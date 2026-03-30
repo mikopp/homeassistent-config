@@ -1,0 +1,9 @@
+# Ignore sensitive files
+secrets.yaml
+ip_addresses.yaml
+*.db
+*.db-shm
+*.db-wal
+*.log
+.storage/
+.cloud/

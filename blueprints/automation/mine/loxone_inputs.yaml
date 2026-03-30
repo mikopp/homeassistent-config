@@ -1,0 +1,54 @@
+blueprint:
+  name: Home Assistant to Loxone (mine)
+  description: Send entity states from Home Assistant to Loxone
+  domain: automation
+  input:
+    target_entities:
+      name: Trigger entities
+      description: List the entities that will be sent to the VI's on the Miniserver
+      selector:
+        entity:
+          multiple: true
+          filter:
+          - domain:
+            - sensor
+            - binary_sensor
+            - switch
+            - cover
+          reorder: false
+    attribute_name:
+      name: Attribute (Optional)
+      description: "If left blank, the main state is sent. If provided (e.g., 'brightness'), that attribute value is sent instead."
+      default: ""
+      selector:
+        text:
+    # NEW: Template parameter
+    value_template:
+      name: Value Transformation Template
+      description: "Use 'value' as the variable for the raw state."
+      # We use a literal string for the default to avoid parsing errors
+      default: "{% if value == 'off' %}0{% elif value == 'on' %}1{% else %}{{ value }}{% endif %}"
+      selector:
+        text:
+          multiline: true
+alias: Update Loxone
+description: ''
+trigger:
+- platform: state
+  entity_id: !input target_entities
+condition: []
+action:
+  - variables:
+      attr_input: !input attribute_name
+      # Decide which value to process: the attribute value OR the main state
+      value: >-
+        {% if attr_input | length > 0 %}
+          {{ trigger.to_state.attributes[attr_input] if trigger.to_state.attributes[attr_input] is defined else 'undefined' }}
+        {% else %}
+          {{ trigger.to_state.state if trigger is defined and trigger.to_state is not none else 'undefined' }}
+        {% endif %}
+  - service: rest_command.send_to_loxone
+    data:
+      input_name: "{{ trigger.to_state.object_id }}{% if attr_input | length > 0 %}.{{ attr_input }}{% endif %}"
+      value: !input value_template
+mode: parallel
