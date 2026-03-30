@@ -1,0 +1,31 @@
+# Home Assistant secrets - never commit real credentials
+secrets.yaml
+
+# Home Assistant generated/runtime files
+home-assistant_v2.db
+home-assistant_v2.db-shm
+home-assistant_v2.db-wal
+home-assistant.log
+home-assistant.log.1
+home-assistant.log.fault
+
+# Home Assistant core storage
+.storage/
+.cloud/
+
+# OwnTracks encryption key
+.keys/
+
+# Home Assistant compiled UI files
+home-assistant-polymer/
+
+# Certificates and private keys
+*.pem
+*.key
+*.crt
+
+# Editor / OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

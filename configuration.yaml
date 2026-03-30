@@ -1,0 +1,30 @@
+# Home Assistant main configuration
+# Documentation: https://www.home-assistant.io/docs/configuration/
+
+homeassistant:
+  name: Home
+  # Latitude / longitude are used for sunrise/sunset times and weather.
+  # latitude: !secret home_latitude
+  # longitude: !secret home_longitude
+  # elevation: 0
+  unit_system: metric
+  currency: EUR
+  country: NL
+  time_zone: Europe/Amsterdam
+
+# Enable the default_config bundle (covers most common integrations).
+default_config:
+
+# HTTP access settings (uncomment and customise as needed).
+# http:
+#   ssl_certificate: /ssl/fullchain.pem
+#   ssl_key: /ssl/privkey.pem
+
+# Text-to-speech
+tts:
+  - platform: google_translate
+
+# Load automations, scripts and scenes from separate files.
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
