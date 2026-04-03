@@ -7,3 +7,6 @@ ip_addresses.yaml
 *.log
 .storage/
 .cloud/
+.cache/
+custom_components/
+.ssh/
