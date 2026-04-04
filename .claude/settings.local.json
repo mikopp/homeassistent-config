@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ha-mcp__ha_get_entity",
+      "mcp__ha-mcp__ha_get_device",
+      "mcp__ha-mcp__ha_search_entities",
+      "mcp__ha-mcp__ha_get_state",
+      "mcp__ha-mcp__ha_config_list_helpers",
+      "mcp__ha-mcp__ha_get_integration"
+    ]
+  }
+}
