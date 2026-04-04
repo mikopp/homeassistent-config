@@ -37,8 +37,14 @@ Formula: `slat_angle_degrees = tilt_position × 1.25`  →  `tilt_position = sla
 | `sensor.wheatherstation_indoor_temperature` | °C | Indoor/room temp — used in heating season |
 | `sensor.wheatherstation_rain_rate` | mm/h | > 0 = currently raining |
 | `sensor.wheatherstation_hourly_rain` | mm | Rain in last 60 min |
-| `sensor.wheatherstation_solar_radiation` | W/m² | Actual solar irradiance |
+| `sensor.wheatherstation_solar_radiation` | W/m² | Actual solar irradiance (goes into shadow in the afternoon) |
 | `sensor.wheatherstation_uv_index` | UV index | Additional sun indicator |
+
+### PV & Derived Sun Sensor
+| Entity | Unit | Description |
+|---|---|---|
+| `sensor.pergola_pv_power` | W | Power output of the 6-panel afternoon-facing PV section (user will create) |
+| `binary_sensor.pergola_sun_shining` | on/off | Derived: true when PV+radiation exceed elevation-adjusted clear-sky threshold |
 
 ### Helpers to Create (in `configuration.yaml`)
 | Helper | Purpose |
@@ -48,6 +54,7 @@ Formula: `slat_angle_degrees = tilt_position × 1.25`  →  `tilt_position = sla
 | `input_boolean.pergola_post_rain_active` | Set during post-rain sequence; blocks automation |
 | `input_number.pergola_frost_off_threshold` | Temp below which frost hold activates (default: 2.5°C) |
 | `input_number.pergola_frost_on_threshold` | Temp above which frost hold clears (default: 3.0°C) |
+| `input_number.pergola_pv_conversion_factor` | PV W → W/m² divisor for sun detection (default: 3.2; tune until PV proxy ≈ weather station on a clear morning when both are in sun) |
 
 ### Future Entities (not yet in HA)
 | Entity | Description |
@@ -77,13 +84,26 @@ Suspended once `sensor.wheatherstation_indoor_temperature` reaches the room targ
 threshold (value TBD — fill in once decided).
 
 ### "Not enough sun" → open fully (tilt = 100)
-Skip sun-tracking and go to full open when any of these are true:
-- `sun.elevation < 10°` — sun too low for meaningful tracking
-- `sensor.wheatherstation_solar_radiation < THRESHOLD W/m²` — overcast / indirect light only
+Skip sun-tracking and go to full open when `binary_sensor.pergola_sun_shining` = `off`.
 
-> **TBD:** Choose the solar radiation threshold. Suggested starting point: **50 W/m²**.
-> A seasonality correction (comparing actual vs. maximum possible radiation for this date/time)
-> may be added later. Fill in the formula here when decided.
+The binary sensor implements a clearness-index approach derived from the Loxone Wetter sheet:
+```
+effective_radiation = max(
+  sensor.wheatherstation_solar_radiation,        # W/m² — weather station (shaded in afternoon)
+  sensor.pergola_pv_power / pergola_pv_conversion_factor  # W/m² proxy — PV in sun longer
+)
+threshold = 1000 × sin(sun_elevation_rad) × 0.9  # 90% of theoretical clear-sky radiation
+sun_shining = (effective_radiation > threshold) AND (elevation > 10°)
+```
+
+**Why two sources:** The weather station sensor goes into shadow in the afternoon. The
+6 × 440 W Axitec AXIbiperfect panels (228° azimuth, 5–10° tilt) remain in sun longer and
+produce more than the STC factor (2.64) predicts due to bifacial gain (~20%) and favourable
+afternoon geometry — hence the tunable `input_number.pergola_pv_conversion_factor` (start 3.2).
+
+**Calibration:** On a clear morning when both sources are in sun, adjust `pergola_pv_conversion_factor`
+until `sensor.pergola_pv_power / factor ≈ sensor.wheatherstation_solar_radiation`.
+Fine-tune the 0.9 clearness factor if the on/off boundary is too aggressive or lenient.
 
 ### Sun behind house → suspend automation
 Terrasse faces **204°** (SSW). Sun is on the terrasse side when azimuth is **114°–294°**.
@@ -104,6 +124,7 @@ All automatic cover movement is suspended when **any** of these are true:
 | 2 | `input_boolean.pergola_frost_hold` = `on` | Frost safety |
 | 3 | `input_boolean.pergola_post_rain_active` = `on` | Post-rain sequence running |
 | 4 | `sun.sun` = `below_horizon` | No sun |
+| 4b | `binary_sensor.pergola_sun_shining` = `off` | Overcast / insufficient radiation → open fully instead |
 | 5 | `sun.azimuth` outside 114°–294° | Sun behind house |
 | 6 | `sensor.dach_links_priority_lock_originator` ≠ `unknown` | Active Loxone lock (wind, manual…) |
 
@@ -148,9 +169,12 @@ Each step is independently deployable and testable via `git pull` on the HA host
 
 ---
 
-### Step 1 — Helpers
-**File:** `configuration.yaml`  
-Add `input_boolean:` and `input_number:` sections with the five helpers listed above.
+### Step 1 — Helpers & Sun Sensor
+**File:** `packages/pergola.yaml`  
+All pergola-specific YAML lives here. The global `configuration.yaml` loads it via
+`homeassistant: packages: !include_dir_named packages`.
+
+Add `input_boolean:`, `input_number:`, and `template:` sections.
 
 ```yaml
 input_boolean:
@@ -183,12 +207,17 @@ input_number:
     icon: mdi:thermometer
 ```
 
-**Verify:** All five helpers visible in HA → Developer Tools → States.
+Also add `input_number.pergola_pv_conversion_factor` (min 1, max 6, step 0.1, initial 3.2)
+and the `template:` block containing `binary_sensor.pergola_sun_shining`.
+
+**Verify:** All helpers visible in HA → Developer Tools → States.
+Evaluate the template binary sensor manually via Developer Tools → Template using current
+solar radiation and PV power values and confirm the result matches visual sky conditions.
 
 ---
 
 ### Step 2 — Main Tilt Control (cooling season only)
-**File:** `automations.yaml`  
+**File:** `packages/pergola.yaml` — add under the `automation:` key  
 Add automation `pergola_main_tilt_control`. At this stage implements cooling-season
 logic only; heating season is a later step.
 
@@ -199,8 +228,8 @@ Triggers:
 
 Conditions: all six master block conditions clear (see table above).
 
-Action: evaluate "not enough sun" first; if true → tilt = 100; else compute cooling
-formula and call `cover.set_cover_tilt_position` on both covers.
+Action: if `binary_sensor.pergola_sun_shining` = `off` → tilt = 100 (full open); else compute
+cooling formula and call `cover.set_cover_tilt_position` on both covers.
 
 **Verify:**
 - Enable `input_boolean.pergola_automatic_enabled` and confirm covers move to expected
@@ -212,7 +241,7 @@ formula and call `cover.set_cover_tilt_position` on both covers.
 ---
 
 ### Step 3 — Frost Safety
-**File:** `automations.yaml`  
+**File:** `packages/pergola.yaml` — add under the `automation:` key  
 Add automation `pergola_frost_monitor`.
 
 Trigger: `sensor.wheatherstation_outdoor_temperature` state change.  
@@ -230,14 +259,14 @@ Action (two branches via choose):
 ---
 
 ### Step 4 — Post-Rain Recovery
-**Files:** `automations.yaml` + `scripts.yaml`
+**File:** `packages/pergola.yaml` — add under `automation:` and `script:` keys
 
-**`automations.yaml`:** Add `pergola_post_rain_trigger`.
+**`automation:`** Add `pergola_post_rain_trigger`.
 - Trigger: `sensor.wheatherstation_rain_rate` changes to `0` (from > 0)
 - Condition: `input_boolean.pergola_post_rain_active` is off (no double-trigger)
 - Action: call `script.pergola_post_rain_recovery`
 
-**`scripts.yaml`:** Add `pergola_post_rain_recovery`.
+**`script:`** Add `pergola_post_rain_recovery`.
 - Stepped opening sequence as described above (steps 1–8).
 - Use `delay` actions for the wait periods.
 - Use `wait_template` for the conditional hourly-rain check at step 6.
@@ -255,7 +284,7 @@ Action (two branches via choose):
 ---
 
 ### Step 5 — Heating Season Logic
-**File:** `automations.yaml` (update `pergola_main_tilt_control`)
+**File:** `packages/pergola.yaml` (update `pergola_main_tilt_control` under `automation:`)
 
 Prerequisites:
 - `sensor.loxone_heating_season` entity exists and carries `1` / `0` (or `on` / `off`)
@@ -286,7 +315,8 @@ Work through these after real-world observation:
 
 | Item | Action |
 |---|---|
-| Solar radiation threshold | Observe `sensor.wheatherstation_solar_radiation` on partly cloudy days; set threshold where "not enough sun" feels right |
+| PV conversion factor | On a clear morning, adjust `input_number.pergola_pv_conversion_factor` until `sensor.pergola_pv_power / factor ≈ sensor.wheatherstation_solar_radiation` |
+| Clearness factor (0.9) | On a partly cloudy afternoon, check if `binary_sensor.pergola_sun_shining` on/off boundary feels right; tune via the template sensor |
 | Sun azimuth window | Observe shadows on terrasse; adjust 114°/294° bounds if needed |
 | Post-rain tilt values | Confirm 25% / 50% drain adequately; adjust if water remains |
 | Rain lock originator | Log value of `sensor.dach_links_priority_lock_originator` during rain; update Step 4 trigger if needed |
@@ -298,7 +328,9 @@ Work through these after real-world observation:
 
 | # | Item | Where to fill in |
 |---|---|---|
-| 1 | Solar radiation "enough sun" threshold (W/m²) | Step 2 / "Not enough sun" section above |
+| 1 | ~~Solar radiation "enough sun" threshold~~ | **Resolved** — `binary_sensor.pergola_sun_shining` (dynamic clearness-index formula) |
+| 1b | `sensor.pergola_pv_power` entity ID | User will create; update entity table above |
+| 1c | PV conversion factor (default 3.2) | Calibrate on a clear morning; adjust via `input_number.pergola_pv_conversion_factor` |
 | 2 | Sun azimuth window confirmation | Step 2 / "Sun behind house" section above |
 | 3 | Loxone heating season entity ID | Step 5 prerequisites |
 | 4 | Room temperature target (°C) | Step 5 section above |

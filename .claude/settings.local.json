@@ -6,7 +6,8 @@
       "mcp__ha-mcp__ha_search_entities",
       "mcp__ha-mcp__ha_get_state",
       "mcp__ha-mcp__ha_config_list_helpers",
-      "mcp__ha-mcp__ha_get_integration"
+      "mcp__ha-mcp__ha_get_integration",
+      "Read(//c/Users/mikop/Documents/Loxone/Loxone Config/Projects/**)"
     ]
   }
 }

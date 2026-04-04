@@ -1,0 +1,68 @@
+# Pergola roof automation — all helpers, templates, automations, and scripts live here.
+# See pergola-roof-automation.md for the full design and implementation plan.
+
+input_boolean:
+  pergola_automatic_enabled:
+    name: Pergola Automatic Enabled
+    icon: mdi:sun-clock
+  pergola_frost_hold:
+    name: Pergola Frost Hold
+    icon: mdi:snowflake-alert
+  pergola_post_rain_active:
+    name: Pergola Post-Rain Sequence Active
+    icon: mdi:weather-rainy
+
+input_number:
+  pergola_frost_off_threshold:
+    name: Pergola Frost OFF threshold
+    min: -10
+    max: 5
+    step: 0.5
+    initial: 2.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-low
+  pergola_frost_on_threshold:
+    name: Pergola Frost ON threshold
+    min: -10
+    max: 5
+    step: 0.5
+    initial: 3.0
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+  pergola_pv_conversion_factor:
+    name: Pergola PV Conversion Factor
+    min: 1
+    max: 6
+    step: 0.1
+    initial: 3.2
+    icon: mdi:solar-panel
+
+template:
+  - binary_sensor:
+      - name: "Pergola Sun Shining"
+        unique_id: pergola_sun_shining
+        device_class: light
+        state: >
+          {% set solar  = states('sensor.wheatherstation_solar_radiation') | float(0) %}
+          {% set factor = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
+          {% set pv     = states('sensor.pergola_pv_power') | float(0) / factor %}
+          {% set elev   = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% if elev <= 10 %}
+            false
+          {% else %}
+            {% set effective = [solar, pv] | max %}
+            {% set threshold = 1000 * (elev * pi / 180) | sin * 0.9 %}
+            {{ effective > threshold }}
+          {% endif %}
+
+# automation and script keys will be added here in later steps.
+# Example structure (do not uncomment until the step is implemented):
+#
+# automation:
+#   - id: pergola_main_tilt_control
+#     alias: "Pergola: Main Tilt Control"
+#     ...
+#
+# script:
+#   pergola_post_rain_recovery:
+#     ...
