@@ -43,7 +43,8 @@ Formula: `slat_angle_degrees = tilt_position × 1.25`  →  `tilt_position = sla
 ### PV & Derived Sun Sensor
 | Entity | Unit | Description |
 |---|---|---|
-| `sensor.pergola_pv_power` | W | Power output of the 6-panel afternoon-facing PV section (user will create) |
+| `sensor.pergola_pv_power` | W | Template sensor wrapping `sensor.victronsolarcharger_yield_power226` — stable alias used throughout the package |
+| `sensor.victronsolarcharger_yield_power226` | W | Raw Victron solarcharger aggregate DC PV power (device model 226; per-tracker breakdown not available on this unit) |
 | `binary_sensor.pergola_sun_shining` | on/off | Derived: true when PV+radiation exceed elevation-adjusted clear-sky threshold |
 
 ### Helpers to Create (in `configuration.yaml`)
@@ -329,7 +330,7 @@ Work through these after real-world observation:
 | # | Item | Where to fill in |
 |---|---|---|
 | 1 | ~~Solar radiation "enough sun" threshold~~ | **Resolved** — `binary_sensor.pergola_sun_shining` (dynamic clearness-index formula) |
-| 1b | `sensor.pergola_pv_power` entity ID | User will create; update entity table above |
+| 1b | ~~`sensor.pergola_pv_power` entity ID~~ | **Resolved** — template sensor wrapping `sensor.victronsolarcharger_yield_power226` (Victron solarcharger, model 226) |
 | 1c | PV conversion factor (default 3.2) | Calibrate on a clear morning; adjust via `input_number.pergola_pv_conversion_factor` |
 | 2 | Sun azimuth window confirmation | Step 2 / "Sun behind house" section above |
 | 3 | Loxone heating season entity ID | Step 5 prerequisites |

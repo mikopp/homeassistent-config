@@ -38,6 +38,15 @@ input_number:
     icon: mdi:solar-panel
 
 template:
+  - sensor:
+      - name: "Pergola PV Power"
+        unique_id: pergola_pv_power
+        state: "{{ states('sensor.victronsolarcharger_yield_power226') | float(0) }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-panel
+
   - binary_sensor:
       - name: "Pergola Sun Shining"
         unique_id: pergola_sun_shining
