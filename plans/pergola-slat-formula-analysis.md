@@ -14,10 +14,10 @@
 - **Sun hits terrasse when:** 114° <= azimuth <= 294°
 
 ### Slat Dimensions (from spreadsheet L7/L8)
-- **Slat width (w):** 22 mm *(usable blocking width: 20 mm)*
-- **Slat thickness (t):** 3 mm
-- **Pivot spacing (d):** 22 mm *(center-to-center between adjacent slats)*
-- **Effective diagonal (deff):** sqrt(20² + 3²) = 20.22 mm
+- **Slat width (w):** 22 cm *(usable blocking width: 20 cm)*
+- **Slat thickness (t):** 3 cm
+- **Pivot spacing (d):** 20 cm *(center-to-center between adjacent slats)*
+- **Effective diagonal (deff):** sqrt(20² + 3²) = 20.22 cm
 - **Effective slat ratio (R):** deff / w = sqrt(20² + 3²) / 22 = **0.91926**
 - **Thickness offset (phi):** arctan(3/20) = **8.53°**
 
@@ -206,7 +206,7 @@ All values are physically sensible.
 ### What Gemini got right
 1. **Core sun projection formula** — the effective sun angle and perpendicular angle formulas are geometrically correct and match the spreadsheet
 2. **Safe zone concept** — the idea that slat overlap creates a range of valid blocking angles is sound physics
-3. **Slat thickness correction** — the deff and phi constants correctly account for 3mm slat thickness in the safe zone calculation
+3. **Slat thickness correction** — the deff and phi constants correctly account for 3 cm slat thickness in the safe zone calculation
 4. **The reciprocal relationship** between "where is the sun" (A_EFF) and "where should the slat be" (perfect_angle) is correctly explained as complementary angles (sum = 90°)
 
 ### What Gemini got wrong or confused

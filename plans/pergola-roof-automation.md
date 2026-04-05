@@ -113,6 +113,7 @@ All entities created by this feature will appear under a single HA virtual devic
 | `input_number.pergola_frost_on_threshold` | number | 3.0 °C | Temp above which frost mode clears |
 | `input_number.pergola_pv_conversion_factor` | number | 3.2 | PV W → W/m² divisor for sun detection (calibrate in Step 6) |
 | `input_number.pergola_max_tilt_angle` | number | 122 ° | Maximum physical slat angle; drives tilt_position conversion |
+| `input_boolean.pergola_cooling_optimized` | toggle | off | Cooling angle mode: off = perfect perpendicular blocking; on = optimized (safe-zone max-open) — see Step 7 |
 
 #### Status — derived/calculated, read-only
 | Entity | Unit | Description |
@@ -207,7 +208,9 @@ else:                                        # dead zone: -58° < angle < 0°
 clamp slat_angle to [0°, 90°]
 ```
 
-**Dead zone explanation:** When the sun comes from a slight-east angle (azimuth roughly 114°–170°), the ideal blocking tilt would require a small negative angle. Since the hardware only goes 0°–122°, flat (0°) is the best achievable fallback — it provides maximum shade even if not perfectly perpendicular to the sun rays.
+**Dead zone explanation:** When the sun comes from a slight-east angle (azimuth roughly 114°–170°), the ideal blocking tilt would require a small negative angle. Since the hardware only goes 0°–122°, the fallback is **15°** (not fully flat). The slats are 22 cm wide with a 3 cm thickness and 20 cm pivot spacing, so they overlap — a 15° tilt still provides full shade in practice while allowing a small amount of airflow. Flat (0°) would also block, but 15° is slightly better for ventilation without sacrificing shade.
+
+> If `input_boolean.pergola_cooling_optimized` is `on`, a different formula is used instead (see Step 7). The dead zone fallback of 15° applies only in the default (`off`) mode.
 
 #### Heating season (`sun_automatik_heating`) — let sun through
 
@@ -330,16 +333,17 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - **Current pergola.yaml needs adapting:** remove `input_boolean.pergola_frost_hold` and `input_boolean.pergola_post_rain_active` (superseded by the state machine); add `input_select.pergola_automation_state` with all 8 options
 - `input_boolean.pergola_automatic_enabled`, all `input_number` helpers, and both existing template sensors are already correct — keep as-is
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
+- Add `input_boolean.pergola_cooling_optimized` (default off) — selects between perfect-perpendicular and safe-zone max-open cooling formula (Step 7)
 - Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now — they exist on the device from day one
 - All template sensors and binary sensors (`sensor.pergola_pv_power`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) must share the same `template:` block that carries the `device:` declaration
 
 **Post-deploy (one-time, manual via HA UI):**
 After first `git pull` and HA restart, manually assign each `input_*` helper to the "Pergola Dach" device:
 Settings → Devices & Services → Helpers → [select each helper] → change device → "Pergola Dach"
-Helpers to assign: `pergola_automatic_enabled`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`
+Helpers to assign: `pergola_automatic_enabled`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_cooling_optimized`
 
 **Verify:**
-- Settings → Devices → "Pergola Dach" shows all 10 entities
+- Settings → Devices → "Pergola Dach" shows all 11 entities
 - `input_select.pergola_automation_state` shows all eight options
 - `binary_sensor.pergola_sun_shining` changes state plausibly with sun conditions
 - `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` report `unknown` (correct at this stage)
@@ -446,7 +450,26 @@ Update state manager: when sun is active and `sensor.loxone_heating_season = on`
 
 ---
 
-### Phase 4 — Calibration & Validation
+### Phase 4 — Optimized Cooling
+
+#### Step 7 — Optimized Cooling Angle [TBD — formula to be defined]
+**File:** `packages/pergola.yaml` — update `pergola_cover_response` and cooling template sensor
+
+Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfect-perpendicular cooling formula with one that uses the **safe-zone max-open angle** — the furthest the slats can tilt toward vertical while still guaranteeing 100% shade (leveraging slat overlap/thickness).
+
+**Key concept:** Due to the slat geometry (w=22 cm, t=3 cm, d=20 cm pivot spacing, R=0.91926, phi=8.53°), the slats overlap. There is a range of angles (the "safe zone") that all provide full shade. The max-open formula targets the far edge of this zone to maximize airflow while maintaining shade. When the sun is high enough, the safe zone includes even larger angles, giving more airflow.
+
+**TBD:** Exact formula to be derived and agreed — see [pergola-slat-formula-analysis.md](pergola-slat-formula-analysis.md) Section 3 (Gemini "max open" formula) and Section 3 (safe zone table). The dead zone handling for the optimized mode also needs to be specified (likely the "backside block" angle from Gemini formula 5).
+
+**Dependencies:** Step 3 (cover response and cooling formula must exist), `input_boolean.pergola_cooling_optimized` added in Step 1 update.
+
+**Verify:**
+- Toggle `pergola_cooling_optimized` off → perfect perpendicular angle applied, slats track sun tightly
+- Toggle `pergola_cooling_optimized` on → slats open further (more airflow) but still block sun
+
+---
+
+### Phase 5 — Calibration & Validation
 
 #### Step 6 — Field Testing & Threshold Tuning [TODO]
 **Dependencies:** Steps 1–4 deployed and running for at least one sunny + one rainy day.
@@ -475,3 +498,4 @@ Update state manager: when sun is active and `sensor.loxone_heating_season = on`
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override) |
 | 7 | ~~Slat angle formula (cooling + heating season)~~ | Resolved — cooling: perpendicular blocking angle; heating: parallel alignment angle (perfect_angle - 90°). See [formula analysis](pergola-slat-formula-analysis.md) |
+| 8 | Optimized cooling formula (safe-zone max-open) | Step 7 — formula to be defined before implementation |
