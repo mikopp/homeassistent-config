@@ -156,7 +156,7 @@ All entities created by this feature will appear under a single HA virtual devic
 
    Condition: state ≠ `frost`
 3. **rain_stopped** — was `rain`, both indicators now off → enter `rain_stopped`. Script exits this state.
-4. **user_override** — either lock originator = `user`. Clears when both = `unknown`. Cover response automation skips all movement while in this state.
+4. **user_override** — either lock originator = `user`. Clears when both = `unknown`. Cover response automation skips all movement while in this state. On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules. (Same exit logic as frost.)
 5. **no_sun_behind_house** — sun below horizon OR azimuth outside 114°–294° (geometric — no sun possible regardless of sensor).
 6. **not_enough_sun** — `pergola_sun_shining` has been `off` for ≥ 5 continuous minutes. Exits when `pergola_sun_shining` has been `on` for ≥ 2 continuous minutes.
 7. **sun_automatik_heating** — `sensor.loxone_heating_season` = on/1.
@@ -203,7 +203,7 @@ if perfect_angle <= threshold:               # sun from far east, steep angle
 elif perfect_angle >= 0:                     # sun from west, direct blocking
     slat_angle = perfect_angle
 else:                                        # dead zone: -58° < angle < 0°
-    slat_angle = 0                           # flat for maximum shade (imperfect)
+    slat_angle = 15                           # almost flat for maximum shade (imperfect) - not completely closed
 
 clamp slat_angle to [0°, 90°]
 ```
@@ -240,8 +240,8 @@ clamp slat_angle to [0°, max_tilt]
 | 240° | 40° | 35.0° | 35.0° | 90° (dead zone) | West, medium |
 | 260° | 30° | 55.1° | 55.1° | 90° (dead zone) | Far west, low |
 | 102° | 31° | -58.4° | 90° (capped) | 31.6° | Far east (outside window) |
-| 140° | 40° | -47.0° | 0° (dead zone) | 43.0° | East, medium |
-| 180° | 40° | -25.9° | 0° (dead zone) | 64.1° | South |
+| 140° | 40° | -47.0° | 15° (dead zone) | 43.0° | East, medium |
+| 180° | 40° | -25.9° | 15° (dead zone) | 64.1° | South |
 
 #### No sun (`no_sun_behind_house`, `not_enough_sun`)
 ```
@@ -265,12 +265,14 @@ tilt_position = INT(slat_angle / pergola_max_tilt_angle × 100 + correction)
 ```
 - `pergola_max_tilt_angle` = `input_number.pergola_max_tilt_angle` (default 122°)
 - Clamp result: cooling → [0, 71]; heating → [0, 100]
+  - Cooling upper bound 71 = hardware-observed tilt position for 90° slat angle (vertical). The formula gives ~74 for 90° due to a small calibration gap in the +0.5 correction region above 69°; 71 is the authoritative hardware cap. The slat_angle clamp at 90° (in the formula above) and the tilt_position clamp at 71 (here) express the same physical limit — 90° vertical — from two different perspectives.
+  - In cooling mode, angles > 90° would start letting sun through from the opposite face of the slat — physically wrong.
 - Values > 100 are dead zone on the Somfy controller — never send them
 
 **Why corrections are needed:**
 - Below 20°: motor displacement is very small → +7 compensates
 - 20°–69°: linear region → +5.5 rounds up correctly
-- Above 69°: slight mechanical jerk → only +0.5 to avoid overshoot
+- Above 69°: slight mechanical jerk → only +0.5 to avoid overshoot (small residual gap near 90° absorbed by the explicit tilt_position clamp)
 
 ---
 
@@ -328,10 +330,9 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 **Dependencies:** None — first step.
 
 **Notes:**
-- `input_select.pergola_automation_state` must list all 8 state values — **currently missing from pergola.yaml**
+- **`packages/pergola.yaml` is rewritten from scratch** — the existing file (which still contains the old `pergola_frost_hold` and `pergola_post_rain_active` booleans and lacks the device declaration) is discarded entirely. Write the complete file fresh using only the entities listed below.
+- `input_select.pergola_automation_state` must list all 8 state values
 - PV conversion factor (default 3.2) calibrated in Step 6
-- **Current pergola.yaml needs adapting:** remove `input_boolean.pergola_frost_hold` and `input_boolean.pergola_post_rain_active` (superseded by the state machine); add `input_select.pergola_automation_state` with all 8 options
-- `input_boolean.pergola_automatic_enabled`, all `input_number` helpers, and both existing template sensors are already correct — keep as-is
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
 - Add `input_boolean.pergola_cooling_optimized` (default off) — selects between perfect-perpendicular and safe-zone max-open cooling formula (Step 7)
 - Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now — they exist on the device from day one
@@ -355,19 +356,26 @@ Helpers to assign: `pergola_automatic_enabled`, `pergola_automation_state`, `per
 
 Add `pergola_state_manager`. This is the **only automation that writes** to `input_select.pergola_automation_state`.
 
-Triggers: outdoor temp, rain rate, sun attributes, `pergola_sun_shining`, heating season flag, HA start.
+Triggers: outdoor temp, rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), sun attributes, `pergola_sun_shining`, heating season flag, HA start.
 
-Action: evaluate priority rules top-down (frost → rain → rain_stopped → no_sun_behind_house → not_enough_sun → heating → cooling).
+> Lock originator sensors must be triggers so the state manager reacts to rain-lock entry/exit (rule 2) and user-override entry/exit (rule 4) without waiting for another trigger.
+
+Action: evaluate priority rules top-down (frost → rain → rain_stopped → **user_override** → no_sun_behind_house → not_enough_sun → heating → cooling).
 
 **Dependencies:** Step 1 (helpers must exist).
 
 **Notes:**
-- Guard: do not overwrite `rain_stopped` — only the recovery script exits that state
-  - Exception: frost exit triggers a one-time check — if `wheatherstation_hourly_rain > 0`, explicitly set state to `rain_stopped` to kick off recovery
+- Guard: do not overwrite `rain_stopped` mid-flight — only the recovery script exits that state. Exceptions (state manager may set `rain_stopped` explicitly):
+  - **frost exit:** temp rises above `pergola_frost_on_threshold` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
+  - **user_override exit:** both lock originators return to `unknown` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
+  - **HA start with state = `rain_stopped`:** do NOT clear the state; instead re-trigger `script.pergola_post_rain_recovery` so the interrupted drain sequence resumes (see restart recovery note below)
 - `sensor.loxone_heating_season` may not exist yet; use a safe default (cooling season) when unavailable
-- HA start trigger ensures correct state on boot/restart
+- **HA start / restart recovery:**
+  - On HA start the automation fires with trigger = `homeassistant` start
+  - If `input_select.pergola_automation_state` is already `rain_stopped` (persisted from before restart): do NOT evaluate other rules; instead call `script.pergola_post_rain_recovery` again to resume the interrupted drain sequence. The recovery script is idempotent enough for this — it will re-run the wait + step sequence from the beginning, which is safe (covers get drained again).
+  - For all other persisted states: evaluate priority rules top-down and set the correct current state
 - `not_enough_sun` entry/exit requires time-delayed transitions — use separate automations with `for:` timers rather than a single choose block:
-  - Entry: trigger on `pergola_sun_shining` turning `off` **for 5 min**, condition state ≠ frost/rain/rain_stopped/no_sun_behind_house
+  - Entry: trigger on `pergola_sun_shining` turning `off` **for 5 min**, condition state ≠ frost/rain/rain_stopped/user_override/no_sun_behind_house
   - Exit: trigger on `pergola_sun_shining` turning `on` **for 2 min**, condition state = `not_enough_sun` → re-evaluate heating/cooling
 
 **Verify:**
@@ -396,7 +404,7 @@ Action (`choose` on current state):
 
 **Notes:**
 - Every-5-min trigger is the only way covers track a slowly moving sun within a steady state
-- Cooling clamp upper bound is 71, not 100 — never past vertical in cooling mode
+- Cooling clamp upper bound is tilt_position = 71 (= 90° slat angle, hardware-calibrated vertical) — never past vertical in cooling mode. Slat_angle is also clamped to 90° upstream in the formula; the tilt_position clamp is the final safety net.
 - Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation)
 
 **Verify:**
