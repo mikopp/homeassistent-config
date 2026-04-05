@@ -276,6 +276,37 @@ tilt_position = INT(slat_angle / pergola_max_tilt_angle × 100 + correction)
 
 ---
 
+### Step 3 — Movement Deadband (5° hysteresis)
+
+Before sending any tilt command, compare the **calculated target tilt_position** (output of Step 2) against the **current reported tilt_position** from the cover. Only move if the difference corresponds to ≥ 5° of slat angle.
+
+**Why compare tilt positions, not slat angles:**
+Inverting the Step 2 formula naïvely (`slat_angle = current_tilt × max_tilt / 100`) ignores the correction offsets (+7 / +5.5 / +0.5). Those offsets introduce errors of 7–9° at low/medium angles — larger than the 5° threshold itself, making the comparison unreliable. Because both `target_tilt_position` and `current_tilt_position` are in the same corrected tilt-position space, the corrections cancel in the difference. The comparison is done entirely in tilt-position units.
+
+**5° converted to tilt-position units:**
+```
+deadband_tilt = ROUND(5 / max_tilt_angle × 100) = ROUND(5 / 122 × 100) = 4
+```
+(4 tilt units ≈ 4.9° at the default max_tilt_angle of 122°)
+
+**Gate condition (applied before every cover move command):**
+```
+current_tilt = state_attr('cover.dach_links', 'current_tilt_position') | int
+
+if |target_tilt_position - current_tilt| >= 4:
+    send move command with target_tilt_position
+else:
+    skip (no movement)
+```
+
+Use `cover.dach_links` as the reference — both covers always move together.
+
+This applies to **all** move decisions: state-change transitions, the 5-minute periodic sun-tracking trigger, and the no-sun tilt-71 target. The post-rain recovery script bypasses this check — it always moves to its drain angles regardless.
+
+**Why 5°:** The motor's dead zone and mechanical play account for ≈2–3° uncertainty. A 5° threshold prevents constant micro-movements as the sun creeps while still ensuring the covers track meaningful changes (the sun moves about 1°–2° in azimuth per minute at moderate elevation, producing a slat angle change of well under 1°/min — so 5° corresponds to a 5–10 minute lag, comparable to the periodic trigger interval).
+
+---
+
 ## Post-Rain Recovery Sequence
 
 **Trigger:** State transitions to `rain_stopped`
@@ -405,12 +436,13 @@ Action (`choose` on current state):
 **Notes:**
 - Every-5-min trigger is the only way covers track a slowly moving sun within a steady state
 - Cooling clamp upper bound is tilt_position = 71 (= 90° slat angle, hardware-calibrated vertical) — never past vertical in cooling mode. Slat_angle is also clamped to 90° upstream in the formula; the tilt_position clamp is the final safety net.
+- **Deadband (Tilt Calculation Logic Step 3):** before every move command compare `target_tilt_position` against `cover.dach_links.current_tilt_position`; only issue the command if `|target - current| >= 4` tilt units (≈ 5°). Comparison is in tilt-position units — not slat degrees — so the hardware correction offsets cancel and the check is accurate across all angle zones. Post-rain recovery script bypasses this.
 - Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation)
 
 **Verify:**
 - Disable `pergola_automatic_enabled` → covers stop responding
-- With sun active and cooling season, covers move to formula result within 5 min
-- Manually set state to `no_sun_behind_house` → tilt goes to 71
+- With sun active and cooling season, covers move to formula result within 5 min; verify no movement if cover is already within 5° of target
+- Manually set state to `no_sun_behind_house` → tilt goes to 71 (or stays if already within 5°)
 
 ---
 
@@ -507,3 +539,4 @@ Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfe
 | 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override) |
 | 7 | ~~Slat angle formula (cooling + heating season)~~ | Resolved — cooling: perpendicular blocking angle; heating: parallel alignment angle (perfect_angle - 90°). See [formula analysis](pergola-slat-formula-analysis.md) |
 | 8 | Optimized cooling formula (safe-zone max-open) | Step 7 — formula to be defined before implementation |
+| 9 | Reconfirm which tilt the system has on a vertical 90 degree angle in real physical position to maybe adapt the algorithm |
