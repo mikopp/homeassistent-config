@@ -20,9 +20,12 @@ Automate the tilt control of two Somfy bioclimatic pergola covers (`cover.dach_l
 - Terrasse faces 204° (SSW); sun hits the terrasse when `114° ≤ azimuth ≤ 294°`
 - All config lives in `packages/pergola.yaml`; deployed via `git pull` on HA host
 
-** References **
+**References:**
 * Loxone config file: `C:\Users\mikop\Documents\Loxone\Loxone Config\Projects\Haus.Loxone`
 * Loxone config documentation: https://www.loxone.com/enen/kb-cat/loxone-config/
+* Slat angle formula analysis: [pergola-slat-formula-analysis.md](pergola-slat-formula-analysis.md)
+* Gemini conversation (original analysis): [gemini-conversation-slat-formulas.md](gemini-conversation-slat-formulas.md)
+* Spreadsheet with sample calculations: [terrace roof titl.xlsx](terrace%20roof%20titl.xlsx)
 
 **TBD items blocking later steps:**
 - Loxone heating season entity ID (Step 5) — confirmed: Loxone sends a binary heat on/off indicator
@@ -164,17 +167,78 @@ All entities created by this feature will appear under a single HA virtual devic
 
 Tilt calculation is a two-step process: first compute the desired **slat_angle** (degrees), then convert to **tilt_position** (0–100) using the hardware correction formula.
 
+### Step 0 — Intermediate values
+
+Computed once per update cycle from sun position:
+
+```
+delta_phi      = azimuth - 204                          (relative azimuth to terrasse)
+delta_phi_rad  = radians(delta_phi)
+elevation_rad  = radians(elevation)
+max_tilt       = input_number.pergola_max_tilt_angle    (default 122°)
+threshold      = max_tilt - 180                         (default -58°)
+```
+
+**Perfect perpendicular angle** (the slat tilt that blocks sun head-on):
+```
+if elevation <= 0 OR |sin(delta_phi_rad)| < 0.001:
+    perfect_angle = 0
+else:
+    perfect_angle = degrees(atan2(sin(delta_phi_rad), tan(elevation_rad)))
+```
+
+> Sign convention: positive = sun from west (afternoon), negative = sun from east (morning).
+> Derivation and correctness analysis: see [pergola-slat-formula-analysis.md](pergola-slat-formula-analysis.md)
+
 ### Step 1 — Desired slat angle
 
 #### Cooling season (`sun_automatik_cooling`) — block sun
+
+Map `perfect_angle` to the pergola hardware range (0–122°). The hardware can only tilt in one direction, so angles that would require the opposite tilt direction need special handling:
+
 ```
-slat_angle = <TBD — to be specified>    clamped [0°, 90°]
+if perfect_angle <= threshold:               # sun from far east, steep angle
+    slat_angle = perfect_angle + 180         # block from "back side" of slat
+elif perfect_angle >= 0:                     # sun from west, direct blocking
+    slat_angle = perfect_angle
+else:                                        # dead zone: -58° < angle < 0°
+    slat_angle = 0                           # flat for maximum shade (imperfect)
+
+clamp slat_angle to [0°, 90°]
 ```
 
+**Dead zone explanation:** When the sun comes from a slight-east angle (azimuth roughly 114°–170°), the ideal blocking tilt would require a small negative angle. Since the hardware only goes 0°–122°, flat (0°) is the best achievable fallback — it provides maximum shade even if not perfectly perpendicular to the sun rays.
+
 #### Heating season (`sun_automatik_heating`) — let sun through
+
+To let sun through, slats should be **parallel** to the sun rays (rotated 90° from the blocking angle):
+
 ```
-slat_angle = <TBD — to be specified>    clamped [0°, 122°]
+heating_raw = perfect_angle - 90
+
+if heating_raw <= threshold:                 # sun from far east
+    slat_angle = heating_raw + 180           # align with rays from back side
+elif heating_raw >= 0:                       # sun from west
+    slat_angle = heating_raw
+else:                                        # dead zone
+    slat_angle = 90                          # vertical = max light transmission
+
+clamp slat_angle to [0°, max_tilt]
 ```
+
+**Dead zone fallback for heating:** When perfect alignment isn't mechanically possible, vertical (90°) maximizes light transmission because slats present minimum surface area to the sun.
+
+#### Verification table
+
+| Azimuth | Elev | perfect_angle | Cooling slat | Heating slat | Notes |
+|---|---|---|---|---|---|
+| 204° | 57° | 0.0° | 0° (flat) | 90° (vertical) | Sun along slat axis |
+| 220° | 45° | 15.4° | 15.4° | 105.4° | Slight west, high |
+| 240° | 40° | 35.0° | 35.0° | 90° (dead zone) | West, medium |
+| 260° | 30° | 55.1° | 55.1° | 90° (dead zone) | Far west, low |
+| 102° | 31° | -58.4° | 90° (capped) | 31.6° | Far east (outside window) |
+| 140° | 40° | -47.0° | 0° (dead zone) | 43.0° | East, medium |
+| 180° | 40° | -25.9° | 0° (dead zone) | 64.1° | South |
 
 #### No sun (`no_sun_behind_house`, `not_enough_sun`)
 ```
@@ -410,4 +474,4 @@ Update state manager: when sun is active and `sensor.loxone_heating_season = on`
 | 4 | ~~Room temperature target~~ | Resolved — not used; mode driven by Loxone indicator only |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override) |
-| 7 | Slat angle formula (cooling + heating season) | Step 3/5 — user to provide; tilt_position conversion formula already defined |
+| 7 | ~~Slat angle formula (cooling + heating season)~~ | Resolved — cooling: perpendicular blocking angle; heating: parallel alignment angle (perfect_angle - 90°). See [formula analysis](pergola-slat-formula-analysis.md) |
