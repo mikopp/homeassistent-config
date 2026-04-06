@@ -58,11 +58,15 @@ sun behind house when:     sun.azimuth < 114°  OR  sun.azimuth > 294°
 | `cover.dach_rechts` | Right pergola cover (tilt 0–100) |
 | `sensor.dach_links_priority_lock_originator` | Lock state of left cover: `unknown` = no lock, `rain` = rain-locked, `user` = user override |
 | `sensor.dach_rechts_priority_lock_originator` | Same for right cover |
+| `sensor.dach_links_priority_lock_timer` | Countdown timer (seconds) for the active lock; 0 when no lock |
+| `sensor.dach_rechts_priority_lock_timer` | Same for right cover |
 
 > **Lock originator values:**
 > - `unknown` — no active lock, cover moves freely
 > - `rain` — cover-mounted rain sensor triggered; Somfy closed and locked the cover automatically (faster than weather station)
 > - `user` — a user has manually blocked the cover; automation must not move it
+>
+> **Lock timer lifecycle (verified):** While rain is active, the lock timer is a very large value. Once rain stops, the timer counts down from 900 s to 0 independently inside the Somfy device. When it reaches 0 the lock originator resets to `unknown`. The Somfy does **not** report timer or originator changes unless forced — HA only learns the current state when we trigger a state report. We do this two ways: (1) the **inactivity watchdog** (`packages/pergola.yaml`) sends a `stop_cover_tilt` every 5 minutes when no cover or lock update has occurred, causing the Somfy to report its current state; (2) when the automation sends a movement command while unaware of the lock, the Somfy reports back the originator and timer state and, if still locked, does not actually move. Without forced state reports, the lock would appear stuck in HA indefinitely even though the countdown is progressing.
 >
 > **Note:** Tilt position reported while locked is unreliable — do not use for logic decisions.
 
@@ -214,29 +218,38 @@ To let sun through, slats should be **parallel** to the sun rays (rotated 90° f
 ```
 heating_raw = perfect_angle - 90
 
-if heating_raw <= threshold:                 # sun from far east
-    slat_angle = heating_raw + 180           # align with rays from back side
+if heating_raw <= threshold:                 # heating_raw too negative for hardware; covers ALL east,
+    slat_angle = heating_raw + 180           # noon, south, and slight west (perfect_angle ≤ ~32°).
+                                             # +180 uses the 180°-equivalent slat position (same light
+                                             # transmission, mechanically in range)
 elif heating_raw >= 0:                       # sun from west
     slat_angle = heating_raw
-else:                                        # dead zone
-    slat_angle = 90                          # vertical = max light transmission
+else:                                        # dead zone: sun from moderate west,
+    tilt_position = 100                      # ideal angle mechanically impossible —
+    # skip hardware correction, use max tilt directly                                     
+    # no other position lets in more sun from the west
 
-clamp slat_angle to [0°, max_tilt]
+clamp slat_angle to [0°, max_tilt]          # (only applies to the non-dead-zone branches)
 ```
 
-**Dead zone fallback for heating:** When perfect alignment isn't mechanically possible, vertical (90°) maximizes light transmission because slats present minimum surface area to the sun.
+**Dead zone fallback for heating:** When perfect alignment isn't mechanically possible (sun from west at `perfect_angle` between ~32° and 90°), use `tilt_position = 100` (max tilt, 122°) directly. Tilting the slats past vertical toward the east-face-up side opens the maximum gap to incoming west sun. No other position does better.
 
 #### Verification table
 
-| Azimuth | Elev | perfect_angle | Cooling slat | Heating slat | Notes |
-|---|---|---|---|---|---|
-| 204° | 57° | 0.0° | 0° (flat) | 90° (vertical) | Sun along slat axis |
-| 220° | 45° | 15.4° | 15.4° | 105.4° | Slight west, high |
-| 240° | 40° | 35.0° | 35.0° | 90° (dead zone) | West, medium |
-| 260° | 30° | 55.1° | 55.1° | 90° (dead zone) | Far west, low |
-| 102° | 31° | -58.4° | 90° (capped) | 31.6° | Far east (outside window) |
-| 140° | 40° | -47.0° | 15° (dead zone) | 43.0° | East, medium |
-| 180° | 40° | -25.9° | 15° (dead zone) | 64.1° | South |
+Heating branch used: **A** = +180° equivalent (`heating_raw ≤ threshold`), **B** = direct (`heating_raw ≥ 0`), **DZ** = dead zone (`tilt_pos = 100`)
+
+| Azimuth | Elev | perfect_angle | Cooling slat | Heating slat | Heating branch | Notes |
+|---|---|---|---|---|---|---|
+| 115° | 20° | −70.0° | 90° (capped) | 20.0° | A | Far east, in window |
+| 102° | 31° | −58.4° | 90° (capped) | 31.6° | A | Far east, outside window |
+| 150° | 30° | −54.5° | 15° (dead zone) | 35.5° | A | Moderate east |
+| 140° | 40° | −47.0° | 15° (dead zone) | 43.0° | A | East, medium elev |
+| 180° | 55° | −15.9° | 15° (dead zone) | 74.1° | A | Noon (summer) |
+| 180° | 40° | −25.9° | 15° (dead zone) | 64.1° | A | South, lower elev |
+| 204° | 57° | 0.0° | 0° (flat) | 90.0° | A | Sun along slat axis |
+| 220° | 45° | 15.4° | 15.4° | 105.4° | A | Slight west — still branch A! |
+| 240° | 40° | 35.0° | 35.0° | 100 pos | DZ | West, medium (boundary ~32°) |
+| 260° | 30° | 55.1° | 55.1° | 100 pos | DZ | Far west, low |
 
 #### No sun (`no_sun_behind_house`, `not_enough_sun`)
 ```
@@ -318,7 +331,7 @@ This applies to **all** move decisions: state-change transitions, the 5-minute p
 7. Exit `rain_stopped`: re-evaluate state machine rules → set `input_select.pergola_automation_state` to the correct current state (`no_sun_behind_house`, `not_enough_sun`, `sun_automatik_heating`, or `sun_automatik_cooling`)
 
 > **Note:** Slat angles (8°, 15°) converted to tilt_position using the hardware correction formula before sending to covers.
-> **TBD:** Verify `sensor.dach_links_priority_lock_originator` clears promptly after rain.
+> **Note:** Lock originator clears autonomously inside the Somfy via the 900 s countdown timer. HA only learns the change when the inactivity watchdog (or a movement command) forces a state report. The state machine will see `rain_stopped` → `unknown` within ≤5 minutes of the timer expiring.
 
 ---
 
@@ -471,7 +484,9 @@ Prerequisites:
 **Room temperature is NOT used** — heating/cooling mode is determined solely by `input_boolean.pergola_heating`.
 
 Update `sun_automatik_heating` branch of `pergola_cover_response`:
-- Compute `slat_angle` (heating formula — TBD), convert to `tilt_position` using hardware correction formula, clamp [0, 100]
+- Compute `slat_angle` using the heating formula (Tilt Calculation Logic → Step 1): `heating_raw = perfect_angle - 90`, east/west branching as defined there, clamp to `[0°, max_tilt]`
+- **Dead zone special case:** if in the dead zone (`threshold < heating_raw < 0`), set `tilt_position = 100` directly — skip the hardware correction formula. No other position lets in more west sun.
+- For non-dead-zone branches: convert `slat_angle` to `tilt_position` using the hardware correction formula, clamp result to `[0, 100]`
 
 Update state manager: when sun is active and `input_boolean.pergola_heating = on` → `sun_automatik_heating`; otherwise → `sun_automatik_cooling`.
 
@@ -529,7 +544,7 @@ Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfe
 | 3 | ~~Heating indicator entity~~ | Resolved — `input_boolean.pergola_heating` (local toggle, set via UI or REST API) |
 | 4 | ~~Room temperature target~~ | Resolved — not used; mode driven by heating indicator only |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
-| 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override) |
+| 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override). Timer counts down from 900 s after rain stops; driven by inactivity watchdog every 5 min |
 | 7 | ~~Slat angle formula (cooling + heating season)~~ | Resolved — cooling: perpendicular blocking angle; heating: parallel alignment angle (perfect_angle - 90°). See [formula analysis](pergola-slat-formula-analysis.md) |
 | 8 | Optimized cooling formula (safe-zone max-open) | Step 7 — formula to be defined before implementation |
 | 9 | Reconfirm which tilt the system has on a vertical 90 degree angle in real physical position to maybe adapt the algorithm |

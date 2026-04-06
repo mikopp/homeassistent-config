@@ -64,14 +64,96 @@ template:
             {{ effective > threshold }}
           {% endif %}
 
-# automation and script keys will be added here in later steps.
-# Example structure (do not uncomment until the step is implemented):
-#
-# automation:
-#   - id: pergola_main_tilt_control
-#     alias: "Pergola: Main Tilt Control"
-#     ...
-#
+automation:
+  # Inactivity watchdog — fires every 5 minutes and evaluates whether any cover or
+  # lock entity has been updated in the last 5 minutes. If nothing has changed,
+  # sends stop_cover_tilt to force the Somfy firmware to emit a fresh state report.
+  # This is critical for the rain-lock lifecycle: after rain stops, the Somfy lock
+  # originator timer counts down from 900 s to 0 only on motion events. Without this
+  # watchdog, the lock originator would appear stuck indefinitely and the state
+  # machine would never see rain clearing.
+  - id: '1771360145720'
+    alias: 'Inactivity Watchdog: Dach Links'
+    description: >
+      Forces an update of slat position and lock originator every 5 minutes when
+      no cover movement or lock change has occurred. Prevents stale lock state.
+    triggers:
+      - trigger: time_pattern
+        minutes: /5
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: template
+        value_template: >
+          {% set entities = [
+            states.sensor.dach_links_priority_lock_originator,
+            states.sensor.dach_links_priority_lock_timer,
+            states.cover.dach_links
+          ] %}
+          {# Act only when no entity has been updated in the last 5 minutes #}
+          {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
+             | list | count == 0 }}
+    actions:
+      - action: cover.stop_cover_tilt
+        target:
+          entity_id: cover.dach_links
+
+  - id: '1771361016291'
+    alias: 'Inactivity Watchdog: Dach Rechts'
+    description: >
+      Forces an update of slat position and lock originator every 5 minutes when
+      no cover movement or lock change has occurred. Prevents stale lock state.
+    triggers:
+      - trigger: time_pattern
+        minutes: /5
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: template
+        value_template: >
+          {% set entities = [
+            states.sensor.dach_rechts_priority_lock_originator,
+            states.sensor.dach_rechts_priority_lock_timer,
+            states.cover.dach_rechts
+          ] %}
+          {# Act only when no entity has been updated in the last 5 minutes #}
+          {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
+             | list | count == 0 }}
+    actions:
+      - action: cover.stop_cover_tilt
+        target:
+          entity_id: cover.dach_rechts
+
+  # Immediate lock originator reaction — fires the moment the lock originator changes.
+  # Sending stop_cover_tilt forces a fresh state report from the Somfy firmware so HA
+  # sees the updated lock and tilt values without waiting for the next watchdog cycle.
+  - id: '1771748333394'
+    alias: 'Dach Links: Update state when lock originator changes'
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.dach_links_priority_lock_originator
+    conditions: []
+    actions:
+      - action: cover.stop_cover_tilt
+        target:
+          entity_id: cover.dach_links
+    mode: single
+
+  - id: '1771748414999'
+    alias: 'Dach Rechts: Update state when lock originator changes'
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.dach_rechts_priority_lock_originator
+    conditions: []
+    actions:
+      - action: cover.stop_cover_tilt
+        target:
+          entity_id: cover.dach_rechts
+    mode: single
+
+# script key will be added in a later step.
 # script:
 #   pergola_post_rain_recovery:
 #     ...
