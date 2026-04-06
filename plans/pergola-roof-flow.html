@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pergola Roof Automation — Flow Diagrams</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#e8f5e8',
+        primaryTextColor: '#1a1a1a',
+        primaryBorderColor: '#2c7a2c',
+        lineColor: '#555',
+        fontSize: '13px'
+      },
+      flowchart: { curve: 'basis', htmlLabels: true }
+    });
+  </script>
+  <style>
+    :root { --green: #2c7a2c; --red: #c0392b; --blue: #1565c0; --amber: #b8860b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 1500px; margin: 0 auto; padding: 1.5rem 2rem; background: #f4f6f4; color: #1a1a1a; }
+    h1 { color: var(--green); border-bottom: 3px solid var(--green); padding-bottom: .5rem; font-size: 1.7rem; }
+    h2 { color: var(--green); font-size: 1.15rem; margin: 0 0 .4rem; }
+    .section { background: white; border-radius: 10px; padding: 1.5rem 2rem; margin-bottom: 2rem; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+    p.desc { color: #555; font-size: .88rem; margin: 0 0 1.2rem; line-height: 1.5; }
+    p.desc code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 3px; font-size: .85rem; }
+    nav { background: white; border-radius: 8px; padding: .8rem 1.4rem; margin-bottom: 2rem; box-shadow: 0 2px 8px rgba(0,0,0,.07); display: flex; gap: .5rem 1.4rem; flex-wrap: wrap; align-items: center; }
+    nav strong { color: var(--green); }
+    nav a { text-decoration: none; color: var(--blue); font-size: .9rem; padding: .25rem .55rem; border-radius: 4px; }
+    nav a:hover { background: #e8f5e8; }
+    .mermaid { overflow-x: auto; text-align: center; }
+    .legend { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-bottom: 1rem; font-size: .82rem; align-items: center; }
+    .li { display: flex; align-items: center; gap: .4rem; }
+    .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #bbb; flex-shrink: 0; }
+    footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: .8rem; color: #888; }
+    footer a { color: var(--blue); }
+  </style>
+</head>
+<body>
+
+<h1>Pergola Roof Automation — Full Flow Diagrams</h1>
+<p>Source: <a href="pergola-roof-automation.md">pergola-roof-automation.md</a> &nbsp;·&nbsp;
+Edit the <code>&lt;pre class="mermaid"&gt;</code> blocks in this file to update any diagram.</p>
+
+<nav>
+  <strong>Jump to:</strong>
+  <a href="#s1">1 · System Architecture</a>
+  <a href="#s2">2 · State Priority Logic</a>
+  <a href="#s3">3 · Cover Response</a>
+  <a href="#s4">4 · Tilt Calculation</a>
+  <a href="#s5">5 · Post-Rain Recovery</a>
+</nav>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     1. SYSTEM ARCHITECTURE
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s1">
+  <h2>1 · System Architecture</h2>
+  <p class="desc">
+    All components and data-flow paths. Everything lives in <code>packages/pergola.yaml</code> and is deployed via <code>git pull</code>.
+    The two covers (<code>cover.dach_links</code> / <code>cover.dach_rechts</code>) always move together.
+  </p>
+  <pre class="mermaid">
+flowchart LR
+    subgraph Inputs["Inputs"]
+        WS["Weather Station\noutdoor_temp · rain_rate\nhourly_rain · solar_radiation"]
+        SUN_I["sun.sun\nelevation · azimuth"]
+        LOCKS["Cover Lock Sensors\ndach_links · dach_rechts\npriority_lock_originator\nunknown | rain | user"]
+        PV_I["Victron PV\nyield_power226"]
+    end
+
+    subgraph Helpers["Config Helpers — Pergola Dach device (UI-editable)"]
+        H_MASTER["input_boolean\nautomatic_enabled"]
+        H_HEATING["input_boolean\npergola_heating\n(on = heating, off = cooling)\nset via UI or REST API"]
+        H_THRESH["input_number\nfrost_off_threshold (2.5°C)\nfrost_on_threshold (3.0°C)"]
+        H_TILT["input_number\nmax_tilt_angle (122°)"]
+        H_COOL["input_boolean\ncooling_optimized"]
+        H_PV["input_number\npv_conversion_factor (3.2)"]
+        H_STATE["input_select\nautomation_state\n8 states"]
+    end
+
+    subgraph Derived["Derived Template Sensors — Pergola Dach device (read-only)"]
+        D_PV["sensor\npergola_pv_power"]
+        D_SHINE["binary_sensor\npergola_sun_shining"]
+        D_SLAT["sensor\npergola_slat_angle °"]
+        D_TPOS["sensor\npergola_tilt_position 0–100"]
+    end
+
+    subgraph Logic["Automation Logic"]
+        A_SM["automation\npergola_state_manager\nSole writer of automation_state.\nTriggers: temp · rain · sun · locks\n· sun_shining · loxone · HA start"]
+        A_CR["automation\npergola_cover_response\nTriggers: state change + every 5 min\nCondition: automatic_enabled = on"]
+        A_REC["script\npergola_post_rain_recovery\nTriggered when state = rain_stopped\nStepped drain sequence then re-evaluates"]
+    end
+
+    subgraph Covers["Covers (always both together)"]
+        C_L["cover.dach_links\ntilt_position 0–100"]
+        C_R["cover.dach_rechts\ntilt_position 0–100"]
+    end
+
+    PV_I --> D_PV
+    PV_I --> D_SHINE
+    WS --> D_SHINE
+    SUN_I --> D_SHINE
+    H_PV --> D_SHINE
+
+    WS --> A_SM
+    SUN_I --> A_SM
+    LOCKS --> A_SM
+    LOX_I --> A_SM
+    D_SHINE --> A_SM
+    H_THRESH --> A_SM
+    A_SM --> H_STATE
+
+    H_STATE -->|"state change"| A_CR
+    H_STATE -->|"→ rain_stopped"| A_REC
+    H_MASTER --> A_CR
+    H_TILT --> A_CR
+    H_COOL --> A_CR
+    SUN_I --> A_CR
+
+    A_CR --> D_SLAT
+    A_CR --> D_TPOS
+    A_CR --> C_L
+    A_CR --> C_R
+    A_REC --> C_L
+    A_REC --> C_R
+    A_REC -->|"sets final state"| H_STATE
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     2. STATE PRIORITY DECISION LOGIC
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s2">
+  <h2>2 · State Priority Decision Logic</h2>
+  <p class="desc">
+    <code>pergola_state_manager</code> evaluates these rules top-down on every trigger. The first matching rule wins.
+    <strong>rain_stopped is never overwritten mid-flight</strong> — only the recovery script exits it (exception: HA restart re-triggers the script).
+    <code>frost</code> and <code>user_override</code> both check hourly_rain on exit and route to <code>rain_stopped</code> if wet.
+    Each state box shows the cover action and the condition that causes exit / re-evaluation.
+  </p>
+  <div class="legend">
+    <div class="li"><div class="sw" style="background:#fde8e8;border-color:#c0392b"></div> No movement</div>
+    <div class="li"><div class="sw" style="background:#d1ecf1;border-color:#0c7c8c"></div> Tilt → 71 (vertical, open)</div>
+    <div class="li"><div class="sw" style="background:#d4edda;border-color:#28a745"></div> Formula-driven tilt</div>
+    <div class="li"><div class="sw" style="background:#fff3cd;border-color:#ffc107"></div> Recovery script active</div>
+  </div>
+  <pre class="mermaid">
+flowchart TD
+    TRIG(["Trigger fires\ntemp · rain_rate · sun · locks\nsun_shining · loxone · HA start"])
+
+    GUARD{"Currently in\nrain_stopped?"}
+    HA_CHK{"Trigger = HA start?"}
+    RETRIG(["Re-trigger\nscript.pergola_post_rain_recovery\nResume interrupted drain sequence\n(script restarts from beginning — safe)"])
+    DONE_G(["Wait — recovery script\ncontrols exit"])
+
+    P1{"PRIORITY 1 — FROST\ntemp &lt; frost_off_threshold\ndefault 2.5 °C"}
+    P2{"PRIORITY 2 — RAIN\nrain_rate &gt; 0\nOR lock_originator = 'rain'\non either cover"}
+    P3{"PRIORITY 3 — USER OVERRIDE\nlock_originator = 'user'\non either cover"}
+    P4{"PRIORITY 4 — NO SUN geometric\nsun below horizon\nOR azimuth outside 114°–294°"}
+    P5{"PRIORITY 5 — NOT ENOUGH SUN\nbinary_sensor.pergola_sun_shining\nhas been OFF for 5 continuous min"}
+    P6{"PRIORITY 6 — HEATING\ninput_boolean.pergola_heating = on"}
+
+    S_FROST["STATE: frost\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: temp &gt; frost_on_threshold (3.0 °C)"]
+    S_RAIN["STATE: rain\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: rain_rate = 0\nAND both lock_originators = 'unknown'"]
+    S_RAINS["STATE: rain_stopped\n───────────────────\nScript controls covers\n(stepped drain sequence)\n───────────────────\nExit when: script sets new state"]
+    S_USER["STATE: user_override\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: both locks = 'unknown'\n→ if hourly_rain &gt; 0: enter rain_stopped\n→ else: re-evaluate\n(same exit logic as frost)"]
+    S_NOSUN["STATE: no_sun_behind_house\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun enters azimuth window\nAND sun is up"]
+    S_NOTENOUGH["STATE: not_enough_sun\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun_shining ON\nfor 2 continuous min"]
+    S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays\n───────────────────\nExit when: pergola_heating = off\nOR sun sets / overcast"]
+    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–71]\nSlats perpendicular to sun\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
+
+    TRIG --> GUARD
+    GUARD -->|"Yes"| HA_CHK
+    HA_CHK -->|"Yes — HA start\nresume script"| RETRIG
+    HA_CHK -->|"No — mid-flight\nskip evaluation"| DONE_G
+    GUARD -->|No| P1
+    P1 -->|Yes| S_FROST
+    P1 -->|No| P2
+    P2 -->|Yes| S_RAIN
+    P2 -->|No| P3
+    P3 -->|Yes| S_USER
+    P3 -->|No| P4
+    P4 -->|Yes| S_NOSUN
+    P4 -->|No| P5
+    P5 -->|Yes| S_NOTENOUGH
+    P5 -->|No| P6
+    P6 -->|Yes| S_HEAT
+    P6 -->|No| S_COOL
+
+    S_FROST -->|"temp &gt; 3.0 °C\nAND hourly_rain &gt; 0"| S_RAINS
+    S_FROST -->|"temp &gt; 3.0 °C\nAND hourly_rain = 0\n→ re-evaluate"| TRIG
+    S_RAIN -->|"both indicators off\n→ enter recovery"| S_RAINS
+    S_USER -->|"both locks = 'unknown'\nAND hourly_rain &gt; 0"| S_RAINS
+    S_USER -->|"both locks = 'unknown'\nAND hourly_rain = 0\n→ re-evaluate"| TRIG
+    S_RAINS -->|"script complete\n→ re-evaluate"| TRIG
+
+    style S_FROST fill:#fde8e8,stroke:#c0392b
+    style S_RAIN fill:#fde8e8,stroke:#c0392b
+    style S_USER fill:#fde8e8,stroke:#c0392b
+    style RETRIG fill:#fff3cd,stroke:#ffc107
+    style S_NOSUN fill:#d1ecf1,stroke:#0c7c8c
+    style S_NOTENOUGH fill:#d1ecf1,stroke:#0c7c8c
+    style S_HEAT fill:#d4edda,stroke:#28a745
+    style S_COOL fill:#d4edda,stroke:#28a745
+    style S_RAINS fill:#fff3cd,stroke:#ffc107
+    style DONE_G fill:#eeeeee,stroke:#999999
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     3. COVER RESPONSE AUTOMATION
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s3">
+  <h2>3 · Cover Response Automation</h2>
+  <p class="desc">
+    <code>pergola_cover_response</code> triggers on every state change and on a 5-minute timer.
+    The 5-minute timer is the only mechanism that moves covers as the sun slowly tracks across the sky
+    within a steady state. The master switch is checked first on every trigger.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    TRIG(["Trigger\nstate change  OR  every 5 min"])
+    CHK_M{"input_boolean\nautomatic_enabled = on?"}
+    SKIP(["Stop — no movement"])
+
+    WHICH{"Current\nautomation_state?"}
+
+    NONE_F["🛑 No movement\n(frost: state machine controls)"]
+    NONE_R["🛑 No movement\n(rain: state machine controls)"]
+    NONE_RS["🛑 No movement\n(recovery script controls covers)"]
+    NONE_U["🛑 No movement\n(user has manual control)"]
+
+    ACT_71A["set_cover_tilt_position\nboth covers → 71"]
+    ACT_71B["set_cover_tilt_position\nboth covers → 71"]
+
+    COOL_C["Calculate cooling tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 71]"]
+    HEAT_C["Calculate heating tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 100]"]
+
+    SEND["set_cover_tilt_position\nboth covers → tilt_position\nUpdate: sensor.pergola_slat_angle\nUpdate: sensor.pergola_tilt_position"]
+
+    TRIG --> CHK_M
+    CHK_M -->|No| SKIP
+    CHK_M -->|Yes| WHICH
+
+    WHICH -->|frost| NONE_F
+    WHICH -->|rain| NONE_R
+    WHICH -->|rain_stopped| NONE_RS
+    WHICH -->|user_override| NONE_U
+    WHICH -->|no_sun_behind_house| ACT_71A
+    WHICH -->|not_enough_sun| ACT_71B
+    WHICH -->|sun_automatik_cooling| COOL_C
+    WHICH -->|sun_automatik_heating| HEAT_C
+
+    COOL_C --> SEND
+    HEAT_C --> SEND
+
+    style NONE_F fill:#fde8e8,stroke:#c0392b
+    style NONE_R fill:#fde8e8,stroke:#c0392b
+    style NONE_RS fill:#fde8e8,stroke:#c0392b
+    style NONE_U fill:#fde8e8,stroke:#c0392b
+    style ACT_71A fill:#d1ecf1,stroke:#0c7c8c
+    style ACT_71B fill:#d1ecf1,stroke:#0c7c8c
+    style COOL_C fill:#d4edda,stroke:#28a745
+    style HEAT_C fill:#d4edda,stroke:#28a745
+    style SEND fill:#d4edda,stroke:#28a745
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     4. TILT CALCULATION PIPELINE
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s4">
+  <h2>4 · Tilt Calculation Pipeline</h2>
+  <p class="desc">
+    Two-step calculation run by <code>pergola_cover_response</code> and the template sensors.
+    Step 1 computes the desired <strong>slat_angle</strong> (degrees) from sun geometry and season.
+    Step 2 applies hardware motor correction to produce <strong>tilt_position</strong> (0–100) sent to the covers.
+    <br>
+    <strong>threshold</strong> = max_tilt_angle − 180 = 122 − 180 = <strong>−58°</strong> (default).
+    <strong>perfect_angle</strong> sign convention: positive = sun from west, negative = sun from east.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    IN(["Inputs\nazimuth · elevation · mode\nmax_tilt_angle · cooling_optimized"])
+
+    STEP0["STEP 0 — Intermediate Values\ndelta_phi      = azimuth − 204\ndelta_phi_rad  = radians(delta_phi)\nelevation_rad  = radians(elevation)\nthreshold      = max_tilt_angle − 180  (default −58°)"]
+
+    PERF_CHK{"elevation &lt;= 0\nOR |sin(delta_phi_rad)| &lt; 0.001?"}
+    PA_ZERO["perfect_angle = 0\n(sun along slat axis\nor below horizon)"]
+    PA_CALC["perfect_angle =\ndegrees(\n  atan2(sin(delta_phi_rad),\n        tan(elevation_rad))\n)"]
+
+    MODE{"Mode?"}
+
+    FIXED["slat_angle = 90°\n→ tilt_position = 71\n(vertical, open)"]
+
+    C1{"perfect_angle\n&lt;= threshold (−58°)?\nsun from far east"}
+    C2{"perfect_angle &gt;= 0?\nsun from west"}
+    C_BACK["slat_angle = perfect_angle + 180\n(block from slat back side)"]
+    C_DIRECT["slat_angle = perfect_angle\n(direct perpendicular block)"]
+    C_DEAD["slat_angle = 15°\ndead zone: −58° &lt; angle &lt; 0°\nfull shade + small airflow"]
+    C_CLAMP["clamp to [0°, 90°]"]
+
+    H_RAW["heating_raw = perfect_angle − 90\n(rotate 90° to align parallel)"]
+    H1{"heating_raw\n&lt;= threshold (−58°)?"}
+    H2{"heating_raw &gt;= 0?"}
+    H_BACK["slat_angle = heating_raw + 180"]
+    H_DIRECT["slat_angle = heating_raw"]
+    H_DEAD["slat_angle = 90°\ndead zone: max light transmission\n(slats present min area to sun)"]
+    H_CLAMP["clamp to [0°, max_tilt_angle]"]
+
+    OPT["Optimised cooling\nStep 7 — formula TBD\nSafe-zone max-open angle\nSlat geometry: w=22cm, t=3cm,\nd=20cm, R=0.919, phi=8.53°\nMaximises airflow while\nguaranteeing full shade"]
+
+    STEP2["STEP 2 — Hardware Motor Correction\ncorrection = 7.0   if slat_angle &lt; 20°\n           = 5.5   if slat_angle &lt; 69°\n           = 0.5   otherwise\n\ntilt_position = INT(slat_angle / max_tilt_angle × 100 + correction)"]
+
+    CLAMP_M{"Mode?"}
+    CLAMP_C["clamp tilt_position → [0, 71]\n71 = hardware-calibrated vertical (90°)\nFormula gives ~74 for 90° due to correction\ngap above 69°; 71 is the authoritative cap.\nAngles &gt; 90° let sun through the back face."]
+    CLAMP_H["clamp tilt_position → [0, 100]\n(full range in heating)"]
+
+    OUT(["set_cover_tilt_position\nboth covers → tilt_position"])
+
+    IN --> STEP0
+    STEP0 --> PERF_CHK
+    PERF_CHK -->|Yes| PA_ZERO
+    PERF_CHK -->|No| PA_CALC
+    PA_ZERO --> MODE
+    PA_CALC --> MODE
+
+    MODE -->|"no_sun / not_enough_sun"| FIXED
+    MODE -->|"sun_automatik_cooling\ncooling_optimized = off"| C1
+    MODE -->|"sun_automatik_cooling\ncooling_optimized = on"| OPT
+    MODE -->|"sun_automatik_heating"| H_RAW
+
+    C1 -->|Yes| C_BACK
+    C1 -->|No| C2
+    C2 -->|Yes| C_DIRECT
+    C2 -->|"No — dead zone"| C_DEAD
+    C_BACK --> C_CLAMP
+    C_DIRECT --> C_CLAMP
+    C_DEAD --> C_CLAMP
+
+    H_RAW --> H1
+    H1 -->|Yes| H_BACK
+    H1 -->|No| H2
+    H2 -->|Yes| H_DIRECT
+    H2 -->|"No — dead zone"| H_DEAD
+    H_BACK --> H_CLAMP
+    H_DIRECT --> H_CLAMP
+    H_DEAD --> H_CLAMP
+
+    FIXED --> OUT
+    C_CLAMP --> STEP2
+    OPT --> STEP2
+    H_CLAMP --> STEP2
+    STEP2 --> CLAMP_M
+    CLAMP_M -->|"cooling"| CLAMP_C
+    CLAMP_M -->|"heating"| CLAMP_H
+    CLAMP_C --> OUT
+    CLAMP_H --> OUT
+
+    style STEP0 fill:#f0f4ff,stroke:#4477cc
+    style STEP2 fill:#f0f4ff,stroke:#4477cc
+    style FIXED fill:#d1ecf1,stroke:#0c7c8c
+    style C_DEAD fill:#fff8dc,stroke:#c8960a
+    style H_DEAD fill:#fff8dc,stroke:#c8960a
+    style OPT fill:#fef0ff,stroke:#9040bb
+    style CLAMP_C fill:#d4edda,stroke:#28a745
+    style CLAMP_H fill:#d4edda,stroke:#28a745
+  </pre>
+
+  <p class="desc" style="margin-top:1rem">
+    <strong>Verification examples</strong> (azimuth, elevation → perfect_angle → cooling slat / heating slat):
+    204°/57° → 0.0° → 0° flat / 90° vertical &nbsp;|&nbsp;
+    220°/45° → 15.4° → 15.4° / 105.4° &nbsp;|&nbsp;
+    260°/30° → 55.1° → 55.1° / 90° dead-zone &nbsp;|&nbsp;
+    140°/40° → −47.0° → 15° dead-zone / 43.0°
+  </p>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     5. POST-RAIN RECOVERY SCRIPT
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s5">
+  <h2>5 · Post-Rain Recovery Script</h2>
+  <p class="desc">
+    <code>script.pergola_post_rain_recovery</code> runs whenever <code>automation_state</code> enters <code>rain_stopped</code>
+    (rain cleared, frost exited with residual rain, user_override exited with residual rain, or HA restarted with state persisted as rain_stopped).
+    Slat angles (8°, 15°) are converted via the hardware correction formula before sending to covers.
+    The state manager does not re-evaluate while <code>rain_stopped</code> is active — only this script exits it.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    ENTER(["automation_state enters: rain_stopped\nFrom: rain clears — both indicators off\nOR: frost exits with hourly_rain &gt; 0\nOR: user_override exits with hourly_rain &gt; 0\nOR: HA restart with state persisted as rain_stopped"])
+
+    W30["Wait 30 s\nSystem stabilisation"]
+    T8["set_cover_tilt_position → 8°\nboth covers (tilt_position ≈ 13)\nSlight opening to start water drainage"]
+    W5A["Wait 5 min\nWater runs off slats"]
+    T15["set_cover_tilt_position → 15°\nboth covers (tilt_position ≈ 17)\nOpen further — continued drainage"]
+    W5B["Wait 5 min\nMore water drains"]
+    CHK_RAIN{"wheatherstation\n_hourly_rain &gt; 0?"}
+    W30B["Wait 30 min\nSlats drying after recent rain"]
+    RE_EVAL["Re-evaluate state machine rules\npriority order:\nfrost → rain → user_override\n→ no_sun_behind_house\n→ not_enough_sun\n→ sun_automatik_heating\n→ sun_automatik_cooling"]
+    SET_STATE["Set input_select\npergola_automation_state\n← result of re-evaluation"]
+    EXIT(["automation_state exits rain_stopped\nCover response automation resumes\nnormal tilt tracking"])
+
+    ENTER --> W30
+    W30 --> T8
+    T8 --> W5A
+    W5A --> T15
+    T15 --> W5B
+    W5B --> CHK_RAIN
+    CHK_RAIN -->|"Yes — still wet"| W30B
+    CHK_RAIN -->|"No — dry enough"| RE_EVAL
+    W30B --> RE_EVAL
+    RE_EVAL --> SET_STATE
+    SET_STATE --> EXIT
+
+    style ENTER fill:#fff3cd,stroke:#ffc107
+    style T8 fill:#d1ecf1,stroke:#0c7c8c
+    style T15 fill:#d1ecf1,stroke:#0c7c8c
+    style W30B fill:#fde8e8,stroke:#e67e22
+    style RE_EVAL fill:#e8f5e8,stroke:#28a745
+    style SET_STATE fill:#e8f5e8,stroke:#28a745
+    style EXIT fill:#e8f5e8,stroke:#28a745
+  </pre>
+</div>
+
+<footer>
+  Pergola Roof Automation flow diagrams &nbsp;·&nbsp; source: <a href="pergola-roof-automation.md">pergola-roof-automation.md</a>
+  &nbsp;·&nbsp; rendered with <a href="https://mermaid.js.org">Mermaid 10</a>
+</footer>
+
+</body>
+</html>
