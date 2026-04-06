@@ -93,6 +93,19 @@ automation:
           {# Act only when no entity has been updated in the last 5 minutes #}
           {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
              | list | count == 0 }}
+      # Skip when the state machine is in an actively-moving state. The cover
+      # response automation (sun states) and the post-rain recovery script
+      # (rain_stopped) both use the same /5 time pattern. Because HA evaluates
+      # both triggers concurrently, the cover's last_updated is still stale at
+      # evaluation time — the watchdog condition would pass and send stop_cover_tilt
+      # while the movement command is already in flight, aborting mid-travel.
+      # State-based suppression eliminates the race at the root.
+      # Safe before Step 1: states() returns 'unknown' when the entity does not
+      # exist yet, which is not in the exclusion list, so the watchdog fires normally.
+      - condition: template
+        value_template: >
+          {% set s = states('input_select.pergola_automation_state') %}
+          {{ s not in ['sun_automatik_cooling', 'sun_automatik_heating', 'rain_stopped'] }}
     actions:
       - action: cover.stop_cover_tilt
         target:
@@ -119,6 +132,11 @@ automation:
           {# Act only when no entity has been updated in the last 5 minutes #}
           {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
              | list | count == 0 }}
+      # Same race-condition guard as Dach Links watchdog — see comment there.
+      - condition: template
+        value_template: >
+          {% set s = states('input_select.pergola_automation_state') %}
+          {{ s not in ['sun_automatik_cooling', 'sun_automatik_heating', 'rain_stopped'] }}
     actions:
       - action: cover.stop_cover_tilt
         target:
