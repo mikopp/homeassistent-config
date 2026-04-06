@@ -370,6 +370,12 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 
 **Notes:**
 - **`packages/pergola.yaml` is rewritten from scratch** — the existing file (which still contains the old `pergola_frost_hold` and `pergola_post_rain_active` booleans and lacks the device declaration) is discarded entirely. Write the complete file fresh using only the entities listed below.
+- **Carry over the 4 existing automations verbatim** — these must appear in the new file's `automation:` block unchanged (same `id`, `alias`, triggers, conditions, and actions):
+  - `id: '1771360145720'` — Inactivity Watchdog: Dach Links
+  - `id: '1771361016291'` — Inactivity Watchdog: Dach Rechts
+  - `id: '1771748333394'` — Dach Links: Update state when lock originator changes
+  - `id: '1771748414999'` — Dach Rechts: Update state when lock originator changes
+  - These are critical for the rain-lock lifecycle and must not be lost during the rewrite.
 - `input_select.pergola_automation_state` must list all 8 state values
 - PV conversion factor (default 3.2) calibrated in Step 6
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
@@ -405,6 +411,9 @@ Action: evaluate priority rules top-down (frost → rain → rain_stopped → **
 **Dependencies:** Step 1 (helpers must exist).
 
 **Notes:**
+- **Lock originator triggers are watchdog-driven.** The Somfy does not push state changes proactively. `sensor.dach_links_priority_lock_originator` and `sensor.dach_rechts_priority_lock_originator` only update in HA when the inactivity watchdog (or a movement command) sends `stop_cover_tilt` and forces a Somfy state report. The state manager triggers on these sensors but cannot observe rain clearing without the watchdog first causing a report. This is not a gap — the watchdog is already in place — but it means the state manager's lock originator triggers are reactive to watchdog-driven updates, not direct Somfy pushes.
+- **Watchdog self-suppresses during active sun-tracking.** Steps 3–5 send `cover.set_cover_tilt_position` every 5 minutes. Each command updates `states.cover.dach_*` `last_updated`, causing the watchdog condition to fail. The watchdog therefore fires only during quiet states (`rain`, `frost`, `user_override`, `no_sun_behind_house`) — exactly the periods when no movement commands are issued. This is emergent behavior, not designed-in, but it is correct.
+- **Lock originator responders (automations 3 & 4) complement the state manager.** These automations (already in the file) trigger on lock originator changes and immediately send a second `stop_cover_tilt`. This forces a fresh Somfy state report right after each lock transition, before the state manager has acted. The state manager's second evaluation then sees the most current tilt position data. These automations should be left as-is — do not fold their logic into the state manager.
 - Guard: do not overwrite `rain_stopped` mid-flight — only the recovery script exits that state. Exceptions (state manager may set `rain_stopped` explicitly):
   - **frost exit:** temp rises above `pergola_frost_on_threshold` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **user_override exit:** both lock originators return to `unknown` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
