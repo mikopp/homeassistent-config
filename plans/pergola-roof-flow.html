@@ -318,11 +318,11 @@ flowchart TD
     FIXED["slat_angle = 90°\n→ tilt_position = 71\n(vertical, open)"]
 
     C1{"perfect_angle\n&lt;= threshold (−58°)?\nsun from far east"}
-    C2{"perfect_angle &gt;= 0?\nsun from west"}
+    C2{"perfect_angle &gt;= −5°?\nearly flip: ~2 update cycles\nbefore geometric crossing"}
     C_BACK["slat_angle = perfect_angle + 180\n(block from slat back side)"]
-    C_DIRECT["slat_angle = perfect_angle\n(direct perpendicular block)"]
-    C_DEAD["slat_angle = 15°\ndead zone: −58° &lt; angle &lt; 0°\nfull shade + small airflow"]
-    C_CLAMP["clamp to [0°, max_tilt_angle]\nWest branch stays &lt; 90° naturally.\nEast branch (+180°) needs 90°–122°."]
+    C_DIRECT["slat_angle = max(perfect_angle, 11°)\n(direct block; tilt≥16 ventilation floor)"]
+    C_DEAD["slat_angle = max_tilt_angle (122°)\ndead zone: −58° &lt; angle &lt; −5°\ne_crit=6.56° &lt; 10° min → always shades"]
+    C_CLAMP["clamp to [11°, max_tilt_angle]\nLower bound = tilt 16 (ventilation floor).\nEast branch (+180°) needs 90°–122°."]
 
     H_RAW["heating_raw = perfect_angle − 90\n(rotate 90° to align parallel)"]
     H1{"heating_raw\n&lt;= threshold (−58°)?"}
@@ -393,10 +393,11 @@ flowchart TD
 
   <p class="desc" style="margin-top:1rem">
     <strong>Verification examples</strong> (azimuth, elevation → perfect_angle → cooling slat / heating slat):
-    204°/57° → 0.0° → 0° flat / 90° vertical &nbsp;|&nbsp;
+    204°/57° → 0.0° → 11° (tilt=16 floor; ≥−5° direct branch) / 90° vertical &nbsp;|&nbsp;
     220°/45° → 15.4° → 15.4° / 105.4° &nbsp;|&nbsp;
     260°/30° → 55.1° → 55.1° / 90° dead-zone &nbsp;|&nbsp;
-    140°/40° → −47.0° → 15° dead-zone / 43.0°
+    140°/40° → −47.0° → 122° (tilt=100) dead-zone / 43.0°
+    &nbsp;|&nbsp; <em>Direct blocking kicks in at perfect_angle ≥ −5° (was 0°); dead zone shrinks to −58° … −5°.</em>
   </p>
 </div>
 

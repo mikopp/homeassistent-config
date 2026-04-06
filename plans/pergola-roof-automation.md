@@ -197,21 +197,28 @@ else:
 Map `perfect_angle` to the pergola hardware range (0–122°). The hardware can only tilt in one direction, so angles that would require the opposite tilt direction need special handling:
 
 ```
+COOLING_LOWER_BOUND_ANGLE = 11°              # = tilt_position 16; ventilation floor
+DIRECT_BLOCK_THRESHOLD    = -5°              # early flip: ~2 update cycles before geometric crossing
+
 if perfect_angle <= threshold:               # sun from far east, steep angle
     slat_angle = perfect_angle + 180         # block from "back side" of slat
-elif perfect_angle >= 0:                     # sun from west, direct blocking
-    slat_angle = perfect_angle
-else:                                        # dead zone: -58° < angle < 0°
-    slat_angle = 15                           # almost flat for maximum shade (imperfect) - not completely closed
+elif perfect_angle >= DIRECT_BLOCK_THRESHOLD:  # sun from west/south, direct blocking
+    slat_angle = max(perfect_angle, COOLING_LOWER_BOUND_ANGLE)
+else:                                        # dead zone: -58° < angle < -5°
+    slat_angle = max_tilt_angle              # 122° — back-face blocks; e_crit=6.56° < 10° min
 
-clamp slat_angle to [0°, max_tilt_angle]
+clamp slat_angle to [COOLING_LOWER_BOUND_ANGLE, max_tilt_angle]
 ```
 
-> **Why not cap at 90°:** branch 2 (west, `perfect_angle ≥ 0`) naturally stays below 90° within the azimuth window — no cap needed. Branch 1 (east, `+180°`) produces values in `[90°, 122°]`; these are exactly correct and required. Capping at 90° (vertical) would leave eastern sun unblocked because vertical slats face south, not toward the rising sun.
+> **Why not cap at 90°:** branch 2 (west, `perfect_angle ≥ DIRECT_BLOCK_THRESHOLD`) naturally stays below 90° within the azimuth window — no cap needed. Branch 1 (east, `+180°`) produces values in `[90°, 122°]`; these are exactly correct and required. Capping at 90° (vertical) would leave eastern sun unblocked because vertical slats face south, not toward the rising sun.
 
-**Dead zone explanation:** When the sun comes from a slight-east angle (azimuth roughly 114°–170°), the ideal blocking tilt would require a small negative angle. Since the hardware only goes 0°–122°, the fallback is **15°** (not fully flat). The slats are 22 cm wide with a 3 cm thickness and 20 cm pivot spacing, so they overlap — a 15° tilt still provides full shade in practice while allowing a small amount of airflow. Flat (0°) would also block, but 15° is slightly better for ventilation without sacrificing shade.
+**Dead zone explanation:** When the sun comes from a slight-east angle (perfect_angle between −58° and −5°), the ideal perpendicular blocking angle would be small and negative — mechanically impossible. `max_tilt_angle` (122°) is used instead. Geometry confirms this: at 122°, `e_crit = atan((20 − 22·sin122°) / (22·|cos122°|)) = 6.56°`. The `sun_shining` sensor requires elevation > 10°, so 122° always provides complete shade within the operating envelope. The safe east-side limit (accounting for 3 cm slat thickness) is verified to exceed our 32°-past-vertical position for all dead-zone sun angles.
 
-> If `input_boolean.pergola_cooling_optimized` is `on`, a different formula is used instead (see Step 7). The dead zone fallback of 15° applies only in the default (`off`) mode.
+**DIRECT_BLOCK_THRESHOLD = −5°:** The sun moves ~1–1.5°/5 min through the crossing at 52°N, so −5° gives ~2 full update cycles of lead time. The slats switch to direct blocking (floor = 11°) before the geometric crossing at 0°, ensuring no gap between back-face and front-face coverage.
+
+> If `input_boolean.pergola_cooling_optimized` is `on`, a different formula is used instead (see Step 7). The dead zone fallback of `max_tilt_angle` applies only in the default (`off`) mode.
+
+**Cooling lower bound:** In the direct branch, when `perfect_angle` is very small (sun nearly due south), the floor of `COOLING_LOWER_BOUND_ANGLE = 11°` (tilt_position = 16) prevents the slats closing completely flat. At 11°, `e_crit = atan((20 + 22·sin11°) / (22·cos11°)) = 48.3°` — summer noon elevation (≈65°) exceeds this, giving complete shade. This is a ventilation floor; the tracking formula handles optimal shading above the floor.
 
 #### Heating season (`sun_automatik_heating`) — let sun through
 
@@ -245,11 +252,11 @@ Heating branch used: **A** = +180° equivalent (`heating_raw ≤ threshold`), **
 | Azimuth | Elev | perfect_angle | Cooling slat | Heating slat | Heating branch | Notes |
 |---|---|---|---|---|---|---|
 | 115° | 20° | −70.0° | 110° (tilt≈90) | 20.0° | A | Far east, near window edge |
-| 150° | 30° | −54.5° | 15° (dead zone) | 35.5° | A | Moderate east |
-| 140° | 40° | −47.0° | 15° (dead zone) | 43.0° | A | East, medium elev |
-| 180° | 55° | −15.9° | 15° (dead zone) | 74.1° | A | Noon (summer) |
-| 180° | 40° | −25.9° | 15° (dead zone) | 64.1° | A | South, lower elev |
-| 204° | 57° | 0.0° | 0° (flat) | 90.0° | A | Sun along slat axis |
+| 150° | 30° | −54.5° | 122° (tilt=100) | 35.5° | A | Moderate east — dead zone |
+| 140° | 40° | −47.0° | 122° (tilt=100) | 43.0° | A | East, medium elev — dead zone |
+| 180° | 55° | −15.9° | 122° (tilt=100) | 74.1° | A | Noon (summer) — dead zone |
+| 180° | 40° | −25.9° | 122° (tilt=100) | 64.1° | A | South, lower elev — dead zone |
+| 204° | 57° | 0.0° | 11° (tilt=16, lower bound) | 90.0° | A | Sun along slat axis — lower bound applies |
 | 220° | 45° | 15.4° | 15.4° | 105.4° | A | Slight west — still branch A! |
 | 240° | 40° | 35.0° | 35.0° | 100 pos | DZ | West, medium (boundary ~32°) |
 | 260° | 30° | 55.1° | 55.1° | 100 pos | DZ | Far west, low |
