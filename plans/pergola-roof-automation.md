@@ -204,8 +204,10 @@ elif perfect_angle >= 0:                     # sun from west, direct blocking
 else:                                        # dead zone: -58° < angle < 0°
     slat_angle = 15                           # almost flat for maximum shade (imperfect) - not completely closed
 
-clamp slat_angle to [0°, 90°]
+clamp slat_angle to [0°, max_tilt_angle]
 ```
+
+> **Why not cap at 90°:** branch 2 (west, `perfect_angle ≥ 0`) naturally stays below 90° within the azimuth window — no cap needed. Branch 1 (east, `+180°`) produces values in `[90°, 122°]`; these are exactly correct and required. Capping at 90° (vertical) would leave eastern sun unblocked because vertical slats face south, not toward the rising sun.
 
 **Dead zone explanation:** When the sun comes from a slight-east angle (azimuth roughly 114°–170°), the ideal blocking tilt would require a small negative angle. Since the hardware only goes 0°–122°, the fallback is **15°** (not fully flat). The slats are 22 cm wide with a 3 cm thickness and 20 cm pivot spacing, so they overlap — a 15° tilt still provides full shade in practice while allowing a small amount of airflow. Flat (0°) would also block, but 15° is slightly better for ventilation without sacrificing shade.
 
@@ -236,12 +238,13 @@ clamp slat_angle to [0°, max_tilt]          # (only applies to the non-dead-zon
 
 #### Verification table
 
+All rows are within the azimuth window (114°–294°). Outside that range the state machine is in `no_sun_behind_house` and neither formula runs — slats go to tilt 71 (vertical).
+
 Heating branch used: **A** = +180° equivalent (`heating_raw ≤ threshold`), **B** = direct (`heating_raw ≥ 0`), **DZ** = dead zone (`tilt_pos = 100`)
 
 | Azimuth | Elev | perfect_angle | Cooling slat | Heating slat | Heating branch | Notes |
 |---|---|---|---|---|---|---|
-| 115° | 20° | −70.0° | 90° (capped) | 20.0° | A | Far east, in window |
-| 102° | 31° | −58.4° | 90° (capped) | 31.6° | A | Far east, outside window |
+| 115° | 20° | −70.0° | 110° (tilt≈90) | 20.0° | A | Far east, near window edge |
 | 150° | 30° | −54.5° | 15° (dead zone) | 35.5° | A | Moderate east |
 | 140° | 40° | −47.0° | 15° (dead zone) | 43.0° | A | East, medium elev |
 | 180° | 55° | −15.9° | 15° (dead zone) | 74.1° | A | Noon (summer) |
@@ -272,15 +275,15 @@ correction = 7    if slat_angle < 20°
 tilt_position = INT(slat_angle / pergola_max_tilt_angle × 100 + correction)
 ```
 - `pergola_max_tilt_angle` = `input_number.pergola_max_tilt_angle` (default 122°)
-- Clamp result: cooling → [0, 71]; heating → [0, 100]
-  - Cooling upper bound 71 = hardware-observed tilt position for 90° slat angle (vertical). The formula gives ~74 for 90° due to a small calibration gap in the +0.5 correction region above 69°; 71 is the authoritative hardware cap. The slat_angle clamp at 90° (in the formula above) and the tilt_position clamp at 71 (here) express the same physical limit — 90° vertical — from two different perspectives.
-  - In cooling mode, angles > 90° would start letting sun through from the opposite face of the slat — physically wrong.
+- Clamp result: both cooling and heating → [0, 100]
+  - Cooling uses the full range: western sun branch (slat 0°–90°, tilt 0–71) and eastern sun branch (slat 90°–122°, tilt ~71–100). Both branches are valid — going past 90° is wrong only for western sun, which never reaches 90° naturally within the azimuth window.
+  - Note: the formula gives tilt ≈ 74 for slat_angle = 90° (versus hardware-observed 71). This 3-unit discrepancy exists because the +0.5 correction was calibrated in the 69°–90° range. In practice, the eastern branch rarely lands exactly at 90°; the calibration error is small relative to the 4-unit deadband.
 - Values > 100 are dead zone on the Somfy controller — never send them
 
 **Why corrections are needed:**
 - Below 20°: motor displacement is very small → +7 compensates
 - 20°–69°: linear region → +5.5 rounds up correctly
-- Above 69°: slight mechanical jerk → only +0.5 to avoid overshoot (small residual gap near 90° absorbed by the explicit tilt_position clamp)
+- Above 69°: slight mechanical jerk → only +0.5 to avoid overshoot
 
 ---
 
@@ -414,7 +417,9 @@ Action: evaluate priority rules top-down (frost → rain → rain_stopped → **
 - **Lock originator triggers are watchdog-driven.** The Somfy does not push state changes proactively. `sensor.dach_links_priority_lock_originator` and `sensor.dach_rechts_priority_lock_originator` only update in HA when the inactivity watchdog (or a movement command) sends `stop_cover_tilt` and forces a Somfy state report. The state manager triggers on these sensors but cannot observe rain clearing without the watchdog first causing a report. This is not a gap — the watchdog is already in place — but it means the state manager's lock originator triggers are reactive to watchdog-driven updates, not direct Somfy pushes.
 - **Watchdog suppression is explicit, not emergent.** The watchdog and the cover response automation both use `time_pattern: minutes: /5`, so they evaluate simultaneously at every 5-minute mark. Because the cover's `last_updated` is only set after the Somfy responds (not when the command is sent), the watchdog condition would pass at the same instant the cover response is about to send a movement command — causing `stop_cover_tilt` to abort the movement mid-travel. To eliminate this race, both watchdog automations carry an explicit state condition that skips them when `input_select.pergola_automation_state` is in `[sun_automatik_cooling, sun_automatik_heating, rain_stopped]`. The watchdog runs only in quiet states where no movement commands are issued (`rain`, `frost`, `user_override`, `no_sun_behind_house`, `not_enough_sun`).
 - **Lock originator responders (automations 3 & 4) complement the state manager.** These automations (already in the file) trigger on lock originator changes and immediately send a second `stop_cover_tilt`. This forces a fresh Somfy state report right after each lock transition, before the state manager has acted. The state manager's second evaluation then sees the most current tilt position data. These automations should be left as-is — do not fold their logic into the state manager.
-- Guard: do not overwrite `rain_stopped` mid-flight — only the recovery script exits that state. Exceptions (state manager may set `rain_stopped` explicitly):
+- Guard: do not overwrite `rain_stopped` mid-flight — only the recovery script exits that state. **Exceptions** (state manager may write a different state while `rain_stopped` is active):
+  - **frost entry (from any state including `rain_stopped`):** temp falls below `pergola_frost_off_threshold` → call `script.turn_off` on `script.pergola_post_rain_recovery`, then set state to `frost`. Frost is the highest-priority safety rule — it must preempt an in-progress drain sequence.
+  - **rain re-entry (from any state including `rain_stopped`):** either rain indicator becomes active → call `script.turn_off` on `script.pergola_post_rain_recovery`, then set state to `rain`. Rain just restarted — the covers should stay closed and the drain sequence must not continue mid-rain.
   - **frost exit:** temp rises above `pergola_frost_on_threshold` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **user_override exit:** both lock originators return to `unknown` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **HA start with state = `rain_stopped`:** do NOT clear the state; instead re-trigger `script.pergola_post_rain_recovery` so the interrupted drain sequence resumes (see restart recovery note below)
@@ -446,14 +451,14 @@ Condition: `input_boolean.pergola_automatic_enabled = on`.
 Action (`choose` on current state):
 - `no_sun_behind_house`, `not_enough_sun` → set tilt 71 on both covers
 - `frost`, `rain`, `rain_stopped`, `user_override` → do nothing
-- `sun_automatik_cooling` → cooling formula, clamped [0, 71]
+- `sun_automatik_cooling` → cooling formula, clamped [0, 100]
 - `sun_automatik_heating` → stub: tilt 71 (replaced in Step 5)
 
 **Dependencies:** Step 1 (helpers), Step 2 (state machine must be writing state).
 
 **Notes:**
 - Every-5-min trigger is the only way covers track a slowly moving sun within a steady state
-- Cooling clamp upper bound is tilt_position = 71 (= 90° slat angle, hardware-calibrated vertical) — never past vertical in cooling mode. Slat_angle is also clamped to 90° upstream in the formula; the tilt_position clamp is the final safety net.
+- Cooling tilt clamp is [0, 100]: western sun branch (slat 0°–90°) stays below tilt 71 naturally; eastern sun branch (+180°, slat 90°–122°) uses tilt 71–100 to block sun from behind the slat.
 - **Deadband (Tilt Calculation Logic Step 3):** before every move command compare `target_tilt_position` against `cover.dach_links.current_tilt_position`; only issue the command if `|target - current| >= 4` tilt units (≈ 5°). Comparison is in tilt-position units — not slat degrees — so the hardware correction offsets cancel and the check is accurate across all angle zones. Post-rain recovery script bypasses this.
 - Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation)
 

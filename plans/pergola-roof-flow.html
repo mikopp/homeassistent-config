@@ -141,7 +141,10 @@ flowchart LR
   <h2>2 · State Priority Decision Logic</h2>
   <p class="desc">
     <code>pergola_state_manager</code> evaluates these rules top-down on every trigger. The first matching rule wins.
-    <strong>rain_stopped is never overwritten mid-flight</strong> — only the recovery script exits it (exception: HA restart re-triggers the script).
+    <strong>rain_stopped is protected mid-flight</strong> — the state manager skips evaluation while the recovery script is running, with three exceptions:
+    (1) <strong>frost preempts:</strong> temp falls below threshold → cancel recovery script, set <code>frost</code>;
+    (2) <strong>rain preempts:</strong> rain indicator becomes active → cancel recovery script, set <code>rain</code>;
+    (3) <strong>HA restart:</strong> re-trigger the recovery script to resume the interrupted drain sequence.
     <code>frost</code> and <code>user_override</code> both check hourly_rain on exit and route to <code>rain_stopped</code> if wet.
     Each state box shows the cover action and the condition that causes exit / re-evaluation.
   </p>
@@ -156,6 +159,10 @@ flowchart TD
     TRIG(["Trigger fires\ntemp · rain_rate · sun · locks\nsun_shining · loxone · HA start"])
 
     GUARD{"Currently in\nrain_stopped?"}
+    G_FROST{"PRIORITY 1 — FROST?\ntemp &lt; frost_off_threshold"}
+    G_RAIN{"PRIORITY 2 — RAIN?\nrain_rate &gt; 0\nOR lock_originator = 'rain'"}
+    CANCEL_F["Cancel recovery script\nscript.turn_off\npergola_post_rain_recovery"]
+    CANCEL_R["Cancel recovery script\nscript.turn_off\npergola_post_rain_recovery"]
     HA_CHK{"Trigger = HA start?"}
     RETRIG(["Re-trigger\nscript.pergola_post_rain_recovery\nResume interrupted drain sequence\n(script restarts from beginning — safe)"])
     DONE_G(["Wait — recovery script\ncontrols exit"])
@@ -174,10 +181,16 @@ flowchart TD
     S_NOSUN["STATE: no_sun_behind_house\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun enters azimuth window\nAND sun is up"]
     S_NOTENOUGH["STATE: not_enough_sun\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun_shining ON\nfor 2 continuous min"]
     S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays\n───────────────────\nExit when: pergola_heating = off\nOR sun sets / overcast"]
-    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–71]\nSlats perpendicular to sun\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
+    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–100]\nSlats perpendicular to sun\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
 
     TRIG --> GUARD
-    GUARD -->|"Yes"| HA_CHK
+    GUARD -->|"Yes"| G_FROST
+    G_FROST -->|"Yes — preempt"| CANCEL_F
+    CANCEL_F --> S_FROST
+    G_FROST -->|No| G_RAIN
+    G_RAIN -->|"Yes — preempt"| CANCEL_R
+    CANCEL_R --> S_RAIN
+    G_RAIN -->|No| HA_CHK
     HA_CHK -->|"Yes — HA start\nresume script"| RETRIG
     HA_CHK -->|"No — mid-flight\nskip evaluation"| DONE_G
     GUARD -->|No| P1
@@ -204,6 +217,8 @@ flowchart TD
     style S_FROST fill:#fde8e8,stroke:#c0392b
     style S_RAIN fill:#fde8e8,stroke:#c0392b
     style S_USER fill:#fde8e8,stroke:#c0392b
+    style CANCEL_F fill:#fde8e8,stroke:#c0392b
+    style CANCEL_R fill:#fde8e8,stroke:#c0392b
     style RETRIG fill:#fff3cd,stroke:#ffc107
     style S_NOSUN fill:#d1ecf1,stroke:#0c7c8c
     style S_NOTENOUGH fill:#d1ecf1,stroke:#0c7c8c
@@ -241,7 +256,7 @@ flowchart TD
     ACT_71A["set_cover_tilt_position\nboth covers → 71"]
     ACT_71B["set_cover_tilt_position\nboth covers → 71"]
 
-    COOL_C["Calculate cooling tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 71]"]
+    COOL_C["Calculate cooling tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 100]"]
     HEAT_C["Calculate heating tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 100]"]
 
     SEND["set_cover_tilt_position\nboth covers → tilt_position\nUpdate: sensor.pergola_slat_angle\nUpdate: sensor.pergola_tilt_position"]
@@ -307,7 +322,7 @@ flowchart TD
     C_BACK["slat_angle = perfect_angle + 180\n(block from slat back side)"]
     C_DIRECT["slat_angle = perfect_angle\n(direct perpendicular block)"]
     C_DEAD["slat_angle = 15°\ndead zone: −58° &lt; angle &lt; 0°\nfull shade + small airflow"]
-    C_CLAMP["clamp to [0°, 90°]"]
+    C_CLAMP["clamp to [0°, max_tilt_angle]\nWest branch stays &lt; 90° naturally.\nEast branch (+180°) needs 90°–122°."]
 
     H_RAW["heating_raw = perfect_angle − 90\n(rotate 90° to align parallel)"]
     H1{"heating_raw\n&lt;= threshold (−58°)?"}
@@ -322,7 +337,7 @@ flowchart TD
     STEP2["STEP 2 — Hardware Motor Correction\ncorrection = 7.0   if slat_angle &lt; 20°\n           = 5.5   if slat_angle &lt; 69°\n           = 0.5   otherwise\n\ntilt_position = INT(slat_angle / max_tilt_angle × 100 + correction)"]
 
     CLAMP_M{"Mode?"}
-    CLAMP_C["clamp tilt_position → [0, 71]\n71 = hardware-calibrated vertical (90°)\nFormula gives ~74 for 90° due to correction\ngap above 69°; 71 is the authoritative cap.\nAngles &gt; 90° let sun through the back face."]
+    CLAMP_C["clamp tilt_position → [0, 100]\nEast branch (slat 90°–122°) needs tilt 71–100.\nWest branch stays &lt; tilt 71 naturally.\nFormula ~3 units high at exactly 90° — within deadband."]
     CLAMP_H["clamp tilt_position → [0, 100]\n(full range in heating)"]
 
     OUT(["set_cover_tilt_position\nboth covers → tilt_position"])
@@ -395,7 +410,8 @@ flowchart TD
     <code>script.pergola_post_rain_recovery</code> runs whenever <code>automation_state</code> enters <code>rain_stopped</code>
     (rain cleared, frost exited with residual rain, user_override exited with residual rain, or HA restarted with state persisted as rain_stopped).
     Slat angles (8°, 15°) are converted via the hardware correction formula before sending to covers.
-    The state manager does not re-evaluate while <code>rain_stopped</code> is active — only this script exits it.
+    The state manager skips normal evaluation while <code>rain_stopped</code> is active — only this script exits it normally.
+    Exception: if frost or rain triggers mid-sequence, the state manager cancels this script via <code>script.turn_off</code> and immediately sets the higher-priority state.
   </p>
   <pre class="mermaid">
 flowchart TD
