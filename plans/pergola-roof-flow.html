@@ -72,11 +72,11 @@ flowchart LR
         SUN_I["sun.sun\nelevation · azimuth"]
         LOCKS["Cover Lock Sensors\ndach_links · dach_rechts\npriority_lock_originator\nunknown | rain | user"]
         PV_I["Victron PV\nyield_power226"]
-        LOX_I["Loxone\nloxone_heating_season\n(binary: on = heating)"]
     end
 
     subgraph Helpers["Config Helpers — Pergola Dach device (UI-editable)"]
         H_MASTER["input_boolean\nautomatic_enabled"]
+        H_HEATING["input_boolean\npergola_heating\n(on = heating, off = cooling)\nset via UI or REST API"]
         H_THRESH["input_number\nfrost_off_threshold (2.5°C)\nfrost_on_threshold (3.0°C)"]
         H_TILT["input_number\nmax_tilt_angle (122°)"]
         H_COOL["input_boolean\ncooling_optimized"]
@@ -165,7 +165,7 @@ flowchart TD
     P3{"PRIORITY 3 — USER OVERRIDE\nlock_originator = 'user'\non either cover"}
     P4{"PRIORITY 4 — NO SUN geometric\nsun below horizon\nOR azimuth outside 114°–294°"}
     P5{"PRIORITY 5 — NOT ENOUGH SUN\nbinary_sensor.pergola_sun_shining\nhas been OFF for 5 continuous min"}
-    P6{"PRIORITY 6 — HEATING SEASON\nsensor.loxone_heating_season = on"}
+    P6{"PRIORITY 6 — HEATING\ninput_boolean.pergola_heating = on"}
 
     S_FROST["STATE: frost\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: temp &gt; frost_on_threshold (3.0 °C)"]
     S_RAIN["STATE: rain\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: rain_rate = 0\nAND both lock_originators = 'unknown'"]
@@ -173,8 +173,8 @@ flowchart TD
     S_USER["STATE: user_override\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: both locks = 'unknown'\n→ if hourly_rain &gt; 0: enter rain_stopped\n→ else: re-evaluate\n(same exit logic as frost)"]
     S_NOSUN["STATE: no_sun_behind_house\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun enters azimuth window\nAND sun is up"]
     S_NOTENOUGH["STATE: not_enough_sun\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun_shining ON\nfor 2 continuous min"]
-    S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays\n───────────────────\nExit when: loxone_heating_season = off\nOR sun sets / overcast"]
-    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–71]\nSlats perpendicular to sun\n───────────────────\nExit when: loxone_heating_season = on\nOR sun sets / overcast"]
+    S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays\n───────────────────\nExit when: pergola_heating = off\nOR sun sets / overcast"]
+    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–71]\nSlats perpendicular to sun\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
 
     TRIG --> GUARD
     GUARD -->|"Yes"| HA_CHK

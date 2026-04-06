@@ -28,8 +28,7 @@ Automate the tilt control of two Somfy bioclimatic pergola covers (`cover.dach_l
 * Spreadsheet with sample calculations: [terrace roof titl.xlsx](terrace%20roof%20titl.xlsx)
 
 **TBD items blocking later steps:**
-- Loxone heating season entity ID (Step 5) — confirmed: Loxone sends a binary heat on/off indicator
-- Room temperature ignored — heating/cooling mode is determined solely by the Loxone indicator
+- Room temperature ignored — heating/cooling mode is determined solely by the heating indicator
 - Post-rain tilt values to confirm after first rain event (Step 4)
 
 ---
@@ -89,11 +88,6 @@ sun behind house when:     sun.azimuth < 114°  OR  sun.azimuth > 294°
 |---|---|---|
 | `sensor.victronsolarcharger_yield_power226` | W | Raw Victron solarcharger DC PV power |
 
-### Future Entities (not yet in HA)
-| Entity | Description |
-|---|---|
-| `sensor.loxone_heating_season` | Boolean from Loxone: 1 = heating season, 0 = cooling |
-
 ---
 
 ## Pergola Device
@@ -108,6 +102,7 @@ All entities created by this feature will appear under a single HA virtual devic
 | Entity | Type | Default | Purpose |
 |---|---|---|---|
 | `input_boolean.pergola_automatic_enabled` | toggle | on | Master on/off — disables all cover movement when off |
+| `input_boolean.pergola_heating` | toggle | off | Heating indicator: on = heating mode (let sun through), off = cooling mode (block sun). Can be flipped by user or set via HA REST API by an external system (e.g. Loxone) |
 | `input_select.pergola_automation_state` | select | — | State machine; **can be set manually to break a deadlock** |
 | `input_number.pergola_frost_off_threshold` | number | 2.5 °C | Temp below which frost mode activates |
 | `input_number.pergola_frost_on_threshold` | number | 3.0 °C | Temp above which frost mode clears |
@@ -141,8 +136,8 @@ All entities created by this feature will appear under a single HA virtual devic
 | `rain_stopped` | Rain just ended, recovery in progress | Recovery script handles covers |
 | `user_override` | One or both covers locked by user (`lock originator = user`) | No movement |
 | `not_enough_sun` | Sun shining indicator off for ≥ 5 min (cloud/overcast) | tilt = 71 (vertical, open) |
-| `sun_automatik_heating` | Sun active, Loxone heating indicator on | Heating formula |
-| `sun_automatik_cooling` | Sun active, Loxone heating indicator off | Cooling formula |
+| `sun_automatik_heating` | Sun active, heating indicator on | Heating formula |
+| `sun_automatik_cooling` | Sun active, heating indicator off | Cooling formula |
 
 ### Priority Rules (highest first)
 
@@ -159,7 +154,7 @@ All entities created by this feature will appear under a single HA virtual devic
 4. **user_override** — either lock originator = `user`. Clears when both = `unknown`. Cover response automation skips all movement while in this state. On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules. (Same exit logic as frost.)
 5. **no_sun_behind_house** — sun below horizon OR azimuth outside 114°–294° (geometric — no sun possible regardless of sensor).
 6. **not_enough_sun** — `pergola_sun_shining` has been `off` for ≥ 5 continuous minutes. Exits when `pergola_sun_shining` has been `on` for ≥ 2 continuous minutes.
-7. **sun_automatik_heating** — `sensor.loxone_heating_season` = on/1.
+7. **sun_automatik_heating** — `input_boolean.pergola_heating` = on/1.
 8. **sun_automatik_cooling** — default when sun is active and heating indicator is off.
 
 ---
@@ -366,16 +361,17 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - PV conversion factor (default 3.2) calibrated in Step 6
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
 - Add `input_boolean.pergola_cooling_optimized` (default off) — selects between perfect-perpendicular and safe-zone max-open cooling formula (Step 7)
+- Add `input_boolean.pergola_heating` (default off) — heating indicator; when `on`, sun is let through (heating formula); when `off`, sun is blocked (cooling formula). Can be toggled by user in UI or set via HA REST API by an external system
 - Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now — they exist on the device from day one
 - All template sensors and binary sensors (`sensor.pergola_pv_power`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) must share the same `template:` block that carries the `device:` declaration
 
 **Post-deploy (one-time, manual via HA UI):**
 After first `git pull` and HA restart, manually assign each `input_*` helper to the "Pergola Dach" device:
 Settings → Devices & Services → Helpers → [select each helper] → change device → "Pergola Dach"
-Helpers to assign: `pergola_automatic_enabled`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_cooling_optimized`
+Helpers to assign: `pergola_automatic_enabled`, `pergola_heating`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_cooling_optimized`
 
 **Verify:**
-- Settings → Devices → "Pergola Dach" shows all 11 entities
+- Settings → Devices → "Pergola Dach" shows all 12 entities
 - `input_select.pergola_automation_state` shows all eight options
 - `binary_sensor.pergola_sun_shining` changes state plausibly with sun conditions
 - `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` report `unknown` (correct at this stage)
@@ -387,7 +383,7 @@ Helpers to assign: `pergola_automatic_enabled`, `pergola_automation_state`, `per
 
 Add `pergola_state_manager`. This is the **only automation that writes** to `input_select.pergola_automation_state`.
 
-Triggers: outdoor temp, rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), sun attributes, `pergola_sun_shining`, heating season flag, HA start.
+Triggers: outdoor temp, rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), sun attributes, `pergola_sun_shining`, `input_boolean.pergola_heating`, HA start.
 
 > Lock originator sensors must be triggers so the state manager reacts to rain-lock entry/exit (rule 2) and user-override entry/exit (rule 4) without waiting for another trigger.
 
@@ -400,7 +396,7 @@ Action: evaluate priority rules top-down (frost → rain → rain_stopped → **
   - **frost exit:** temp rises above `pergola_frost_on_threshold` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **user_override exit:** both lock originators return to `unknown` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **HA start with state = `rain_stopped`:** do NOT clear the state; instead re-trigger `script.pergola_post_rain_recovery` so the interrupted drain sequence resumes (see restart recovery note below)
-- `sensor.loxone_heating_season` may not exist yet; use a safe default (cooling season) when unavailable
+- `input_boolean.pergola_heating` may not exist yet; use a safe default (cooling season) when unavailable
 - **HA start / restart recovery:**
   - On HA start the automation fires with trigger = `homeassistant` start
   - If `input_select.pergola_automation_state` is already `rain_stopped` (persisted from before restart): do NOT evaluate other rules; instead call `script.pergola_post_rain_recovery` again to resume the interrupted drain sequence. The recovery script is idempotent enough for this — it will re-run the wait + step sequence from the beginning, which is safe (covers get drained again).
@@ -470,23 +466,20 @@ Action (`choose` on current state):
 **File:** `packages/pergola.yaml` — update `pergola_cover_response` and `pergola_state_manager`
 
 Prerequisites:
-- `sensor.loxone_heating_season` entity exists and carries `on`/`off` (or `1`/`0`) — entity ID TBD
+- `input_boolean.pergola_heating` created in Step 1 (local HA toggle)
 
-**Room temperature is NOT used** — heating/cooling mode is determined solely by the Loxone indicator.
+**Room temperature is NOT used** — heating/cooling mode is determined solely by `input_boolean.pergola_heating`.
 
 Update `sun_automatik_heating` branch of `pergola_cover_response`:
 - Compute `slat_angle` (heating formula — TBD), convert to `tilt_position` using hardware correction formula, clamp [0, 100]
 
-Update state manager: when sun is active and `sensor.loxone_heating_season = on` → `sun_automatik_heating`; otherwise → `sun_automatik_cooling`.
+Update state manager: when sun is active and `input_boolean.pergola_heating = on` → `sun_automatik_heating`; otherwise → `sun_automatik_cooling`.
 
-**Dependencies:** Step 3 (cover response stub must exist), `sensor.loxone_heating_season` available in HA.
-
-**Notes:**
-- Until `sensor.loxone_heating_season` exists, state manager stays in cooling mode by default
+**Dependencies:** Step 1 (`input_boolean.pergola_heating` created there), Step 3 (cover response stub must exist).
 
 **Verify:**
-- With Loxone heating indicator on → heating formula applied
-- With Loxone heating indicator off → state transitions to `sun_automatik_cooling`
+- With `pergola_heating` on → heating formula applied
+- With `pergola_heating` off → state transitions to `sun_automatik_cooling`
 
 ---
 
@@ -533,8 +526,8 @@ Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfe
 | 1c | PV conversion factor (default 3.2) | Calibrate in Step 6 |
 | 2 | ~~Sun azimuth window~~ | Resolved — 114°–294° (204° ± 90°) |
 | 2b | ~~HA GPS coordinates~~ | Resolved — `zone.home` matches within 4 m |
-| 3 | `sensor.loxone_heating_season` entity ID | Step 5 — confirmed: Loxone sends binary heat on/off |
-| 4 | ~~Room temperature target~~ | Resolved — not used; mode driven by Loxone indicator only |
+| 3 | ~~Heating indicator entity~~ | Resolved — `input_boolean.pergola_heating` (local toggle, set via UI or REST API) |
+| 4 | ~~Room temperature target~~ | Resolved — not used; mode driven by heating indicator only |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 6 | ~~Rain lock originator string value~~ | Resolved — values are `unknown` (no lock), `rain` (rain lock), `user` (user override) |
 | 7 | ~~Slat angle formula (cooling + heating season)~~ | Resolved — cooling: perpendicular blocking angle; heating: parallel alignment angle (perfect_angle - 90°). See [formula analysis](pergola-slat-formula-analysis.md) |
