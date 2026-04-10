@@ -21,12 +21,26 @@
 - **Effective slat ratio (R):** deff / w = sqrt(20² + 3²) / 22 = **0.91926**
 - **Thickness offset (phi):** arctan(3/20) = **8.53°**
 
-### Pergola Coordinate System
+### Unified Coordinate System
+
+Both sun position and slat angles use the same 0°–180° number line:
+
+**Effective Sun Angle ($A_{eff}$):**
+```
+0°  (East Horizon)  ──►  90°  (Zenith/Noon)  ──►  180°  (West Horizon)
+```
+
+**Slat Angle (hardware, 0°–122°):**
+```
+0°  (Flat/closed)  ──►  90°  (Vertical/open)  ──►  122°  (Max, back face)  ···►  180°  (unreachable)
+```
+
 - **0°** = flat / horizontal (fully closed, rain protection)
-- **90°** = vertical (slats perpendicular to ground)
-- **122°** = maximum tilt (slats tilted past vertical) — configurable via `input_number.pergola_max_tilt_angle`
-- Positive angles tilt toward west (afternoon sun side)
-- Negative angles would tilt toward east — but hardware only goes 0° to 122°, so negative angles are not directly achievable
+- **90°** = vertical (slats perpendicular to ground, fully open)
+- **122°** = maximum tilt (32° past vertical; back face blocks eastern sun) — configurable via `input_number.pergola_max_tilt_angle`
+- **Dead zone:** 122.1°–180° is mechanically unreachable
+
+**Key insight:** In heating mode, `slat_angle = A_eff` — the slat directly tracks the sun's effective position on the shared number line. In cooling mode, `slat_angle = A_eff ± 90°` (perpendicular offset).
 
 ---
 
@@ -38,63 +52,77 @@ All formulas use:
 - **terrasse_azimuth** = 204° (constant)
 - **delta_phi** = azimuth - terrasse_azimuth (relative azimuth)
 
-### 2.1 Effective Sun Angle (A_EFF)
+### 2.1 Effective Sun Angle ($A_{eff}$)
 
-The projected height of the sun as seen from the cross-section perpendicular to the slat axis. This is the angle at which sunlight enters between the slats.
+The sun's effective position projected onto the plane perpendicular to the slat axis, mapped to a 0°–180° east-to-west scale.
 
+**Step 1 — Effective Sun Height** (always 0°–90°, unsigned projected elevation):
 ```
-A_EFF = degrees(atan(tan(radians(elevation)) / sin(radians(delta_phi))))
-```
-
-- When delta_phi = 0 (sun directly along slat axis): A_EFF → 90° (sun directly overhead from slat's perspective)
-- When delta_phi = ±90° (sun perpendicular to slat axis): A_EFF = elevation
-- **Sign convention:** positive when sun is from the west side (afternoon), negative when from east (morning)
-- **Singularity:** when sin(delta_phi) = 0, use A_EFF = 90°
-
-**Spreadsheet column C** implements exactly this formula. Verified correct.
-
-### 2.2 Perfect Perpendicular Angle (blocking angle)
-
-The slat tilt that places the slat surface perpendicular to the incoming sun rays — the "perfect" blocking angle for cooling mode.
-
-```
-perfect_angle = degrees(atan(sin(radians(delta_phi)) / tan(radians(elevation))))
+sun_height = degrees(atan(tan(radians(elevation)) / abs(sin(radians(delta_phi)))))
 ```
 
-**Relationship:** perfect_angle + A_EFF = 90° (complementary angles of the same right triangle)
+Guards:
+- `elevation <= 0`: sun below horizon — formula should not be called (state machine handles this)
+- `|sin(radians(delta_phi))| < 0.001`: singularity when sun is along slat axis (azimuth ≈ 204°) → `sun_height = 90°` (correct mathematical limit)
 
-- **Positive values:** sun from west → tilt slats toward west to block
-- **Negative values:** sun from east → tilt slats toward east to block
-- When delta_phi = 0: perfect_angle = 0° (flat blocks overhead sun perfectly)
-- When elevation = 0: perfect_angle → ±90° (vertical slats needed for horizon sun)
-
-**Spreadsheet column D** implements this. Verified correct.
-
-**Loxone formula** (user-provided): `DEG(ARCTAN(SIN(RAD(I2-I3))/TAN(RAD(I1))))` — identical, where I2-I3 = azimuth - terrasse_azimuth, I1 = elevation.
-
-### 2.3 Mapping to Pergola Hardware (Column H)
-
-The perfect_angle is in a symmetric coordinate system (negative = east, positive = west). The pergola hardware only supports 0° to 122° (one direction). The mapping is:
-
+**Step 2 — Map to 0°–180° east-to-west:**
 ```
-threshold = -(180 - max_tilt_angle) = max_tilt_angle - 180
-         = 122 - 180 = -58°
-
-if perfect_angle <= threshold (-58°):
-    slat_angle = perfect_angle + 180     # flip: block from "back side" of slat
-elif perfect_angle >= 0:
-    slat_angle = perfect_angle           # direct blocking angle
-else:
-    # Dead zone: -58° < perfect_angle < 0°
-    # Hardware cannot achieve this angle
-    # Fallback depends on mode (see Section 3)
+A_eff = sun_height          if azimuth < 204    (morning — sun east of terrasse)
+A_eff = 180 - sun_height    if azimuth >= 204   (afternoon — sun west of terrasse)
 ```
 
-**Spreadsheet column H** implements this with: `IF(D <= -58, D + 180, IF(D >= 0, D, -1))`
+Properties:
+- When delta_phi = 0 (sun along slat axis): `A_eff = 90°` (zenith — from both branches)
+- When delta_phi = ±90° (sun fully perpendicular to slat axis): `sun_height = elevation`, so `A_eff = elevation` (morning) or `A_eff = 180° − elevation` (afternoon)
+- Range: 0° (east horizon) → 90° (zenith) → 180° (west horizon)
 
-The `-1` represents the dead zone — the hardware physically cannot tilt to block the sun from slight-east angles. This corresponds to early morning (azimuth ~114°-170°) when the effective sun angle is between roughly -33° and -58°.
+**Note on spreadsheet column C:** The spreadsheet implements the older signed formula `atan(tan(elev) / sin(delta_phi))`, which equals `±sun_height`. The new formula is equivalent in magnitude but always positive, with east/west disambiguation via the morning/afternoon branch instead of the sign of `sin(delta_phi)`.
 
-**Why -58° is the threshold:** At perfect_angle = -58°, adding 180° gives 122° — the hardware maximum. Any more negative perfect_angle maps to a value below 122° (achievable). Values between -58° and 0° would map to 122°-180°, which is the motor's dead zone.
+### 2.2 Blocking Angle
+
+The slat angle that places the slat surface perpendicular to the incoming sun rays — the ideal blocking angle for cooling mode.
+
+In the unified coordinate system this is derived directly from $A_{eff}$:
+
+```
+blocking_angle = A_eff - 90
+```
+
+Range: −90° (east horizon) → 0° (zenith) → +90° (west horizon).
+
+- **Positive values:** sun from west (A_eff > 90°) → direct front-face blocking
+- **Negative values:** sun from east (A_eff < 90°) → back-face blocking needed (hardware cannot tilt negative)
+- When A_eff = 90° (sun at zenith): `blocking_angle = 0°` (flat blocks overhead sun perfectly)
+
+**Geometric relationship:** `blocking_angle + sun_height = 90°` (complementary angles of the same right triangle — the geometry is unchanged from the original analysis, only the coordinate expression differs).
+
+**Spreadsheet column D** computes `atan(sin(delta_phi) / tan(elevation))` which equals `blocking_angle` — the values are identical. Verified correct.
+
+**Loxone formula** (historical reference): `DEG(ARCTAN(SIN(RAD(I2-I3))/TAN(RAD(I1))))` — computes `blocking_angle` directly, where I2-I3 = delta_phi, I1 = elevation.
+
+### 2.3 Mapping to Pergola Hardware
+
+The hardware only rotates in one direction (0°–122°). The $A_{eff}$-based mapping uses a morning/afternoon split:
+
+```
+MORNING_LIMIT = 85°    # early flip to afternoon formula; gives ~2 update cycles of
+                       # lead time before geometric noon crossing at A_eff = 90°
+COOLING_LB    = 11°    # ventilation floor (tilt_position ≈ 16)
+max_tilt      = 122°   # hardware maximum
+
+Morning (A_eff < 85°) — back-face blocking:
+  if A_eff + 90 <= max_tilt:   slat_angle = A_eff + 90    # achievable: 90°–122°
+  else:                         slat_angle = max_tilt       # dead zone fallback (122°)
+
+Afternoon (A_eff >= 85°) — direct front-face blocking:
+  slat_angle = max(A_eff - 90, COOLING_LB)                 # 0°–90°, floor at 11°
+```
+
+**Morning dead zone:** When A_eff is between ~32° and 85°, `A_eff + 90` exceeds 122°. The hardware falls back to 122° (max tilt, back-face position), which geometry confirms provides complete shade for all sun elevations > 10°.
+
+**Why 85° (not 90°):** The sun moves ~1–1.5°/5 min at the noon crossing. Switching 5° early ensures the slats move to afternoon direct-blocking before the geometric crossing at A_eff = 90°, preventing any unblocked gap during the transition.
+
+**Spreadsheet column H** (`IF(D <= -58, D + 180, IF(D >= 0, D, -1))`) implements the equivalent logic using the old signed `blocking_angle` (column D). In the new coordinate: `blocking_angle <= -58°` ↔ `A_eff ≤ 32°` (reachable morning back-face); `blocking_angle >= 0°` ↔ `A_eff >= 90°` (afternoon direct); `-1` ↔ dead zone (32° < A_eff < 90°, back-face unreachable).
 
 ---
 
@@ -102,55 +130,66 @@ The `-1` represents the dead zone — the hardware physically cannot tilt to blo
 
 **Goal:** Block direct sunlight by tilting slats perpendicular to sun rays.
 
-### Simple version (no slat thickness correction)
+### Standard formula (no slat thickness correction)
 
 ```
-slat_angle = mapped perfect_angle (Section 2.3)
+MORNING_LIMIT = 85°
+COOLING_LB    = 11°    # ventilation floor (tilt_position ≈ 16)
+
+if A_eff < MORNING_LIMIT:                       # Morning — back-face blocking
+    if A_eff + 90 <= max_tilt:
+        slat_angle = A_eff + 90                 # back face perpendicular to east sun
+    else:
+        slat_angle = max_tilt                   # dead zone: best available (122°)
+else:                                           # Afternoon — direct front-face blocking
+    slat_angle = max(A_eff - 90, COOLING_LB)
+
+clamp slat_angle to [COOLING_LB, max_tilt]
 ```
 
-Dead zone fallback: **0°** (flat) — provides maximum shade even if imperfect blocking.
-
-Clamp to: **[0°, 90°]** — never past vertical in cooling mode (past-vertical lets sun through from the other side).
+Cooling lower bound (11°): When A_eff ≈ 90° (sun nearly overhead), `A_eff − 90 ≈ 0°` (flat). The 11° floor prevents full closure for ventilation. At 11°, `e_crit ≈ 48.3°` — summer noon elevation (~65°) exceeds this, so full shade is maintained.
 
 ### Enhanced version (with slat thickness / safe zone — from Gemini conversation)
 
-The slat thickness and overlap create a "safe zone" — a range of angles that all provide 100% shade. Instead of the "perfect" perpendicular angle, we can use the **maximum open angle** (edge of the safe zone closest to vertical) to maximize airflow while maintaining full shade.
+The slat thickness and overlap create a "safe zone" — a range of angles that all provide 100% shade. Instead of the exact perpendicular angle, the **maximum open angle** (edge of safe zone closest to vertical) can be used to maximise airflow while maintaining full shade.
 
-**Max Open toward sun (East Cutoff):**
+The safe-zone formulas use `sun_height` (the unsigned projected elevation = `A_eff` for morning, `180° − A_eff` for afternoon):
+
+**Max Open toward sun:**
 ```
-Stoward = A_EFF + phi - 180 + degrees(asin(R * sin(radians(A_EFF))))
+Stoward = sun_height + phi - 180 + degrees(asin(R * sin(radians(sun_height))))
 ```
 
-**Max Open away from sun (West Cutoff / "Backside Block"):**
+**Max Open away from sun ("Backside Block"):**
 ```
-Sbackside = A_EFF + phi - degrees(asin(R * sin(radians(A_EFF))))
+Sbackside = sun_height + phi - degrees(asin(R * sin(radians(sun_height))))
 ```
 
 Where R = 0.91926, phi = 8.53°.
 
-The "backside block" angle is used when the "toward" angle falls in the dead zone. This is the positive (west-tilt) angle that still blocks eastern sun by leveraging slat overlap.
+**Safe Zone width at various sun positions (d=20, w=22, t=3):**
 
-**Safe Zone width at various effective sun angles (for d=20, w=22, t=3):**
-
-| A_EFF | Perfect Angle | Max East (Stoward) | Max West (Sbackside) | Safe Zone Width |
+| $A_{eff}$ (morning) | sun_height | Ideal slat ($A_{eff}$+90) | Sbackside | Safe Zone Width |
 |---|---|---|---|---|
-| 10° | -80.0° | -152.3° | +9.3° | 161.6° |
-| 20° | -70.0° | -133.1° | +10.2° | 143.4° |
-| 30° | -60.0° | -114.1° | +11.2° | 125.3° |
-| 40° | -50.0° | -95.2° | +12.3° | 107.6° |
-| 50° | -40.0° | -76.7° | +13.8° | 90.5° |
-| 60° | -30.0° | -58.7° | +15.8° | 74.5° |
-| 70° | -20.0° | -41.7° | +18.8° | 60.5° |
+| 10° | 10° | 100° | +9.3° | 161.6° |
+| 20° | 20° | 110° | +10.2° | 143.4° |
+| 30° | 30° | 120° | +11.2° | 125.3° |
+| 40° | 40° | 130° → dead zone | +12.3° | 107.6° |
+| 50° | 50° | 140° → dead zone | +13.8° | 90.5° |
+| 60° | 60° | 150° → dead zone | +15.8° | 74.5° |
+| 70° | 70° | 160° → dead zone | +18.8° | 60.5° |
+
+> Note: For morning rows where the ideal slat exceeds 122° (dead zone), the standard formula uses 122°. The `Sbackside` column shows the alternative west-tilt angle that still achieves full shade via slat overlap — this is the basis for the `pergola_cooling_optimized` mode (Step 7).
 
 ### Recommended Cooling Strategy
 
-For the HA automation, use the **simple perpendicular angle** (column D mapped via column H). Reasons:
+For the HA automation, use the **standard formula** above. Reasons:
 1. The perpendicular angle sits safely inside the safe zone for all sun positions
 2. It provides the thickest shadow (maximum margin of error)
 3. It's simpler to implement and debug
-4. The safe zone optimization (minimal motor movement) is a future enhancement — the motor moves at most every 5 minutes anyway
+4. The safe zone optimisation (minimal motor movement) is a future enhancement — the motor moves at most every 5 minutes anyway
 
-The safe zone data is documented here for future optimization if desired.
+The safe zone data is documented here for future optimisation (Step 7) if desired.
 
 ---
 
@@ -160,44 +199,41 @@ The safe zone data is documented here for future optimization if desired.
 
 ### Derivation
 
-To let sun through, slats should be aligned **with** the sun rays rather than perpendicular to them. This means rotating 90° from the blocking angle:
+In the unified coordinate, $A_{eff}$ and the slat angle share the same number line. For heating, the slat should be **parallel** to the sun rays — which means the slat angle directly equals $A_{eff}$:
 
 ```
-heating_raw = perfect_angle - 90
+slat_angle = A_eff
 ```
 
-This gives the angle (in the symmetric coordinate system) where slats are parallel to sun rays.
+**Why this works geometrically:** The heating slat angle is `blocking_angle − 90 = A_eff − 180`. This is always ≤ 0°, so the hardware back-face mapping (`+180`) always applies: `(A_eff − 180) + 180 = A_eff`. The old three-branch logic (threshold / direct / dead zone) collapses to a single check against `max_tilt`.
 
-### Mapping to pergola hardware
-
-Same mapping logic as cooling, but applied to heating_raw:
+### Hardware mapping
 
 ```
-threshold = max_tilt_angle - 180 = -58°
-
-if heating_raw <= threshold (-58°):
-    slat_angle = heating_raw + 180
-elif heating_raw >= 0:
-    slat_angle = heating_raw
+if A_eff <= max_tilt (122°):
+    slat_angle = A_eff              # direct — covers all east, noon, south, slight west
 else:
-    # Dead zone: hardware can't achieve perfect alignment
-    slat_angle = 90°  (vertical — maximizes light transmission as fallback)
+    tilt_position = 100             # dead zone: A_eff > 122° (moderate-to-far west)
+                                    # max tilt is best available; skip hardware correction
+
+clamp slat_angle to [0°, max_tilt]
 ```
 
-Clamp to: **[0°, 122°]** (full hardware range available in heating mode).
+Dead zone explanation: When `A_eff > 122°` (sun from moderate-to-far west), slats are tilted to 122° (past vertical). The back face angles toward the incoming west sun, opening the maximum gap. No other position transmits more west light.
 
-### Verification with test cases
+### Verification
 
-| Azimuth | Elev | perfect_angle | heating_raw | slat_angle | Physical interpretation |
-|---|---|---|---|---|---|
-| 220° | 45° | 15.41° | -74.59° | 105.41° | Sun from slight west, high → open past vertical to let rays through |
-| 240° | 40° | 35.01° | -54.99° | 90° (dead zone) | Sun from west, medium → vertical fallback |
-| 260° | 30° | 55.15° | -34.85° | 90° (dead zone) | Sun far west, low → vertical fallback |
-| 102° | 31° | -58.44° | -148.44° | 31.56° | Sun from far east → tilt to 31.56° to align with rays |
-| 180° | 40° | -25.86° | -115.86° | 64.14° | Sun from south → open to 64° |
-| 204° | 57° | 0.00° | -90.00° | 90° | Sun along slat axis → vertical |
+| Azimuth | Elev | $A_{eff}$ | slat_angle | Physical interpretation |
+|---|---|---|---|---|
+| 115° | 20° | 20.0° | 20.0° (= $A_{eff}$) | Low east sun — slat near flat, light enters between open slats |
+| 150° | 30° | 35.5° | 35.5° (= $A_{eff}$) | Moderate east |
+| 180° | 40° | 64.1° | 64.1° (= $A_{eff}$) | South, lower elevation |
+| 204° | 57° | 90.0° | 90.0° (= $A_{eff}$) | Sun along slat axis → vertical |
+| 220° | 45° | 105.4° | 105.4° (= $A_{eff}$) | Slight west → past vertical, back face angled toward sun |
+| 240° | 40° | 125.0° | tilt = 100 (DZ) | West — dead zone, max tilt |
+| 260° | 30° | 145.1° | tilt = 100 (DZ) | Far west — dead zone, max tilt |
 
-All values are physically sensible.
+All values match the verification table in `pergola-roof-automation.md`.
 
 ---
 
@@ -224,54 +260,56 @@ All values are physically sensible.
 
 ## 6. Summary: Formulas for HA Implementation
 
-### Intermediate values (computed once per update cycle)
+### Step 0 — Effective Sun Angle ($A_{eff}$)
 ```
-delta_phi = azimuth - 204
-elevation = sun elevation
-max_tilt = 122  (from input_number.pergola_max_tilt_angle)
-threshold = max_tilt - 180  (= -58 for default 122°)
-```
+delta_phi     = azimuth - 204
+elevation_rad = radians(elevation)
+max_tilt      = 122  (from input_number.pergola_max_tilt_angle)
 
-### Cooling mode slat_angle (block sun)
-```
-if elevation <= 0 or sin(delta_phi) ≈ 0:
-    perfect_angle = 0
+# Guard: sun below horizon — state machine handles this before reaching formula
+if elevation <= 0: return
+
+# Singularity guard: sun along slat axis (azimuth ≈ 204°)
+if |sin(radians(delta_phi))| < 0.001:
+    sun_height = 90
 else:
-    perfect_angle = atan(sin(delta_phi) / tan(elevation))  [in degrees]
+    sun_height = degrees(atan(tan(elevation_rad) / abs(sin(radians(delta_phi)))))
 
-if perfect_angle <= threshold:
-    slat_angle = perfect_angle + 180
-elif perfect_angle >= 0:
-    slat_angle = perfect_angle
-else:
-    slat_angle = 0  (dead zone: flat for max shade)
-
-clamp slat_angle to [0, 90]
+A_eff = sun_height        if azimuth < 204    # morning (east sun)
+      = 180 - sun_height  if azimuth >= 204   # afternoon (west sun)
 ```
 
-### Heating mode slat_angle (let sun through)
+### Step 1a — Cooling slat_angle (block sun)
 ```
-if elevation <= 0 or sin(delta_phi) ≈ 0:
-    perfect_angle = 0
-else:
-    perfect_angle = atan(sin(delta_phi) / tan(elevation))  [in degrees]
+MORNING_LIMIT = 85    # early flip before geometric noon crossing
+COOLING_LB    = 11    # ventilation floor
 
-heating_raw = perfect_angle - 90
+if A_eff < MORNING_LIMIT:                          # Morning — back-face blocking
+    if A_eff + 90 <= max_tilt:
+        slat_angle = A_eff + 90
+    else:
+        slat_angle = max_tilt                      # dead zone fallback
+else:                                              # Afternoon — direct blocking
+    slat_angle = max(A_eff - 90, COOLING_LB)
 
-if heating_raw <= threshold:
-    slat_angle = heating_raw + 180
-elif heating_raw >= 0:
-    slat_angle = heating_raw
+clamp slat_angle to [COOLING_LB, max_tilt]
+```
+
+### Step 1b — Heating slat_angle (let sun through)
+```
+if A_eff <= max_tilt:
+    slat_angle = A_eff                             # slat tracks sun directly
 else:
-    slat_angle = 90  (dead zone: vertical for max light)
+    tilt_position = 100                            # dead zone: skip Step 2
+    return
 
 clamp slat_angle to [0, max_tilt]
 ```
 
-### Then convert slat_angle to tilt_position
+### Step 2 — Convert slat_angle → tilt_position
 ```
-correction = 7    if slat_angle < 20°
-           = 5.5  if slat_angle < 69°
+correction = 7    if slat_angle < 20
+           = 5.5  if slat_angle < 69
            = 0.5  otherwise
 
 tilt_position = INT(slat_angle / max_tilt * 100 + correction)
