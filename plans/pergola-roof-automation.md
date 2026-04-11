@@ -125,6 +125,24 @@ All entities created by this feature will appear under a single HA virtual devic
 | `sensor.pergola_tilt_position` | 0–100 | Calculated tilt_position after hardware correction (what will be sent to covers) |
 | `binary_sensor.pergola_sun_shining` | on/off | True when PV+radiation exceed elevation-adjusted clear-sky threshold |
 
+> **`binary_sensor.pergola_sun_shining` formula** (adapted from Loxone Wetter/Sonnenschein logic):
+> ```
+> effective_radiation = max(
+>   sensor.wheatherstation_solar_radiation,      # W/m² — goes into shadow in afternoon
+>   sensor.pergola_pv_power / pergola_pv_conversion_factor   # W → W/m² proxy; stays in sun longer
+> )
+> clear_sky_threshold = 1000 × sin(elevation_deg × π/180) × 0.9
+>                       # 90% of theoretical clear-sky irradiance at current sun angle
+>                       # 0.9 = clearness factor; primary tuning knob (calibrate in Step 6)
+>
+> sun_is_shining = (effective_radiation > clear_sky_threshold)
+>                  AND (elevation > input_number.pergola_min_sun_elevation)
+>                  # elevation guard matches state machine no_sun_behind_house threshold
+> ```
+> - `pergola_pv_conversion_factor` default 3.2 — empirically calibrated for 6× Axitec 440W bifacial panels at 5–10° tilt, 228° azimuth (bifacial back gain + near-flat tilt + afternoon facing). STC baseline (2640W / 1000 W/m² = 2.64) is adjusted upward to 3.2 for real-world geometry. Calibrate in Step 6 on a clear morning.
+> - Taking `max()` of both sources solves the afternoon shadow problem: whichever sensor is still in sun drives the reading.
+> - Why `sin(elevation)`: the theoretical clear-sky horizontal irradiance scales with `sin(elevation)`, peaking at ~1000 W/m² at 90°. The `1000 × sin` baseline is the correct physics — not a fixed threshold.
+
 > `sensor.pergola_effective_sun_angle` is the primary debug value — it shows the sun's effective position on the unified 0°–180° east-to-west scale. In heating mode, slat_angle = $A_{eff}$ directly; in cooling mode, slat_angle = $A_{eff}$ ± 90.
 > `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` reflect the *calculated setpoint* at any given moment — useful for debugging the formula without having to look at cover state.
 
@@ -480,13 +498,17 @@ Helpers to assign: `pergola_automatic_enabled`, `pergola_heating`, `pergola_auto
 #### Step 2 — State Manager Automation [TODO]
 **File:** `packages/pergola.yaml` — add under `automation:`
 
-Add `pergola_state_manager`. This is the **only automation that writes** to `input_select.pergola_automation_state`.
+Add `pergola_state_manager` and `script.pergola_evaluate_state`. Together these are the **only code that writes** to `input_select.pergola_automation_state`.
+
+**`script.pergola_evaluate_state`** — evaluates rules 5–8 (no_sun_behind_house → not_enough_sun → heating → cooling) and sets `input_select.pergola_automation_state`. This script is the **single place** for lower-priority rule logic — called from two places to avoid duplication:
+- `pergola_state_manager` default branch (when rules 1–4 do not apply)
+- `script.pergola_post_rain_recovery` final step (when exiting rain_stopped — frost and rain already ruled out)
 
 Triggers: outdoor temp, rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), sun attributes, `pergola_sun_shining`, `input_boolean.pergola_heating`, HA start.
 
 > Lock originator sensors must be triggers so the state manager reacts to rain-lock entry/exit (rule 2) and user-override entry/exit (rule 4) without waiting for another trigger.
 
-Action: evaluate priority rules top-down (frost → rain → rain_stopped → **user_override** → no_sun_behind_house → not_enough_sun → heating → cooling).
+Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain → rain_stopped → user_override) — these require preempting ongoing scripts and have asymmetric exit logic. For all other cases, it delegates to `script.pergola_evaluate_state` (rules 5–8: no_sun_behind_house → not_enough_sun → heating → cooling).
 
 **Dependencies:** Step 1 (helpers must exist).
 
@@ -504,10 +526,10 @@ Action: evaluate priority rules top-down (frost → rain → rain_stopped → **
 - **HA start / restart recovery:**
   - On HA start the automation fires with trigger = `homeassistant` start
   - If `input_select.pergola_automation_state` is already `rain_stopped` (persisted from before restart): do NOT evaluate other rules; instead call `script.pergola_post_rain_recovery` again to resume the interrupted drain sequence. The recovery script is idempotent enough for this — it will re-run the wait + step sequence from the beginning, which is safe (covers get drained again).
-  - For all other persisted states: evaluate priority rules top-down and set the correct current state
-- `not_enough_sun` entry/exit requires time-delayed transitions — use separate automations with `for:` timers rather than a single choose block:
-  - Entry: trigger on `pergola_sun_shining` turning `off` **for 5 min**, condition state ≠ frost/rain/rain_stopped/user_override/no_sun_behind_house
-  - Exit: trigger on `pergola_sun_shining` turning `on` **for 2 min**, condition state = `not_enough_sun` → re-evaluate heating/cooling
+  - For all other persisted states: evaluate rules 1–4 inline, then call `script.pergola_evaluate_state` for rules 5–8
+- `not_enough_sun` entry/exit requires time-delayed transitions — use **two separate named automations** rather than a single choose block (the `for:` timer must be on the trigger itself):
+  - **`pergola_not_enough_sun_entry`** — trigger: `binary_sensor.pergola_sun_shining` → `off` **for 5 min**; condition: `input_select.pergola_automation_state` not in {frost, rain, rain_stopped, user_override, no_sun_behind_house}; action: set state = `not_enough_sun`
+  - **`pergola_not_enough_sun_exit`** — trigger: `binary_sensor.pergola_sun_shining` → `on` **for 2 min**; condition: state = `not_enough_sun`; action: re-evaluate heating/cooling and set state to `sun_automatik_heating` or `sun_automatik_cooling` accordingly
 
 **Verify:**
 - State reflects current conditions on HA boot
@@ -555,7 +577,7 @@ Action (`choose` on current state):
 
 **Notes:**
 - Script must call the cover service directly (not go through state machine) during drain sequence
-- Final step re-evaluates by setting state explicitly (call state manager logic or set state directly)
+- **Final step calls `script.pergola_evaluate_state`** (the shared script from Step 2) to set the correct state. No duplication — rules 5–8 live in exactly one place. The state manager won't fire on its own at script end because no sensor values changed (rain_rate and lock originators were already clear before entering rain_stopped).
 - TBD: confirm 25%/50% drain adequately after first real rain
 
 **Verify:**
