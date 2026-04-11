@@ -112,6 +112,8 @@ All entities created by this feature will appear under a single HA virtual devic
 | `input_number.pergola_frost_on_threshold` | number | 3.0 °C | Temp above which frost mode clears |
 | `input_number.pergola_pv_conversion_factor` | number | 3.2 | PV W → W/m² divisor for sun detection (calibrate in Step 6) |
 | `input_number.pergola_max_tilt_angle` | number | 122 ° | Maximum physical slat angle; drives tilt_position conversion |
+| `input_number.pergola_min_sun_elevation` | number | 10 ° | Elevation at or below which sun shines under the roof → `no_sun_behind_house` (must be > 0°) |
+| `input_number.pergola_min_heating_slat_angle` | number | 16 ° | Floor slat angle in heating mode — prevents near-parallel slats at dawn (derived: tilt=20 → 15.86° ≈ 16°) |
 | `input_boolean.pergola_cooling_optimized` | toggle | off | Cooling angle mode: off = standard ($A_{eff}$ ± 90); on = optimized (safe-zone max-open) — see Step 7 |
 
 #### Status — derived/calculated, read-only
@@ -136,7 +138,7 @@ All entities created by this feature will appear under a single HA virtual devic
 
 | State | Meaning | Cover behavior |
 |---|---|---|
-| `no_sun_behind_house` | Sun below horizon or azimuth outside 114°–294° | tilt = 71 (vertical, open) |
+| `no_sun_behind_house` | Sun below horizon, elevation ≤ `pergola_min_sun_elevation`, or azimuth outside 114°–294° | tilt = 71 (vertical, open) |
 | `frost` | Outdoor temp below frost threshold | No movement |
 | `rain` | Rain active (weather station OR cover lock = `rain`) | No movement |
 | `rain_stopped` | Rain just ended, recovery in progress | Recovery script handles covers |
@@ -158,7 +160,7 @@ All entities created by this feature will appear under a single HA virtual devic
    Condition: state ≠ `frost`
 3. **rain_stopped** — was `rain`, both indicators now off → enter `rain_stopped`. Script exits this state.
 4. **user_override** — either lock originator = `user`. Clears when both = `unknown`. Cover response automation skips all movement while in this state. On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules. (Same exit logic as frost.)
-5. **no_sun_behind_house** — sun below horizon OR azimuth outside 114°–294° (geometric — no sun possible regardless of sensor).
+5. **no_sun_behind_house** — sun below horizon OR `sun.sun` elevation ≤ `input_number.pergola_min_sun_elevation` (sun shines under the roof; slat geometry irrelevant) OR azimuth outside 114°–294° (geometric — no sun possible regardless of sensor).
 6. **not_enough_sun** — `pergola_sun_shining` has been `off` for ≥ 5 continuous minutes. Exits when `pergola_sun_shining` has been `on` for ≥ 2 continuous minutes.
 7. **sun_automatik_heating** — `input_boolean.pergola_heating` = on/1.
 8. **sun_automatik_cooling** — default when sun is active and heating indicator is off.
@@ -290,13 +292,21 @@ clamp slat_angle to [COOLING_LOWER_BOUND, max_tilt]
 To let sun through, slats should be **parallel** to the sun rays. Because $A_{eff}$ and the slat angle share the same number line, the slat simply tracks $A_{eff}$:
 
 ```
+MIN_HEATING_ANGLE = input_number.pergola_min_heating_slat_angle   # default 16°
+                                            # Floor: at very low A_eff the slats are nearly
+                                            # parallel to the sun and admit almost no light.
+                                            # Back-calculated from experimental tilt=20:
+                                            #   (20 − 7) × 122 / 100 = 15.86° ≈ 16°
+
 if A_eff <= max_tilt:                        # sun angle within hardware range (≤ 122°)
-    slat_angle = A_eff                       # covers ALL east, noon, south, and slight west
+    slat_angle = max(A_eff, MIN_HEATING_ANGLE)
+                                            # covers ALL east, noon, south, and slight west;
+                                            # floor prevents near-parallel slat at dawn
 else:                                        # dead zone: A_eff > 122° (moderate-to-far west)
     tilt_position = 100                      # max tilt directly — no other position lets in
     # skip hardware correction               # more sun from the west
 
-clamp slat_angle to [0°, max_tilt]          # (only applies to the non-dead-zone branch)
+clamp slat_angle to [MIN_HEATING_ANGLE, max_tilt]   # (only applies to non-dead-zone branch)
 ```
 
 **Dead zone fallback for heating:** When $A_{eff}$ > 122° — sun from moderate-to-far west — use `tilt_position = 100` (max tilt, 122°) directly. The slats are past vertical with the back face angled toward the incoming west sun, opening the maximum gap. No other position does better.
@@ -446,6 +456,8 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - `input_select.pergola_automation_state` must list all 8 state values
 - PV conversion factor (default 3.2) calibrated in Step 6
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
+- Add `input_number.pergola_min_sun_elevation` (default 10, min 1, max 30, step 0.5, unit °) — elevation at or below which state = `no_sun_behind_house`
+- Add `input_number.pergola_min_heating_slat_angle` (default 16, min 0, max 40, step 1, unit °) — floor slat angle in heating mode (back-calculated from tilt=20: `(20−7)×122/100=15.86°≈16°`)
 - Add `input_boolean.pergola_cooling_optimized` (default off) — selects between perfect-perpendicular and safe-zone max-open cooling formula (Step 7)
 - Add `input_boolean.pergola_heating` (default off) — heating indicator; when `on`, sun is let through (heating formula); when `off`, sun is blocked (cooling formula). Can be toggled by user in UI or set via HA REST API by an external system
 - Add `sensor.pergola_effective_sun_angle` (unit °, unknown until formula defined in Step 3) as a stub template sensor returning `unknown` for now — exists on the device from day one for debugging
@@ -455,10 +467,10 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 **Post-deploy (one-time, manual via HA UI):**
 After first `git pull` and HA restart, manually assign each `input_*` helper to the "Pergola Dach" device:
 Settings → Devices & Services → Helpers → [select each helper] → change device → "Pergola Dach"
-Helpers to assign: `pergola_automatic_enabled`, `pergola_heating`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_cooling_optimized`
+Helpers to assign: `pergola_automatic_enabled`, `pergola_heating`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_min_sun_elevation`, `pergola_min_heating_slat_angle`, `pergola_cooling_optimized`
 
 **Verify:**
-- Settings → Devices → "Pergola Dach" shows all 12 entities
+- Settings → Devices → "Pergola Dach" shows all 14 entities
 - `input_select.pergola_automation_state` shows all eight options
 - `binary_sensor.pergola_sun_shining` changes state plausibly with sun conditions
 - `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` report `unknown` (correct at this stage)
