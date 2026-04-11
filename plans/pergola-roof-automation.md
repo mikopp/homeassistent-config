@@ -484,7 +484,7 @@ Each step is independently deployable via `git pull` on the HA host.
 
 ### Phase 1 — Foundation
 
-#### Step 1 — Helpers, Template Sensors, Virtual Device [IN_PROGRESS]
+#### Step 1 — Helpers, Template Sensors, Virtual Device [DONE]
 **File:** `packages/pergola.yaml`
 
 Add `input_boolean`, `input_select`, `input_number`, and `template` sections.
