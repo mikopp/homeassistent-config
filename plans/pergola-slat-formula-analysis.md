@@ -102,25 +102,23 @@ Range: −90° (east horizon) → 0° (zenith) → +90° (west horizon).
 
 ### 2.3 Mapping to Pergola Hardware
 
-The hardware only rotates in one direction (0°–122°). The $A_{eff}$-based mapping uses a morning/afternoon split:
+The hardware only rotates in one direction (0°–122°). The $A_{eff}$-based mapping uses a morning/afternoon split governed by `MaxOpenEastMorningCoolingAngle` (see Section 3):
 
 ```
-MORNING_LIMIT = 85°    # early flip to afternoon formula; gives ~2 update cycles of
-                       # lead time before geometric noon crossing at A_eff = 90°
-COOLING_LB    = 11°    # ventilation floor (tilt_position ≈ 16)
+COOLING_LB    = 15°    # ventilation floor — = MaxOpenWest at flip point (A_eff=58°) = 15.3° → 15°
 max_tilt      = 122°   # hardware maximum
 
-Morning (A_eff < 85°) — back-face blocking:
+Morning (MaxOpenEast <= max_tilt - 5°) — back-face blocking:
   if A_eff + 90 <= max_tilt:   slat_angle = A_eff + 90    # achievable: 90°–122°
-  else:                         slat_angle = max_tilt       # dead zone fallback (122°)
+  else:                         slat_angle = max_tilt       # dead zone fallback (122°), still in safe zone
 
-Afternoon (A_eff >= 85°) — direct front-face blocking:
-  slat_angle = max(A_eff - 90, COOLING_LB)                 # 0°–90°, floor at 11°
+Afternoon / past safe limit — direct front-face blocking:
+  slat_angle = max(A_eff - 90, COOLING_LB)                 # 0°–90°, floor at 15°
 ```
 
-**Morning dead zone:** When A_eff is between ~32° and 85°, `A_eff + 90` exceeds 122°. The hardware falls back to 122° (max tilt, back-face position), which geometry confirms provides complete shade for all sun elevations > 10°.
+**Morning dead zone (A_eff ~32°–58°):** `A_eff + 90` exceeds 122° — mechanically unreachable. The hardware falls back to 122° (max tilt). This is safe because `MaxOpenEastMorningCoolingAngle` (see Section 3) remains below 117° throughout this range, confirming 122° is still inside the shade safe zone.
 
-**Why 85° (not 90°):** The sun moves ~1–1.5°/5 min at the noon crossing. Switching 5° early ensures the slats move to afternoon direct-blocking before the geometric crossing at A_eff = 90°, preventing any unblocked gap during the transition.
+**Dynamic morning limit:** The flip from back-face to front-face blocking is governed by `MaxOpenEast > max_tilt - 5°`. At A_eff ≈ 58° (for max_tilt = 122°), back-face blocking can no longer guarantee full shade, and the formula flips to closing/flat (COOLING_LB = 15°).
 
 **Spreadsheet column H** (`IF(D <= -58, D + 180, IF(D >= 0, D, -1))`) implements the equivalent logic using the old signed `blocking_angle` (column D). In the new coordinate: `blocking_angle <= -58°` ↔ `A_eff ≤ 32°` (reachable morning back-face); `blocking_angle >= 0°` ↔ `A_eff >= 90°` (afternoon direct); `-1` ↔ dead zone (32° < A_eff < 90°, back-face unreachable).
 
@@ -130,24 +128,37 @@ Afternoon (A_eff >= 85°) — direct front-face blocking:
 
 **Goal:** Block direct sunlight by tilting slats perpendicular to sun rays.
 
-### Standard formula (no slat thickness correction)
+### Standard formula (with dynamic morning limit via MaxOpenEast)
 
 ```
-MORNING_LIMIT = 85°
-COOLING_LB    = 11°    # ventilation floor (tilt_position ≈ 16)
+COOLING_LB      = 15°                           # ventilation floor — = MaxOpenWest at flip point
+                                                #   MaxOpenWest(58°) = 58 + 8.53 − asin(R×sin58°) = 15.3° → 15°
+SAFETY_BUFFER   = 5°                            # flip margin below max_tilt
+R               = 0.91926                       # deff / w = sqrt(d² + t²) / w
+                                                #   slat geometry: w=22cm, d=20cm (pivot spacing), t=3cm (thickness)
+                                                #   deff = sqrt(20² + 3²) = 20.22cm → R = 20.22 / 22 = 0.91926
+PHI             = 8.53°                         # arctan(t / d) = arctan(3 / 20)
+                                                #   internal angle from slat thickness relative to pivot spacing
 
-if A_eff < MORNING_LIMIT:                       # Morning — back-face blocking
+# MaxOpenEastMorningCoolingAngle: minimum back-face slat angle for 100% shade from east.
+# Derivation: Sperp - W = (A_eff + 90) - (90 - PHI - asin(R × sin(A_eff)))
+MaxOpenEast = A_eff + PHI + degrees(asin(R × sin(radians(A_eff))))
+
+if A_eff < 90 and MaxOpenEast <= max_tilt - SAFETY_BUFFER:
+                                                # Morning — back-face blocking (safe)
     if A_eff + 90 <= max_tilt:
         slat_angle = A_eff + 90                 # back face perpendicular to east sun
     else:
-        slat_angle = max_tilt                   # dead zone: best available (122°)
-else:                                           # Afternoon — direct front-face blocking
+        slat_angle = max_tilt                   # dead zone: best available (122°), still in safe zone
+else:                                           # Afternoon, or morning past safe limit
     slat_angle = max(A_eff - 90, COOLING_LB)
 
 clamp slat_angle to [COOLING_LB, max_tilt]
 ```
 
-Cooling lower bound (11°): When A_eff ≈ 90° (sun nearly overhead), `A_eff − 90 ≈ 0°` (flat). The 11° floor prevents full closure for ventilation. At 11°, `e_crit ≈ 48.3°` — summer noon elevation (~65°) exceeds this, so full shade is maintained.
+**Dynamic morning limit:** The `MaxOpenEast` check ensures we only use back-face blocking while it can geometrically provide full shade. At $A_{eff}$ ≈ 58° (for max_tilt = 122°), `MaxOpenEast` exceeds 117° (= max_tilt − 5) and the formula flips to front-face/closing.
+
+Cooling lower bound (15°): When A_eff ≈ 90° (sun nearly overhead), `A_eff − 90 ≈ 0°` (flat). The 15° floor prevents full closure for ventilation. Derived from `MaxOpenWest` at the flip point: `MaxOpenWest(58°) = 58 + PHI − asin(R·sin58°) = 15.3°` → rounded down to 15°. At 15°, `e_crit = 50.6°` — summer noon elevation (~65°) still exceeds this, so full shade is maintained.
 
 ### Enhanced version (with slat thickness / safe zone — from Gemini conversation)
 
@@ -160,34 +171,56 @@ The safe-zone formulas use `sun_height` (the unsigned projected elevation = `A_e
 Stoward = sun_height + phi - 180 + degrees(asin(R * sin(radians(sun_height))))
 ```
 
-**Max Open away from sun ("Backside Block"):**
+**Max Open away from sun ("Backside Block" = MaxOpenWestMorningCoolingAngle):**
 ```
 Sbackside = sun_height + phi - degrees(asin(R * sin(radians(sun_height))))
+```
+
+For morning (A_eff ≤ 90, sun_height = A_eff), this is also written as:
+```
+# MaxOpenWestMorningCoolingAngle: maximum WEST-leaning (front-face) slat angle
+# for 100% shade from east / high-noon sun (A_eff ≤ 90).
+# Blocking condition (derived): sin(A_eff − θ + PHI) = R × sin(A_eff)  → solve for max θ
+# NOTE: sign is +PHI (NOT −PHI).  A_eff − PHI − asin(...) is WRONG (gives negative values at flip).
+MaxOpenWest = A_eff + PHI − degrees(asin(R × sin(radians(A_eff))))   [A_eff ≤ 90 only]
 ```
 
 Where R = 0.91926, phi = 8.53°.
 
 **Safe Zone width at various sun positions (d=20, w=22, t=3):**
 
-| $A_{eff}$ (morning) | sun_height | Ideal slat ($A_{eff}$+90) | Sbackside | Safe Zone Width |
+| $A_{eff}$ (morning) | sun_height | Ideal slat ($A_{eff}$+90) | MaxOpenWest (=Sbackside) | Safe Zone Width |
 |---|---|---|---|---|
-| 10° | 10° | 100° | +9.3° | 161.6° |
-| 20° | 20° | 110° | +10.2° | 143.4° |
-| 30° | 30° | 120° | +11.2° | 125.3° |
-| 40° | 40° | 130° → dead zone | +12.3° | 107.6° |
-| 50° | 50° | 140° → dead zone | +13.8° | 90.5° |
-| 60° | 60° | 150° → dead zone | +15.8° | 74.5° |
-| 70° | 70° | 160° → dead zone | +18.8° | 60.5° |
+| 10° | 10° | 100° | 9.3° | 161.6° |
+| 20° | 20° | 110° | 10.2° | 143.4° |
+| 30° | 30° | 120° | 11.2° | 125.3° |
+| 40° | 40° | 130° → dead zone | 12.3° | 107.6° |
+| 50° | 50° | 140° → dead zone | 13.8° | 90.5° |
+| 58° | 58° | 148° → dead zone | **15.3°** (= COOLING_LB) | — |
+| 60° | 60° | 150° → dead zone | 15.8° | 74.5° |
+| 70° | 70° | 160° → dead zone | 18.8° | 60.5° |
+| 80° | 80° | 170° → dead zone | 23.7° | — |
+| 90° | 90° | 180° → dead zone | 31.7° | — |
 
-> Note: For morning rows where the ideal slat exceeds 122° (dead zone), the standard formula uses 122°. The `Sbackside` column shows the alternative west-tilt angle that still achieves full shade via slat overlap — this is the basis for the `pergola_cooling_optimized` mode (Step 7).
+> Note: For morning rows where the ideal slat exceeds 122° (dead zone), the standard formula uses 122° **only while `MaxOpenEast ≤ max_tilt - 5`** (A_eff up to ~58°). Beyond that, the formula flips to front-face/closing. `MaxOpenWest` is the maximum open angle that still guarantees full shade — it serves as: (1) the static COOLING_LB = 15° (evaluated at the flip point A_eff = 58°) for the standard formula; and (2) the dynamic target angle in the `pergola_cooling_optimized` mode (Step 7).
+
+**MaxOpenEastMorningCoolingAngle** at key dead-zone boundaries:
+
+| $A_{eff}$ | MaxOpenEast | vs max_tilt (122°) | Status |
+|---|---|---|---|
+| 40° | 89.5° | 32.5° margin | Safe — back-face at 122° works |
+| 50° | 103.3° | 18.7° margin | Safe |
+| 55° | 112.4° | 9.6° margin | Safe |
+| 58° | 117.7° | 4.3° margin | **FLIP** — exceeds 117° threshold |
+| 60° | 121.3° | 0.7° margin | Would fail without the fix |
 
 ### Recommended Cooling Strategy
 
-For the HA automation, use the **standard formula** above. Reasons:
-1. The perpendicular angle sits safely inside the safe zone for all sun positions
-2. It provides the thickest shadow (maximum margin of error)
-3. It's simpler to implement and debug
-4. The safe zone optimisation (minimal motor movement) is a future enhancement — the motor moves at most every 5 minutes anyway
+For the HA automation, use the **standard formula with dynamic morning limit** above. Reasons:
+1. The perpendicular angle sits safely inside the safe zone for all sun positions where back-face blocking is feasible
+2. The `MaxOpenEast` check dynamically detects when back-face blocking fails and flips to closing
+3. It provides the thickest shadow (maximum margin of error) within the safe morning range
+4. The safe zone optimisation (minimal motor movement) is a future enhancement for Step 7 — it changes the target angle within the safe zone, not the flip logic
 
 The safe zone data is documented here for future optimisation (Step 7) if desired.
 
@@ -281,16 +314,26 @@ A_eff = sun_height        if azimuth < 204    # morning (east sun)
 
 ### Step 1a — Cooling slat_angle (block sun)
 ```
-MORNING_LIMIT = 85    # early flip before geometric noon crossing
-COOLING_LB    = 11    # ventilation floor
+COOLING_LB    = 15    # ventilation floor — derived from MaxOpenWest at flip point (A_eff=58°):
+                      #   MaxOpenWest(58°) = 58 + 8.53 − asin(0.91926×sin58°) = 15.3° → floor to 15°
+                      #   e_crit at 15° = 50.6° < summer noon 65° → full shade maintained
+SAFETY_BUFFER = 5     # flip margin below max_tilt
+R             = 0.91926  # deff / w = sqrt(d² + t²) / w  (w=22, d=20, t=3)
+PHI           = 8.53     # arctan(t / d) = arctan(3 / 20)
 
-if A_eff < MORNING_LIMIT:                          # Morning — back-face blocking
+# Minimum back-face (east-sun) slat angle for 100% shade — standard flip guard
+MaxOpenEast = A_eff + PHI + degrees(asin(R * sin(radians(A_eff))))
+# Maximum front-face (west-leaning) slat angle for 100% shade (A_eff ≤ 90 only)
+# = Sbackside; sign is +PHI (NOT −PHI)
+MaxOpenWest = A_eff + PHI - degrees(asin(R * sin(radians(A_eff))))
+
+if A_eff < 90 and MaxOpenEast <= max_tilt - SAFETY_BUFFER:  # Morning — back-face blocking
     if A_eff + 90 <= max_tilt:
         slat_angle = A_eff + 90
     else:
-        slat_angle = max_tilt                      # dead zone fallback
-else:                                              # Afternoon — direct blocking
-    slat_angle = max(A_eff - 90, COOLING_LB)
+        slat_angle = max_tilt                      # dead zone fallback, still in safe zone
+else:                                              # Afternoon / past safe limit — direct blocking
+    slat_angle = max(A_eff - 90, COOLING_LB)      # floor = 15° (= MaxOpenWest at flip point)
 
 clamp slat_angle to [COOLING_LB, max_tilt]
 ```
