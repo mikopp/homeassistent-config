@@ -161,6 +161,7 @@ All entities created by this feature will appear under a single HA virtual devic
 >
 > `sensor.pergola_effective_sun_angle` is the primary debug value — it shows the sun's effective position on the unified 0°–180° east-to-west scale. In heating mode, slat_angle = $A_{eff}$ directly; in cooling mode, slat_angle = $A_{eff}$ ± 90.
 > `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` reflect the *calculated setpoint* at any given moment — useful for debugging the formula without having to look at cover state.
+> These sensors compute continuously regardless of `input_boolean.pergola_automatic_enabled` — they show what the automation *would* do even when disabled, making them useful for monitoring and commissioning.
 
 ---
 
@@ -391,8 +392,6 @@ tilt_position = INT(slat_angle / pergola_max_tilt_angle × 100 + correction)
 ```
 - `pergola_max_tilt_angle` = `input_number.pergola_max_tilt_angle` (default 122°)
 - Clamp result: both cooling and heating → [0, 100]
-  - Cooling uses the full range: afternoon formula ($A_{eff}$ − 90, slat 0°–90°, tilt 0–71) and morning formula ($A_{eff}$ + 90, slat 90°–122°, tilt ~71–100). Both ranges are valid — going past 90° is wrong only for afternoon sun, which never reaches 90° naturally within the azimuth window.
-  - Note: the formula gives tilt ≈ 74 for slat_angle = 90° (versus hardware-observed 71). This 3-unit discrepancy exists because the +0.5 correction was calibrated in the 69°–90° range. In practice, the morning branch rarely lands exactly at 90°; the calibration error is small relative to the 4-unit deadband.
 - Values > 100 are dead zone on the Somfy controller — never send them
 
 **Why corrections are needed:**
@@ -466,7 +465,7 @@ Hysteresis to prevent oscillation:
 
 ## Master Switch
 
-`input_boolean.pergola_automatic_enabled` — when `off`, response automation skips all cover movement. State machine continues tracking state so re-enabling acts immediately.
+`input_boolean.pergola_automatic_enabled` — when `off`, response automation skips all cover movement. State machine continues tracking state so re-enabling acts immediately. **Template sensors (`sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) are NOT gated by this switch — they always reflect current computed values. Only cover movement commands are suppressed.**
 
 ---
 
@@ -589,7 +588,7 @@ Action (`choose` on current state):
 - Every-5-min trigger is the only way covers track a slowly moving sun within a steady state
 - Cooling tilt clamp is [0, 100]: western sun branch (slat 0°–90°) stays below tilt 71 naturally; eastern sun branch (+180°, slat 90°–122°) uses tilt 71–100 to block sun from behind the slat.
 - **Deadband (Tilt Calculation Logic Step 3):** before every move command compare `target_tilt_position` against `cover.dach_links.current_tilt_position`; only issue the command if `|target - current| >= 4` tilt units (≈ 5°). Comparison is in tilt-position units — not slat degrees — so the hardware correction offsets cancel and the check is accurate across all angle zones. Post-rain recovery script bypasses this.
-- Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation)
+- Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation). The template bodies for `sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, and `sensor.pergola_tilt_position` must NOT check `input_boolean.pergola_automatic_enabled` — they always compute. The `automatic_enabled` gate belongs only to the `pergola_cover_response` automation condition, not to any template sensor.
 
 **Verify:**
 - Disable `pergola_automatic_enabled` → covers stop responding
