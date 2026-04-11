@@ -10,7 +10,7 @@ Automate the tilt control of two Somfy bioclimatic pergola covers (`cover.dach_l
 - Step-drain covers after rain stops
 
 **Key facts:**
-- Tilt scale: 0 = horizontal/flat (maximum shade / rain protection), 71 ≈ vertical (90°), 100 = 122° open (max tilt user-configurable via `input_number.pergola_max_tilt_angle`, default 122°)
+- Tilt scale: 0 = horizontal/flat (maximum shade / rain protection), ~74 = vertical (90°, derived: INT(90/max_tilt_angle×100+0.5); default 74 when max_tilt_angle=122°), 100 = max_tilt_angle open (user-configurable via `input_number.pergola_max_tilt_angle`, default 122°)
 - Conversion formula (slat_angle_degrees → tilt_position, with hardware-specific rounding corrections):
   ```
   tilt_position = INT(slat_angle / max_tilt_angle × 100 + correction)
@@ -34,7 +34,7 @@ Automate the tilt control of two Somfy bioclimatic pergola covers (`cover.dach_l
 
 ## Location & Orientation
 
-**Slat rotation:** tilt 0 = flat/horizontal (rain/closed). tilt 71 = 90° vertical (fully open to diffuse light). tilt 100 = 122° (max open).
+**Slat rotation:** tilt 0 = flat/horizontal (rain/closed). tilt ~74 = 90° vertical (fully open to diffuse light, derived via formula from slat_angle=90° and max_tilt_angle). tilt 100 = max_tilt_angle (max open, default 122°).
 
 **Sun azimuth window** (derived from `input_number.pergola_wall_azimuth`):
 ```
@@ -153,7 +153,6 @@ All entities created by this feature will appear under a single HA virtual devic
 > | `SAFETY_BUFFER` | fixed constant: 5 ° | 5 ° | Flip margin below max_tilt; not user-configurable |
 > | `AZIMUTH_MIN` | `wall_azimuth − 90` | 114 ° | Lower bound of sun-on-terrasse azimuth window |
 > | `AZIMUTH_MAX` | `wall_azimuth + 90` | 294 ° | Upper bound of sun-on-terrasse azimuth window |
-> | `TILT_VERTICAL` | **informational only — do not use** | formula gives ~74, hardware is 71 | Formula `INT(90/max_tilt×100+0.5)` gives ~74 but hardware stops at 71 (3-unit calibration gap). Always use the literal 71 for no-sun/open states — the formula does NOT apply here |
 > | `DEADBAND_TILT` | `(5 / max_tilt_angle * 100) \| round(0) \| int` | 4 | Movement gate: skip command if \|target − current\| < DEADBAND_TILT |
 > | `COOLING_LOWER_BOUND` | MaxOpenWest at the flip point A_eff — see derivation below | ~15.3 ° | Ventilation floor for closing formula |
 >
@@ -162,6 +161,11 @@ All entities created by this feature will appear under a single HA virtual devic
 > `sensor.pergola_effective_sun_angle` is the primary debug value — it shows the sun's effective position on the unified 0°–180° east-to-west scale. In heating mode, slat_angle = $A_{eff}$ directly; in cooling mode, slat_angle = $A_{eff}$ ± 90.
 > `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` reflect the *calculated setpoint* at any given moment — useful for debugging the formula without having to look at cover state.
 > These sensors compute continuously regardless of `input_boolean.pergola_automatic_enabled` — they show what the automation *would* do even when disabled, making them useful for monitoring and commissioning.
+
+#### Scripts — internal movement helpers
+| Entity | Description |
+|---|---|
+| `script.pergola_set_slat_angle` | **Single authoritative slat_angle→tilt_position converter.** Accepts `slat_angle` (float, degrees). Computes `tilt_position` using the Step 2 hardware-correction formula with the live value of `input_number.pergola_max_tilt_angle`, clamps to [0, 100], and sends `cover.set_cover_tilt_position` to both covers. All cover movement commands — from the cover response automation and the post-rain recovery script — call this script. The formula is never inlined elsewhere. Does **not** apply the movement deadband; callers check the deadband before invoking where required. |
 
 ---
 
@@ -173,12 +177,12 @@ All entities created by this feature will appear under a single HA virtual devic
 
 | State | Meaning | Cover behavior |
 |---|---|---|
-| `no_sun_behind_house` | Sun below horizon, elevation ≤ `pergola_min_sun_elevation`, or azimuth outside AZIMUTH_MIN–AZIMUTH_MAX (derived: `wall_azimuth ± 90`) | tilt = 71 (vertical, empirically verified open position) |
+| `no_sun_behind_house` | Sun below horizon, elevation ≤ `pergola_min_sun_elevation`, or azimuth outside AZIMUTH_MIN–AZIMUTH_MAX (derived: `wall_azimuth ± 90`) | slat_angle = 90° → tilt_position via formula (default 74) |
 | `frost` | wheatherstation_outdoor_temperature below frost threshold | No movement |
 | `rain` | Rain active (weather station OR cover lock = `rain`) | No movement |
 | `rain_stopped` | Rain just ended, recovery in progress | Recovery script handles covers |
 | `user_override` | One or both covers locked by user (`lock originator = user`) | No movement |
-| `not_enough_sun` | Sun shining indicator off for ≥ 5 min (cloud/overcast) | tilt = 71 (vertical, empirically verified open position) |
+| `not_enough_sun` | Sun shining indicator off for ≥ 5 min (cloud/overcast) | slat_angle = 90° → tilt_position via formula (default 74) |
 | `sun_automatik_heating` | Sun active, heating indicator on | Heating formula |
 | `sun_automatik_cooling` | Sun active, heating indicator off | Cooling formula |
 
@@ -336,7 +340,7 @@ To let sun through, slats should be **parallel** to the sun rays. Because $A_{ef
 MIN_HEATING_ANGLE = input_number.pergola_min_heating_slat_angle   # default 16°
                                             # Floor: prevents near-parallel slats at dawn.
                                             # Default derived from tilt-position 20:
-                                            #   (20 − 7) × 122 / 100 = 15.86° ≈ 16°
+                                            #   (20 − 7) × max_tilt_angle / 100 = 15.86° ≈ 16° at default max_tilt_angle=122°
                                             # User-configurable via input_number.
 
 if A_eff <= max_tilt:                        # sun angle within hardware range (≤ 122°)
@@ -354,7 +358,7 @@ clamp slat_angle to [MIN_HEATING_ANGLE, max_tilt]   # (only applies to non-dead-
 
 #### Verification table
 
-All rows are within the azimuth window (AZIMUTH_MIN–AZIMUTH_MAX, derived as `wall_azimuth ± 90`, default 114°–294°). Outside that range the state machine is in `no_sun_behind_house` and neither formula runs — slats go to tilt 71 (empirically verified vertical).
+All rows are within the azimuth window (AZIMUTH_MIN–AZIMUTH_MAX, derived as `wall_azimuth ± 90`, default 114°–294°). Outside that range the state machine is in `no_sun_behind_house` and neither formula runs — slats go to slat_angle 90° (tilt_position via formula, default 74).
  
 | Azimuth | Elev | $A_{eff}$ | MaxOpenEast | MaxOpenWest | Cooling slat | Cooling formula | Heating slat | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -371,9 +375,10 @@ All rows are within the azimuth window (AZIMUTH_MIN–AZIMUTH_MAX, derived as `w
 
 #### No sun (`no_sun_behind_house`, `not_enough_sun`)
 ```
-tilt_position = 71    # empirically verified open/vertical position; NOT computed from formula
-                      # (formula gives TILT_VERTICAL = INT(90/max_tilt×100+0.5) ≈ 74 — 3-unit hardware discrepancy)
+slat_angle = 90       # vertical open position
+tilt_position = INT(90 / max_tilt × 100 + 0.5)   # correction = 0.5 (90° ≥ 69°); default max_tilt=122 → 74
 ```
+> **Implementation:** this is algorithm pseudocode only. In code, pass `slat_angle: 90` to `script.pergola_set_slat_angle` — the formula above runs inside that script, not inline.
 
 #### Rain / Frost
 No cover movement.
@@ -398,6 +403,8 @@ tilt_position = INT(slat_angle / pergola_max_tilt_angle × 100 + correction)
 - Below 20°: motor displacement is very small → +7 compensates
 - 20°–69°: linear region → +5.5 rounds up correctly
 - Above 69°: slight mechanical jerk → only +0.5 to avoid overshoot
+
+> **Single authoritative implementation:** The formula above is implemented in exactly one place: `script.pergola_set_slat_angle` (defined in Implementation Step 3). All cover movement commands go through this script — the formula is never inlined in automations or other scripts. `sensor.pergola_tilt_position` also evaluates the formula for display/debug (read-only; never used to drive cover commands directly).
 
 ---
 
@@ -426,7 +433,7 @@ else:
 
 Use `cover.dach_links` as the reference — both covers always move together.
 
-This applies to **all** move decisions: state-change transitions, the 5-minute periodic sun-tracking trigger, and the no-sun tilt-71 target. The post-rain recovery script bypasses this check — it always moves to its drain angles regardless.
+This applies to **all** move decisions: state-change transitions, the 5-minute periodic sun-tracking trigger, and the no-sun slat_angle-90° target. The post-rain recovery script bypasses this check — it always moves to its drain angles regardless.
 
 **Why 5°:** The motor's dead zone and mechanical play account for ≈2–3° uncertainty. A 5° threshold prevents constant micro-movements as the sun creeps while still ensuring the covers track meaningful changes (the sun moves about 1°–2° in azimuth per minute at moderate elevation, producing a slat angle change of well under 1°/min — so 5° corresponds to a 5–10 minute lag, comparable to the periodic trigger interval).
 
@@ -497,7 +504,7 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - PV conversion factor default 3.2; can be refined in Step 6 field testing (Phase 5)
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
 - Add `input_number.pergola_min_sun_elevation` (default 10, min 1, max 30, step 0.5, unit °) — elevation at or below which state = `no_sun_behind_house`
-- Add `input_number.pergola_min_heating_slat_angle` (default 16, min 0, max 40, step 1, unit °) — floor slat angle in heating mode (back-calculated from tilt=20: `(20−7)×122/100=15.86°≈16°`)
+- Add `input_number.pergola_min_heating_slat_angle` (default 16, min 0, max 40, step 1, unit °) — floor slat angle in heating mode (back-calculated from tilt=20: `(20−7)×max_tilt_angle/100=15.86°≈16°` at default max_tilt_angle=122°)
 - Add `input_boolean.pergola_cooling_optimized` (default off) — selects between perfect-perpendicular and safe-zone max-open cooling formula (Step 7)
 - Add `input_number.pergola_wall_azimuth` (default 204, min 0, max 359, step 1, unit °) — compass bearing of terrasse wall; drives AZIMUTH_MIN/MAX and the A_eff formula
 - Add `input_number.pergola_clearness_factor` (default 0.9, min 0.5, max 1.2, step 0.05) — calibration knob for sun_shining threshold (Step 6)
@@ -574,26 +581,28 @@ Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain �
 
 Add `pergola_cover_response`. Triggers on `input_select.pergola_automation_state` state change and on time pattern every 5 min (to track sun position within active state).
 
+Also defines `script.pergola_set_slat_angle` — the single authoritative cover movement script (see entity listing and Tilt Calculation Logic Step 2). All cover movement in this step and Step 4 goes through this script.
+
 Condition: `input_boolean.pergola_automatic_enabled = on`.
 
 Action (`choose` on current state):
-- `no_sun_behind_house`, `not_enough_sun` → set tilt 71 on both covers
+- `no_sun_behind_house`, `not_enough_sun` → if deadband passes, call `script.pergola_set_slat_angle` with `slat_angle: 90`
 - `frost`, `rain`, `rain_stopped`, `user_override` → do nothing
-- `sun_automatik_cooling` → cooling formula, clamped [0, 100]
-- `sun_automatik_heating` → stub: tilt 71 (replaced in Step 5)
+- `sun_automatik_cooling` → compute slat_angle via cooling formula; if deadband passes, call `script.pergola_set_slat_angle` with computed slat_angle
+- `sun_automatik_heating` → stub: if deadband passes, call `script.pergola_set_slat_angle` with `slat_angle: 90` (replaced in Step 5)
 
 **Dependencies:** Step 1 (helpers), Step 2 (state machine must be writing state).
 
 **Notes:**
 - Every-5-min trigger is the only way covers track a slowly moving sun within a steady state
-- Cooling tilt clamp is [0, 100]: western sun branch (slat 0°–90°) stays below tilt 71 naturally; eastern sun branch (+180°, slat 90°–122°) uses tilt 71–100 to block sun from behind the slat.
-- **Deadband (Tilt Calculation Logic Step 3):** before every move command compare `target_tilt_position` against `cover.dach_links.current_tilt_position`; only issue the command if `|target - current| >= 4` tilt units (≈ 5°). Comparison is in tilt-position units — not slat degrees — so the hardware correction offsets cancel and the check is accurate across all angle zones. Post-rain recovery script bypasses this.
+- Cooling tilt clamp is [0, 100]: western sun branch (slat 0°–90°) stays below tilt_position(90°) naturally (default ≈74, derived via formula); eastern sun branch (+180°, slat 90°–max_tilt_angle°) uses tilt_position(90°)–100 to block sun from behind the slat.
+- **Deadband (Tilt Calculation Logic Step 3):** the automation computes `target_tilt_position` (INT(slat_angle/max_tilt×100+correction)) and compares it against `cover.dach_links.current_tilt_position`; only calls `script.pergola_set_slat_angle` if `|target - current| >= DEADBAND_TILT`. The script itself does **not** check the deadband — this separation allows post-rain recovery to bypass it naturally by calling the script directly.
 - Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation). The template bodies for `sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, and `sensor.pergola_tilt_position` must NOT check `input_boolean.pergola_automatic_enabled` — they always compute. The `automatic_enabled` gate belongs only to the `pergola_cover_response` automation condition, not to any template sensor.
 
 **Verify:**
 - Disable `pergola_automatic_enabled` → covers stop responding
 - With sun active and cooling season, covers move to formula result within 5 min; verify no movement if cover is already within 5° of target
-- Manually set state to `no_sun_behind_house` → tilt goes to 71 (or stays if already within 5°)
+- Manually set state to `no_sun_behind_house` → tilt goes to formula result for slat_angle 90° (default 74, or stays if already within 5°)
 
 ---
 
@@ -605,7 +614,7 @@ Action (`choose` on current state):
 **Dependencies:** Step 2 (state manager must set `rain_stopped` to trigger this), Step 3 (cover control).
 
 **Notes:**
-- Script must call the cover service directly (not go through state machine) during drain sequence
+- Script calls `script.pergola_set_slat_angle` with `slat_angle: 8` and `slat_angle: 15` for the drain steps — the formula runs there, not inline. No deadband check; the script always moves regardless of current position (drain must complete).
 - **Final step calls `script.pergola_evaluate_state`** (the shared script from Step 2) to set the correct state. No duplication — rules 5–8 live in exactly one place. The state manager won't fire on its own at script end because no sensor values changed (rain_rate and lock originators were already clear before entering rain_stopped).
 - TBD: confirm 25%/50% drain adequately after first real rain
 
@@ -703,4 +712,3 @@ else:                                                    # afternoon west sun �
 | 1c | PV conversion factor (default 3.2) | Can be refined in Step 6 field testing (Phase 5) |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 8 | Optimized cooling formula (safe-zone max-open) | Formula defined — `MaxOpenWest` (= Sbackside, `A_eff + PHI − asin(...)`) for flip range; `MaxOpenEast` as back-face target for morning. See Step 7. |
-| 9 | Verify tilt=71 is the physical 90° vertical position | Method: send `set_cover_tilt_position` 71, measure actual slat angle. If ≠90°, adjust hardware correction offsets (Step 2). Not a Phase 1–4 blocker. |
