@@ -9,9 +9,11 @@
 #             ~74 = vertical / 90° (default open position, derived from formula)
 #            100 = max_tilt_angle open (hardware maximum, default 122°)
 #
-# All entities under this feature should appear on the "Pergola Dach" virtual device
-# (template entities: assigned automatically via the device: block below;
-#  input_* helpers: must be manually assigned via HA UI after first deploy — see plan Step 1).
+# All entities under this feature should appear on the "Pergola Dach" device.
+# device_id: is not supported in template YAML — both template entities and input_* helpers
+# must be assigned to the device and labelled manually via HA UI after each first deploy
+# (Settings → Devices & Services → Entities → open entity → set Device + Label).
+# See plans/pergola-roof-automation.md § "Pergola Device" for the full post-deploy checklist.
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT BOOLEANS — on/off toggles
@@ -231,8 +233,9 @@ input_number:
 template:
 
   # ── Pergola Dach user-facing entities ────────────────────────────────────────────
-  # All template entities carry device_id: 7aa66d1b67748d04964042345ab11e89 so HA
-  # links them to the Pergola Dach device on load (no post-deploy UI steps needed).
+  # device_id: is not valid in template YAML — HA rejects it at config load time.
+  # After deploy, assign each entity to the Pergola Dach device and apply the
+  # "Pergola" label via Settings → Devices & Services → Entities (one-time UI step).
   #
   # input_* helpers (input_boolean, input_number, input_select) cannot be assigned to
   # a device in YAML at all — template wrappers (switch, number) are provided below
@@ -249,7 +252,6 @@ template:
       # ever changes, only this sensor needs updating.
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: "{{ states('sensor.victronsolarcharger_yield_power226') | float(0) }}"
         unit_of_measurement: "W"
         device_class: power
@@ -264,7 +266,6 @@ template:
       # Always computes regardless of pergola_automatic_enabled — useful for monitoring.
       - name: "Pergola Effective Sun Angle"
         unique_id: pergola_effective_sun_angle
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: "{{ none }}"
         unit_of_measurement: "°"
         icon: mdi:angle-acute
@@ -277,7 +278,6 @@ template:
       # Always computes regardless of pergola_automatic_enabled.
       - name: "Pergola Slat Angle"
         unique_id: pergola_slat_angle
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: "{{ none }}"
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
@@ -290,7 +290,6 @@ template:
       # Always computes regardless of pergola_automatic_enabled.
       - name: "Pergola Tilt Position"
         unique_id: pergola_tilt_position
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: "{{ none }}"
         icon: mdi:format-align-middle
 
@@ -301,7 +300,6 @@ template:
       # registry or Developer Tools.
       - name: "Pergola Automation State"
         unique_id: pergola_automation_state_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: "{{ states('input_select.pergola_automation_state') }}"
         icon: mdi:state-machine
 
@@ -326,7 +324,6 @@ template:
       # The elevation guard matches the state machine no_sun_behind_house threshold.
       - name: "Pergola Sun Shining"
         unique_id: pergola_sun_shining
-        device_id: 7aa66d1b67748d04964042345ab11e89
         device_class: light
         state: >
           {% set solar    = states('sensor.wheatherstation_solar_radiation') | float(0) %}
@@ -357,7 +354,6 @@ template:
       # movement is suppressed; the state machine and sensors keep running.
       - name: "Pergola Automatic Enabled"
         unique_id: pergola_automatic_enabled_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:sun-clock
         state: "{{ is_state('input_boolean.pergola_automatic_enabled', 'on') }}"
         turn_on:
@@ -375,7 +371,6 @@ template:
       # Can also be written via HA REST API by an external system (e.g. Loxone).
       - name: "Pergola Heating"
         unique_id: pergola_heating_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:radiator
         state: "{{ is_state('input_boolean.pergola_heating', 'on') }}"
         turn_on:
@@ -392,7 +387,6 @@ template:
       # off = perfect-perpendicular (default), on = safe-zone max-open (Step 7).
       - name: "Pergola Cooling Optimized"
         unique_id: pergola_cooling_optimized_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:sine-wave
         state: "{{ is_state('input_boolean.pergola_cooling_optimized', 'on') }}"
         turn_on:
@@ -410,7 +404,6 @@ template:
       # Temp must fall below this value to enter frost state (movement suspended).
       - name: "Pergola Frost OFF Threshold"
         unique_id: pergola_frost_off_threshold_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:thermometer-low
         state: "{{ states('input_number.pergola_frost_off_threshold') | float(2.5) }}"
         min: 0
@@ -429,7 +422,6 @@ template:
       # oscillation near the frost boundary).
       - name: "Pergola Frost ON Threshold"
         unique_id: pergola_frost_on_threshold_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:thermometer
         state: "{{ states('input_number.pergola_frost_on_threshold') | float(3.0) }}"
         min: 0
@@ -448,7 +440,6 @@ template:
       # Default 3.2; calibrate in Step 6 field testing on a clear morning.
       - name: "Pergola PV Conversion Factor"
         unique_id: pergola_pv_conversion_factor_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:solar-panel
         state: "{{ states('input_number.pergola_pv_conversion_factor') | float(3.2) }}"
         min: 1
@@ -466,7 +457,6 @@ template:
       # Primary calibration knob — see plan Step 6 (Phase 5).
       - name: "Pergola Clearness Factor"
         unique_id: pergola_clearness_factor_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:weather-sunny
         state: "{{ states('input_number.pergola_clearness_factor') | float(0.9) }}"
         min: 0.5
@@ -483,7 +473,6 @@ template:
       # Elevation at or below which the state machine enters no_sun_behind_house.
       - name: "Pergola Min Sun Elevation"
         unique_id: pergola_min_sun_elevation_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:weather-sunset
         state: "{{ states('input_number.pergola_min_sun_elevation') | float(10) }}"
         min: 1
@@ -502,7 +491,6 @@ template:
       # Drives the tilt_position conversion formula and all derived constants.
       - name: "Pergola Max Tilt Angle"
         unique_id: pergola_max_tilt_angle_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:rotate-right
         state: "{{ states('input_number.pergola_max_tilt_angle') | float(122) }}"
         min: 100
@@ -520,7 +508,6 @@ template:
       # Floor slat angle in heating mode — prevents near-parallel slats at dawn.
       - name: "Pergola Min Heating Slat Angle"
         unique_id: pergola_min_heating_slat_angle_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:angle-acute
         state: "{{ states('input_number.pergola_min_heating_slat_angle') | float(16) }}"
         min: 0
@@ -539,7 +526,6 @@ template:
       # and the A_eff coordinate system reference direction.
       - name: "Pergola Wall Azimuth"
         unique_id: pergola_wall_azimuth_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:compass
         state: "{{ states('input_number.pergola_wall_azimuth') | float(204) }}"
         min: 0
@@ -557,7 +543,6 @@ template:
       # Slat face width (w) in cm — used to derive geometry constants R and PHI.
       - name: "Pergola Slat Width"
         unique_id: pergola_slat_width_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:ruler
         state: "{{ states('input_number.pergola_slat_width') | float(22) }}"
         min: 5
@@ -575,7 +560,6 @@ template:
       # Pivot-to-pivot spacing (d) in cm — used to derive geometry constants R and PHI.
       - name: "Pergola Slat Pivot Spacing"
         unique_id: pergola_slat_pivot_spacing_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:ruler-square
         state: "{{ states('input_number.pergola_slat_pivot_spacing') | float(20) }}"
         min: 5
@@ -593,7 +577,6 @@ template:
       # Slat thickness (t) in cm — used to derive geometry constants R and PHI.
       - name: "Pergola Slat Thickness"
         unique_id: pergola_slat_thickness_tpl
-        device_id: 7aa66d1b67748d04964042345ab11e89
         icon: mdi:layers
         state: "{{ states('input_number.pergola_slat_thickness') | float(3) }}"
         min: 0.5
@@ -635,7 +618,6 @@ template:
   - sensor:
       - name: "Pergola Cooling Lower Bound"
         unique_id: pergola_cooling_lower_bound
-        device_id: 7aa66d1b67748d04964042345ab11e89
         state: >
           {# ── Derived geometry constants ──────────────────────────────────────── #}
           {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float(122) %}
