@@ -3,7 +3,7 @@ name: Home Assistant Config Check
 # Run on every push and on every pull-request targeting any branch.
 on:
   push:
-  pull_request:
+#  pull_request:
 
 # Minimal GITHUB_TOKEN permissions — this job only needs to read the repo.
 permissions:
