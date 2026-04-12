@@ -92,19 +92,26 @@ sun behind house when:     sun.azimuth < AZIMUTH_MIN  OR  sun.azimuth > AZIMUTH_
 
 ## Pergola Device
 
-All template entities created by this feature are linked to an **existing HA device** (the Somfy cover device or similar) using `device_id:` on each template entity definition. This causes HA to register them under that device automatically on load — no post-deploy UI steps needed for template entities.
+All entities created by this feature should be assigned to the **Pergola Dach** device (the existing Somfy/Overkiz device) and labelled `Pergola`.
 
-**Prerequisites — ask the user before implementing any step:**
-1. **Device ID** — navigate to the cover device in HA (Settings → Devices → [device]) and copy the UUID from the URL (`/config/devices/device/<UUID>`). This value is set as `device_id:` on every template entity.
-2. **Label name** — the user defines a label (e.g. `"Pergola"`) to apply to all entities for filtering. Labels are assigned via the HA entity registry (one-time UI step after deploy).
+> **⚠️ `device_id:` is NOT supported in template YAML.** HA's config validator rejects it, causing the entire `template:` block to be skipped. Do not add `device_id:` to any template entity definition.
 
 **Rules for implementation:**
-- **Never create a device.** Always attach to an existing device provided by the user.
-- All `template` entity types (`sensor`, `binary_sensor`, `number`, `switch`, `select`) support `device_id:` — add it to every entity definition.
-- `input_*` helpers (`input_boolean`, `input_number`, `input_select`) cannot be assigned to a device from YAML. They get the user-defined label via the entity registry (post-deploy UI step), but no `device_id`.
-- `sensor.pergola_cooling_lower_bound` is on the device as a read-only sensor. It re-derives automatically from slat geometry inputs and has no user-settable counterpart.
+- **Never create a device.** Always attach to the existing Pergola Dach device via the UI.
+- Do **not** add `device_id:` to any `template` entity (`sensor`, `binary_sensor`, `number`, `switch`, `select`).
+- `input_*` helpers (`input_boolean`, `input_number`, `input_select`) also cannot be device-linked from YAML.
+- `sensor.pergola_cooling_lower_bound` is an internal derived constant — assign it to the device via UI like all others.
 
-**Template wrapper pattern:** Because `input_*` helpers cannot be device-linked from YAML, each helper gets a thin template wrapper (`switch`, `number`, or `sensor`) that reads/writes the backend `input_*` entity and carries `device_id:`. This makes the wrapper appear on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged.
+**Template wrapper pattern:** `input_*` helpers cannot be device-linked from YAML, so each helper gets a thin template wrapper (`switch`, `number`, or `sensor`) that reads/writes the backend `input_*` entity. This makes the wrapper appear on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged. Both the wrapper and the backing `input_*` must be assigned and labelled via UI after deploy.
+
+**Post-deployment UI steps (required after every first deploy of new entities):**
+
+1. Open **Settings → Devices & Services → Entities**
+2. Filter by `pergola` to find all pergola entities
+3. For each entity: open it → set **Device** = `Pergola Dach`
+4. For each entity: open it → add **Label** = `Pergola`
+
+> These steps are one-time per entity. Re-deploying the same entity ID preserves existing UI assignments.
 
 ### All entities on the device
 
