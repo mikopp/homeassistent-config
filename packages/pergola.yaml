@@ -1,44 +1,253 @@
-# Pergola roof automation — all helpers, templates, automations, and scripts live here.
-# See pergola-roof-automation.md for the full design and implementation plan.
+# Pergola Dach — full automation package (Phase 1: Foundation)
+# See plans/pergola-roof-automation.md for the complete design and implementation plan.
+#
+# All helpers, template sensors, automations, and scripts for the two Somfy bioclimatic
+# pergola covers (cover.dach_links, cover.dach_rechts) live in this file.
+# Both covers always move together as one unit.
+#
+# Tilt scale:  0 = horizontal/flat (rain protection, max shade)
+#             ~74 = vertical / 90° (default open position, derived from formula)
+#            100 = max_tilt_angle open (hardware maximum, default 122°)
+#
+# All entities under this feature should appear on the "Pergola Dach" virtual device
+# (template entities: assigned automatically via the device: block below;
+#  input_* helpers: must be manually assigned via HA UI after first deploy — see plan Step 1).
 
+# ─────────────────────────────────────────────────────────────────────────────────────
+# INPUT BOOLEANS — on/off toggles
+# ─────────────────────────────────────────────────────────────────────────────────────
 input_boolean:
+
+  # Master switch: when off, all cover movement is suppressed.
+  # The state machine and template sensors keep running so re-enabling acts immediately.
   pergola_automatic_enabled:
     name: Pergola Automatic Enabled
     icon: mdi:sun-clock
-  pergola_frost_hold:
-    name: Pergola Frost Hold
-    icon: mdi:snowflake-alert
-  pergola_post_rain_active:
-    name: Pergola Post-Rain Sequence Active
-    icon: mdi:weather-rainy
 
+  # Heating indicator: on = heating season (let sun through), off = cooling season (block sun).
+  # Can be toggled by the user in the HA UI or written via the HA REST API by an external
+  # system (e.g. Loxone). Does NOT affect state machine transitions — only the cover formula.
+  pergola_heating:
+    name: Pergola Heating
+    icon: mdi:radiator
+
+  # Cooling formula selector (Step 7).
+  # off = perfect-perpendicular (default, standard A_eff ± 90 formula)
+  # on  = safe-zone max-open (optimised — see plan Step 7 for formula details)
+  pergola_cooling_optimized:
+    name: Pergola Cooling Optimized
+    icon: mdi:sine-wave
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# INPUT SELECT — state machine
+# ─────────────────────────────────────────────────────────────────────────────────────
+input_select:
+
+  # The single source of truth for the automation state machine.
+  # Only pergola_state_manager and script.pergola_evaluate_state may write this selector
+  # (except manual overrides to break a deadlock).
+  # States in priority order (highest first):
+  #   frost              — temp below frost threshold; no movement
+  #   rain               — rain active (weather station or cover lock); no movement
+  #   rain_stopped       — rain just ended; recovery script running
+  #   user_override      — cover(s) locked by user; no movement
+  #   no_sun_behind_house — sun below horizon, low elevation, or outside azimuth window
+  #   not_enough_sun     — pergola_sun_shining off for ≥ 5 min (overcast)
+  #   sun_automatik_heating — sun active, heating indicator on
+  #   sun_automatik_cooling — sun active, heating indicator off (default)
+  pergola_automation_state:
+    name: Pergola Automation State
+    icon: mdi:state-machine
+    options:
+      - no_sun_behind_house
+      - frost
+      - rain
+      - rain_stopped
+      - user_override
+      - not_enough_sun
+      - sun_automatik_heating
+      - sun_automatik_cooling
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# INPUT NUMBERS — user-configurable parameters
+# ─────────────────────────────────────────────────────────────────────────────────────
 input_number:
+
+  # ── Frost thresholds ──────────────────────────────────────────────────────────────
+  # Hysteresis pair: frost activates below OFF threshold, clears above ON threshold.
+  # Default spread (2.5 / 3.0) prevents oscillation near the frost boundary.
+
   pergola_frost_off_threshold:
     name: Pergola Frost OFF threshold
-    min: -10
+    # Temp must fall below this value to enter frost state (movement suspended)
+    min: 0
     max: 5
     step: 0.5
     initial: 2.5
     unit_of_measurement: "°C"
     icon: mdi:thermometer-low
+
   pergola_frost_on_threshold:
     name: Pergola Frost ON threshold
-    min: -10
+    # Temp must rise above this value to clear frost state (higher than OFF to avoid hunting)
+    min: 0
     max: 5
     step: 0.5
     initial: 3.0
     unit_of_measurement: "°C"
     icon: mdi:thermometer
+
+  # ── PV / sun detection ────────────────────────────────────────────────────────────
+
   pergola_pv_conversion_factor:
     name: Pergola PV Conversion Factor
+    # Divisor to convert raw PV watt output (sensor.victronsolarcharger_yield_power226)
+    # to equivalent W/m² irradiance.
+    # Default 3.2 is empirically calibrated for 6× Axitec 440W bifacial panels at ~5–10°
+    # tilt, 228° azimuth (bifacial back-gain + near-flat tilt + afternoon-facing geometry).
+    # STC baseline: 2640W / 1000 W/m² = 2.64; adjusted to 3.2 for real-world geometry.
+    # Calibrate in Step 6 field testing on a clear morning.
     min: 1
     max: 6
     step: 0.1
     initial: 3.2
     icon: mdi:solar-panel
 
+  pergola_clearness_factor:
+    name: Pergola Clearness Factor
+    # Fraction of theoretical clear-sky irradiance used as the sun_shining threshold.
+    # Formula: threshold = 1000 × sin(elevation) × clearness_factor
+    # Default 0.9 = 90% of clear-sky; lower to trigger on hazy days, raise to require
+    # brighter sun. Primary calibration knob — see plan Step 6 (Phase 5).
+    min: 0.5
+    max: 1.2
+    step: 0.05
+    initial: 0.9
+    icon: mdi:weather-sunny
+
+  pergola_min_sun_elevation:
+    name: Pergola Min Sun Elevation
+    # Elevation at or below which the state machine enters no_sun_behind_house.
+    # At very low elevation the sun shines *under* the roof regardless of azimuth —
+    # the slat geometry formulas are irrelevant and the covers open to 90°.
+    # Must be > 0° (the sin(elevation) in the sun_shining threshold also uses this guard).
+    min: 1
+    max: 30
+    step: 0.5
+    initial: 10
+    unit_of_measurement: "°"
+    icon: mdi:weather-sunset
+
+  # ── Tilt / hardware geometry ──────────────────────────────────────────────────────
+
+  pergola_max_tilt_angle:
+    name: Pergola Max Tilt Angle
+    # Maximum physical slat rotation in degrees (Somfy hardware limit).
+    # Drives the tilt_position conversion formula: tilt_position = INT(slat_angle / max_tilt × 100 + correction)
+    # and all derived constants (R, PHI, DEADBAND_TILT, COOLING_LOWER_BOUND).
+    # Adjust if the physical stop changes (e.g. after motor recalibration).
+    min: 100
+    max: 150
+    step: 1
+    initial: 122
+    unit_of_measurement: "°"
+    icon: mdi:rotate-right
+
+  pergola_min_heating_slat_angle:
+    name: Pergola Min Heating Slat Angle
+    # Floor slat angle in heating mode — prevents near-parallel slats at dawn where
+    # A_eff approaches 0° and the angle gap between sun and slat is too small to matter.
+    # Default 16° is back-calculated from tilt-position 20:
+    #   (20 − 7) × max_tilt_angle / 100 = 15.86° ≈ 16° at default max_tilt_angle=122°
+    min: 0
+    max: 40
+    step: 1
+    initial: 16
+    unit_of_measurement: "°"
+    icon: mdi:angle-acute
+
+  # ── Location / orientation ────────────────────────────────────────────────────────
+
+  pergola_wall_azimuth:
+    name: Pergola Wall Azimuth
+    # Compass bearing (0°–360°) of the terrasse wall — the direction the pergola faces.
+    # Default 204° = SSW (measured on-site).
+    # Drives two derived constants used throughout the automation:
+    #   AZIMUTH_MIN = wall_azimuth − 90  (default 114°) — eastern edge of sun window
+    #   AZIMUTH_MAX = wall_azimuth + 90  (default 294°) — western edge of sun window
+    # Outside AZIMUTH_MIN–AZIMUTH_MAX the sun cannot hit the terrasse geometrically,
+    # regardless of what any sensor reads.
+    # Also defines the reference direction for the effective sun angle (A_eff) formula.
+    min: 0
+    max: 359
+    step: 1
+    initial: 204
+    unit_of_measurement: "°"
+    icon: mdi:compass
+
+  # ── Slat geometry (used to derive R and PHI) ──────────────────────────────────────
+  # These three inputs feed the shade-overlap geometry (see plan "Derived Internal Constants"):
+  #   R   = sqrt(d² + t²) / w              — overlap ratio
+  #   PHI = degrees(atan(t / d))            — thickness angle offset (default ≈ 8.53°)
+  # R and PHI are used to compute MaxOpenEast, MaxOpenWest, and COOLING_LOWER_BOUND.
+  # sensor.pergola_cooling_lower_bound is re-derived automatically when any of these change.
+
+  pergola_slat_width:
+    name: Pergola Slat Width
+    # Slat face width (w) in cm — the dimension perpendicular to the pivot axis.
+    # Default 22 cm (Somfy bioclimatic standard).
+    min: 5
+    max: 50
+    step: 0.5
+    initial: 22
+    unit_of_measurement: "cm"
+    icon: mdi:ruler
+
+  pergola_slat_pivot_spacing:
+    name: Pergola Slat Pivot Spacing
+    # Pivot-to-pivot spacing (d) in cm — distance between adjacent slat pivot axes.
+    # Default 20 cm (Somfy bioclimatic standard).
+    min: 5
+    max: 40
+    step: 0.5
+    initial: 20
+    unit_of_measurement: "cm"
+    icon: mdi:ruler-square
+
+  pergola_slat_thickness:
+    name: Pergola Slat Thickness
+    # Slat thickness (t) in cm — the fin depth dimension.
+    # Default 3 cm (Somfy bioclimatic standard).
+    min: 0.5
+    max: 10
+    step: 0.5
+    initial: 3
+    unit_of_measurement: "cm"
+    icon: mdi:layers
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# TEMPLATE SENSORS AND BINARY SENSORS
+# ─────────────────────────────────────────────────────────────────────────────────────
 template:
-  - sensor:
+
+  # ── Pergola Dach virtual device ───────────────────────────────────────────────────
+  # All visible status sensors and binary sensors are declared inside this device block
+  # so HA groups them under the "Pergola Dach" device automatically.
+  # input_* helpers cannot be assigned here — they must be manually linked via:
+  #   Settings → Devices & Services → Helpers → [helper] → Change device → Pergola Dach
+  - device:
+      identifiers:
+        - pergola_dach
+      name: "Pergola Dach"
+      model: "Bioclimatic Pergola"
+      manufacturer: "Somfy"
+
+    sensor:
+
+      # ── PV Power ──────────────────────────────────────────────────────────────────
+      # Thin wrapper around the raw Victron solar charger output. Exposes a clean
+      # "pergola" entity for all formulas to reference — if the underlying sensor ID
+      # ever changes, only this sensor needs updating.
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
         state: "{{ states('sensor.victronsolarcharger_yield_power226') | float(0) }}"
@@ -47,31 +256,167 @@ template:
         state_class: measurement
         icon: mdi:solar-panel
 
-  - binary_sensor:
+      # ── Effective Sun Angle (A_eff) ───────────────────────────────────────────────
+      # STUB — formula will be added in Step 3 (Phase 2).
+      # When implemented, A_eff maps the sun's position onto a unified 0°–180° scale:
+      #   0° = East Horizon → 90° = Zenith/Noon → 180° = West Horizon
+      # Used as the primary input for both the cooling and heating slat formulas.
+      # Always computes regardless of pergola_automatic_enabled — useful for monitoring.
+      - name: "Pergola Effective Sun Angle"
+        unique_id: pergola_effective_sun_angle
+        state: "{{ none }}"
+        unit_of_measurement: "°"
+        icon: mdi:angle-acute
+
+      # ── Target Slat Angle ─────────────────────────────────────────────────────────
+      # STUB — formula will be added in Step 3 (Phase 2).
+      # When implemented, shows the calculated slat angle (0°–122°) that the automation
+      # would target at this moment — the raw angular output before hardware correction.
+      # Useful for commissioning without having to inspect cover state.
+      # Always computes regardless of pergola_automatic_enabled.
+      - name: "Pergola Slat Angle"
+        unique_id: pergola_slat_angle
+        state: "{{ none }}"
+        unit_of_measurement: "°"
+        icon: mdi:angle-obtuse
+
+      # ── Target Tilt Position ──────────────────────────────────────────────────────
+      # STUB — formula will be added in Step 3 (Phase 2).
+      # When implemented, shows the hardware-corrected tilt_position (0–100) that will
+      # be sent to cover.dach_links / cover.dach_rechts. Useful for debugging the
+      # formula without triggering actual cover movement.
+      # Always computes regardless of pergola_automatic_enabled.
+      - name: "Pergola Tilt Position"
+        unique_id: pergola_tilt_position
+        state: "{{ none }}"
+        icon: mdi:format-align-middle
+
+    binary_sensor:
+
+      # ── Sun Shining ────────────────────────────────────────────────────────────────
+      # True when measured irradiance (weather station or PV proxy) exceeds the
+      # elevation-adjusted clear-sky threshold × clearness_factor.
+      #
+      # Formula (adapted from Loxone Wetter/Sonnenschein logic):
+      #   effective_radiation = max(
+      #       sensor.wheatherstation_solar_radiation,          # W/m²; goes into shadow in afternoon
+      #       sensor.pergola_pv_power / pv_conversion_factor   # W→W/m² proxy; stays in sun longer
+      #   )
+      #   clear_sky_threshold = 1000 × sin(elevation_rad) × clearness_factor
+      #   sun_is_shining = (effective_radiation > clear_sky_threshold)
+      #                    AND (elevation > min_sun_elevation)
+      #
+      # Taking max() of both sources solves the afternoon shadow problem: whichever
+      # sensor is still in direct sun drives the reading.
+      # 1000 × sin(elevation) is the correct physics baseline for horizontal irradiance.
+      # The elevation guard matches the state machine no_sun_behind_house threshold.
       - name: "Pergola Sun Shining"
         unique_id: pergola_sun_shining
         device_class: light
         state: >
-          {% set solar  = states('sensor.wheatherstation_solar_radiation') | float(0) %}
-          {% set factor = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
-          {% set pv     = states('sensor.pergola_pv_power') | float(0) / factor %}
-          {% set elev   = state_attr('sun.sun', 'elevation') | float(0) %}
-          {% if elev <= 10 %}
+          {% set solar    = states('sensor.wheatherstation_solar_radiation') | float(0) %}
+          {% set factor   = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
+          {% set pv       = states('sensor.pergola_pv_power') | float(0) / factor %}
+          {% set elev     = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% set min_elev = states('input_number.pergola_min_sun_elevation') | float(10) %}
+          {% set clearness = states('input_number.pergola_clearness_factor') | float(0.9) %}
+          {# Elevation guard: at or below min_sun_elevation the state machine enters     #}
+          {# no_sun_behind_house; sun_shining is irrelevant at those angles.             #}
+          {% if elev <= min_elev %}
             false
           {% else %}
-            {% set effective = [solar, pv] | max %}
-            {% set threshold = 1000 * (elev * pi / 180) | sin * 0.9 %}
+            {# Both sources are compared; max() ensures that afternoon PV              #}
+            {# compensates when the weather station falls into building shadow.         #}
+            {% set effective  = [solar, pv] | max %}
+            {# Clear-sky threshold: 1000 W/m² × sin(elevation) × calibration factor.  #}
+            {# Scaling with sin(elevation) is correct physics — irradiance scales       #}
+            {# with the cosine of the zenith angle = sine of the elevation angle.       #}
+            {% set threshold  = 1000 * sin(elev * pi / 180) * clearness %}
             {{ effective > threshold }}
           {% endif %}
 
+  # ── Internal sensor: Cooling Lower Bound ─────────────────────────────────────────
+  # Separate template block (no device: key) so this sensor does NOT appear on the
+  # Pergola Dach device card — it is an internal derived constant, not a user-facing value.
+  #
+  # COOLING_LOWER_BOUND is the ventilation floor for the cooling formula.
+  # It equals MaxOpenWest evaluated at the "flip point" A_eff — the largest A_eff (1°→90°)
+  # where the morning back-face formula (MaxOpenEast = A_eff + PHI + asin(R×sin(A_eff)))
+  # is still ≤ max_tilt − SAFETY_BUFFER (5°), meaning the back-face strategy can safely
+  # provide 100% shade.
+  #
+  # At the flip point, MaxOpenWest (= A_eff_flip + PHI − asin(R×sin(A_eff_flip))) gives
+  # the minimum slat angle that still fully shades overhead/high-east sun via the front face.
+  # This becomes the floor for the afternoon/closing formula, ensuring shade is never lost.
+  #
+  # Derived constants used here (never hardcoded elsewhere):
+  #   w  = input_number.pergola_slat_width          (default 22 cm)
+  #   d  = input_number.pergola_slat_pivot_spacing   (default 20 cm)
+  #   t  = input_number.pergola_slat_thickness       (default 3 cm)
+  #   R  = sqrt(d² + t²) / w                        (default ≈ 0.9193)
+  #   PHI = degrees(atan(t / d))                     (default ≈ 8.53°)
+  #   SAFETY_BUFFER = 5° (fixed, non-configurable)
+  #
+  # Default (w=22, d=20, t=3, max_tilt=122): A_eff_flip ≈ 58°, COOLING_LOWER_BOUND ≈ 15.3°
+  # Re-derives automatically when any geometry input or max_tilt_angle changes.
+  - sensor:
+      - name: "Pergola Cooling Lower Bound"
+        unique_id: pergola_cooling_lower_bound
+        state: >
+          {# ── Derived geometry constants ──────────────────────────────────────── #}
+          {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float(122) %}
+          {% set w        = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d        = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t        = states('input_number.pergola_slat_thickness') | float(3) %}
+          {# R: overlap ratio — how much a slat overlaps its neighbour at 90°         #}
+          {% set R   = ((d**2 + t**2) ** 0.5) / w %}
+          {# PHI: angle correction for slat thickness; shifts the MaxOpenEast/West    #}
+          {# formulas to account for the finite fin depth (default ≈ 8.53°).          #}
+          {% set PHI = atan(t / d) * (180 / pi) %}
+          {# SAFETY_BUFFER: margin below max_tilt at which the back-face strategy     #}
+          {# is declared unsafe; flip occurs ~2 update cycles before shade loss.      #}
+          {% set SAFETY = 5 %}
+          {# ── Find the flip point (A_eff_flip) ──────────────────────────────────── #}
+          {# Iterate A_eff from 1° to 90° in 1° steps.                               #}
+          {# MaxOpenEast = minimum back-face slat angle for 100% shade from eastern sun #}
+          {# = A_eff + PHI + asin(R × sin(A_eff))                                   #}
+          {# We record the LAST (= largest) A_eff for which MaxOpenEast ≤ max_tilt − 5 #}
+          {% set ns = namespace(flip=1) %}
+          {% for a in range(1, 91) %}
+            {% set max_open_east = a + PHI + asin(R * sin(a * pi / 180)) * (180 / pi) %}
+            {% if max_open_east <= max_tilt - SAFETY %}
+              {% set ns.flip = a %}
+            {% endif %}
+          {% endfor %}
+          {# ── Compute COOLING_LOWER_BOUND from the flip point ──────────────────── #}
+          {# MaxOpenWest at A_eff_flip = A_eff_flip + PHI − asin(R × sin(A_eff_flip)) #}
+          {# This is the highest front-face angle that still blocks high-east/noon sun #}
+          {# when the back-face strategy becomes unusable.                             #}
+          {% set a_flip = ns.flip %}
+          {{ (a_flip + PHI - asin(R * sin(a_flip * pi / 180)) * (180 / pi)) | round(2) }}
+        unit_of_measurement: "°"
+        icon: mdi:angle-acute
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# AUTOMATIONS
+# ─────────────────────────────────────────────────────────────────────────────────────
 automation:
-  # Inactivity watchdog — fires every 5 minutes and evaluates whether any cover or
-  # lock entity has been updated in the last 5 minutes. If nothing has changed,
-  # sends stop_cover_tilt to force the Somfy firmware to emit a fresh state report.
-  # This is critical for the rain-lock lifecycle: after rain stops, the Somfy lock
-  # originator timer counts down from 900 s to 0 only on motion events. Without this
-  # watchdog, the lock originator would appear stuck indefinitely and the state
-  # machine would never see rain clearing.
+
+  # ── Inactivity Watchdog: Dach Links ───────────────────────────────────────────────
+  # Sends stop_cover_tilt to cover.dach_links every 5 minutes when no cover or lock
+  # entity has been updated in the last 5 minutes.
+  #
+  # Why this is critical: the Somfy device does not push state changes proactively.
+  # After rain stops, the lock timer counts down from 900 s to 0 internally, but HA
+  # only learns the current value when we force a state report via stop_cover_tilt.
+  # Without this watchdog, the lock originator would appear stuck (= rain) indefinitely
+  # and the state machine would never see the lock clearing.
+  #
+  # State-based suppression: the watchdog is skipped when the state machine is in an
+  # actively-moving state (sun_automatik_cooling, sun_automatik_heating, rain_stopped).
+  # Both watchdog and cover_response automations share the same /5 time_pattern trigger;
+  # suppressing the watchdog during active movement prevents stop_cover_tilt from
+  # aborting a movement command mid-travel (race condition — see plan Step 2 notes).
   - id: '1771360145720'
     alias: 'Inactivity Watchdog: Dach Links'
     description: >
@@ -100,7 +445,7 @@ automation:
       # evaluation time — the watchdog condition would pass and send stop_cover_tilt
       # while the movement command is already in flight, aborting mid-travel.
       # State-based suppression eliminates the race at the root.
-      # Safe before Step 1: states() returns 'unknown' when the entity does not
+      # Safe before Step 2: states() returns 'unknown' when the entity does not
       # exist yet, which is not in the exclusion list, so the watchdog fires normally.
       - condition: template
         value_template: >
@@ -111,6 +456,8 @@ automation:
         target:
           entity_id: cover.dach_links
 
+  # ── Inactivity Watchdog: Dach Rechts ──────────────────────────────────────────────
+  # Identical logic as the Dach Links watchdog — see comment above.
   - id: '1771361016291'
     alias: 'Inactivity Watchdog: Dach Rechts'
     description: >
@@ -142,9 +489,13 @@ automation:
         target:
           entity_id: cover.dach_rechts
 
-  # Immediate lock originator reaction — fires the moment the lock originator changes.
-  # Sending stop_cover_tilt forces a fresh state report from the Somfy firmware so HA
-  # sees the updated lock and tilt values without waiting for the next watchdog cycle.
+  # ── Lock Originator Responder: Dach Links ─────────────────────────────────────────
+  # Fires immediately when sensor.dach_links_priority_lock_originator changes state.
+  # Sending stop_cover_tilt causes the Somfy to emit a fresh state report, so HA
+  # learns the current tilt position and lock state *before* the state manager evaluates
+  # the lock transition.
+  # This complements the state manager (Step 2): it ensures the most current tilt data
+  # is available the moment the lock changes, without waiting for the next watchdog cycle.
   - id: '1771748333394'
     alias: 'Dach Links: Update state when lock originator changes'
     triggers:
@@ -158,6 +509,8 @@ automation:
           entity_id: cover.dach_links
     mode: single
 
+  # ── Lock Originator Responder: Dach Rechts ────────────────────────────────────────
+  # Same as Dach Links responder — see comment above.
   - id: '1771748414999'
     alias: 'Dach Rechts: Update state when lock originator changes'
     triggers:
@@ -171,7 +524,8 @@ automation:
           entity_id: cover.dach_rechts
     mode: single
 
-# script key will be added in a later step.
+# script key will be added in Step 3 (Phase 2) — script.pergola_set_slat_angle
+# and in Step 2 — script.pergola_evaluate_state and script.pergola_post_rain_recovery.
 # script:
-#   pergola_post_rain_recovery:
+#   pergola_set_slat_angle:
 #     ...
