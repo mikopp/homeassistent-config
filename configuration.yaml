@@ -14,6 +14,16 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
+lovelace:
+  mode: storage # Keeps your main dashboard editable in the UI
+  dashboards:
+    pergola-management: # The URL will be /pergola-management
+      mode: yaml
+      title: Pergola Control
+      icon: mdi:sun-angle
+      filename: dashboards/Pergola-management.yaml
+      show_in_sidebar: true
+
 rest_command:
   update_loxone:
     url: "http://homeassist:home@192.168.1.92/jdev/sps/io/{{ parameter }}"

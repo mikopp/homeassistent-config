@@ -1,0 +1,5 @@
+views:
+  - title: Main View
+    cards:
+      - type: entities
+        !include ../packages/pergola_card.yaml
