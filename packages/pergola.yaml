@@ -9,11 +9,9 @@
 #             ~74 = vertical / 90° (default open position, derived from formula)
 #            100 = max_tilt_angle open (hardware maximum, default 122°)
 #
-# All entities under this feature should appear on the "Pergola Dach" device.
-# device_id: is not supported in template YAML — both template entities and input_* helpers
-# must be assigned to the device and labelled manually via HA UI after each first deploy
-# (Settings → Devices & Services → Entities → open entity → set Device + Label).
-# See plans/pergola-roof-automation.md § "Pergola Device" for the full post-deploy checklist.
+# All entities under this feature are grouped via group.pergola_dach (built-in group integration).
+# No post-deploy UI steps required — the group is fully defined in YAML.
+# See plans/pergola-roof-automation.md § "Pergola Device" for the group design rationale.
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT BOOLEANS — on/off toggles
@@ -232,18 +230,14 @@ input_number:
 # ─────────────────────────────────────────────────────────────────────────────────────
 template:
 
-  # ── Pergola Dach user-facing entities ────────────────────────────────────────────
-  # device_id: is not valid in template YAML — HA rejects it at config load time.
-  # After deploy, assign each entity to the Pergola Dach device and apply the
-  # "Pergola" label via Settings → Devices & Services → Entities (one-time UI step).
+  # ── Pergola Dach computed sensors ────────────────────────────────────────────────
+  # These template sensors compute real values (sun angle, slat position, etc.).
+  # They are NOT wrappers for input_* helpers — those are used directly.
+  # All entities are grouped via group.pergola_dach (defined at the bottom of this
+  # file) — no post-deploy UI steps required.
   #
-  # input_* helpers (input_boolean, input_number, input_select) cannot be assigned to
-  # a device in YAML at all — template wrappers (switch, number) are provided below
-  # as interactive controls backed by the input_* entities. Automations continue to
-  # reference the input_* entity IDs unchanged.
-  #
-  # sensor.pergola_cooling_lower_bound is kept in a separate block below without a
-  # device_id — it is an internal derived constant, not a user-facing value.
+  # sensor.pergola_cooling_lower_bound is kept in a separate block below —
+  # it is an internal derived constant, not a user-facing value.
   - sensor:
 
       # ── PV Power ──────────────────────────────────────────────────────────────────
@@ -293,15 +287,6 @@ template:
         state: "{{ none }}"
         icon: mdi:format-align-middle
 
-      # ── Automation State (read-only view) ─────────────────────────────────────────
-      # Read-only mirror of input_select.pergola_automation_state on the device card.
-      # Only the state manager automation (Step 2) may write the backend select.
-      # To manually break a deadlock, use the backend entity directly via the entity
-      # registry or Developer Tools.
-      - name: "Pergola Automation State"
-        unique_id: pergola_automation_state_tpl
-        state: "{{ states('input_select.pergola_automation_state') }}"
-        icon: mdi:state-machine
 
     binary_sensor:
 
@@ -347,253 +332,11 @@ template:
             {{ effective > threshold }}
           {% endif %}
 
-    switch:
-
-      # ── Master switch wrapper ──────────────────────────────────────────────────────
-      # Reads/writes input_boolean.pergola_automatic_enabled. When off, all cover
-      # movement is suppressed; the state machine and sensors keep running.
-      - name: "Pergola Automatic Enabled"
-        unique_id: pergola_automatic_enabled_tpl
-        icon: mdi:sun-clock
-        state: "{{ is_state('input_boolean.pergola_automatic_enabled', 'on') }}"
-        turn_on:
-          action: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.pergola_automatic_enabled
-        turn_off:
-          action: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.pergola_automatic_enabled
-
-      # ── Heating mode wrapper ───────────────────────────────────────────────────────
-      # Reads/writes input_boolean.pergola_heating.
-      # on = heating season (let sun through), off = cooling season (block sun).
-      # Can also be written via HA REST API by an external system (e.g. Loxone).
-      - name: "Pergola Heating"
-        unique_id: pergola_heating_tpl
-        icon: mdi:radiator
-        state: "{{ is_state('input_boolean.pergola_heating', 'on') }}"
-        turn_on:
-          action: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.pergola_heating
-        turn_off:
-          action: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.pergola_heating
-
-      # ── Cooling formula selector wrapper ──────────────────────────────────────────
-      # Reads/writes input_boolean.pergola_cooling_optimized.
-      # off = perfect-perpendicular (default), on = safe-zone max-open (Step 7).
-      - name: "Pergola Cooling Optimized"
-        unique_id: pergola_cooling_optimized_tpl
-        icon: mdi:sine-wave
-        state: "{{ is_state('input_boolean.pergola_cooling_optimized', 'on') }}"
-        turn_on:
-          action: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.pergola_cooling_optimized
-        turn_off:
-          action: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.pergola_cooling_optimized
-
-    number:
-
-      # ── Frost OFF threshold wrapper ────────────────────────────────────────────────
-      # Temp must fall below this value to enter frost state (movement suspended).
-      - name: "Pergola Frost OFF Threshold"
-        unique_id: pergola_frost_off_threshold_tpl
-        icon: mdi:thermometer-low
-        state: "{{ states('input_number.pergola_frost_off_threshold') | float(2.5) }}"
-        min: 0
-        max: 5
-        step: 0.5
-        unit_of_measurement: "°C"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_frost_off_threshold
-          data:
-            value: "{{ value }}"
-
-      # ── Frost ON threshold wrapper ─────────────────────────────────────────────────
-      # Temp must rise above this value to clear frost state (higher than OFF to avoid
-      # oscillation near the frost boundary).
-      - name: "Pergola Frost ON Threshold"
-        unique_id: pergola_frost_on_threshold_tpl
-        icon: mdi:thermometer
-        state: "{{ states('input_number.pergola_frost_on_threshold') | float(3.0) }}"
-        min: 0
-        max: 5
-        step: 0.5
-        unit_of_measurement: "°C"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_frost_on_threshold
-          data:
-            value: "{{ value }}"
-
-      # ── PV conversion factor wrapper ───────────────────────────────────────────────
-      # Divisor to convert raw PV watts to equivalent W/m² irradiance.
-      # Default 3.2; calibrate in Step 6 field testing on a clear morning.
-      - name: "Pergola PV Conversion Factor"
-        unique_id: pergola_pv_conversion_factor_tpl
-        icon: mdi:solar-panel
-        state: "{{ states('input_number.pergola_pv_conversion_factor') | float(3.2) }}"
-        min: 1
-        max: 6
-        step: 0.1
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_pv_conversion_factor
-          data:
-            value: "{{ value }}"
-
-      # ── Clearness factor wrapper ───────────────────────────────────────────────────
-      # Fraction of theoretical clear-sky irradiance used as the sun_shining threshold.
-      # Primary calibration knob — see plan Step 6 (Phase 5).
-      - name: "Pergola Clearness Factor"
-        unique_id: pergola_clearness_factor_tpl
-        icon: mdi:weather-sunny
-        state: "{{ states('input_number.pergola_clearness_factor') | float(0.9) }}"
-        min: 0.5
-        max: 1.2
-        step: 0.05
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_clearness_factor
-          data:
-            value: "{{ value }}"
-
-      # ── Min sun elevation wrapper ──────────────────────────────────────────────────
-      # Elevation at or below which the state machine enters no_sun_behind_house.
-      - name: "Pergola Min Sun Elevation"
-        unique_id: pergola_min_sun_elevation_tpl
-        icon: mdi:weather-sunset
-        state: "{{ states('input_number.pergola_min_sun_elevation') | float(10) }}"
-        min: 1
-        max: 30
-        step: 0.5
-        unit_of_measurement: "°"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_min_sun_elevation
-          data:
-            value: "{{ value }}"
-
-      # ── Max tilt angle wrapper ─────────────────────────────────────────────────────
-      # Maximum physical slat rotation in degrees (Somfy hardware limit).
-      # Drives the tilt_position conversion formula and all derived constants.
-      - name: "Pergola Max Tilt Angle"
-        unique_id: pergola_max_tilt_angle_tpl
-        icon: mdi:rotate-right
-        state: "{{ states('input_number.pergola_max_tilt_angle') | float(122) }}"
-        min: 100
-        max: 150
-        step: 1
-        unit_of_measurement: "°"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_max_tilt_angle
-          data:
-            value: "{{ value }}"
-
-      # ── Min heating slat angle wrapper ────────────────────────────────────────────
-      # Floor slat angle in heating mode — prevents near-parallel slats at dawn.
-      - name: "Pergola Min Heating Slat Angle"
-        unique_id: pergola_min_heating_slat_angle_tpl
-        icon: mdi:angle-acute
-        state: "{{ states('input_number.pergola_min_heating_slat_angle') | float(16) }}"
-        min: 0
-        max: 40
-        step: 1
-        unit_of_measurement: "°"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_min_heating_slat_angle
-          data:
-            value: "{{ value }}"
-
-      # ── Wall azimuth wrapper ───────────────────────────────────────────────────────
-      # Compass bearing of the terrasse wall. Drives AZIMUTH_MIN/MAX (wall ± 90°)
-      # and the A_eff coordinate system reference direction.
-      - name: "Pergola Wall Azimuth"
-        unique_id: pergola_wall_azimuth_tpl
-        icon: mdi:compass
-        state: "{{ states('input_number.pergola_wall_azimuth') | float(204) }}"
-        min: 0
-        max: 359
-        step: 1
-        unit_of_measurement: "°"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_wall_azimuth
-          data:
-            value: "{{ value }}"
-
-      # ── Slat width wrapper ────────────────────────────────────────────────────────
-      # Slat face width (w) in cm — used to derive geometry constants R and PHI.
-      - name: "Pergola Slat Width"
-        unique_id: pergola_slat_width_tpl
-        icon: mdi:ruler
-        state: "{{ states('input_number.pergola_slat_width') | float(22) }}"
-        min: 5
-        max: 50
-        step: 0.5
-        unit_of_measurement: "cm"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_slat_width
-          data:
-            value: "{{ value }}"
-
-      # ── Slat pivot spacing wrapper ────────────────────────────────────────────────
-      # Pivot-to-pivot spacing (d) in cm — used to derive geometry constants R and PHI.
-      - name: "Pergola Slat Pivot Spacing"
-        unique_id: pergola_slat_pivot_spacing_tpl
-        icon: mdi:ruler-square
-        state: "{{ states('input_number.pergola_slat_pivot_spacing') | float(20) }}"
-        min: 5
-        max: 40
-        step: 0.5
-        unit_of_measurement: "cm"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_slat_pivot_spacing
-          data:
-            value: "{{ value }}"
-
-      # ── Slat thickness wrapper ────────────────────────────────────────────────────
-      # Slat thickness (t) in cm — used to derive geometry constants R and PHI.
-      - name: "Pergola Slat Thickness"
-        unique_id: pergola_slat_thickness_tpl
-        icon: mdi:layers
-        state: "{{ states('input_number.pergola_slat_thickness') | float(3) }}"
-        min: 0.5
-        max: 10
-        step: 0.5
-        unit_of_measurement: "cm"
-        set_value:
-          action: input_number.set_value
-          target:
-            entity_id: input_number.pergola_slat_thickness
-          data:
-            value: "{{ value }}"
 
   # ── Internal sensor: Cooling Lower Bound ─────────────────────────────────────────
-  # Read-only derived constant on the device. device_id links it to the Pergola device
-  # so it is visible on the device page, but it has no user-settable counterpart —
-  # it re-derives automatically whenever slat geometry or max_tilt_angle changes.
+  # Read-only derived constant. Included in group.pergola_dach.
+  # Has no user-settable counterpart — re-derives automatically whenever slat
+  # geometry or max_tilt_angle changes.
   #
   # COOLING_LOWER_BOUND is the ventilation floor for the cooling formula.
   # It equals MaxOpenWest evaluated at the "flip point" A_eff — the largest A_eff (1°→90°)
@@ -785,3 +528,42 @@ automation:
 # script:
 #   pergola_set_slat_angle:
 #     ...
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# GROUP — logical grouping of all pergola entities
+# ─────────────────────────────────────────────────────────────────────────────────────
+group:
+
+  # Groups all pergola helpers, template sensors, and binary sensors into a single
+  # logical entity (group.pergola_dach). Shown as a combined card on the dashboard
+  # and usable as a target in automations. No post-deploy UI steps required.
+  #
+  # When new entities are added to this feature, add them here as well.
+  pergola_dach:
+    name: Pergola Dach
+    entities:
+      # ── On/off toggles ────────────────────────────────────────────────────────────
+      - input_boolean.pergola_automatic_enabled
+      - input_boolean.pergola_heating
+      - input_boolean.pergola_cooling_optimized
+      # ── State machine ─────────────────────────────────────────────────────────────
+      - input_select.pergola_automation_state
+      # ── User-configurable parameters ──────────────────────────────────────────────
+      - input_number.pergola_frost_off_threshold
+      - input_number.pergola_frost_on_threshold
+      - input_number.pergola_pv_conversion_factor
+      - input_number.pergola_clearness_factor
+      - input_number.pergola_min_sun_elevation
+      - input_number.pergola_max_tilt_angle
+      - input_number.pergola_min_heating_slat_angle
+      - input_number.pergola_wall_azimuth
+      - input_number.pergola_slat_width
+      - input_number.pergola_slat_pivot_spacing
+      - input_number.pergola_slat_thickness
+      # ── Computed / read-only sensors ──────────────────────────────────────────────
+      - sensor.pergola_pv_power
+      - sensor.pergola_effective_sun_angle
+      - sensor.pergola_slat_angle
+      - sensor.pergola_tilt_position
+      - binary_sensor.pergola_sun_shining
+      - sensor.pergola_cooling_lower_bound
