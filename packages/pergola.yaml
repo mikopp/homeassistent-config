@@ -560,7 +560,6 @@ group:
   # When new entities are added to this feature, add them here as well.
   pergola_dach:
     name: Pergola Dach
-    unique_id: b5e2b990-52fa-47cd-94e2-8e511276e506
     entities:
       # ── On/off toggles ────────────────────────────────────────────────────────────
       - input_boolean.pergola_automatic_enabled

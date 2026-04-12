@@ -1,0 +1,33 @@
+title: Pergola Dach
+show_header_toggle: false
+entities:
+  - type: section
+    label: "On/Off Toggles"
+  - input_boolean.pergola_automatic_enabled
+  - input_boolean.pergola_heating
+  - input_boolean.pergola_cooling_optimized
+  - type: section
+    label: "State of Automation"
+  - input_select.pergola_automation_state
+  # ── Computed / read-only sensors ──────────────────────────────────────────────
+  - type: section
+    label: "States and Sensors"
+  - sensor.pergola_pv_power
+  - sensor.pergola_effective_sun_angle
+  - sensor.pergola_slat_angle
+  - sensor.pergola_tilt_position
+  - binary_sensor.pergola_sun_shining
+  - sensor.pergola_cooling_lower_bound
+  - type: section
+    label: "Parameters"
+  - input_number.pergola_frost_off_threshold
+  - input_number.pergola_frost_on_threshold
+  - input_number.pergola_pv_conversion_factor
+  - input_number.pergola_shading_sensitivity
+  - input_number.pergola_min_sun_elevation
+  - input_number.pergola_max_tilt_angle
+  - input_number.pergola_min_heating_slat_angle
+  - input_number.pergola_wall_azimuth
+  - input_number.pergola_slat_width
+  - input_number.pergola_slat_pivot_spacing
+  - input_number.pergola_slat_thickness
