@@ -94,7 +94,9 @@ sun behind house when:     sun.azimuth < AZIMUTH_MIN  OR  sun.azimuth > AZIMUTH_
 
 All entities created by this feature will appear under a single HA virtual device named **"Pergola Dach"** (`identifier: pergola_dach`). This allows the user to find and control everything in one place via Settings → Devices.
 
-**Implementation note:** HA's `template:` integration supports a `device:` block that groups template entities under a virtual device directly in YAML. `input_*` helpers (config values) do not support YAML device assignment — they must be manually assigned to the "Pergola Dach" device via the HA UI after creation (Settings → Devices & Services → [each helper] → Change device).
+**Implementation approach:** The `template:` integration supports a `device:` block at the list-item level (sibling to `sensor:`, `number:`, `switch:`, etc.) that creates a virtual device and groups all entities within the same list item under it. `input_*` helpers cannot be assigned to a device in YAML, so each helper gets a thin template wrapper (`switch`, `number`, `sensor`) that reads/writes the backend `input_*` entity and appears on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged.
+
+**Note:** An earlier attempt used `device:` inside individual sensor definitions — that caused a config error. The current structure puts `device:` as a sibling to the entity-type keys, which is the correct HA syntax. `sensor.pergola_cooling_lower_bound` is intentionally kept in a separate template block (no `device:`) so it does not appear on the device card.
 
 ### All entities on the device
 
@@ -518,16 +520,15 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now — they exist on the device from day one
 - All template sensors and binary sensors (`sensor.pergola_pv_power`, `sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) must share the same `template:` block that carries the `device:` declaration
 
-**Post-deploy (one-time, manual via HA UI):**
-After first `git pull` and HA restart, manually assign each `input_*` helper to the "Pergola Dach" device:
-Settings → Devices & Services → Helpers → [select each helper] → change device → "Pergola Dach"
-Helpers to assign: `pergola_automatic_enabled`, `pergola_heating`, `pergola_automation_state`, `pergola_frost_off_threshold`, `pergola_frost_on_threshold`, `pergola_pv_conversion_factor`, `pergola_max_tilt_angle`, `pergola_min_sun_elevation`, `pergola_min_heating_slat_angle`, `pergola_cooling_optimized`, `pergola_wall_azimuth`, `pergola_clearness_factor`, `pergola_slat_width`, `pergola_slat_pivot_spacing`, `pergola_slat_thickness`
+**Post-deploy:** No manual UI assignment needed. The `device:` block in the template section creates the virtual device automatically. Template wrapper entities appear on the device card immediately after HA reloads the config. Backend `input_*` helpers remain ungrouped (as expected — they are internal); optionally assign them to the "Terrasse" area via the entity registry for tidiness.
 
 **Verify:**
-- Settings → Devices → "Pergola Dach" shows all 21 entities (15 input_* helpers + 4 template sensors + 1 binary_sensor + 1 internal template sensor `sensor.pergola_cooling_lower_bound`; the 15 input_* helpers appear after manual UI assignment)
-- `input_select.pergola_automation_state` shows all eight options
+- Settings → Devices → "Pergola Dach" shows all 20 entities: 4 template sensors + 1 binary_sensor + 3 template switches + 11 template numbers + 1 automation state sensor
+- `sensor.pergola_cooling_lower_bound` does NOT appear on the device card (correct — internal)
+- Backend `input_*` helpers remain ungrouped in Settings → Helpers (expected)
 - `binary_sensor.pergola_sun_shining` changes state plausibly with sun conditions
 - `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` report `unknown` (correct at this stage)
+- Sliders and toggles on the device card write through to the backend `input_*` entities
 
 ---
 
