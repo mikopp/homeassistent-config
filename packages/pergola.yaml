@@ -230,19 +230,11 @@ input_number:
 # ─────────────────────────────────────────────────────────────────────────────────────
 template:
 
-  # ── Pergola Dach virtual device ───────────────────────────────────────────────────
-  # All visible status sensors and binary sensors are declared inside this device block
-  # so HA groups them under the "Pergola Dach" device automatically.
-  # input_* helpers cannot be assigned here — they must be manually linked via:
-  #   Settings → Devices & Services → Helpers → [helper] → Change device → Pergola Dach
-  - device:
-      identifiers:
-        - pergola_dach
-      name: "Pergola Dach"
-      model: "Bioclimatic Pergola"
-      manufacturer: "Somfy"
-
-    sensor:
+  # ── Pergola Dach sensors ──────────────────────────────────────────────────────────
+  # HA YAML does not support device: grouping for template entities.
+  # After deployment, link each entity to the "Pergola Dach" device via:
+  #   Settings → Devices & Services → [entity] → Change device
+  - sensor:
 
       # ── PV Power ──────────────────────────────────────────────────────────────────
       # Thin wrapper around the raw Victron solar charger output. Exposes a clean
