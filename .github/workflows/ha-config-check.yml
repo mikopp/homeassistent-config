@@ -2,9 +2,6 @@ name: Home Assistant Config Check
 
 # Run on every push and on every pull-request targeting any branch.
 on:
-  push:
-    branches:
-      - master
   pull_request:
   workflow_dispatch:
 
