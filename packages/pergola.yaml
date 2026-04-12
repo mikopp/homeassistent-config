@@ -52,7 +52,7 @@ input_select:
   #   rain_stopped       — rain just ended; recovery script running
   #   user_override      — cover(s) locked by user; no movement
   #   no_sun_behind_house — sun below horizon, low elevation, or outside azimuth window
-  #   not_enough_sun     — pergola_sun_shining off for ≥ 5 min (overcast)
+  #   not_enough_sun     — pergola_sun_shining off (sensor has built-in 5 min delay_off)
   #   sun_automatik_heating — sun active, heating indicator on
   #   sun_automatik_cooling — sun active, heating indicator off (default)
   pergola_automation_state:
@@ -113,12 +113,13 @@ input_number:
     initial: 3.2
     icon: mdi:solar-panel
 
-  pergola_clearness_factor:
-    name: Pergola Clearness Factor
-    # Fraction of theoretical clear-sky irradiance used as the sun_shining threshold.
-    # Formula: threshold = 1000 × sin(elevation) × clearness_factor
-    # Default 0.9 = 90% of clear-sky; lower to trigger on hazy days, raise to require
-    # brighter sun. Primary calibration knob — see plan Step 6 (Phase 5).
+  pergola_shading_sensitivity:
+    name: Pergola Shading Sensitivity
+    # Sensitivity knob for the sun_shining shading threshold.
+    # Formula: shading_threshold = 512 × sin(elevation) × shading_sensitivity
+    # Default 0.9: lower values → shading activates earlier (hazy days); higher
+    # values → requires brighter sun to trigger shading. Primary calibration knob
+    # — see plan Step 6 (Phase 5).
     min: 0.5
     max: 1.2
     step: 0.05
@@ -291,45 +292,63 @@ template:
     binary_sensor:
 
       # ── Sun Shining ────────────────────────────────────────────────────────────────
-      # True when measured irradiance (weather station or PV proxy) exceeds the
-      # elevation-adjusted clear-sky threshold × clearness_factor.
+      # True when the sun is shining strongly enough that the terrasse needs shading.
+      # This answers: "is it sunny enough to shade?"
       #
-      # Formula (adapted from Loxone Wetter/Sonnenschein logic):
+      # Adapted from Loxone Wetter/Sonnenschein logic:
       #   effective_radiation = max(
       #       sensor.wheatherstation_solar_radiation,          # W/m²; goes into shadow in afternoon
       #       sensor.pergola_pv_power / pv_conversion_factor   # W→W/m² proxy; stays in sun longer
       #   )
-      #   clear_sky_threshold = 1000 × sin(elevation_rad) × clearness_factor
-      #   sun_is_shining = (effective_radiation > clear_sky_threshold)
+      #   shading_threshold = 512 × sin(elevation_rad) × shading_sensitivity
+      #   sun_is_shining = (effective_radiation > shading_threshold)
+      #                    OR (uv_index ≥ 3)           ← UV catches hazy high-UV days
       #                    AND (elevation > min_sun_elevation)
       #
       # Taking max() of both sources solves the afternoon shadow problem: whichever
       # sensor is still in direct sun drives the reading.
-      # 1000 × sin(elevation) is the correct physics baseline for horizontal irradiance.
+      #
+      # Why 512 W/m² × sin(elevation)?
+      #   The theoretical clear-sky horizontal irradiance is ~1000 × sin(elevation).
+      #   In Central Austria (≈47°N), real-world peak irradiance is significantly lower
+      #   than the 1000 W/m² STC reference. 512 W/m² is the Loxone-calibrated baseline
+      #   that represents "enough sun to shade" at solar noon — roughly half the
+      #   theoretical maximum. shading_sensitivity (default 0.9) provides fine-tuning.
+      #
+      # Hysteresis (prevents rapid toggling when sun is near the threshold):
+      #   delay_on:  1 min  — must be true for 1 min before shading activates
+      #   delay_off: 5 min  — must be false for 5 min before shading deactivates
+      #   The state machine no_sun_behind_house threshold is separate — it only depends
+      #   on sun position and is not delayed.
       # The elevation guard matches the state machine no_sun_behind_house threshold.
       - name: "Pergola Sun Shining"
         unique_id: pergola_sun_shining
         device_class: light
+        delay_on: "00:01:00"
+        delay_off: "00:05:00"
         state: >
-          {% set solar    = states('sensor.wheatherstation_solar_radiation') | float(0) %}
-          {% set factor   = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
-          {% set pv       = states('sensor.pergola_pv_power') | float(0) / factor %}
-          {% set elev     = state_attr('sun.sun', 'elevation') | float(0) %}
-          {% set min_elev = states('input_number.pergola_min_sun_elevation') | float(10) %}
-          {% set clearness = states('input_number.pergola_clearness_factor') | float(0.9) %}
+          {% set solar       = states('sensor.wheatherstation_solar_radiation') | float(0) %}
+          {% set factor      = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
+          {% set pv          = states('sensor.pergola_pv_power') | float(0) / factor %}
+          {% set elev        = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% set min_elev    = states('input_number.pergola_min_sun_elevation') | float(10) %}
+          {% set sensitivity = states('input_number.pergola_shading_sensitivity') | float(0.9) %}
+          {% set uv          = states('sensor.wheatherstation_uv_index') | float(0) %}
           {# Elevation guard: at or below min_sun_elevation the state machine enters     #}
-          {# no_sun_behind_house; sun_shining is irrelevant at those angles.             #}
+          {# no_sun_behind_house; shading is irrelevant at those angles.                 #}
           {% if elev <= min_elev %}
             false
           {% else %}
             {# Both sources are compared; max() ensures that afternoon PV              #}
             {# compensates when the weather station falls into building shadow.         #}
             {% set effective  = [solar, pv] | max %}
-            {# Clear-sky threshold: 1000 W/m² × sin(elevation) × calibration factor.  #}
-            {# Scaling with sin(elevation) is correct physics — irradiance scales       #}
-            {# with the cosine of the zenith angle = sine of the elevation angle.       #}
-            {% set threshold  = 1000 * sin(elev * pi / 180) * clearness %}
-            {{ effective > threshold }}
+            {# Shading threshold: 512 W/m² × sin(elevation) × sensitivity.            #}
+            {# 512 is the Loxone-derived "shade needed" baseline for Central Austria   #}
+            {# (≈47°N); sin(elevation) scales it correctly with sun angle.             #}
+            {% set threshold  = 512 * sin(elev * pi / 180) * sensitivity %}
+            {# UV fallback: UV index ≥ 3 (WHO moderate) means shading is needed even  #}
+            {# on hazy days where irradiance is low but UV is still significant.       #}
+            {{ effective > threshold or uv >= 3 }}
           {% endif %}
 
 
@@ -541,6 +560,7 @@ group:
   # When new entities are added to this feature, add them here as well.
   pergola_dach:
     name: Pergola Dach
+    unique_id: b5e2b990-52fa-47cd-94e2-8e511276e506
     entities:
       # ── On/off toggles ────────────────────────────────────────────────────────────
       - input_boolean.pergola_automatic_enabled
@@ -552,7 +572,7 @@ group:
       - input_number.pergola_frost_off_threshold
       - input_number.pergola_frost_on_threshold
       - input_number.pergola_pv_conversion_factor
-      - input_number.pergola_clearness_factor
+      - input_number.pergola_shading_sensitivity
       - input_number.pergola_min_sun_elevation
       - input_number.pergola_max_tilt_angle
       - input_number.pergola_min_heating_slat_angle
