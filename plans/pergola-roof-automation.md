@@ -150,7 +150,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 | `input_number.pergola_min_heating_slat_angle` | number | 16 ° | Floor slat angle in heating mode — prevents near-parallel slats at dawn (derived: tilt=20 → 15.86° ≈ 16°) |
 | `input_boolean.pergola_cooling_optimized` | toggle | off | Cooling angle mode: off = standard ($A_{eff}$ ± 90); on = optimized (safe-zone max-open) — see Step 7 |
 | `input_number.pergola_wall_azimuth` | number | 204 ° | Compass bearing of the terrasse wall (SSW). Drives the azimuth window (wall_azimuth ± 90°) and the A_eff coordinate system |
-| `input_number.pergola_clearness_factor` | number | 0.9 | Clearness factor for the sun_shining threshold (0.9 = 90% of theoretical clear-sky); primary calibration knob for Step 6 |
+| `input_number.pergola_shading_sensitivity` | number | 0.9 | Sensitivity knob for the shading threshold (0.9 = 90% of baseline); lower → shade earlier on hazy days, higher → requires brighter sun; primary calibration knob for Step 6 |
 | `input_number.pergola_slat_width` | number | 22 cm | Slat face width (w); used to derive geometry constants R and PHI |
 | `input_number.pergola_slat_pivot_spacing` | number | 20 cm | Pivot-to-pivot spacing (d); used to derive geometry constants R and PHI |
 | `input_number.pergola_slat_thickness` | number | 3 cm | Slat thickness (t); used to derive geometry constants R and PHI |
@@ -162,7 +162,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 | `sensor.pergola_effective_sun_angle` | ° | Effective sun angle ($A_{eff}$): 0° = East Horizon → 90° = Zenith → 180° = West Horizon |
 | `sensor.pergola_slat_angle` | ° | Currently calculated target slat angle (0°–122°, output of sun/season formula) |
 | `sensor.pergola_tilt_position` | 0–100 | Calculated tilt_position after hardware correction (what will be sent to covers) |
-| `binary_sensor.pergola_sun_shining` | on/off | True when PV+radiation exceed elevation-adjusted clear-sky threshold |
+| `binary_sensor.pergola_sun_shining` | on/off | True when radiation/PV exceed shading threshold OR UV ≥ 3; built-in 1 min delay_on / 5 min delay_off |
 
 > **`binary_sensor.pergola_sun_shining` formula** (adapted from Loxone Wetter/Sonnenschein logic):
 > ```
@@ -170,17 +170,20 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 >   sensor.wheatherstation_solar_radiation,      # W/m² — goes into shadow in afternoon
 >   sensor.pergola_pv_power / pergola_pv_conversion_factor   # W → W/m² proxy; stays in sun longer
 > )
-> clear_sky_threshold = 1000 × sin(elevation_deg × π/180) × input_number.pergola_clearness_factor
->                       # clearness_factor % of theoretical clear-sky irradiance at current sun angle
->                       # default 0.9; can be refined in Step 6 field testing (Phase 5)
+> shading_threshold = 512 × sin(elevation_deg × π/180) × input_number.pergola_shading_sensitivity
 >
-> sun_is_shining = (effective_radiation > clear_sky_threshold)
+> sun_is_shining = ( effective_radiation > shading_threshold
+>                    OR sensor.wheatherstation_uv_index ≥ 3 )   ← UV catches hazy high-UV days
 >                  AND (elevation > input_number.pergola_min_sun_elevation)
 >                  # elevation guard matches state machine no_sun_behind_house threshold
 > ```
+> Built-in hysteresis: `delay_on: 1 min` (must be true for 1 min before activating shading),
+> `delay_off: 5 min` (must be false for 5 min before deactivating). 
+> - **Purpose:**Answers: "is the sun shining strongly enough that the terrasse needs shading?"
+> - **Why 512 W/m²:** Loxone-calibrated "shade needed" baseline for Central Austria (≈47°N). Theoretical maximum horizontal irradiance is `1000 × sin(elevation)`, but Austrian real-world peak is significantly lower. 512 ≈ the irradiance level where shading becomes necessary. `shading_sensitivity` (default 0.9) provides fine-tuning per-installation.
+> - **UV fallback:** UV index ≥ 3 (WHO "moderate") means meaningful UV exposure even when irradiance is low (e.g. thin cloud). Shading is still needed for comfort/protection.
 > - `pergola_pv_conversion_factor` default 3.2 — empirically calibrated for 6× Axitec 440W bifacial panels at 5–10° tilt, 228° azimuth (bifacial back gain + near-flat tilt + afternoon facing). STC baseline (2640W / 1000 W/m² = 2.64) is adjusted upward to 3.2 for real-world geometry. Calibrate in Step 6 on a clear morning.
 > - Taking `max()` of both sources solves the afternoon shadow problem: whichever sensor is still in sun drives the reading.
-> - Why `sin(elevation)`: the theoretical clear-sky horizontal irradiance scales with `sin(elevation)`, peaking at ~1000 W/m² at 90°. The `1000 × sin` baseline is the correct physics — not a fixed threshold.
 
 > **Derived Internal Constants** — computed once from `input_number` geometry/config inputs. Never hardcoded as literals; any formula that uses these must reference these derived values only.
 >
@@ -220,7 +223,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 | `rain` | Rain active (weather station OR cover lock = `rain`) | No movement |
 | `rain_stopped` | Rain just ended, recovery in progress | Recovery script handles covers |
 | `user_override` | One or both covers locked by user (`lock originator = user`) | No movement |
-| `not_enough_sun` | Sun shining indicator off for ≥ 5 min (cloud/overcast) | slat_angle = 90° → tilt_position via formula (default 74) |
+| `not_enough_sun` | `pergola_sun_shining` off (cloud/overcast) — sensor already has 5 min delay_off built in | slat_angle = 90° → tilt_position via formula (default 74) |
 | `sun_automatik_heating` | Sun active, heating indicator on | Heating formula |
 | `sun_automatik_cooling` | Sun active, heating indicator off | Cooling formula |
 
@@ -238,7 +241,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 3. **rain_stopped** — was `rain`, both indicators now off → enter `rain_stopped`. Script exits this state.
 4. **user_override** — either lock originator = `user`. Clears when both = `unknown`. Cover response automation skips all movement while in this state. On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules. (Same exit logic as frost.)
 5. **no_sun_behind_house** — sun below horizon OR `sun.sun` elevation ≤ `input_number.pergola_min_sun_elevation` (sun shines under the roof; slat geometry irrelevant) OR azimuth outside AZIMUTH_MIN–AZIMUTH_MAX (derived as `wall_azimuth ± 90`; geometric — no sun possible regardless of sensor).
-6. **not_enough_sun** — `pergola_sun_shining` has been `off` for ≥ 5 continuous minutes. Exits when `pergola_sun_shining` has been `on` for ≥ 2 continuous minutes.
+6. **not_enough_sun** — `pergola_sun_shining` is `off`. No additional delay needed here — the sensor's built-in `delay_off: 5 min` already ensures it only turns off after 5 continuous minutes of no sun. Exits when `pergola_sun_shining` has been `on` for ≥ 1 continuous minute (the sensor's `delay_on: 1 min` already provides this; an extra `for:` guard on the exit trigger is optional but not required).
 7. **sun_automatik_heating** — `input_boolean.pergola_heating` = on/1.
 8. **sun_automatik_cooling** — default when sun is active and heating indicator is off.
 
@@ -603,9 +606,9 @@ Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain �
   - On HA start the automation fires with trigger = `homeassistant` start
   - If `input_select.pergola_automation_state` is already `rain_stopped` (persisted from before restart): do NOT evaluate other rules; instead call `script.pergola_post_rain_recovery` again to resume the interrupted drain sequence. The recovery script is idempotent enough for this — it will re-run the wait + step sequence from the beginning, which is safe (covers get drained again).
   - For all other persisted states: evaluate rules 1–4 inline, then call `script.pergola_evaluate_state` for rules 5–8
-- `not_enough_sun` entry/exit requires time-delayed transitions — use **two separate named automations** rather than a single choose block (the `for:` timer must be on the trigger itself):
-  - **`pergola_not_enough_sun_entry`** — trigger: `binary_sensor.pergola_sun_shining` → `off` **for 5 min**; condition: `input_select.pergola_automation_state` not in {frost, rain, rain_stopped, user_override, no_sun_behind_house}; action: set state = `not_enough_sun`
-  - **`pergola_not_enough_sun_exit`** — trigger: `binary_sensor.pergola_sun_shining` → `on` **for 2 min**; condition: state = `not_enough_sun`; action: re-evaluate heating/cooling and set state to `sun_automatik_heating` or `sun_automatik_cooling` accordingly
+- `not_enough_sun` entry/exit uses **two separate named automations** rather than a single choose block:
+  - **`pergola_not_enough_sun_entry`** — trigger: `binary_sensor.pergola_sun_shining` → `off` (no `for:` — the sensor's own `delay_off: 5 min` already means it only goes `off` after 5 continuous minutes); condition: `input_select.pergola_automation_state` not in {frost, rain, rain_stopped, user_override, no_sun_behind_house}; action: set state = `not_enough_sun`
+  - **`pergola_not_enough_sun_exit`** — trigger: `binary_sensor.pergola_sun_shining` → `on` (no `for:` needed — the sensor's `delay_on: 1 min` already ensures it only turns `on` after 1 continuous minute); condition: state = `not_enough_sun`; action: re-evaluate heating/cooling and set state to `sun_automatik_heating` or `sun_automatik_cooling` accordingly
 
 **Verify:**
 - State reflects current conditions on HA boot
