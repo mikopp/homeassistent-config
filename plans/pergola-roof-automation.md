@@ -92,11 +92,19 @@ sun behind house when:     sun.azimuth < AZIMUTH_MIN  OR  sun.azimuth > AZIMUTH_
 
 ## Pergola Device
 
-All entities created by this feature will appear under a single HA virtual device named **"Pergola Dach"** (`identifier: pergola_dach`). This allows the user to find and control everything in one place via Settings → Devices.
+All template entities created by this feature are linked to an **existing HA device** (the Somfy cover device or similar) using `device_id:` on each template entity definition. This causes HA to register them under that device automatically on load — no post-deploy UI steps needed for template entities.
 
-**Implementation approach:** The `template:` integration supports a `device:` block at the list-item level (sibling to `sensor:`, `number:`, `switch:`, etc.) that creates a virtual device and groups all entities within the same list item under it. `input_*` helpers cannot be assigned to a device in YAML, so each helper gets a thin template wrapper (`switch`, `number`, `sensor`) that reads/writes the backend `input_*` entity and appears on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged.
+**Prerequisites — ask the user before implementing any step:**
+1. **Device ID** — navigate to the cover device in HA (Settings → Devices → [device]) and copy the UUID from the URL (`/config/devices/device/<UUID>`). This value is set as `device_id:` on every template entity.
+2. **Label name** — the user defines a label (e.g. `"Pergola"`) to apply to all entities for filtering. Labels are assigned via the HA entity registry (one-time UI step after deploy).
 
-**Note:** An earlier attempt used `device:` inside individual sensor definitions — that caused a config error. The current structure puts `device:` as a sibling to the entity-type keys, which is the correct HA syntax. `sensor.pergola_cooling_lower_bound` is intentionally kept in a separate template block (no `device:`) so it does not appear on the device card.
+**Rules for implementation:**
+- **Never create a device.** Always attach to an existing device provided by the user.
+- All `template` entity types (`sensor`, `binary_sensor`, `number`, `switch`, `select`) support `device_id:` — add it to every entity definition.
+- `input_*` helpers (`input_boolean`, `input_number`, `input_select`) cannot be assigned to a device from YAML. They get the user-defined label via the entity registry (post-deploy UI step), but no `device_id`.
+- `sensor.pergola_cooling_lower_bound` is on the device as a read-only sensor. It re-derives automatically from slat geometry inputs and has no user-settable counterpart.
+
+**Template wrapper pattern:** Because `input_*` helpers cannot be device-linked from YAML, each helper gets a thin template wrapper (`switch`, `number`, or `sensor`) that reads/writes the backend `input_*` entity and carries `device_id:`. This makes the wrapper appear on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged.
 
 ### All entities on the device
 
@@ -486,22 +494,26 @@ Each step is independently deployable via `git pull` on the HA host.
 
 ### Phase 1 — Foundation
 
-#### Step 1 — Helpers, Template Sensors, Virtual Device [DONE]
+#### Step 1 — Helpers, Template Sensors, Device Linking [DONE]
 **File:** `packages/pergola.yaml`
 
-Add `input_boolean`, `input_select`, `input_number`, and `template` sections.
-The `template:` block uses a `device:` key to create the **"Pergola Dach"** virtual device and groups all template entities under it.
+Add `input_boolean`, `input_select`, `input_number`, and `template` sections. All template entities carry `device_id:` to link them to the user's existing cover device.
+
+**Before implementing:** ask the user for their **device ID** (UUID from the device page URL) and **label name**. Substitute both throughout the file.
 
 **Dependencies:** None — first step.
 
 **Notes:**
-- **`packages/pergola.yaml` is rewritten from scratch** — the existing file (which still contains the old `pergola_frost_hold` and `pergola_post_rain_active` booleans and lacks the device declaration) is discarded entirely. Write the complete file fresh using only the entities listed below.
+- **`packages/pergola.yaml` is rewritten from scratch** — the existing file (which still contains the old `pergola_frost_hold` and `pergola_post_rain_active` booleans) is discarded entirely. Write the complete file fresh using only the entities listed below.
 - **Carry over the 4 existing automations** — these must appear in the new file's `automation:` block. The watchdog automations (ids below) are carried over **with the state-based suppression condition already present** (added before Step 1 to fix a race condition — see Step 2 notes). The lock originator responders are carried over verbatim.
   - `id: '1771360145720'` — Inactivity Watchdog: Dach Links
   - `id: '1771361016291'` — Inactivity Watchdog: Dach Rechts
   - `id: '1771748333394'` — Dach Links: Update state when lock originator changes
   - `id: '1771748414999'` — Dach Rechts: Update state when lock originator changes
   - These are critical for the rain-lock lifecycle and must not be lost during the rewrite.
+- **Device linking:** every `template` entity (`sensor`, `binary_sensor`, `number`, `switch`) gets `device_id: <USER_DEVICE_ID>`. Do NOT create a device — only attach to the existing one the user provides.
+- **Template wrappers:** each `input_boolean` gets a `template switch`, each `input_number` gets a `template number`, and `input_select.pergola_automation_state` gets a read-only `template sensor` — all with `device_id:`. This makes them appear on the device card. Automations target the `input_*` entity IDs, not the wrappers.
+- `sensor.pergola_cooling_lower_bound` carries `device_id:` and appears on the device page as a read-only value. It re-derives automatically from slat geometry inputs — no wrapper needed.
 - `input_select.pergola_automation_state` must list all 8 state values
 - PV conversion factor default 3.2; can be refined in Step 6 field testing (Phase 5)
 - Add `input_number.pergola_max_tilt_angle` (default 122, min 100, max 135, step 1, unit °)
@@ -513,22 +525,21 @@ The `template:` block uses a `device:` key to create the **"Pergola Dach"** virt
 - Add `input_number.pergola_slat_width` (default 22, min 5, max 50, step 0.5, unit cm) — slat face width (w); used to derive R and PHI
 - Add `input_number.pergola_slat_pivot_spacing` (default 20, min 5, max 40, step 0.5, unit cm) — pivot-to-pivot spacing (d); used to derive R and PHI
 - Add `input_number.pergola_slat_thickness` (default 3, min 0.5, max 10, step 0.5, unit cm) — slat thickness (t); used to derive R and PHI
-- Add `sensor.pergola_cooling_lower_bound` (unit °) as an **internal** template sensor (hidden from device UI) — computed once from slat geometry and max_tilt using a Jinja2 for-loop; no other formula may hardcode a literal 15° floor
+- Add `sensor.pergola_cooling_lower_bound` (unit °) as a read-only template sensor with `device_id:` — computed from slat geometry and max_tilt using a Jinja2 for-loop; re-derives automatically when any input changes; no other formula may hardcode a literal 15° floor
 - **Derived constants computed inline or as template sensors** (never hardcode literals): AZIMUTH_MIN/MAX from wall_azimuth; R and PHI from slat geometry; DEADBAND_TILT from max_tilt; COOLING_LOWER_BOUND from sensor above. See "Derived Internal Constants" table in the device section.
 - Add `input_boolean.pergola_heating` (default off) — heating indicator; when `on`, sun is let through (heating formula); when `off`, sun is blocked (cooling formula). Can be toggled by user in UI or set via HA REST API by an external system
 - Add `sensor.pergola_effective_sun_angle` (unit °, unknown until formula defined in Step 3) as a stub template sensor returning `unknown` for now — exists on the device from day one for debugging
-- Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now — they exist on the device from day one
-- All template sensors and binary sensors (`sensor.pergola_pv_power`, `sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) must share the same `template:` block that carries the `device:` declaration
+- Add `sensor.pergola_slat_angle` (unit °, unknown until formula defined in Step 3) and `sensor.pergola_tilt_position` (0–100, unknown until Step 3) as stub template sensors returning `unknown` for now
 
-**Post-deploy:** No manual UI assignment needed. The `device:` block in the template section creates the virtual device automatically. Template wrapper entities appear on the device card immediately after HA reloads the config. Backend `input_*` helpers remain ungrouped (as expected — they are internal); optionally assign them to the "Terrasse" area via the entity registry for tidiness.
+**Post-deploy (one-time, manual via HA UI):** Apply the user-defined label to all entities (both template wrappers and backend `input_*` helpers) via Settings → Entities. Template wrapper entities will already appear on the device card automatically. Backend `input_*` helpers cannot be device-linked from YAML — the label is their only grouping mechanism.
 
 **Verify:**
-- Settings → Devices → "Pergola Dach" shows all 20 entities: 4 template sensors + 1 binary_sensor + 3 template switches + 11 template numbers + 1 automation state sensor
-- `sensor.pergola_cooling_lower_bound` does NOT appear on the device card (correct — internal)
-- Backend `input_*` helpers remain ungrouped in Settings → Helpers (expected)
+- HA config check passes with no errors
+- Template entities appear on the device page under Settings → Devices → [device]
 - `binary_sensor.pergola_sun_shining` changes state plausibly with sun conditions
 - `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` report `unknown` (correct at this stage)
-- Sliders and toggles on the device card write through to the backend `input_*` entities
+- Template switch and number wrapper entities write through to the backend `input_*` entities
+- `sensor.pergola_cooling_lower_bound` appears on the device card and updates automatically when geometry inputs change
 
 ---
 
