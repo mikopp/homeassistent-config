@@ -92,26 +92,47 @@ sun behind house when:     sun.azimuth < AZIMUTH_MIN  OR  sun.azimuth > AZIMUTH_
 
 ## Pergola Device
 
-All entities created by this feature should be assigned to the **Pergola Dach** device (the existing Somfy/Overkiz device) and labelled `Pergola`.
+All entities created by this feature are grouped via **`group.pergola_dach`** — HA's built-in [group integration](https://www.home-assistant.io/integrations/group/). The group is defined in YAML alongside all other entities; no post-deploy UI steps are required.
 
-> **⚠️ `device_id:` is NOT supported in template YAML.** HA's config validator rejects it, causing the entire `template:` block to be skipped. Do not add `device_id:` to any template entity definition.
+> **⚠️ `device_id:` is NOT supported in template YAML**, and template entities also cannot be assigned to a device via the HA entity editor UI — both have been verified to fail.
+> **No template wrappers.** `input_*` helpers (`input_boolean`, `input_number`, `input_select`) are used directly. Wrappers served no purpose.
 
 **Rules for implementation:**
-- **Never create a device.** Always attach to the existing Pergola Dach device via the UI.
-- Do **not** add `device_id:` to any `template` entity (`sensor`, `binary_sensor`, `number`, `switch`, `select`).
-- `input_*` helpers (`input_boolean`, `input_number`, `input_select`) also cannot be device-linked from YAML.
-- `sensor.pergola_cooling_lower_bound` is an internal derived constant — assign it to the device via UI like all others.
+- Do **not** add `device_id:` to any `template` entity — the config validator rejects it.
+- Do **not** create template wrapper entities for `input_*` helpers.
+- Automations reference `input_*` entity IDs directly.
+- Add every new entity to the `group.pergola_dach` entity list in `packages/pergola.yaml`.
 
-**Template wrapper pattern:** `input_*` helpers cannot be device-linked from YAML, so each helper gets a thin template wrapper (`switch`, `number`, or `sensor`) that reads/writes the backend `input_*` entity. This makes the wrapper appear on the device card as an interactive control. Automations continue to reference the `input_*` entity IDs unchanged. Both the wrapper and the backing `input_*` must be assigned and labelled via UI after deploy.
+**Group definition** (in `packages/pergola.yaml`):
+```yaml
+group:
+  pergola_dach:
+    name: Pergola Dach
+    entities:
+      - input_boolean.pergola_automatic_enabled
+      - input_boolean.pergola_heating
+      - input_boolean.pergola_cooling_optimized
+      - input_select.pergola_automation_state
+      - input_number.pergola_frost_off_threshold
+      - input_number.pergola_frost_on_threshold
+      - input_number.pergola_pv_conversion_factor
+      - input_number.pergola_clearness_factor
+      - input_number.pergola_min_sun_elevation
+      - input_number.pergola_max_tilt_angle
+      - input_number.pergola_min_heating_slat_angle
+      - input_number.pergola_wall_azimuth
+      - input_number.pergola_slat_width
+      - input_number.pergola_slat_pivot_spacing
+      - input_number.pergola_slat_thickness
+      - sensor.pergola_pv_power
+      - sensor.pergola_effective_sun_angle
+      - sensor.pergola_slat_angle
+      - sensor.pergola_tilt_position
+      - binary_sensor.pergola_sun_shining
+      - sensor.pergola_cooling_lower_bound
+```
 
-**Post-deployment UI steps (required after every first deploy of new entities):**
-
-1. Open **Settings → Devices & Services → Entities**
-2. Filter by `pergola` to find all pergola entities
-3. For each entity: open it → set **Device** = `Pergola Dach`
-4. For each entity: open it → add **Label** = `Pergola`
-
-> These steps are one-time per entity. Re-deploying the same entity ID preserves existing UI assignments.
+The resulting `group.pergola_dach` entity can be added directly to any Lovelace dashboard card.
 
 ### All entities on the device
 
