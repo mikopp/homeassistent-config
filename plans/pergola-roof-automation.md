@@ -102,6 +102,7 @@ All entities created by this feature are grouped via **`group.pergola_dach`** â€
 - Do **not** create template wrapper entities for `input_*` helpers.
 - Automations reference `input_*` entity IDs directly.
 - Add every new entity to the `group.pergola_dach` entity list in `packages/pergola.yaml`.
+- **Keep `dashboards/elements/pergola_card.yaml` in sync:** whenever any entity (`input_boolean`, `input_number`, `input_select`, `sensor`, `binary_sensor`, `script`) is added or removed, update the card in the same step. Place it in the appropriate section: *On/Off Toggles*, *State of Automation*, *States and Sensors*, or *Parameters*.
 
 **Group definition** (in `packages/pergola.yaml`):
 ```yaml
@@ -116,7 +117,7 @@ group:
       - input_number.pergola_frost_off_threshold
       - input_number.pergola_frost_on_threshold
       - input_number.pergola_pv_conversion_factor
-      - input_number.pergola_clearness_factor
+      - input_number.pergola_shading_sensitivity
       - input_number.pergola_min_sun_elevation
       - input_number.pergola_max_tilt_angle
       - input_number.pergola_min_heating_slat_angle
