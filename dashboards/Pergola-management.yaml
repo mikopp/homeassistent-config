@@ -2,4 +2,4 @@ views:
   - title: Main View
     cards:
       - type: entities
-        !include ../packages/pergola_card.yaml
+        !include ../dashboards/elements/pergola_card.yaml
