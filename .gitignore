@@ -10,3 +10,4 @@ ip_addresses.yaml
 .cache/
 custom_components/
 .ssh/
+.ha_run.lock

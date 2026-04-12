@@ -1,5 +1,38 @@
 views:
   - title: Main View
     cards:
+      - !include ../dashboards/elements/pergola_card.yaml
       - type: entities
-        !include ../dashboards/elements/pergola_card.yaml
+        title: Dach Links
+        show_header_toggle: false
+        entities:
+        - entity: cover.dach_links
+        - entity: sensor.dach_links_priority_lock_originator
+        - entity: sensor.dach_links_priority_lock_timer
+        - type: attribute
+          entity: cover.dach_links
+          attribute: current_tilt_position
+      - type: entities
+        title: Dach Rechts
+        show_header_toggle: false
+        entities:
+        - entity: cover.dach_rechts
+        - entity: sensor.dach_rechts_priority_lock_originator
+        - entity: sensor.dach_rechts_priority_lock_timer
+        - type: attribute
+          entity: cover.dach_rechts
+          attribute: current_tilt_position
+      - type: logbook
+        title: Pergola Activity
+        hours_to_show: 24
+        target:
+          label_id: pergola  # Use the ID of your label here
+        entities:
+          - cover.dach_links
+          - cover.dach_rechts
+          - sensor.dach_links_priority_lock_originator
+          - sensor.dach_rechts_priority_lock_originator
+        
+        
+          
+
