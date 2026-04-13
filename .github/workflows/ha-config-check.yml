@@ -2,7 +2,7 @@ name: Home Assistant Config Check
 
 # Run on every push and on every pull-request targeting any branch.
 on:
-  pull_request:
+#  pull_request:
   workflow_dispatch:
 
 # Permissions needed:
