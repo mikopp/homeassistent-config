@@ -114,8 +114,6 @@ group:
       - input_boolean.pergola_heating
       - input_boolean.pergola_cooling_optimized
       - input_select.pergola_automation_state
-      - input_number.pergola_frost_off_threshold
-      - input_number.pergola_frost_on_threshold
       - input_number.pergola_pv_conversion_factor
       - input_number.pergola_shading_sensitivity
       - input_number.pergola_min_sun_elevation
@@ -143,8 +141,6 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 | `input_boolean.pergola_automatic_enabled` | toggle | on | Master on/off — disables all cover movement when off |
 | `input_boolean.pergola_heating` | toggle | off | Heating indicator: on = heating mode (let sun through), off = cooling mode (block sun). Can be flipped by user or set via HA REST API by an external system (e.g. Loxone) |
 | `input_select.pergola_automation_state` | select | — | State machine; **can be set manually to break a deadlock** |
-| `input_number.pergola_frost_off_threshold` | number | 2.5 °C | Temp below which frost mode activates |
-| `input_number.pergola_frost_on_threshold` | number | 3.0 °C | Temp above which frost mode clears |
 | `input_number.pergola_pv_conversion_factor` | number | 3.2 | PV W → W/m² divisor for sun detection (default 3.2; can be refined in Step 6 field testing) |
 | `input_number.pergola_max_tilt_angle` | number | 122 ° | Maximum physical slat angle; drives tilt_position conversion |
 | `input_number.pergola_min_sun_elevation` | number | 10 ° | Elevation at or below which sun shines under the roof → `no_sun_behind_house` (must be > 0°) |
@@ -220,7 +216,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 | State | Meaning | Cover behavior |
 |---|---|---|
 | `no_sun_behind_house` | Sun below horizon, elevation ≤ `pergola_min_sun_elevation`, or azimuth outside AZIMUTH_MIN–AZIMUTH_MAX (derived: `wall_azimuth ± 90`) | slat_angle = 90° → tilt_position via formula (default 74) |
-| `frost` | wheatherstation_outdoor_temperature below frost threshold | No movement |
+| `frost` | wheatherstation_outdoor_temperature < 2.5 °C (hardcoded) | No movement |
 | `rain` | Rain active (weather station OR cover lock = `rain`) | No movement |
 | `rain_stopped` | Rain just ended, recovery in progress | Recovery script handles covers |
 | `user_override` | One or both covers locked by user (`lock originator = user`) | No movement |
@@ -230,7 +226,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 
 ### Priority Rules (highest first)
 
-1. **frost** — `wheatherstation_outdoor_temperature` < `pergola_frost_off_threshold` → enter `frost`. Clears when `wheatherstation_outdoor_temperature` > `pergola_frost_on_threshold`. On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules.
+1. **frost** — `wheatherstation_outdoor_temperature` < 2.5 °C (hardcoded) → enter `frost`. Clears when `wheatherstation_outdoor_temperature` > 3.0 °C (hardcoded, hysteresis gap). On exit: if `wheatherstation_hourly_rain > 0` → enter `rain_stopped` (post-rain recovery); otherwise re-evaluate remaining rules.
 2. **rain** — enter when **either** indicator is active:
    - `sensor.wheatherstation_rain_rate > 0` (weather station — slower, delayed), OR
    - `sensor.dach_links_priority_lock_originator = rain` OR `sensor.dach_rechts_priority_lock_originator = rain` (cover-mounted rain sensor — fast, no delay)
@@ -504,11 +500,13 @@ This applies to **all** move decisions: state-change transitions, the 5-minute p
 ## Frost Safety
 
 Hysteresis to prevent oscillation:
-- Temp falls below `pergola_frost_off_threshold` (2.5°C) → state = `frost`, movement stops
-- Temp rises above `pergola_frost_on_threshold` (3.0°C) → exit `frost`:
+- Temp falls below 2.5 °C (hardcoded) → state = `frost`, movement stops
+- Temp rises above 3.0 °C (hardcoded, 0.5 °C hysteresis gap) → exit `frost`:
   - Check `sensor.wheatherstation_hourly_rain`:
     - If `> 0` → enter `rain_stopped` (run post-rain recovery script)
     - If `== 0` → re-evaluate normally (no rain recovery needed)
+
+**Robustness — value-based frost conditions:** The dedicated `numeric_state` frost_entry / frost_exit triggers in `pergola_state_manager` fire on threshold crossings so we react immediately, but the branch conditions are evaluated against the *current* `wheatherstation_outdoor_temperature` value — **not** against `trigger.id`. This means any trigger (time_pattern every 5 min, sensor update, HA start) can enter or exit frost based on the live temperature, so the state converges correctly even if the threshold-crossing trigger is silently dropped from the queue (`mode: queued, max: 3`). Fail-safe defaults on unknown/unavailable sensor readings: entry uses `| float(99)` (do not trip frost), exit uses `| float(0)` (stay in frost until temp is known).
 
 ---
 
@@ -575,7 +573,7 @@ Add `input_boolean`, `input_select`, `input_number`, and `template` sections. Al
 
 ---
 
-#### Step 2 — State Manager Automation [TODO]
+#### Step 2 — State Manager Automation [DONE]
 **File:** `packages/pergola.yaml` — add under `automation:`
 
 Add `pergola_state_manager` and `script.pergola_evaluate_state`. Together these are the **only code that writes** to `input_select.pergola_automation_state`.
@@ -584,7 +582,9 @@ Add `pergola_state_manager` and `script.pergola_evaluate_state`. Together these 
 - `pergola_state_manager` default branch (when rules 1–4 do not apply)
 - `script.pergola_post_rain_recovery` final step (when exiting rain_stopped — frost and rain already ruled out)
 
-Triggers: outdoor temp, rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), sun attributes, `pergola_sun_shining`, `input_boolean.pergola_heating`, HA start.
+Triggers: outdoor temp (numeric_state, both entry and exit thresholds), rain rate, both lock originator sensors (`dach_links` and `dach_rechts`), `pergola_sun_shining`, `input_boolean.pergola_heating`, HA start, and `time_pattern: minutes: /5`.
+
+> **Why `time_pattern` instead of `sun.sun` attributes:** Sun azimuth and elevation change continuously — triggering on them directly would cause an evaluation every minute. Instead, `time_pattern: /5` catches slow threshold crossings (azimuth window entry/exit, elevation guard) at a rate matched to the sun's movement speed (~1–2°/min azimuth ≙ well under 1° slat change/min, so 5 min lag is negligible). The state manager reads `sun.sun` attributes directly inside its condition templates when it runs.
 
 > Lock originator sensors must be triggers so the state manager reacts to rain-lock entry/exit (rule 2) and user-override entry/exit (rule 4) without waiting for another trigger.
 
@@ -597,9 +597,9 @@ Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain �
 - **Watchdog suppression is explicit, not emergent.** The watchdog and the cover response automation both use `time_pattern: minutes: /5`, so they evaluate simultaneously at every 5-minute mark. Because the cover's `last_updated` is only set after the Somfy responds (not when the command is sent), the watchdog condition would pass at the same instant the cover response is about to send a movement command — causing `stop_cover_tilt` to abort the movement mid-travel. To eliminate this race, both watchdog automations carry an explicit state condition that skips them when `input_select.pergola_automation_state` is in `[sun_automatik_cooling, sun_automatik_heating, rain_stopped]`. The watchdog runs only in quiet states where no movement commands are issued (`rain`, `frost`, `user_override`, `no_sun_behind_house`, `not_enough_sun`).
 - **Lock originator responders (automations 3 & 4) complement the state manager.** These automations (already in the file) trigger on lock originator changes and immediately send a second `stop_cover_tilt`. This forces a fresh Somfy state report right after each lock transition, before the state manager has acted. The state manager's second evaluation then sees the most current tilt position data. These automations should be left as-is — do not fold their logic into the state manager.
 - Guard: do not overwrite `rain_stopped` mid-flight — only the recovery script exits that state. **Exceptions** (state manager may write a different state while `rain_stopped` is active):
-  - **frost entry (from any state including `rain_stopped`):** temp falls below `pergola_frost_off_threshold` → call `script.turn_off` on `script.pergola_post_rain_recovery`, then set state to `frost`. Frost is the highest-priority safety rule — it must preempt an in-progress drain sequence.
+  - **frost entry (from any state including `rain_stopped`):** temp falls below 2.5 °C (hardcoded) → call `script.turn_off` on `script.pergola_post_rain_recovery`, then set state to `frost`. Frost is the highest-priority safety rule — it must preempt an in-progress drain sequence.
   - **rain re-entry (from any state including `rain_stopped`):** either rain indicator becomes active → call `script.turn_off` on `script.pergola_post_rain_recovery`, then set state to `rain`. Rain just restarted — the covers should stay closed and the drain sequence must not continue mid-rain.
-  - **frost exit:** `wheatherstation_outdoor_temperature` rises above `pergola_frost_on_threshold` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
+  - **frost exit:** `wheatherstation_outdoor_temperature` rises above 3.0 °C (hardcoded) → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **user_override exit:** both lock originators return to `unknown` → if `wheatherstation_hourly_rain > 0`, set state to `rain_stopped` and trigger recovery script
   - **HA start with state = `rain_stopped`:** do NOT clear the state; instead re-trigger `script.pergola_post_rain_recovery` so the interrupted drain sequence resumes (see restart recovery note below)
 - `input_boolean.pergola_heating` may not exist yet; use a safe default (cooling season) when unavailable
@@ -612,9 +612,21 @@ Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain �
   - **`pergola_not_enough_sun_exit`** — trigger: `binary_sensor.pergola_sun_shining` → `on` (no `for:` needed — the sensor's `delay_on: 1 min` already ensures it only turns `on` after 1 continuous minute); condition: state = `not_enough_sun`; action: re-evaluate heating/cooling and set state to `sun_automatik_heating` or `sun_automatik_cooling` accordingly
 
 **Verify:**
-- State reflects current conditions on HA boot
-- Temporarily lower frost threshold to current temp → state becomes `frost`
-- Evaluate azimuth template manually → `no_sun_behind_house` fires at night
+- Config check passes (Developer Tools → YAML → *Check Configuration*); reload automations.
+- State reflects current conditions on HA boot.
+- Template sanity: Developer Tools → Template, render
+  `{{ states('sensor.wheatherstation_outdoor_temperature') | float(99) < 2.5 }}` and
+  `{{ states('sensor.wheatherstation_outdoor_temperature') | float(0) > 3.0 }}` → match live temp.
+- Frost entry: set state to `sun_automatik_cooling`, then set
+  `sensor.wheatherstation_outdoor_temperature` to `2.0` via Developer Tools → States. Within ≤5 min
+  (next `time_pattern` tick) state must become `frost`. Confirm the trace shows the Rule 1 Entry
+  branch fired from a trigger other than `frost_entry` (proves value-based recovery works).
+- Frost exit: while in `frost`, set the sensor to `4.0`. Within ≤5 min state must exit frost
+  (→ `rain_stopped` if `hourly_rain > 0`, else whatever `pergola_evaluate_state` returns).
+- Fail-safe on unknown sensor: while in `frost`, set the sensor to `unknown` → state must remain
+  `frost`. While *not* in frost, set it to `unknown` → state must **not** enter frost.
+- Evaluate azimuth template manually → `no_sun_behind_house` fires at night.
+- Deploy via `git pull` on the HA host, then re-run config check and reload on the live instance.
 
 ---
 

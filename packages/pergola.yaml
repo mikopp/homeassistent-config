@@ -73,30 +73,6 @@ input_select:
 # ─────────────────────────────────────────────────────────────────────────────────────
 input_number:
 
-  # ── Frost thresholds ──────────────────────────────────────────────────────────────
-  # Hysteresis pair: frost activates below OFF threshold, clears above ON threshold.
-  # Default spread (2.5 / 3.0) prevents oscillation near the frost boundary.
-
-  pergola_frost_off_threshold:
-    name: Pergola Frost OFF threshold
-    # Temp must fall below this value to enter frost state (movement suspended)
-    min: 0
-    max: 5
-    step: 0.5
-    initial: 2.5
-    unit_of_measurement: "°C"
-    icon: mdi:thermometer-low
-
-  pergola_frost_on_threshold:
-    name: Pergola Frost ON threshold
-    # Temp must rise above this value to clear frost state (higher than OFF to avoid hunting)
-    min: 0
-    max: 5
-    step: 0.5
-    initial: 3.0
-    unit_of_measurement: "°C"
-    icon: mdi:thermometer
-
   # ── PV / sun detection ────────────────────────────────────────────────────────────
 
   pergola_pv_conversion_factor:
@@ -110,7 +86,6 @@ input_number:
     min: 1
     max: 6
     step: 0.1
-    initial: 3.2
     icon: mdi:solar-panel
 
   pergola_shading_sensitivity:
@@ -123,7 +98,6 @@ input_number:
     min: 0.5
     max: 1.2
     step: 0.05
-    initial: 0.9
     icon: mdi:weather-sunny
 
   pergola_min_sun_elevation:
@@ -135,7 +109,6 @@ input_number:
     min: 1
     max: 30
     step: 0.5
-    initial: 10
     unit_of_measurement: "°"
     icon: mdi:weather-sunset
 
@@ -150,7 +123,6 @@ input_number:
     min: 100
     max: 150
     step: 1
-    initial: 122
     unit_of_measurement: "°"
     icon: mdi:rotate-right
 
@@ -163,7 +135,6 @@ input_number:
     min: 0
     max: 40
     step: 1
-    initial: 16
     unit_of_measurement: "°"
     icon: mdi:angle-acute
 
@@ -182,7 +153,6 @@ input_number:
     min: 0
     max: 359
     step: 1
-    initial: 204
     unit_of_measurement: "°"
     icon: mdi:compass
 
@@ -200,7 +170,6 @@ input_number:
     min: 5
     max: 50
     step: 0.5
-    initial: 22
     unit_of_measurement: "cm"
     icon: mdi:ruler
 
@@ -211,7 +180,6 @@ input_number:
     min: 5
     max: 40
     step: 0.5
-    initial: 20
     unit_of_measurement: "cm"
     icon: mdi:ruler-square
 
@@ -222,7 +190,6 @@ input_number:
     min: 0.5
     max: 10
     step: 0.5
-    initial: 3
     unit_of_measurement: "cm"
     icon: mdi:layers
 
@@ -248,6 +215,8 @@ template:
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
         state: "{{ states('sensor.victronsolarcharger_yield_power226') | float(0) }}"
+        availability: >
+          {{ states('sensor.victronsolarcharger_yield_power226') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
@@ -261,7 +230,9 @@ template:
       # Always computes regardless of pergola_automatic_enabled — useful for monitoring.
       - name: "Pergola Effective Sun Angle"
         unique_id: pergola_effective_sun_angle
-        state: "{{ none }}"
+        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
+        state: "0"
+        availability: "false"
         unit_of_measurement: "°"
         icon: mdi:angle-acute
 
@@ -273,7 +244,9 @@ template:
       # Always computes regardless of pergola_automatic_enabled.
       - name: "Pergola Slat Angle"
         unique_id: pergola_slat_angle
-        state: "{{ none }}"
+        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
+        state: "0"
+        availability: "false"
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
 
@@ -285,7 +258,9 @@ template:
       # Always computes regardless of pergola_automatic_enabled.
       - name: "Pergola Tilt Position"
         unique_id: pergola_tilt_position
-        state: "{{ none }}"
+        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
+        state: "0"
+        availability: "false"
         icon: mdi:format-align-middle
 
 
@@ -324,6 +299,10 @@ template:
       - name: "Pergola Sun Shining"
         unique_id: pergola_sun_shining
         device_class: light
+        availability: >
+          {{ (states('sensor.wheatherstation_solar_radiation') not in ['unavailable', 'unknown']
+              or states('sensor.pergola_pv_power') not in ['unavailable', 'unknown'])
+             and state_attr('sun.sun', 'elevation') is not none }}
         delay_on: "00:01:00"
         delay_off: "00:05:00"
         state: >
@@ -380,6 +359,11 @@ template:
   - sensor:
       - name: "Pergola Cooling Lower Bound"
         unique_id: pergola_cooling_lower_bound
+        availability: >
+          {{ states('input_number.pergola_max_tilt_angle') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_width') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
           {# ── Derived geometry constants ──────────────────────────────────────── #}
           {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float(122) %}
@@ -516,6 +500,9 @@ automation:
   # is available the moment the lock changes, without waiting for the next watchdog cycle.
   - id: '1771748333394'
     alias: 'Dach Links: Update state when lock originator changes'
+    description: >
+      Sends stop_cover_tilt immediately when the lock originator changes so HA
+      receives a fresh state report before the state manager evaluates the transition.
     triggers:
       - trigger: state
         entity_id:
@@ -531,6 +518,9 @@ automation:
   # Same as Dach Links responder — see comment above.
   - id: '1771748414999'
     alias: 'Dach Rechts: Update state when lock originator changes'
+    description: >
+      Sends stop_cover_tilt immediately when the lock originator changes so HA
+      receives a fresh state report before the state manager evaluates the transition.
     triggers:
       - trigger: state
         entity_id:
@@ -542,11 +532,421 @@ automation:
           entity_id: cover.dach_rechts
     mode: single
 
-# script key will be added in Step 3 (Phase 2) — script.pergola_set_slat_angle
-# and in Step 2 — script.pergola_evaluate_state and script.pergola_post_rain_recovery.
-# script:
-#   pergola_set_slat_angle:
-#     ...
+  # ── Pergola State Manager ──────────────────────────────────────────────────────────
+  # Single automation that evaluates rules 1–4 inline and delegates rules 5–8 to
+  # script.pergola_evaluate_state. The only other writers of
+  # input_select.pergola_automation_state are that script and the two not_enough_sun
+  # entry/exit automations below.
+  #
+  # Rule priority (highest first): frost (1) → rain (2) → rain_stopped (3) →
+  # user_override (4). Rules 5–8 (no_sun_behind_house, not_enough_sun, heating,
+  # cooling) are handled by script.pergola_evaluate_state.
+  #
+  # The choose block evaluates conditions in priority order; the first match wins.
+  # A protected-state guard prevents the default from calling evaluate_state while
+  # frost / rain / rain_stopped are active and no transition condition has fired.
+  - id: 'pergola_state_manager'
+    alias: 'Pergola State Manager'
+    description: >
+      Evaluates rules 1–4 (frost, rain, rain_stopped, user_override) directly and
+      delegates rules 5–8 to script.pergola_evaluate_state. Triggers on all inputs
+      that can cause a state transition; the choose block determines what (if anything)
+      to do on each trigger.
+    triggers:
+      # Frost entry: fires on the threshold crossing (2.5 °C) so we react immediately;
+      # the id is informational only — the branch condition below is value-based so
+      # any trigger (incl. time_pattern) will enter frost if this one gets queue-dropped.
+      - trigger: numeric_state
+        id: "frost_entry"
+        entity_id: sensor.wheatherstation_outdoor_temperature
+        below: 2.5
+      # Frost exit: fires on the threshold crossing (3.0 °C) so we react immediately;
+      # the id is informational only — the branch condition below is value-based so
+      # any trigger (incl. time_pattern) will exit frost if this one gets queue-dropped.
+      - trigger: numeric_state
+        id: "frost_exit"
+        entity_id: sensor.wheatherstation_outdoor_temperature
+        above: 3.0
+      # Rain rule: re-evaluate when weather station rain rate changes
+      - trigger: state
+        entity_id: sensor.wheatherstation_rain_rate
+      # Rain + user_override rules: re-evaluate when lock originator changes
+      # (watchdog-driven — see plan Step 2 notes)
+      - trigger: state
+        entity_id: sensor.dach_links_priority_lock_originator
+      - trigger: state
+        entity_id: sensor.dach_rechts_priority_lock_originator
+      # not_enough_sun boundary: re-evaluate when sun shining binary changes
+      - trigger: state
+        entity_id: binary_sensor.pergola_sun_shining
+      # Heating/cooling toggle: re-evaluate immediately when mode changes
+      - trigger: state
+        entity_id: input_boolean.pergola_heating
+      # HA start: evaluate from persisted state; resume rain_stopped drain if interrupted
+      - trigger: homeassistant
+        event: start
+      # Time pattern: catch slow sun azimuth / elevation threshold crossings every 5 min
+      - trigger: time_pattern
+        minutes: /5
+    actions:
+      - choose:
+          # ── HA START + rain_stopped: resume interrupted drain sequence ─────────────
+          # If HA restarted while rain_stopped was active (drain script mid-run), restart
+          # the recovery script from the beginning. The script is idempotent enough for
+          # this — it re-drains from 8° which is safe. Do NOT re-evaluate other rules.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ trigger.platform == 'homeassistant'
+                     and states('input_select.pergola_automation_state') == 'rain_stopped' }}
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+
+          # ── RULE 1 ENTRY: FROST ────────────────────────────────────────────────────
+          # Highest-priority safety rule — preempts any in-progress script including
+          # the rain recovery drain sequence. Activates when temperature is below
+          # 2.5 °C (hardcoded frost threshold).
+          # Value-based (not trigger.id-based): any trigger can enter frost, so we
+          # recover correctly even if the numeric_state frost_entry trigger was dropped
+          # from the queue — the next tick (time_pattern, sensor update, …) re-checks.
+          # float(99) fail-safe: unknown/unavailable sensor → assume warm, don't trip frost.
+          # Guard: skip if already in frost to avoid redundant state writes.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.wheatherstation_outdoor_temperature') | float(99) < 2.5
+                     and states('input_select.pergola_automation_state') != 'frost' }}
+            sequence:
+              # Stop any in-progress recovery — frost takes absolute priority
+              - action: script.turn_off
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: frost
+
+          # ── RULE 1 EXIT: FROST CLEAR ───────────────────────────────────────────────
+          # Temperature is above 3.0 °C (hardcoded frost-clear threshold).
+          # Value-based (not trigger.id-based): any trigger can exit frost, so we
+          # recover correctly even if the numeric_state frost_exit trigger was dropped
+          # from the queue — the next tick (time_pattern, sensor update, …) re-checks.
+          # float(0) fail-safe: unknown/unavailable sensor → stay in frost until temp known.
+          # On exit: if hourly rain > 0 (rain fell while covers were frozen closed),
+          # enter rain_stopped and start drain sequence; otherwise re-evaluate rules 5–8.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.wheatherstation_outdoor_temperature') | float(0) > 3.0
+                     and states('input_select.pergola_automation_state') == 'frost' }}
+            sequence:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: >
+                          {{ states('sensor.wheatherstation_hourly_rain') | float(0) > 0 }}
+                    sequence:
+                      # Rain accumulated while frozen — drain before reopening
+                      - action: input_select.select_option
+                        target:
+                          entity_id: input_select.pergola_automation_state
+                        data:
+                          option: rain_stopped
+                      - action: script.turn_on
+                        target:
+                          entity_id: script.pergola_post_rain_recovery
+                default:
+                  # No rain while frozen — re-evaluate sun/heating rules normally
+                  - action: script.turn_on
+                    target:
+                      entity_id: script.pergola_evaluate_state
+
+          # ── RULE 2 ENTRY: RAIN ─────────────────────────────────────────────────────
+          # Rain is active when: weather station rain_rate > 0 (slower, delayed) OR
+          # either cover-mounted lock originator = 'rain' (faster, no delay).
+          # Can override rain_stopped (rain restarted mid-drain — stop drain, stay closed).
+          # Cannot override frost — frost remains highest priority.
+          # Guard: skip if already in rain to avoid redundant state writes.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ (states('sensor.wheatherstation_rain_rate') | float(0) > 0
+                      or states('sensor.dach_links_priority_lock_originator') == 'rain'
+                      or states('sensor.dach_rechts_priority_lock_originator') == 'rain')
+                     and states('input_select.pergola_automation_state') not in ['frost', 'rain'] }}
+            sequence:
+              # Stop any in-progress recovery — rain has (re)started
+              - action: script.turn_off
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: rain
+
+          # ── RULE 2 EXIT / RULE 3 ENTRY: RAIN STOPPED ──────────────────────────────
+          # All rain indicators are now off: rain_rate = 0 AND both lock originators =
+          # 'unknown' (Somfy countdown has completed). Covers may have pooled water —
+          # enter rain_stopped and start the step-drain sequence.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'rain'
+                     and states('sensor.wheatherstation_rain_rate') | float(0) == 0
+                     and states('sensor.dach_links_priority_lock_originator') == 'unknown'
+                     and states('sensor.dach_rechts_priority_lock_originator') == 'unknown' }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: rain_stopped
+              - action: script.turn_on
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+
+          # ── RULE 4 ENTRY: USER OVERRIDE ───────────────────────────────────────────
+          # A user has manually operated one or both covers (lock originator = 'user').
+          # Cannot override frost, rain, or rain_stopped — those safety states stay.
+          # Guard: skip if already in user_override.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ (states('sensor.dach_links_priority_lock_originator') == 'user'
+                      or states('sensor.dach_rechts_priority_lock_originator') == 'user')
+                     and states('input_select.pergola_automation_state') not in
+                     ['frost', 'rain', 'rain_stopped', 'user_override'] }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: user_override
+
+          # ── RULE 4 EXIT: USER OVERRIDE CLEAR ─────────────────────────────────────
+          # Both lock originators have returned to 'unknown' — manual override is over.
+          # On exit: same logic as frost exit — if rain accumulated during the override,
+          # start drain sequence; otherwise re-evaluate rules 5–8 normally.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'user_override'
+                     and states('sensor.dach_links_priority_lock_originator') == 'unknown'
+                     and states('sensor.dach_rechts_priority_lock_originator') == 'unknown' }}
+            sequence:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: >
+                          {{ states('sensor.wheatherstation_hourly_rain') | float(0) > 0 }}
+                    sequence:
+                      - action: input_select.select_option
+                        target:
+                          entity_id: input_select.pergola_automation_state
+                        data:
+                          option: rain_stopped
+                      - action: script.turn_on
+                        target:
+                          entity_id: script.pergola_post_rain_recovery
+                default:
+                  - action: script.turn_on
+                    target:
+                      entity_id: script.pergola_evaluate_state
+
+          # ── PROTECTED STATE GUARD ─────────────────────────────────────────────────
+          # Current state is a protected safety state (frost, rain, or rain_stopped)
+          # and none of the transition conditions above matched (e.g. a time_pattern
+          # fired while indicators are still active). Do nothing — these states are
+          # only exited by their explicit exit conditions above.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') in
+                     ['frost', 'rain', 'rain_stopped'] }}
+            sequence: []
+
+        # ── DEFAULT: delegate to evaluate_state (rules 5–8) ───────────────────────
+        # No high-priority rule matched — evaluate the sun-based rules.
+        # evaluate_state checks no_sun_behind_house → not_enough_sun → heating → cooling.
+        default:
+          - action: script.turn_on
+            target:
+              entity_id: script.pergola_evaluate_state
+    mode: queued
+    max: 3
+
+  # ── Not Enough Sun Entry ──────────────────────────────────────────────────────────
+  # Dedicated automation for not_enough_sun state entry. Kept separate from the main
+  # state manager because it has a very specific trigger (sun_shining off) and condition
+  # (state not in higher-priority states).
+  #
+  # No 'for:' guard needed on the trigger — binary_sensor.pergola_sun_shining already
+  # has delay_off: 5 min, so it only turns off after 5 continuous minutes without sun.
+  - id: 'pergola_not_enough_sun_entry'
+    alias: 'Pergola: Not Enough Sun — Entry'
+    description: >
+      Enters not_enough_sun when pergola_sun_shining turns off. The sensor's 5 min
+      delay_off means this fires only after 5 continuous minutes of no sun — no extra
+      guard needed here. Condition: no higher-priority state is currently active.
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.pergola_sun_shining
+        to: "off"
+    conditions:
+      # Only enter not_enough_sun when no higher-priority state is holding
+      - condition: template
+        value_template: >
+          {{ states('input_select.pergola_automation_state') not in
+             ['frost', 'rain', 'rain_stopped', 'user_override', 'no_sun_behind_house'] }}
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.pergola_automation_state
+        data:
+          option: not_enough_sun
+    mode: single
+
+  # ── Not Enough Sun Exit ───────────────────────────────────────────────────────────
+  # Dedicated automation for not_enough_sun state exit. Fires when sun_shining turns
+  # on (sensor has 1 min delay_on built in) and current state is not_enough_sun.
+  # Re-evaluates the heating/cooling indicator directly and sets the correct sun state.
+  # No need to call evaluate_state — at this point, rules 1–5 are already known to
+  # not apply (we were in not_enough_sun, meaning no frost/rain/no-sun conditions).
+  - id: 'pergola_not_enough_sun_exit'
+    alias: 'Pergola: Not Enough Sun — Exit'
+    description: >
+      Exits not_enough_sun when pergola_sun_shining turns on. The sensor's 1 min
+      delay_on means this fires only after 1 continuous minute of sun — no extra guard
+      needed here. Sets sun_automatik_heating or sun_automatik_cooling based on the
+      current heating indicator.
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.pergola_sun_shining
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: input_select.pergola_automation_state
+        state: not_enough_sun
+    actions:
+      # Inline heating/cooling check — no need to call evaluate_state here since
+      # rules 1–5 are already known to not apply when exiting not_enough_sun.
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pergola_heating
+                state: "on"
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: sun_automatik_heating
+        default:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.pergola_automation_state
+            data:
+              option: sun_automatik_cooling
+    mode: single
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# SCRIPTS
+# ─────────────────────────────────────────────────────────────────────────────────────
+script:
+
+  # ── Pergola Evaluate State (Rules 5–8) ───────────────────────────────────────────
+  # Evaluates the lower-priority sun-based rules and writes the result to
+  # input_select.pergola_automation_state. Called from two places:
+  #   1. pergola_state_manager default branch (when rules 1–4 do not apply)
+  #   2. script.pergola_post_rain_recovery final step (when exiting rain_stopped)
+  #
+  # Rules evaluated in priority order:
+  #   5. no_sun_behind_house — sun below horizon, too low, or outside azimuth window
+  #   6. not_enough_sun      — binary_sensor.pergola_sun_shining = off
+  #   7. sun_automatik_heating — heating indicator on
+  #   8. sun_automatik_cooling — default
+  #
+  # This script never checks rules 1–4; callers guarantee those are not active.
+  pergola_evaluate_state:
+    alias: "Pergola: Evaluate State (Rules 5–8)"
+    description: >
+      Evaluates rules 5–8 (no_sun_behind_house → not_enough_sun → heating → cooling)
+      and writes the result to input_select.pergola_automation_state. Called from
+      the state manager default branch and from the post-rain recovery script.
+    sequence:
+      - choose:
+          # ── Rule 5: no_sun_behind_house ──────────────────────────────────────────
+          # Sun is geometrically incapable of hitting the terrasse — slat formulas
+          # are irrelevant. Three sub-conditions (any one is sufficient):
+          #   a) sun.sun below horizon
+          #   b) elevation ≤ min_sun_elevation (sun shines UNDER the pergola roof)
+          #   c) azimuth outside terrasse-facing window (wall_azimuth ± 90°)
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set elev    = state_attr('sun.sun', 'elevation') | float(0) %}
+                  {% set az      = state_attr('sun.sun', 'azimuth')   | float(0) %}
+                  {% set min_el  = states('input_number.pergola_min_sun_elevation') | float(10) %}
+                  {% set wall_az = states('input_number.pergola_wall_azimuth') | float(204) %}
+                  {% set az_min  = wall_az - 90 %}
+                  {% set az_max  = wall_az + 90 %}
+                  {{ states('sun.sun') == 'below_horizon'
+                     or elev <= min_el
+                     or az < az_min
+                     or az > az_max }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: no_sun_behind_house
+
+          # ── Rule 6: not_enough_sun ───────────────────────────────────────────────
+          # Sun is above the horizon and in the azimuth window but not bright enough
+          # for shading. The sensor's 5 min delay_off means it has already been off
+          # for 5 continuous minutes when this script is called from that path.
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.pergola_sun_shining
+                state: "off"
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: not_enough_sun
+
+          # ── Rule 7: sun_automatik_heating ────────────────────────────────────────
+          # Sun is shining and the heating indicator is on — let sun through.
+          # Safe default when pergola_heating is unavailable: treat as cooling season.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_boolean.pergola_heating') | default('off') == 'on' }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: sun_automatik_heating
+
+        # ── Rule 8: sun_automatik_cooling (default) ──────────────────────────────
+        # Sun is active and cooling season — block sun via the cover formula.
+        default:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.pergola_automation_state
+            data:
+              option: sun_automatik_cooling
+    mode: single
+    max_exceeded: silent
+
+  # script.pergola_set_slat_angle will be added in Step 3 (Phase 2).
+  # script.pergola_post_rain_recovery will be added in Step 4.
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # GROUP — logical grouping of all pergola entities
@@ -568,8 +968,6 @@ group:
       # ── State machine ─────────────────────────────────────────────────────────────
       - input_select.pergola_automation_state
       # ── User-configurable parameters ──────────────────────────────────────────────
-      - input_number.pergola_frost_off_threshold
-      - input_number.pergola_frost_on_threshold
       - input_number.pergola_pv_conversion_factor
       - input_number.pergola_shading_sensitivity
       - input_number.pergola_min_sun_elevation
