@@ -1,4 +1,4 @@
-name: Check
+name: Home Assistant Core Configuration Check - Frenk
 on: [push, pull_request, workflow_dispatch]
 jobs:
   home-assistant:
