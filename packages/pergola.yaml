@@ -112,6 +112,25 @@ input_number:
     unit_of_measurement: "°"
     icon: mdi:weather-sunset
 
+  # ── Rain recovery step tracker ───────────────────────────────────────────────────
+
+  pergola_rain_recovery_step:
+    name: Pergola Rain Recovery Step
+    # Internal step counter for script.pergola_post_rain_recovery.
+    # Written by the recovery script before each phase; read by
+    # sensor.pergola_rain_recovery_step (which returns 0 when state ≠ rain_stopped).
+    # Steps:
+    #   1 — settling (30 s wait before first move)
+    #   2 — draining at 8° (5 min hold)
+    #   3 — draining at 15° (5 min hold)
+    #   4 — drying (optional 30 min wait when hourly_rain > 0)
+    # After the script calls script.pergola_evaluate_state the state exits rain_stopped
+    # and the template sensor returns 0 automatically — no explicit reset needed.
+    min: 0
+    max: 4
+    step: 1
+    icon: mdi:water-sync
+
   # ── Tilt / hardware geometry ──────────────────────────────────────────────────────
 
   pergola_max_tilt_angle:
@@ -347,6 +366,30 @@ template:
           {{ [[raw, 0] | max, 100] | min }}
         icon: mdi:format-align-middle
 
+      # ── Rain Recovery Step ────────────────────────────────────────────────────────
+      # Shows which step of the post-rain drain sequence is currently active.
+      # Returns 0 when the state machine is not in rain_stopped — no cleanup needed
+      # if the script is aborted (frost/rain entry), the state check handles it.
+      #
+      # Steps (only meaningful while state = rain_stopped):
+      #   1 — settling      (30 s wait for states to stabilise)
+      #   2 — draining 8°   (covers open to 8°; 5 min hold for initial drainage)
+      #   3 — draining 15°  (covers open to 15°; 5 min hold for continued drainage)
+      #   4 — drying        (optional 30 min extra wait when hourly_rain > 0)
+      #   0 — not in recovery (state ≠ rain_stopped)
+      - name: "Pergola Rain Recovery Step"
+        unique_id: pergola_rain_recovery_step
+        availability: >
+          {{ states('input_select.pergola_automation_state') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_rain_recovery_step') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% if states('input_select.pergola_automation_state') == 'rain_stopped' %}
+            {{ states('input_number.pergola_rain_recovery_step') | int(0) }}
+          {% else %}
+            0
+          {% endif %}
+        icon: mdi:water-sync
+
 
     binary_sensor:
 
@@ -479,7 +522,7 @@ template:
           {# This is the highest front-face angle that still blocks high-east/noon sun #}
           {# when the back-face strategy becomes unusable.                             #}
           {% set a_flip = ns.flip %}
-          {{ (a_flip + PHI - asin(R * sin(a_flip * pi / 180)) * (180 / pi)) | round(2) }}
+          {{ (a_flip + PHI - asin(R * sin(a_flip * pi / 180)) * (180 / pi)) | round(0) }}
         unit_of_measurement: "°"
         icon: mdi:angle-acute
 
@@ -1202,7 +1245,111 @@ script:
     mode: queued
     max: 2
 
-  # script.pergola_post_rain_recovery will be added in Step 4.
+  # ── Pergola Post-Rain Recovery ───────────────────────────────────────────────────
+  # Stepped drain sequence executed when the state machine enters rain_stopped.
+  # Moves covers to two progressively more open angles (8° → 15°) to drain water that
+  # pooled on the slats while they were flat during rain. After draining, re-evaluates
+  # sun/heating rules and exits rain_stopped by setting the correct operating state.
+  #
+  # Called from:
+  #   1. pergola_state_manager — Rule 2 exit / Rule 3 entry (rain just stopped)
+  #   2. pergola_state_manager — frost exit when hourly_rain > 0 (covers closed while frozen)
+  #   3. pergola_state_manager — user_override exit when hourly_rain > 0
+  #   4. pergola_state_manager — HA start with persisted rain_stopped state (drain resumes)
+  #
+  # No deadband check: the script always moves to its target angles regardless of the
+  # current cover position. Draining must always complete. script.pergola_set_slat_angle
+  # still enforces the pergola_automatic_enabled gate — if the master switch is off,
+  # movement commands are suppressed (water stays on slats until re-enabled).
+  #
+  # mode: restart — if turn_on is called while a drain is already in progress (e.g.
+  # after HA restart with rain_stopped persisted), the previous instance is terminated
+  # and the drain restarts from the beginning. Re-draining from 8° is safe.
+  # Frost / rain entry: the state manager calls turn_off explicitly, which also aborts
+  # any running instance.
+  pergola_post_rain_recovery:
+    alias: "Pergola: Post-Rain Recovery"
+    description: >
+      Stepped drain sequence after rain stops. Moves covers 8° → 15° to drain pooled
+      water, optionally waits 30 min if hourly rain > 0, then calls
+      script.pergola_evaluate_state to re-enter the correct operating state.
+    sequence:
+      # ── Step 1: Settling — set counter, wait for states to stabilise ──────────────
+      # 30 s delay after the rain indicator clears, giving the lock originator sensors
+      # and weather station time to report their final post-rain values before we move.
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pergola_rain_recovery_step
+        data:
+          value: 1
+      - delay: "00:00:30"
+
+      # ── Step 2: First drain position — 8° ──────────────────────────────────────────
+      # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
+      # pulls water toward the front edge. Hardware-corrected tilt_position ≈ 13.
+      # (INT(8 / 122 × 100 + 7) = INT(13.6) = 13)
+      # Counter set to 2 before the 5 min hold so the sensor shows the active phase.
+      - action: script.pergola_set_slat_angle
+        data:
+          slat_angle: 8
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pergola_rain_recovery_step
+        data:
+          value: 2
+
+      # ── Step 3: Wait 5 minutes — initial drainage ──────────────────────────────────
+      - delay: "00:05:00"
+
+      # ── Step 4: Second drain position — 15° ────────────────────────────────────────
+      # Open further so remaining water continues to run off. Hardware-corrected
+      # tilt_position ≈ 17. (INT(15 / 122 × 100 + 5.5) = INT(17.8) = 17)
+      # Counter set to 3 before the 5 min hold so the sensor shows the active phase.
+      - action: script.pergola_set_slat_angle
+        data:
+          slat_angle: 15
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pergola_rain_recovery_step
+        data:
+          value: 3
+
+      # ── Step 5: Wait 5 minutes — continued drainage ────────────────────────────────
+      - delay: "00:05:00"
+
+      # ── Step 6: Check whether rain accumulated in the last hour ────────────────────
+      # Counter set to 4 before the choose so the sensor shows "drying" during any wait.
+      # If hourly_rain > 0, rain fell recently — covers and slats may still be wet.
+      # Wait an additional 30 minutes before returning to normal operation so the slats
+      # can dry at 15° and motor stress from rapid re-opening is avoided.
+      # If hourly_rain = 0 (dry period since rain stopped), proceed immediately.
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pergola_rain_recovery_step
+        data:
+          value: 4
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.wheatherstation_hourly_rain') | float(0) > 0 }}
+            sequence:
+              # Rain still shows in the 60-min accumulation window — wait for slats to dry
+              - delay: "00:30:00"
+
+      # ── Step 7: Re-evaluate state and exit rain_stopped ────────────────────────────
+      # Rules 1–4 (frost, rain, user_override) are guaranteed to not apply here:
+      #   - frost was ruled out before rain_stopped was entered (frost takes priority)
+      #   - both rain indicators are off (that is the precondition for rain_stopped)
+      #   - user_override cannot coexist with rain_stopped (state machine priority)
+      # script.pergola_evaluate_state is the single implementation of rules 5–8:
+      #   no_sun_behind_house → not_enough_sun → sun_automatik_heating → sun_automatik_cooling
+      # The state manager will not fire on its own here — no sensor values changed since
+      # rain_rate and lock originators were already clear before entering rain_stopped.
+      - action: script.turn_on
+        target:
+          entity_id: script.pergola_evaluate_state
+    mode: restart
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # GROUP — logical grouping of all pergola entities
@@ -1234,9 +1381,22 @@ group:
       - input_number.pergola_slat_pivot_spacing
       - input_number.pergola_slat_thickness
       # ── Computed / read-only sensors ──────────────────────────────────────────────
+      - sensor.pergola_rain_recovery_step
       - sensor.pergola_pv_power
       - sensor.pergola_effective_sun_angle
       - sensor.pergola_slat_angle
       - sensor.pergola_tilt_position
       - binary_sensor.pergola_sun_shining
       - sensor.pergola_cooling_lower_bound
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# RECORDER EXCLUDES — derived constants that don't need history
+# ─────────────────────────────────────────────────────────────────────────────────────
+recorder:
+  exclude:
+    entities:
+      # Derived from max_tilt_angle alone — no value in storing history of a constant.
+      - sensor.pergola_cooling_lower_bound
+      - sensor.pergola_pv_power
+      - sensor.pergola_rain_recovery_step
