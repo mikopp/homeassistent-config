@@ -662,7 +662,7 @@ Action (`choose` on current state):
 
 ---
 
-#### Step 4 — Post-Rain Recovery Script [TODO]
+#### Step 4 — Post-Rain Recovery Script [DONE]
 **File:** `packages/pergola.yaml` — add under `script:`
 
 `script.pergola_post_rain_recovery` — stepped drain sequence (8° → wait 30 s → wait 5 min → 15° → wait 5 min → check hourly rain → [wait 30 min if rain reported] → re-evaluate and set final state).
