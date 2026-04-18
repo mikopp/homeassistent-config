@@ -768,3 +768,7 @@ else:                                                    # afternoon west sun �
 | 1c | PV conversion factor (default 3.2) | Can be refined in Step 6 field testing (Phase 5) |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 8 | Optimized cooling formula (safe-zone max-open) | Formula defined — `MaxOpenWest` (= Sbackside, `A_eff + PHI − asin(...)`) for flip range; `MaxOpenEast` as back-face target for morning. See Step 7. |
+| 9 | ~~The histeresis of actually moving the slats needs diff actual slat position with the target position~~ | ~~phase 2~~ |
+| 10 | the cooling morning in optimized state needs to be max open but safe. max open is 90 deg. so this position would be max (90, max_open_east - safty) as long as its less than max titlt | phase 4 |
+| 11 | the cooling lower bound needs to change to be dynamic. on the flip over we use maxopenwest which is actually a max open west morning. In the afternoon we need a max open west afternoon. That mirrors what have in the morning but for sun on the west. It should also have max open as its target, so it never opens to more than 90 | phase |
+| 12 | ~~in the no sun shining state we want to only move the slats when the current slat angle is more than 30 degrees away from max open (90). this is to avoid unnecessary movement~~ | ~~phase 2~~ | 

@@ -974,16 +974,41 @@ automation:
                      ['frost', 'rain', 'rain_stopped', 'user_override'] }}
             sequence: []
 
-          # ── No-sun states: no_sun_behind_house, not_enough_sun ─────────────────────
-          # Slats open to vertical (90°) for maximum ventilation and diffuse light.
-          # No deadband: target is a fixed 90° — always move on state entry.
-          # The Somfy is idempotent when already at the target position.
+          # ── No sun behind house ───────────────────────────────────────────────────
+          # Sun is geometrically behind the house — always open to 90° immediately
+          # so ventilation is restored without any deadband check.
           - conditions:
               - condition: template
                 value_template: >
-                  {{ states('input_select.pergola_automation_state') in
-                     ['no_sun_behind_house', 'not_enough_sun'] }}
+                  {{ states('input_select.pergola_automation_state') == 'no_sun_behind_house' }}
             sequence:
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: 90
+
+          # ── Not enough sun ─────────────────────────────────────────────────────────
+          # Sun is up but not bright enough for shading.
+          # Only move if the current slat angle (back-calculated from current_tilt_position)
+          # is more than 30° away from the 90° target — avoids unnecessary motor travel
+          # when the slats are already roughly vertical from a prior state transition.
+          #
+          # Reverse conversion: slat_angle ≈ (tilt_position − correction) × max_tilt / 100
+          # Correction is estimated from a rough first-pass (same breakpoints as the forward
+          # formula): < 20° → 7, < 69° → 5.5, else → 0.5.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'not_enough_sun' }}
+            sequence:
+              # 30° deadband: skip movement when slats are already near-vertical
+              - condition: template
+                value_template: >
+                  {% set mt          = states('input_number.pergola_max_tilt_angle') | float(122) %}
+                  {% set tp          = state_attr('cover.dach_links', 'current_tilt_position') | int(74) %}
+                  {% set rough_slat  = tp * mt / 100 %}
+                  {% set corr        = 7 if rough_slat < 20 else (5.5 if rough_slat < 69 else 0.5) %}
+                  {% set current_slat = ((tp - corr) * mt / 100) | round(1) %}
+                  {{ (current_slat - 90) | abs > 30 }}
               - action: script.pergola_set_slat_angle
                 data:
                   slat_angle: 90
