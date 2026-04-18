@@ -203,7 +203,7 @@ The resulting `group.pergola_dach` entity can be added directly to any Lovelace 
 #### Scripts — internal movement helpers
 | Entity | Description |
 |---|---|
-| `script.pergola_set_slat_angle` | **Single authoritative slat_angle→tilt_position converter.** Accepts `slat_angle` (float, degrees). Computes `tilt_position` using the Step 2 hardware-correction formula with the live value of `input_number.pergola_max_tilt_angle`, clamps to [0, 100], and sends `cover.set_cover_tilt_position` to both covers. All cover movement commands — from the cover response automation and the post-rain recovery script — call this script. The formula is never inlined elsewhere. Does **not** apply the movement deadband; callers check the deadband before invoking where required. |
+| `script.pergola_set_slat_angle` | **Single authoritative slat_angle→tilt_position converter.** Accepts `slat_angle` (float, degrees). First checks `input_boolean.pergola_automatic_enabled` — if `off`, exits immediately without moving covers (this gates all movement including post-rain drain). Computes `tilt_position` using the Step 2 hardware-correction formula with the live value of `input_number.pergola_max_tilt_angle`, clamps to [0, 100], and sends `cover.set_cover_tilt_position` to both covers. All cover movement commands — from the cover response automation and the post-rain recovery script — call this script. The formula is never inlined elsewhere. Does **not** apply the movement deadband; callers check the deadband before invoking where required. |
 
 ---
 
@@ -471,7 +471,7 @@ else:
 
 Use `cover.dach_links` as the reference — both covers always move together.
 
-This applies to **all** move decisions: state-change transitions, the 5-minute periodic sun-tracking trigger, and the no-sun slat_angle-90° target. The post-rain recovery script bypasses this check — it always moves to its drain angles regardless.
+This applies **only to states where the formula output changes continuously with the sun** (`sun_automatik_cooling`, and `sun_automatik_heating` once the real heating formula is in place). It does **not** apply to fixed-target states (`no_sun_behind_house`, `not_enough_sun`, or the `sun_automatik_heating` stub) — those always send `slat_angle: 90` unconditionally; the Somfy is idempotent if already at the target position. The post-rain recovery script bypasses this check — it always moves to its drain angles regardless.
 
 **Why 5°:** The motor's dead zone and mechanical play account for ≈2–3° uncertainty. A 5° threshold prevents constant micro-movements as the sun creeps while still ensuring the covers track meaningful changes (the sun moves about 1°–2° in azimuth per minute at moderate elevation, producing a slat angle change of well under 1°/min — so 5° corresponds to a 5–10 minute lag, comparable to the periodic trigger interval).
 
@@ -512,7 +512,7 @@ Hysteresis to prevent oscillation:
 
 ## Master Switch
 
-`input_boolean.pergola_automatic_enabled` — when `off`, response automation skips all cover movement. State machine continues tracking state so re-enabling acts immediately. **Template sensors (`sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) are NOT gated by this switch — they always reflect current computed values. Only cover movement commands are suppressed.**
+`input_boolean.pergola_automatic_enabled` — when `off`, `script.pergola_set_slat_angle` exits immediately without moving covers. This gates all cover movement including the post-rain drain sequence. State machine continues tracking state so re-enabling acts immediately. **Template sensors (`sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, `sensor.pergola_tilt_position`, `binary_sensor.pergola_sun_shining`) are NOT gated by this switch — they always reflect current computed values. Only cover movement commands are suppressed.**
 
 ---
 
@@ -632,14 +632,14 @@ Action: `pergola_state_manager` evaluates rules 1–4 directly (frost → rain �
 
 ### Phase 2 — Cover Control
 
-#### Step 3 — Cover Response Automation (no-sun + cooling) [TODO]
+#### Step 3 — Cover Response Automation (no-sun + cooling) [DONE]
 **File:** `packages/pergola.yaml` — add under `automation:`
 
 Add `pergola_cover_response`. Triggers on `input_select.pergola_automation_state` state change and on time pattern every 5 min (to track sun position within active state).
 
 Also defines `script.pergola_set_slat_angle` — the single authoritative cover movement script (see entity listing and Tilt Calculation Logic Step 2). All cover movement in this step and Step 4 goes through this script.
 
-Condition: `input_boolean.pergola_automatic_enabled = on`.
+Condition: none — the `input_boolean.pergola_automatic_enabled` gate lives inside `script.pergola_set_slat_angle`, not here. The automation always runs; the script decides whether to move covers.
 
 Action (`choose` on current state):
 - `no_sun_behind_house`, `not_enough_sun` → if deadband passes, call `script.pergola_set_slat_angle` with `slat_angle: 90`
@@ -656,7 +656,7 @@ Action (`choose` on current state):
 - Fill in the stub template sensors from Step 1: `sensor.pergola_slat_angle` and `sensor.pergola_tilt_position` should reflect the current calculated values based on state + sun position (update the template body, not just the automation). The template bodies for `sensor.pergola_effective_sun_angle`, `sensor.pergola_slat_angle`, and `sensor.pergola_tilt_position` must NOT check `input_boolean.pergola_automatic_enabled` — they always compute. The `automatic_enabled` gate belongs only to the `pergola_cover_response` automation condition, not to any template sensor.
 
 **Verify:**
-- Disable `pergola_automatic_enabled` → covers stop responding
+- Disable `pergola_automatic_enabled` → covers stop responding (script exits early, automation still evaluates state)
 - With sun active and cooling season, covers move to formula result within 5 min; verify no movement if cover is already within 5° of target
 - Manually set state to `no_sun_behind_house` → tilt goes to formula result for slat_angle 90° (default 74, or stays if already within 5°)
 
@@ -768,3 +768,7 @@ else:                                                    # afternoon west sun �
 | 1c | PV conversion factor (default 3.2) | Can be refined in Step 6 field testing (Phase 5) |
 | 5 | Post-rain slat angles (8°, 15°) | Confirm drainage adequate after first real rain |
 | 8 | Optimized cooling formula (safe-zone max-open) | Formula defined — `MaxOpenWest` (= Sbackside, `A_eff + PHI − asin(...)`) for flip range; `MaxOpenEast` as back-face target for morning. See Step 7. |
+| 9 | ~~The histeresis of actually moving the slats needs diff actual slat position with the target position~~ | ~~phase 2~~ |
+| 10 | the cooling morning in optimized state needs to be max open but safe. max open is 90 deg. so this position would be max (90, max_open_east - safty) as long as its less than max titlt | phase 4 |
+| 11 | the cooling lower bound needs to change to be dynamic. on the flip over we use maxopenwest which is actually a max open west morning. In the afternoon we need a max open west afternoon. That mirrors what have in the morning but for sun on the west. It should also have max open as its target, so it never opens to more than 90 | phase |
+| 12 | ~~in the no sun shining state we want to only move the slats when the current slat angle is more than 30 degrees away from max open (90). this is to avoid unnecessary movement~~ | ~~phase 2~~ | 

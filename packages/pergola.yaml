@@ -223,44 +223,128 @@ template:
         icon: mdi:solar-panel
 
       # ── Effective Sun Angle (A_eff) ───────────────────────────────────────────────
-      # STUB — formula will be added in Step 3 (Phase 2).
-      # When implemented, A_eff maps the sun's position onto a unified 0°–180° scale:
+      # A_eff maps the sun's position onto a unified 0°–180° east-to-west scale:
       #   0° = East Horizon → 90° = Zenith/Noon → 180° = West Horizon
-      # Used as the primary input for both the cooling and heating slat formulas.
+      # Primary input for both cooling and heating slat formulas.
       # Always computes regardless of pergola_automatic_enabled — useful for monitoring.
+      #
+      # sun_height = projected elevation in the slat-perpendicular plane
+      #   = atan( tan(elevation) / |sin(delta_phi)| )
+      #   where delta_phi = azimuth − wall_azimuth
+      # Singularity at delta_phi ≈ 0 (sun along slat axis): limit is sun_height = 90°.
+      # A_eff: east-of-wall (az < wall_az) → A_eff = sun_height
+      #         west-of-wall (az ≥ wall_az) → A_eff = 180 − sun_height
+      # Derivation: plans/pergola-slat-formula-analysis.md
       - name: "Pergola Effective Sun Angle"
         unique_id: pergola_effective_sun_angle
-        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
-        state: "0"
-        availability: "false"
+        availability: >
+          {{ state_attr('sun.sun', 'elevation') is not none
+             and state_attr('sun.sun', 'azimuth') is not none
+             and states('input_number.pergola_wall_azimuth') not in ['unavailable', 'unknown']
+             and (state_attr('sun.sun', 'elevation') | float(0)) > 0 }}
+        state: >
+          {% set elev    = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% set az      = state_attr('sun.sun', 'azimuth') | float(0) %}
+          {% set wall_az = states('input_number.pergola_wall_azimuth') | float(204) %}
+          {# Safety guard: sun at or below horizon — availability template should already  #}
+          {# prevent this branch, but guard here against evaluation-order edge cases.      #}
+          {% if elev <= 0 %}
+            0
+          {% else %}
+            {% set delta_phi = az - wall_az %}
+            {# Singularity guard: sun azimuth ≈ wall_azimuth (along slat axis) →           #}
+            {# the formula divides by near-zero; mathematical limit is sun_height = 90°.   #}
+            {% if (sin(delta_phi * pi / 180)) | abs < 0.001 %}
+              {% set sun_height = 90 %}
+            {% else %}
+              {% set sun_height = (atan(tan(elev * pi / 180) / ((sin(delta_phi * pi / 180)) | abs))) * (180 / pi) %}
+            {% endif %}
+            {# Map to east→west scale: morning east-of-wall → A_eff = sun_height;          #}
+            {#                          afternoon west-of-wall → A_eff = 180 − sun_height  #}
+            {% if az < wall_az %}
+              {{ sun_height | round(1) }}
+            {% else %}
+              {{ (180 - sun_height) | round(1) }}
+            {% endif %}
+          {% endif %}
         unit_of_measurement: "°"
         icon: mdi:angle-acute
 
       # ── Target Slat Angle ─────────────────────────────────────────────────────────
-      # STUB — formula will be added in Step 3 (Phase 2).
-      # When implemented, shows the calculated slat angle (0°–122°) that the automation
-      # would target at this moment — the raw angular output before hardware correction.
-      # Useful for commissioning without having to inspect cover state.
-      # Always computes regardless of pergola_automatic_enabled.
+      # Shows the calculated target slat angle (0°–max_tilt_angle°) the automation
+      # would send to the covers at this moment — raw angular output before hardware
+      # correction. Always computes regardless of pergola_automatic_enabled.
+      #
+      # State dispatch:
+      #   sun_automatik_cooling  → full cooling formula (see plan Tilt Calc Step 1)
+      #   sun_automatik_heating  → stub: 90° until Step 5 (Phase 3)
+      #   no_sun_behind_house,   → 90° (vertical, maximum ventilation)
+      #   not_enough_sun         → 90°
+      #   frost / rain / ...     → 90° (no movement; neutral display value)
       - name: "Pergola Slat Angle"
         unique_id: pergola_slat_angle
-        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
-        state: "0"
-        availability: "false"
+        availability: >
+          {{ states('input_select.pergola_automation_state') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set s = states('input_select.pergola_automation_state') %}
+          {% if s != 'sun_automatik_cooling' %}
+            {# All non-cooling states (including heating stub) → vertical open position    #}
+            90
+          {% else %}
+            {# ── Cooling formula ────────────────────────────────────────────────────── #}
+            {# Derived geometry constants — same derivation as sensor.pergola_cooling_lower_bound #}
+            {% set mt  = states('input_number.pergola_max_tilt_angle') | float(122) %}
+            {% set w   = states('input_number.pergola_slat_width') | float(22) %}
+            {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+            {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
+            {# R: overlap ratio; PHI: thickness angle offset (default ≈8.53°)             #}
+            {% set R   = ((d**2 + t**2) ** 0.5) / w %}
+            {% set PHI = atan(t / d) * (180 / pi) %}
+            {# COOLING_LOWER_BOUND: ventilation floor derived in sensor.pergola_cooling_lower_bound #}
+            {% set LB  = states('sensor.pergola_cooling_lower_bound') | float(15.3) %}
+            {# A_eff from the companion sensor — already handles singularity + horizon guard #}
+            {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
+            {# MaxOpenEast: minimum back-face slat angle for 100% shade from eastern sun   #}
+            {# = A_eff + PHI + asin(R × sin(A_eff))                                       #}
+            {% set moe = A + PHI + asin(R * sin(A * pi / 180)) * (180 / pi) %}
+            {# Morning (A_eff < 90°, back-face strategy still safe):                       #}
+            {#   target = A_eff + 90 (perpendicular blocking)                              #}
+            {#   if that exceeds max_tilt (dead zone), clamp to max_tilt                   #}
+            {% if A < 90 and moe <= mt - 5 %}
+              {% set slat = (A + 90) if (A + 90) <= mt else mt %}
+            {% else %}
+            {# Afternoon or past safe limit: front-face / closing formula                  #}
+            {#   A_eff − 90 floored at COOLING_LOWER_BOUND (ventilation minimum)           #}
+              {% set slat = [A - 90, LB] | max %}
+            {% endif %}
+            {# Clamp result to [LB, max_tilt] and round to 1 decimal                      #}
+            {{ [[slat, LB] | max, mt] | min | round(1) }}
+          {% endif %}
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
 
       # ── Target Tilt Position ──────────────────────────────────────────────────────
-      # STUB — formula will be added in Step 3 (Phase 2).
-      # When implemented, shows the hardware-corrected tilt_position (0–100) that will
-      # be sent to cover.dach_links / cover.dach_rechts. Useful for debugging the
-      # formula without triggering actual cover movement.
+      # Hardware-corrected tilt_position (0–100) derived from sensor.pergola_slat_angle.
+      # Shows what will be sent to the covers when the automation fires.
+      # READ-ONLY: never used to drive cover commands — display/debug only.
       # Always computes regardless of pergola_automatic_enabled.
+      #
+      # Formula: tilt_position = INT(slat_angle / max_tilt × 100 + correction)
+      # Correction: +7 below 20°, +5.5 below 69°, +0.5 otherwise.
+      # The identical formula lives in script.pergola_set_slat_angle (single authoritative
+      # implementation). This sensor mirrors it for observability only.
       - name: "Pergola Tilt Position"
         unique_id: pergola_tilt_position
-        # STUB: formula added in Step 3 (Phase 2). Reports unavailable until then.
-        state: "0"
-        availability: "false"
+        availability: >
+          {{ states('sensor.pergola_slat_angle') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_max_tilt_angle') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set slat = states('sensor.pergola_slat_angle') | float(90) %}
+          {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
+          {# Hardware correction offsets: see plan "Step 2 — Convert slat_angle to tilt_position" #}
+          {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
+          {% set raw  = (slat / mt * 100 + corr) | int %}
+          {{ [[raw, 0] | max, 100] | min }}
         icon: mdi:format-align-middle
 
 
@@ -853,6 +937,123 @@ automation:
               option: sun_automatik_cooling
     mode: single
 
+  # ── Pergola Cover Response ─────────────────────────────────────────────────────────
+  # Moves covers in response to state machine transitions and every 5 minutes for
+  # continuous sun tracking. The choose block dispatches to the right slat-angle target
+  # per state; a deadband check prevents unnecessary micro-movements.
+  #
+  # No conditions here: the pergola_automatic_enabled gate lives inside
+  # script.pergola_set_slat_angle. The automation always evaluates; the script
+  # decides whether to actually move covers. This keeps template sensors computing
+  # freely for monitoring even when automatic is disabled.
+  - id: 'pergola_cover_response'
+    alias: 'Pergola Cover Response'
+    description: >
+      Reacts to state machine transitions and tracks the sun every 5 min. Dispatches
+      to the correct slat-angle formula per state and applies the movement deadband
+      before calling script.pergola_set_slat_angle.
+    triggers:
+      # Immediate reaction to any state machine transition
+      - trigger: state
+        entity_id: input_select.pergola_automation_state
+      # Periodic sun tracking: sun moves ~1–2°/min in azimuth so a 5 min tick
+      # produces ~5–10° of slat change — right at the deadband threshold. Without
+      # this trigger, covers would not track the sun while the state stays constant.
+      - trigger: time_pattern
+        minutes: /5
+    conditions: []
+    actions:
+      - choose:
+          # ── Safety / protected states: frost, rain, rain_stopped, user_override ────
+          # Covers must not move during these states. An explicit no-op branch prevents
+          # falling through to the default branch.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') in
+                     ['frost', 'rain', 'rain_stopped', 'user_override'] }}
+            sequence: []
+
+          # ── No sun behind house ───────────────────────────────────────────────────
+          # Sun is geometrically behind the house — always open to 90° immediately
+          # so ventilation is restored without any deadband check.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'no_sun_behind_house' }}
+            sequence:
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: 90
+
+          # ── Not enough sun ─────────────────────────────────────────────────────────
+          # Sun is up but not bright enough for shading.
+          # Only move if the current slat angle (back-calculated from current_tilt_position)
+          # is more than 30° away from the 90° target — avoids unnecessary motor travel
+          # when the slats are already roughly vertical from a prior state transition.
+          #
+          # Reverse conversion: slat_angle ≈ (tilt_position − correction) × max_tilt / 100
+          # Correction is estimated from a rough first-pass (same breakpoints as the forward
+          # formula): < 20° → 7, < 69° → 5.5, else → 0.5.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'not_enough_sun' }}
+            sequence:
+              # 30° deadband: skip movement when slats are already near-vertical.
+              # Comparison is done in tilt_position space (0–100) — sensor.pergola_tilt_position
+              # already holds the hardware-corrected tilt_position for the current target angle
+              # (90° → 74 when in not_enough_sun), so no reverse conversion needed here.
+              # DB = 30° expressed as tilt_position units via the same linear factor.
+              - condition: template
+                value_template: >
+                  {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
+                  {% set DB      = (30 / mt * 100) | round(0) | int %}
+                  {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(74) %}
+                  {% set target  = states('sensor.pergola_tilt_position') | int(74) %}
+                  {{ (current - target) | abs > DB }}
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: 90
+
+          # ── Cooling season: sun_automatik_cooling ──────────────────────────────────
+          # sensor.pergola_slat_angle already holds the cooling formula result for this
+          # state — read it to avoid duplicating the formula here. Deadband prevents
+          # micro-movements as the sun creeps across the sky.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'sun_automatik_cooling' }}
+            sequence:
+              # Deadband guard: compare target (from sensor) against current cover position
+              - condition: template
+                value_template: >
+                  {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
+                  {% set DB      = (5 / mt * 100) | round(0) | int %}
+                  {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
+                  {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
+                  {{ (target - current) | abs >= DB }}
+              # Pass cooling formula result from sensor to the authoritative movement script
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: "{{ states('sensor.pergola_slat_angle') | float(90) }}"
+
+          # ── Heating season stub: sun_automatik_heating ─────────────────────────────
+          # Heating formula is added in Step 5 (Phase 3). Until then, open to 90°
+          # (same as the no-sun position) — safe placeholder that lets sun through.
+          # No deadband: fixed target, same reasoning as no-sun states above.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'sun_automatik_heating' }}
+            sequence:
+              # Stub: heating formula replaced in Step 5 — open to 90° for now
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: 90
+    mode: queued
+    max: 3
+
 # ─────────────────────────────────────────────────────────────────────────────────────
 # SCRIPTS
 # ─────────────────────────────────────────────────────────────────────────────────────
@@ -945,7 +1146,62 @@ script:
     mode: single
     max_exceeded: silent
 
-  # script.pergola_set_slat_angle will be added in Step 3 (Phase 2).
+  # ── Pergola Set Slat Angle ────────────────────────────────────────────────────────
+  # Single authoritative slat_angle→tilt_position converter and cover movement script.
+  # ALL cover movement commands (cover response automation and post-rain recovery)
+  # call this script. The formula is never inlined in automations or other scripts.
+  #
+  # Accepts: slat_angle (float, degrees).
+  # Gate: exits immediately if input_boolean.pergola_automatic_enabled is off.
+  # Does NOT check the movement deadband — callers check before invoking here.
+  # This allows the post-rain recovery script to bypass the deadband intentionally.
+  pergola_set_slat_angle:
+    alias: "Pergola: Set Slat Angle"
+    description: >
+      Converts slat_angle (degrees) to hardware-corrected tilt_position and sends
+      cover.set_cover_tilt_position to both covers. Exits without moving if the
+      master switch (pergola_automatic_enabled) is off.
+    fields:
+      slat_angle:
+        description: "Target slat angle in degrees (0–max_tilt_angle)"
+        example: 90
+        required: true
+        selector:
+          number:
+            min: 0
+            max: 122
+    sequence:
+      # ── Master switch gate ──────────────────────────────────────────────────────────
+      # All cover movement is suppressed when automatic is disabled.
+      # State machine and template sensors keep running so re-enabling takes effect
+      # immediately without waiting for the next trigger.
+      - condition: state
+        entity_id: input_boolean.pergola_automatic_enabled
+        state: "on"
+      # ── Hardware-corrected tilt_position ────────────────────────────────────────────
+      # correction offsets compensate for observed non-linear motor behaviour:
+      #   below 20°: motor barely moves at small angles → +7 to actually reach target
+      #   20°–69°:   linear range → +5.5 rounds to nearest integer correctly
+      #   above 69°: slight jerk above vertical → +0.5 to avoid small overshoot
+      # Result is clamped to [0, 100] — values > 100 are dead zone on the Somfy.
+      - variables:
+          _tilt: >
+            {% set s    = slat_angle | float(90) %}
+            {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
+            {% set corr = 7 if s < 20 else (5.5 if s < 69 else 0.5) %}
+            {{ [[(s / mt * 100 + corr) | int, 0] | max, 100] | min }}
+      # ── Send movement command to both covers ─────────────────────────────────────────
+      # Both covers always move together as one unit.
+      - action: cover.set_cover_tilt_position
+        target:
+          entity_id:
+            - cover.dach_links
+            - cover.dach_rechts
+        data:
+          tilt_position: "{{ _tilt }}"
+    mode: queued
+    max: 2
+
   # script.pergola_post_rain_recovery will be added in Step 4.
 
 # ─────────────────────────────────────────────────────────────────────────────────────

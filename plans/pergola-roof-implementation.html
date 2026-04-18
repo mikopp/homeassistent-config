@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pergola Roof Automation — Implementation State</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#e8f5e8',
+        primaryTextColor: '#1a1a1a',
+        primaryBorderColor: '#2c7a2c',
+        lineColor: '#555',
+        fontSize: '13px'
+      },
+      flowchart: { curve: 'basis', htmlLabels: true }
+    });
+  </script>
+  <style>
+    :root { --green: #2c7a2c; --red: #c0392b; --blue: #1565c0; --amber: #b8860b; --grey: #666; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 1500px; margin: 0 auto; padding: 1.5rem 2rem; background: #f4f6f4; color: #1a1a1a; }
+    h1 { color: var(--green); border-bottom: 3px solid var(--green); padding-bottom: .5rem; font-size: 1.7rem; }
+    h2 { color: var(--green); font-size: 1.15rem; margin: 0 0 .4rem; }
+    .section { background: white; border-radius: 10px; padding: 1.5rem 2rem; margin-bottom: 2rem; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+    .section.todo { background: #fff8f0; border-left: 4px solid #e67e22; }
+    p.desc { color: #555; font-size: .88rem; margin: 0 0 1.2rem; line-height: 1.5; }
+    p.desc code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 3px; font-size: .85rem; }
+    nav { background: white; border-radius: 8px; padding: .8rem 1.4rem; margin-bottom: 2rem; box-shadow: 0 2px 8px rgba(0,0,0,.07); display: flex; gap: .5rem 1.4rem; flex-wrap: wrap; align-items: center; }
+    nav strong { color: var(--green); }
+    nav a { text-decoration: none; color: var(--blue); font-size: .9rem; padding: .25rem .55rem; border-radius: 4px; }
+    nav a:hover { background: #e8f5e8; }
+    .mermaid { overflow-x: auto; text-align: center; }
+    .status-table { width: 100%; border-collapse: collapse; font-size: .88rem; margin-bottom: 1.2rem; }
+    .status-table th { background: #e8f5e8; color: var(--green); padding: .5rem .8rem; text-align: left; border-bottom: 2px solid #c0ddc0; }
+    .status-table td { padding: .45rem .8rem; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
+    .status-table tr:hover td { background: #f8fff8; }
+    .done   { color: #1a7a1a; font-weight: 600; }
+    .stub   { color: #8a6a00; font-weight: 600; }
+    .todo   { color: #b84000; font-weight: 600; }
+    .badge  { display: inline-block; padding: .15rem .5rem; border-radius: 10px; font-size: .78rem; font-weight: 600; }
+    .badge-done { background: #d4edda; color: #1a7a1a; }
+    .badge-stub { background: #fff3cd; color: #8a6a00; }
+    .badge-todo { background: #fde8e8; color: #b84000; }
+    footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: .8rem; color: #888; }
+    footer a { color: var(--blue); }
+  </style>
+</head>
+<body>
+
+<h1>Pergola Roof Automation — Current Implementation State</h1>
+<p>Shows what is actually coded in <code>packages/pergola.yaml</code> as of Phase 1 (Steps 1–2 complete).
+For the complete <em>design</em>, see <a href="pergola-roof-flow.html">pergola-roof-flow.html</a>.</p>
+
+<nav>
+  <strong>Jump to:</strong>
+  <a href="#s1">1 · Implementation Status</a>
+  <a href="#s2">2 · Architecture (as-built)</a>
+  <a href="#s3">3 · State Manager (3 automations)</a>
+  <a href="#s4">4 · Evaluate State Script</a>
+  <a href="#s5">5 · Pending: Cover Response</a>
+  <a href="#s6">6 · Pending: Post-Rain Recovery</a>
+</nav>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     1. IMPLEMENTATION STATUS
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s1">
+  <h2>1 · Implementation Status</h2>
+  <p class="desc">Phase 1 (Foundation) is complete. Phase 2 (Cover Control, Steps 3–4) and later phases are not yet implemented.</p>
+
+  <table class="status-table">
+    <tr>
+      <th>Component</th>
+      <th>Entity / Alias</th>
+      <th>Status</th>
+      <th>Notes</th>
+    </tr>
+
+    <tr><td colspan="4" style="background:#f4f4f4;font-weight:600;color:#444;padding:.3rem .8rem">Phase 1 — Foundation (Step 1: Helpers &amp; Sensors)</td></tr>
+    <tr><td>Helpers (all input_boolean / input_number / input_select)</td><td>13 entities</td><td><span class="badge badge-done">DONE</span></td><td>All defaults correct. Group <code>group.pergola_dach</code> defined.</td></tr>
+    <tr><td>PV Power sensor</td><td><code>sensor.pergola_pv_power</code></td><td><span class="badge badge-done">DONE</span></td><td>Thin wrapper around Victron yield_power226.</td></tr>
+    <tr><td>Sun Shining sensor</td><td><code>binary_sensor.pergola_sun_shining</code></td><td><span class="badge badge-done">DONE</span></td><td>Full formula: radiation + PV + UV, with delay_on 1 min / delay_off 5 min.</td></tr>
+    <tr><td>Cooling Lower Bound sensor</td><td><code>sensor.pergola_cooling_lower_bound</code></td><td><span class="badge badge-done">DONE</span></td><td>Jinja2 for-loop finds flip point; re-derives from geometry inputs automatically.</td></tr>
+    <tr><td>Effective Sun Angle sensor</td><td><code>sensor.pergola_effective_sun_angle</code></td><td><span class="badge badge-stub">STUB</span></td><td>Returns <code>unavailable</code>. Formula added in Step 3.</td></tr>
+    <tr><td>Slat Angle sensor</td><td><code>sensor.pergola_slat_angle</code></td><td><span class="badge badge-stub">STUB</span></td><td>Returns <code>unavailable</code>. Formula added in Step 3.</td></tr>
+    <tr><td>Tilt Position sensor</td><td><code>sensor.pergola_tilt_position</code></td><td><span class="badge badge-stub">STUB</span></td><td>Returns <code>unavailable</code>. Formula added in Step 3.</td></tr>
+
+    <tr><td colspan="4" style="background:#f4f4f4;font-weight:600;color:#444;padding:.3rem .8rem">Phase 1 — Foundation (Step 2: State Manager)</td></tr>
+    <tr><td>State Manager automation</td><td><code>pergola_state_manager</code></td><td><span class="badge badge-done">DONE</span></td><td>Rules 1–4 inline (frost/rain/rain_stopped/user_override); delegates rules 5–8 to evaluate_state script.</td></tr>
+    <tr><td>Not-Enough-Sun Entry automation</td><td><code>pergola_not_enough_sun_entry</code></td><td><span class="badge badge-done">DONE</span></td><td>Fires on sun_shining → off; condition guards higher-priority states.</td></tr>
+    <tr><td>Not-Enough-Sun Exit automation</td><td><code>pergola_not_enough_sun_exit</code></td><td><span class="badge badge-done">DONE</span></td><td>Fires on sun_shining → on; directly sets heating/cooling state.</td></tr>
+    <tr><td>Evaluate State script</td><td><code>script.pergola_evaluate_state</code></td><td><span class="badge badge-done">DONE</span></td><td>Rules 5–8: no_sun_behind_house → not_enough_sun → heating → cooling.</td></tr>
+    <tr><td>Inactivity Watchdog (×2)</td><td><code>id: 1771360145720 / 1771361016291</code></td><td><span class="badge badge-done">DONE</span></td><td>Sends stop_cover_tilt every 5 min when inactive; suppressed during active states.</td></tr>
+    <tr><td>Lock Originator Responders (×2)</td><td><code>id: 1771748333394 / 1771748414999</code></td><td><span class="badge badge-done">DONE</span></td><td>Forces state report immediately on lock originator change.</td></tr>
+
+    <tr><td colspan="4" style="background:#f4f4f4;font-weight:600;color:#444;padding:.3rem .8rem">Phase 2 — Cover Control (Steps 3–4: not yet started)</td></tr>
+    <tr><td>Cover Response automation</td><td><code>pergola_cover_response</code></td><td><span class="badge badge-todo">TODO</span></td><td>Step 3. State changes + /5 min trigger → slat formula → covers.</td></tr>
+    <tr><td>Set Slat Angle script</td><td><code>script.pergola_set_slat_angle</code></td><td><span class="badge badge-todo">TODO</span></td><td>Step 3. Single authoritative slat→tilt_position converter.</td></tr>
+    <tr><td>Effective Sun Angle formula</td><td><code>sensor.pergola_effective_sun_angle</code></td><td><span class="badge badge-todo">TODO</span></td><td>Step 3. Fills in the stub with A_eff formula.</td></tr>
+    <tr><td>Slat/Tilt sensor formulas</td><td><code>sensor.pergola_slat_angle/tilt_position</code></td><td><span class="badge badge-todo">TODO</span></td><td>Step 3. Fills in stubs for display/debug.</td></tr>
+    <tr><td>Post-Rain Recovery script</td><td><code>script.pergola_post_rain_recovery</code></td><td><span class="badge badge-todo">TODO</span></td><td>Step 4. 8°→15° stepped drain sequence.</td></tr>
+
+    <tr><td colspan="4" style="background:#f4f4f4;font-weight:600;color:#444;padding:.3rem .8rem">Phase 3–5 (Steps 5–7: not yet started)</td></tr>
+    <tr><td>Heating season formula</td><td><code>sun_automatik_heating</code> branch</td><td><span class="badge badge-todo">TODO</span></td><td>Step 5. A_eff tracking in cover_response.</td></tr>
+    <tr><td>Optimized cooling formula</td><td><code>cooling_optimized = on</code> branch</td><td><span class="badge badge-todo">TODO</span></td><td>Step 7. MaxOpenEast/MaxOpenWest targeting.</td></tr>
+    <tr><td>Field calibration</td><td>PV factor, shading sensitivity</td><td><span class="badge badge-todo">TODO</span></td><td>Step 6. After first sunny+rainy day.</td></tr>
+  </table>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     2. ARCHITECTURE (as-built)
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s2">
+  <h2>2 · Architecture (as-built)</h2>
+  <p class="desc">
+    What is actually wired up in <code>packages/pergola.yaml</code> today.
+    Grey dashed boxes = not yet implemented.
+    The state machine runs and writes <code>input_select.pergola_automation_state</code> correctly.
+    No cover movement occurs yet — the cover response automation and <code>script.pergola_set_slat_angle</code>
+    do not exist. The watchdog automations force Somfy state reports every 5 minutes as before.
+  </p>
+  <pre class="mermaid">
+flowchart LR
+    subgraph Inputs["Inputs"]
+        WS["Weather Station\noutdoor_temp · rain_rate\nhourly_rain · solar_radiation · uv_index"]
+        SUN_I["sun.sun\nelevation · azimuth"]
+        LOCKS["Cover Lock Sensors\noriginator: unknown | rain | user"]
+        PV_I["Victron PV\nyield_power226"]
+    end
+
+    subgraph Helpers["Config Helpers — 13 entities, all DONE"]
+        H_MASTER["input_boolean\nautomatic_enabled"]
+        H_HEATING["input_boolean\npergola_heating"]
+        H_COOL["input_boolean\ncooling_optimized"]
+        H_STATE["input_select\nautomation_state  8 states"]
+        H_NUMS["input_number ×8\npv_factor · sensitivity · max_tilt\nwall_az · min_elev · min_heat_angle\nslat_width · spacing · thickness"]
+    end
+
+    subgraph Derived["Derived Template Sensors"]
+        D_PV["sensor.pergola_pv_power\nDONE"]
+        D_CLB["sensor.pergola_cooling_lower_bound\nDONE — geometry-derived constant"]
+        D_SHINE["binary_sensor.pergola_sun_shining\nDONE — full formula + delays"]
+        D_AEFF["sensor.pergola_effective_sun_angle\nSTUB — returns unavailable"]
+        D_SLAT["sensor.pergola_slat_angle\nSTUB — returns unavailable"]
+        D_TPOS["sensor.pergola_tilt_position\nSTUB — returns unavailable"]
+    end
+
+    subgraph StateLogic["State Machine — DONE"]
+        A_SM["automation\npergola_state_manager\nRules 1–4 inline\n+ 2 not_enough_sun automations"]
+        A_EVS["script\npergola_evaluate_state\nRules 5–8"]
+        WD["Inactivity Watchdog ×2\n+ Lock Responders ×2\n(carry-over automations)"]
+    end
+
+    subgraph Pending["Cover Control — TODO (Step 3+)"]
+        A_CR["automation\npergola_cover_response\nNOT YET IMPLEMENTED"]
+        A_SS["script\npergola_set_slat_angle\nNOT YET IMPLEMENTED"]
+        A_REC["script\npergola_post_rain_recovery\nNOT YET IMPLEMENTED"]
+    end
+
+    subgraph Covers["Covers"]
+        C_L["cover.dach_links"]
+        C_R["cover.dach_rechts"]
+    end
+
+    PV_I --> D_PV
+    WS --> D_SHINE
+    SUN_I --> D_SHINE
+    PV_I --> D_SHINE
+    H_NUMS --> D_CLB
+    SUN_I --> D_AEFF
+    H_NUMS --> D_AEFF
+
+    WS --> A_SM
+    SUN_I --> A_SM
+    LOCKS --> A_SM
+    D_SHINE --> A_SM
+    H_HEALING --> A_SM
+    A_SM --> H_STATE
+    A_SM --> A_EVS
+    A_EVS --> H_STATE
+    LOCKS --> WD
+    WD --> C_L
+    WD --> C_R
+
+    H_STATE -.->|"TODO: state change trigger"| A_CR
+    A_CR -.->|"TODO"| A_SS
+    A_REC -.->|"TODO"| A_SS
+    A_SS -.->|"TODO"| C_L
+    A_SS -.->|"TODO"| C_R
+
+    style A_CR fill:#fff0e0,stroke:#e67e22,stroke-dasharray:5 3
+    style A_SS fill:#fff0e0,stroke:#e67e22,stroke-dasharray:5 3
+    style A_REC fill:#fff0e0,stroke:#e67e22,stroke-dasharray:5 3
+    style D_AEFF fill:#fffce0,stroke:#c8960a
+    style D_SLAT fill:#fffce0,stroke:#c8960a
+    style D_TPOS fill:#fffce0,stroke:#c8960a
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     3. STATE MANAGER (as implemented — 3 automations)
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s3">
+  <h2>3 · State Manager (as implemented)</h2>
+  <p class="desc">
+    The state machine is split across <strong>three automations</strong> plus one script —
+    not a single automation as the design diagram implies.
+    <code>pergola_state_manager</code> handles rules 1–4 (frost/rain/rain_stopped/user_override) and
+    the default delegation to <code>script.pergola_evaluate_state</code>.
+    <code>not_enough_sun</code> entry and exit each have a dedicated automation because they have distinct
+    trigger/condition patterns (the sensor's built-in delays make extra <code>for:</code> guards unnecessary).
+    Only these three automations (plus the script) may write <code>input_select.pergola_automation_state</code>.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    subgraph NSE["pergola_not_enough_sun_entry  (mode: single)"]
+        NSE_T(["Trigger\nbinary_sensor.pergola_sun_shining → off\n(sensor has 5 min delay_off built-in)"])
+        NSE_C{"State not in:\nfrost · rain · rain_stopped\nuser_override · no_sun_behind_house?"}
+        NSE_A["Set state\nnot_enough_sun"]
+        NSE_T --> NSE_C
+        NSE_C -->|Yes| NSE_A
+        NSE_C -->|No — higher priority active| NSE_SKIP(["Skip"])
+    end
+
+    subgraph NSX["pergola_not_enough_sun_exit  (mode: single)"]
+        NSX_T(["Trigger\nbinary_sensor.pergola_sun_shining → on\n(sensor has 1 min delay_on built-in)"])
+        NSX_C{"State = not_enough_sun?"}
+        NSX_A{"pergola_heating = on?"}
+        NSX_H["Set state\nsun_automatik_heating"]
+        NSX_K["Set state\nsun_automatik_cooling"]
+        NSX_T --> NSX_C
+        NSX_C -->|No| NSX_SKIP(["Skip"])
+        NSX_C -->|Yes| NSX_A
+        NSX_A -->|Yes| NSX_H
+        NSX_A -->|No| NSX_K
+    end
+
+    subgraph SM["pergola_state_manager  (mode: queued, max: 3)"]
+        SM_T(["Triggers\ntemp numeric_state (2.5°C / 3.0°C threshold crossings)\nrain_rate state · dach_links/rechts lock_originator state\nbinary_sensor.pergola_sun_shining state\ninput_boolean.pergola_heating state\nhomeassistant start · time_pattern /5 min"])
+
+        SM_C1{"HA start\nAND state = rain_stopped?"}
+        SM_RA(["Re-trigger\nscript.pergola_post_rain_recovery"])
+
+        SM_C2{"temp &lt; 2.5°C\nAND state ≠ frost?"}
+        SM_FROST_IN["Stop recovery script\nSet state: frost"]
+
+        SM_C3{"temp &gt; 3.0°C\nAND state = frost?"}
+        SM_FROST_OUT_R["Set state: rain_stopped\nStart recovery script"]
+        SM_FROST_OUT_E["Call script.pergola_evaluate_state"]
+
+        SM_C4{"Rain active\nAND state not in frost/rain?"}
+        SM_RAIN_IN["Stop recovery script\nSet state: rain"]
+
+        SM_C5{"All rain indicators off\nAND state = rain?"}
+        SM_RAIN_STOP["Set state: rain_stopped\nStart recovery script"]
+
+        SM_C6{"lock = 'user'\nAND state not in frost/rain\n/rain_stopped/user_override?"}
+        SM_USER_IN["Set state: user_override"]
+
+        SM_C7{"Both locks = 'unknown'\nAND state = user_override?"}
+        SM_USER_OUT_R["Set state: rain_stopped\nStart recovery script"]
+        SM_USER_OUT_E["Call script.pergola_evaluate_state"]
+
+        SM_GUARD{"State in\nfrost/rain/rain_stopped?"}
+        SM_DEF["Call script.pergola_evaluate_state\n(rules 5–8)"]
+
+        SM_T --> SM_C1
+        SM_C1 -->|Yes| SM_RA
+        SM_C1 -->|No| SM_C2
+        SM_C2 -->|Yes| SM_FROST_IN
+        SM_C2 -->|No| SM_C3
+        SM_C3 -->|Yes — hourly_rain > 0| SM_FROST_OUT_R
+        SM_C3 -->|Yes — hourly_rain = 0| SM_FROST_OUT_E
+        SM_C3 -->|No| SM_C4
+        SM_C4 -->|Yes| SM_RAIN_IN
+        SM_C4 -->|No| SM_C5
+        SM_C5 -->|Yes| SM_RAIN_STOP
+        SM_C5 -->|No| SM_C6
+        SM_C6 -->|Yes| SM_USER_IN
+        SM_C6 -->|No| SM_C7
+        SM_C7 -->|Yes — hourly_rain > 0| SM_USER_OUT_R
+        SM_C7 -->|Yes — hourly_rain = 0| SM_USER_OUT_E
+        SM_C7 -->|No| SM_GUARD
+        SM_GUARD -->|"Yes — protected"| SM_NOOP(["Do nothing"])
+        SM_GUARD -->|No| SM_DEF
+    end
+
+    style SM_FROST_IN fill:#fde8e8,stroke:#c0392b
+    style SM_RAIN_IN fill:#fde8e8,stroke:#c0392b
+    style SM_RA fill:#fff3cd,stroke:#ffc107
+    style SM_RAIN_STOP fill:#fff3cd,stroke:#ffc107
+    style SM_FROST_OUT_R fill:#fff3cd,stroke:#ffc107
+    style SM_USER_OUT_R fill:#fff3cd,stroke:#ffc107
+    style SM_DEF fill:#e8f5e8,stroke:#28a745
+    style SM_FROST_OUT_E fill:#e8f5e8,stroke:#28a745
+    style SM_USER_OUT_E fill:#e8f5e8,stroke:#28a745
+    style NSE_A fill:#d1ecf1,stroke:#0c7c8c
+    style NSX_H fill:#d4edda,stroke:#28a745
+    style NSX_K fill:#d4edda,stroke:#28a745
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     4. EVALUATE STATE SCRIPT (as implemented)
+══════════════════════════════════════════════════════════════ -->
+<div class="section" id="s4">
+  <h2>4 · Evaluate State Script (as implemented)</h2>
+  <p class="desc">
+    <code>script.pergola_evaluate_state</code> (mode: single, max_exceeded: silent) evaluates rules 5–8 and
+    writes <code>input_select.pergola_automation_state</code>. Called from two places:
+    the <code>pergola_state_manager</code> default branch, and the post-rain recovery script final step
+    (Step 4 — not yet implemented). This is the single place for lower-priority rule logic.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    ENTRY(["Called from:\npergola_state_manager default branch\nOR script.pergola_post_rain_recovery final step\n(callers guarantee rules 1–4 are not active)"])
+
+    R5{"Rule 5 — no_sun_behind_house\nsun.sun = below_horizon\nOR elevation ≤ min_sun_elevation\nOR azimuth &lt; wall_azimuth − 90°\nOR azimuth &gt; wall_azimuth + 90°"}
+    R6{"Rule 6 — not_enough_sun\nbinary_sensor.pergola_sun_shining = off\n(sensor's 5 min delay_off already applied)"}
+    R7{"Rule 7 — sun_automatik_heating\ninput_boolean.pergola_heating = on\n(default('off') fail-safe when unavailable)"}
+
+    S5["Set state: no_sun_behind_house"]
+    S6["Set state: not_enough_sun"]
+    S7["Set state: sun_automatik_heating"]
+    S8["Set state: sun_automatik_cooling\n(default — all above rules false)"]
+
+    ENTRY --> R5
+    R5 -->|Yes| S5
+    R5 -->|No| R6
+    R6 -->|Yes| S6
+    R6 -->|No| R7
+    R7 -->|Yes| S7
+    R7 -->|No| S8
+
+    style S5 fill:#d1ecf1,stroke:#0c7c8c
+    style S6 fill:#d1ecf1,stroke:#0c7c8c
+    style S7 fill:#d4edda,stroke:#28a745
+    style S8 fill:#d4edda,stroke:#28a745
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     5. PENDING: COVER RESPONSE (Step 3)
+══════════════════════════════════════════════════════════════ -->
+<div class="section todo" id="s5">
+  <h2>5 · Pending: Cover Response + Tilt Calculation (Step 3)</h2>
+  <p class="desc">
+    <strong>Not yet implemented.</strong> Step 3 adds:
+    <ul style="color:#555;font-size:.88rem;line-height:1.8;margin:.3rem 0 .8rem 1.2rem">
+      <li><code>automation.pergola_cover_response</code> — triggers on state change + every 5 min;
+          checks <code>automatic_enabled</code>; computes slat_angle per state; applies deadband; calls script</li>
+      <li><code>script.pergola_set_slat_angle</code> — accepts <code>slat_angle</code> (float, degrees);
+          applies hardware correction (7/5.5/0.5 offsets); clamps to [0,100]; sends to both covers</li>
+      <li>Fills in template sensor formulas for <code>sensor.pergola_effective_sun_angle</code>,
+          <code>sensor.pergola_slat_angle</code>, <code>sensor.pergola_tilt_position</code>
+          (stubs currently return <code>unavailable</code>)</li>
+      <li>Cooling formula: A_eff → MaxOpenEast/MaxOpenWest geometry → slat_angle
+          (no_sun/not_enough_sun → slat_angle=90°; heating stub → slat_angle=90° until Step 5)</li>
+    </ul>
+    See <a href="pergola-roof-flow.html#s3">design: Section 3 Cover Response</a> and
+    <a href="pergola-roof-flow.html#s4">design: Section 4 Tilt Calculation</a>.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    TODO(["TODO — Step 3\nadd pergola_cover_response automation\nadd script.pergola_set_slat_angle\nfill in A_eff / slat_angle / tilt_position\ntemplate sensor formulas"])
+
+    style TODO fill:#fff0e0,stroke:#e67e22,stroke-width:2
+  </pre>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     6. PENDING: POST-RAIN RECOVERY (Step 4)
+══════════════════════════════════════════════════════════════ -->
+<div class="section todo" id="s6">
+  <h2>6 · Pending: Post-Rain Recovery Script (Step 4)</h2>
+  <p class="desc">
+    <strong>Not yet implemented.</strong> Step 4 adds <code>script.pergola_post_rain_recovery</code>.
+    When the state machine enters <code>rain_stopped</code>, this script runs the stepped drain sequence:
+    slat_angle 8° → wait 5 min → 15° → wait 5 min → check hourly_rain → [wait 30 min if still wet] →
+    call <code>script.pergola_evaluate_state</code> to exit rain_stopped.
+    Calls <code>script.pergola_set_slat_angle</code> for cover movement (no deadband check — drain must complete).
+    <br>
+    Depends on Step 3 (<code>script.pergola_set_slat_angle</code> must exist first).
+    See <a href="pergola-roof-flow.html#s5">design: Section 5 Post-Rain Recovery</a>.
+  </p>
+  <pre class="mermaid">
+flowchart TD
+    TODO(["TODO — Step 4\nadd script.pergola_post_rain_recovery\n(depends on Step 3 — script.pergola_set_slat_angle)"])
+
+    style TODO fill:#fff0e0,stroke:#e67e22,stroke-width:2
+  </pre>
+</div>
+
+<footer>
+  Pergola Roof Automation — implementation state &nbsp;·&nbsp;
+  source: <a href="../packages/pergola.yaml">packages/pergola.yaml</a>
+  &nbsp;·&nbsp; design: <a href="pergola-roof-automation.md">pergola-roof-automation.md</a>
+  &nbsp;·&nbsp; rendered with <a href="https://mermaid.js.org">Mermaid 10</a>
+</footer>
+
+</body>
+</html>
