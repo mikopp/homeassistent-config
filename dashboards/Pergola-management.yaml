@@ -22,6 +22,32 @@ views:
         - type: attribute
           entity: cover.dach_rechts
           attribute: current_tilt_position
+      # ── Pergola Automations ───────────────────────────────────────────────────────────
+      # Grid of tile cards matching the area-overview automation style.
+      # Lists all automations defined in packages/pergola.yaml.
+      - type: heading
+        heading: Automations
+        heading_level: 2
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: tile
+            entity: automation.pergola_state_manager
+          - type: tile
+            entity: automation.pergola_cover_response
+          - type: tile
+            entity: automation.pergola_not_enough_sun_entry
+          - type: tile
+            entity: automation.pergola_not_enough_sun_exit
+          - type: tile
+            entity: automation.inactivity_watchdog_dach_links
+          - type: tile
+            entity: automation.inactivity_watchdog_dach_rechts
+          - type: tile
+            entity: automation.update_cover_state_when_lock_originator_changes
+          - type: tile
+            entity: automation.dach_rechts_update_state_when_lock_originator_changes
       - type: logbook
         title: Pergola Activity
         hours_to_show: 24

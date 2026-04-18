@@ -42,9 +42,11 @@
 </head>
 <body>
 
-<h1>Pergola Roof Automation — Full Flow Diagrams</h1>
+<h1>Pergola Roof Automation — Full Flow Diagrams (Design / Plan)</h1>
 <p>Source: <a href="pergola-roof-automation.md">pergola-roof-automation.md</a> &nbsp;·&nbsp;
-Edit the <code>&lt;pre class="mermaid"&gt;</code> blocks in this file to update any diagram.</p>
+Edit the <code>&lt;pre class="mermaid"&gt;</code> blocks in this file to update any diagram.
+<br>For the diagram of the current <em>implemented</em> state, see
+<a href="pergola-roof-implementation.html">pergola-roof-implementation.html</a>.</p>
 
 <nav>
   <strong>Jump to:</strong>
@@ -64,36 +66,47 @@ Edit the <code>&lt;pre class="mermaid"&gt;</code> blocks in this file to update 
   <p class="desc">
     All components and data-flow paths. Everything lives in <code>packages/pergola.yaml</code> and is deployed via <code>git pull</code>.
     The two covers (<code>cover.dach_links</code> / <code>cover.dach_rechts</code>) always move together.
+    Frost thresholds (2.5 °C entry / 3.0 °C exit) are <strong>hardcoded constants</strong>, not UI-editable inputs.
+    <code>input_boolean.pergola_heating</code> can be set via HA REST API by an external system (e.g. Loxone) —
+    no direct Loxone trigger in the state manager automation.
   </p>
   <pre class="mermaid">
 flowchart LR
     subgraph Inputs["Inputs"]
-        WS["Weather Station\noutdoor_temp · rain_rate\nhourly_rain · solar_radiation"]
+        WS["Weather Station\noutdoor_temp · rain_rate\nhourly_rain · solar_radiation\nuv_index"]
         SUN_I["sun.sun\nelevation · azimuth"]
         LOCKS["Cover Lock Sensors\ndach_links · dach_rechts\npriority_lock_originator\nunknown | rain | user"]
         PV_I["Victron PV\nyield_power226"]
     end
 
-    subgraph Helpers["Config Helpers — Pergola Dach device (UI-editable)"]
+    subgraph Helpers["Config Helpers — UI-editable"]
         H_MASTER["input_boolean\nautomatic_enabled"]
         H_HEATING["input_boolean\npergola_heating\n(on = heating, off = cooling)\nset via UI or REST API"]
-        H_THRESH["input_number\nfrost_off_threshold (2.5°C)\nfrost_on_threshold (3.0°C)"]
-        H_TILT["input_number\nmax_tilt_angle (122°)"]
         H_COOL["input_boolean\ncooling_optimized"]
-        H_PV["input_number\npv_conversion_factor (3.2)"]
         H_STATE["input_select\nautomation_state\n8 states"]
+        H_PV["input_number\npv_conversion_factor (3.2)"]
+        H_SHAD["input_number\nshading_sensitivity (0.9)"]
+        H_TILT["input_number\nmax_tilt_angle (122°)"]
+        H_WALL["input_number\nwall_azimuth (204°)"]
+        H_MEL["input_number\nmin_sun_elevation (10°)"]
+        H_MHEAT["input_number\nmin_heating_slat_angle (16°)"]
+        H_GEOM["input_number\nslat_width (22 cm)\nslat_pivot_spacing (20 cm)\nslat_thickness (3 cm)"]
     end
 
-    subgraph Derived["Derived Template Sensors — Pergola Dach device (read-only)"]
+    subgraph Derived["Derived Template Sensors — read-only"]
         D_PV["sensor\npergola_pv_power"]
+        D_CLB["sensor\npergola_cooling_lower_bound °\n(re-derives from geometry + max_tilt)"]
         D_SHINE["binary_sensor\npergola_sun_shining"]
+        D_AEFF["sensor\npergola_effective_sun_angle °\n(0°=East Horizon → 90°=Zenith → 180°=West)"]
         D_SLAT["sensor\npergola_slat_angle °"]
         D_TPOS["sensor\npergola_tilt_position 0–100"]
     end
 
     subgraph Logic["Automation Logic"]
-        A_SM["automation\npergola_state_manager\nSole writer of automation_state.\nTriggers: temp · rain · sun · locks\n· sun_shining · loxone · HA start"]
+        A_SM["automation\npergola_state_manager\nSole writer of automation_state.\nTriggers: temp · rain · sun · locks\n· sun_shining · heating · HA start · /5 min"]
+        A_EVS["script\npergola_evaluate_state\nRules 5–8: no_sun →\nnot_enough_sun → heating → cooling"]
         A_CR["automation\npergola_cover_response\nTriggers: state change + every 5 min\nCondition: automatic_enabled = on"]
+        A_SS["script\npergola_set_slat_angle\nSingle authoritative\nslat_angle → tilt_position converter\n(hardware correction formula)"]
         A_REC["script\npergola_post_rain_recovery\nTriggered when state = rain_stopped\nStepped drain sequence then re-evaluates"]
     end
 
@@ -107,29 +120,40 @@ flowchart LR
     WS --> D_SHINE
     SUN_I --> D_SHINE
     H_PV --> D_SHINE
+    H_SHAD --> D_SHINE
+    H_MEL --> D_SHINE
+    H_TILT --> D_CLB
+    H_GEOM --> D_CLB
+    SUN_I --> D_AEFF
+    H_WALL --> D_AEFF
+    SUN_I --> D_SLAT
+    SUN_I --> D_TPOS
+    H_STATE --> D_SLAT
+    H_STATE --> D_TPOS
 
     WS --> A_SM
     SUN_I --> A_SM
     LOCKS --> A_SM
-    LOX_I --> A_SM
     D_SHINE --> A_SM
-    H_THRESH --> A_SM
     A_SM --> H_STATE
+    A_SM --> A_EVS
+    A_EVS --> H_STATE
 
     H_STATE -->|"state change"| A_CR
     H_STATE -->|"→ rain_stopped"| A_REC
     H_MASTER --> A_CR
     H_TILT --> A_CR
     H_COOL --> A_CR
+    H_WALL --> A_CR
+    H_MHEAT --> A_CR
+    D_CLB --> A_CR
     SUN_I --> A_CR
 
-    A_CR --> D_SLAT
-    A_CR --> D_TPOS
-    A_CR --> C_L
-    A_CR --> C_R
-    A_REC --> C_L
-    A_REC --> C_R
-    A_REC -->|"sets final state"| H_STATE
+    A_CR --> A_SS
+    A_REC --> A_SS
+    A_SS --> C_L
+    A_SS --> C_R
+    A_REC -->|"calls evaluate_state"| A_EVS
   </pre>
 </div>
 
@@ -150,16 +174,16 @@ flowchart LR
   </p>
   <div class="legend">
     <div class="li"><div class="sw" style="background:#fde8e8;border-color:#c0392b"></div> No movement</div>
-    <div class="li"><div class="sw" style="background:#d1ecf1;border-color:#0c7c8c"></div> Tilt → 71 (vertical, open)</div>
+    <div class="li"><div class="sw" style="background:#d1ecf1;border-color:#0c7c8c"></div> Tilt → ~74 (vertical, open)</div>
     <div class="li"><div class="sw" style="background:#d4edda;border-color:#28a745"></div> Formula-driven tilt</div>
     <div class="li"><div class="sw" style="background:#fff3cd;border-color:#ffc107"></div> Recovery script active</div>
   </div>
   <pre class="mermaid">
 flowchart TD
-    TRIG(["Trigger fires\ntemp · rain_rate · sun · locks\nsun_shining · loxone · HA start"])
+    TRIG(["Trigger fires\ntemp · rain_rate · sun · locks\nsun_shining · heating · HA start · /5 min"])
 
     GUARD{"Currently in\nrain_stopped?"}
-    G_FROST{"PRIORITY 1 — FROST?\ntemp &lt; frost_off_threshold"}
+    G_FROST{"PRIORITY 1 — FROST?\ntemp &lt; frost_off_threshold\n(hardcoded 2.5 °C)"}
     G_RAIN{"PRIORITY 2 — RAIN?\nrain_rate &gt; 0\nOR lock_originator = 'rain'"}
     CANCEL_F["Cancel recovery script\nscript.turn_off\npergola_post_rain_recovery"]
     CANCEL_R["Cancel recovery script\nscript.turn_off\npergola_post_rain_recovery"]
@@ -167,21 +191,21 @@ flowchart TD
     RETRIG(["Re-trigger\nscript.pergola_post_rain_recovery\nResume interrupted drain sequence\n(script restarts from beginning — safe)"])
     DONE_G(["Wait — recovery script\ncontrols exit"])
 
-    P1{"PRIORITY 1 — FROST\ntemp &lt; frost_off_threshold\ndefault 2.5 °C"}
+    P1{"PRIORITY 1 — FROST\ntemp &lt; 2.5 °C\n(hardcoded; float(99) fail-safe:\nunknown temp → do not trip frost)"}
     P2{"PRIORITY 2 — RAIN\nrain_rate &gt; 0\nOR lock_originator = 'rain'\non either cover"}
     P3{"PRIORITY 3 — USER OVERRIDE\nlock_originator = 'user'\non either cover"}
-    P4{"PRIORITY 4 — NO SUN geometric\nsun below horizon\nOR azimuth outside 114°–294°"}
+    P4{"PRIORITY 4 — NO SUN geometric\nsun below horizon\nOR elevation ≤ min_sun_elevation\nOR azimuth outside wall_azimuth ± 90°"}
     P5{"PRIORITY 5 — NOT ENOUGH SUN\nbinary_sensor.pergola_sun_shining\nhas been OFF for 5 continuous min"}
     P6{"PRIORITY 6 — HEATING\ninput_boolean.pergola_heating = on"}
 
-    S_FROST["STATE: frost\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: temp &gt; frost_on_threshold (3.0 °C)"]
+    S_FROST["STATE: frost\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: temp &gt; 3.0 °C (hardcoded)\nfloat(0) fail-safe: unknown → stay in frost"]
     S_RAIN["STATE: rain\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: rain_rate = 0\nAND both lock_originators = 'unknown'"]
     S_RAINS["STATE: rain_stopped\n───────────────────\nScript controls covers\n(stepped drain sequence)\n───────────────────\nExit when: script sets new state"]
     S_USER["STATE: user_override\n───────────────────\n🛑 No cover movement\n───────────────────\nExit when: both locks = 'unknown'\n→ if hourly_rain &gt; 0: enter rain_stopped\n→ else: re-evaluate\n(same exit logic as frost)"]
-    S_NOSUN["STATE: no_sun_behind_house\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun enters azimuth window\nAND sun is up"]
-    S_NOTENOUGH["STATE: not_enough_sun\n───────────────────\nTilt → 71 (vertical, open)\n───────────────────\nExit when: sun_shining ON\nfor 2 continuous min"]
-    S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays\n───────────────────\nExit when: pergola_heating = off\nOR sun sets / overcast"]
-    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–100]\nSlats perpendicular to sun\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
+    S_NOSUN["STATE: no_sun_behind_house\n───────────────────\nTilt → ~74 (vertical, open)\n───────────────────\nExit when: sun enters azimuth window\nAND elevation &gt; min_sun_elevation"]
+    S_NOTENOUGH["STATE: not_enough_sun\n───────────────────\nTilt → ~74 (vertical, open)\n───────────────────\nExit when: sun_shining ON\nfor 1 continuous min"]
+    S_HEAT["STATE: sun_automatik_heating\n───────────────────\nHeating formula → tilt [0–100]\nSlats parallel to sun rays (A_eff)\n───────────────────\nExit when: pergola_heating = off\nOR sun sets / overcast"]
+    S_COOL["STATE: sun_automatik_cooling\n───────────────────\nCooling formula → tilt [0–100]\nSlats block sun (A_eff ± 90°)\n───────────────────\nExit when: pergola_heating = on\nOR sun sets / overcast"]
 
     TRIG --> GUARD
     GUARD -->|"Yes"| G_FROST
@@ -239,6 +263,9 @@ flowchart TD
     <code>pergola_cover_response</code> triggers on every state change and on a 5-minute timer.
     The 5-minute timer is the only mechanism that moves covers as the sun slowly tracks across the sky
     within a steady state. The master switch is checked first on every trigger.
+    All cover movement goes through <code>script.pergola_set_slat_angle</code> — the single
+    authoritative slat→tilt_position converter. The cover response checks the deadband before calling
+    the script; the post-rain recovery script bypasses the deadband.
   </p>
   <pre class="mermaid">
 flowchart TD
@@ -253,13 +280,14 @@ flowchart TD
     NONE_RS["🛑 No movement\n(recovery script controls covers)"]
     NONE_U["🛑 No movement\n(user has manual control)"]
 
-    ACT_71A["set_cover_tilt_position\nboth covers → 71"]
-    ACT_71B["set_cover_tilt_position\nboth covers → 71"]
+    ACT_74A["call script.pergola_set_slat_angle\nslat_angle: 90\n(tilt_position ~74 vertical)"]
+    ACT_74B["call script.pergola_set_slat_angle\nslat_angle: 90\n(tilt_position ~74 vertical)"]
 
-    COOL_C["Calculate cooling tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 100]"]
-    HEAT_C["Calculate heating tilt\n↓ see Tilt Calculation diagram\nclamp tilt_position to [0, 100]"]
+    COOL_DB["Compute cooling slat_angle\n↓ see Tilt Calculation diagram\nCheck deadband:\n|target_tilt − current_tilt| ≥ DEADBAND_TILT?"]
+    HEAT_DB["Compute heating slat_angle\n↓ see Tilt Calculation diagram\nCheck deadband:\n|target_tilt − current_tilt| ≥ DEADBAND_TILT?"]
 
-    SEND["set_cover_tilt_position\nboth covers → tilt_position\nUpdate: sensor.pergola_slat_angle\nUpdate: sensor.pergola_tilt_position"]
+    SEND["call script.pergola_set_slat_angle\nwith computed slat_angle\n(script does hardware correction,\nclamps to [0,100], sends to both covers)"]
+    SKIP_DB(["Skip — within deadband\n(covers already close enough)"])
 
     TRIG --> CHK_M
     CHK_M -->|No| SKIP
@@ -269,22 +297,24 @@ flowchart TD
     WHICH -->|rain| NONE_R
     WHICH -->|rain_stopped| NONE_RS
     WHICH -->|user_override| NONE_U
-    WHICH -->|no_sun_behind_house| ACT_71A
-    WHICH -->|not_enough_sun| ACT_71B
-    WHICH -->|sun_automatik_cooling| COOL_C
-    WHICH -->|sun_automatik_heating| HEAT_C
+    WHICH -->|no_sun_behind_house| ACT_74A
+    WHICH -->|not_enough_sun| ACT_74B
+    WHICH -->|sun_automatik_cooling| COOL_DB
+    WHICH -->|sun_automatik_heating| HEAT_DB
 
-    COOL_C --> SEND
-    HEAT_C --> SEND
+    COOL_DB -->|"Yes — move"| SEND
+    COOL_DB -->|"No"| SKIP_DB
+    HEAT_DB -->|"Yes — move"| SEND
+    HEAT_DB -->|"No"| SKIP_DB
 
     style NONE_F fill:#fde8e8,stroke:#c0392b
     style NONE_R fill:#fde8e8,stroke:#c0392b
     style NONE_RS fill:#fde8e8,stroke:#c0392b
     style NONE_U fill:#fde8e8,stroke:#c0392b
-    style ACT_71A fill:#d1ecf1,stroke:#0c7c8c
-    style ACT_71B fill:#d1ecf1,stroke:#0c7c8c
-    style COOL_C fill:#d4edda,stroke:#28a745
-    style HEAT_C fill:#d4edda,stroke:#28a745
+    style ACT_74A fill:#d1ecf1,stroke:#0c7c8c
+    style ACT_74B fill:#d1ecf1,stroke:#0c7c8c
+    style COOL_DB fill:#d4edda,stroke:#28a745
+    style HEAT_DB fill:#d4edda,stroke:#28a745
     style SEND fill:#d4edda,stroke:#28a745
   </pre>
 </div>
@@ -296,85 +326,93 @@ flowchart TD
 <div class="section" id="s4">
   <h2>4 · Tilt Calculation Pipeline</h2>
   <p class="desc">
-    Two-step calculation run by <code>pergola_cover_response</code> and the template sensors.
-    Step 1 computes the desired <strong>slat_angle</strong> (degrees) from sun geometry and season.
-    Step 2 applies hardware motor correction to produce <strong>tilt_position</strong> (0–100) sent to the covers.
+    Two-step calculation run by <code>script.pergola_set_slat_angle</code> (cover movement) and the template sensors (display).
+    Step 0 converts sun azimuth + elevation into the <strong>Effective Sun Angle</strong> ($A_{eff}$) —
+    a unified 0°–180° east-to-west scale: 0° = East Horizon → 90° = Zenith/Noon → 180° = West Horizon.
+    $A_{eff}$ and the slat angle sit on the <strong>same number line</strong>:
+    in heating mode the slat tracks $A_{eff}$ directly; in cooling mode the slat is offset ±90° from $A_{eff}$.
     <br>
-    <strong>threshold</strong> = max_tilt_angle − 180 = 122 − 180 = <strong>−58°</strong> (default).
-    <strong>perfect_angle</strong> sign convention: positive = sun from west, negative = sun from east.
+    <strong>COOLING_LOWER_BOUND</strong> ≈ 15.3° — derived at runtime as <code>MaxOpenWest(A_eff_flip)</code>
+    from slat geometry; the ventilation floor used when the back-face strategy can no longer guarantee full shade
+    (MaxOpenEast &gt; max_tilt − 5°, i.e. A_eff ≈ 58°). Fully parametric: re-derives when geometry inputs change.
+    <br>
+    <strong>DEADBAND_TILT</strong> = <code>INT(5 / max_tilt × 100)</code> (default 4 tilt units ≈ 4.9°) —
+    the cover response checks this before every move; the post-rain recovery script bypasses it.
   </p>
   <pre class="mermaid">
 flowchart TD
-    IN(["Inputs\nazimuth · elevation · mode\nmax_tilt_angle · cooling_optimized"])
+    IN(["Inputs\nazimuth · elevation · mode\nwall_azimuth · max_tilt_angle\ncooling_optimized\nslat geometry (w, d, t)"])
 
-    STEP0["STEP 0 — Intermediate Values\ndelta_phi      = azimuth − 204\ndelta_phi_rad  = radians(delta_phi)\nelevation_rad  = radians(elevation)\nthreshold      = max_tilt_angle − 180  (default −58°)"]
+    STEP0["STEP 0 — Effective Sun Angle (A_eff)\ndelta_phi     = azimuth − wall_azimuth\ndelta_phi_rad = radians(delta_phi)\nelevation_rad = radians(elevation)"]
 
-    PERF_CHK{"elevation &lt;= 0\nOR |sin(delta_phi_rad)| &lt; 0.001?"}
-    PA_ZERO["perfect_angle = 0\n(sun along slat axis\nor below horizon)"]
-    PA_CALC["perfect_angle =\ndegrees(\n  atan2(sin(delta_phi_rad),\n        tan(elevation_rad))\n)"]
+    SING_CHK{"elevation &lt;= 0\nOR |sin(delta_phi_rad)| &lt; 0.001?"}
+    SH_90["sun_height = 90°\n(sun at/below horizon, or azimuth ≈ wall_azimuth;\nsingularity → A_eff = 90° is the correct limit)"]
+    SH_CALC["sun_height =\ndegrees(\n  atan( tan(elevation_rad)\n        / |sin(delta_phi_rad)| )\n)"]
+
+    AEFF_CHK{"azimuth &lt; wall_azimuth?\n(sun east of terrasse — morning)"}
+    AEFF_M["A_eff = sun_height\n(0°–90°: morning, east sun)"]
+    AEFF_A["A_eff = 180° − sun_height\n(90°–180°: afternoon, west sun)"]
 
     MODE{"Mode?"}
 
-    FIXED["slat_angle = 90°\n→ tilt_position = 71\n(vertical, open)"]
+    FIXED["slat_angle = 90°\n→ script.pergola_set_slat_angle\n→ tilt_position ≈ 74 (vertical, open)\n(formula: INT(90/max_tilt × 100 + 0.5))"]
 
-    C1{"perfect_angle\n&lt;= threshold (−58°)?\nsun from far east"}
-    C2{"perfect_angle &gt;= −5°?\nearly flip: ~2 update cycles\nbefore geometric crossing"}
-    C_BACK["slat_angle = perfect_angle + 180\n(block from slat back side)"]
-    C_DIRECT["slat_angle = max(perfect_angle, 11°)\n(direct block; tilt≥16 ventilation floor)"]
-    C_DEAD["slat_angle = max_tilt_angle (122°)\ndead zone: −58° &lt; angle &lt; −5°\ne_crit=6.56° &lt; 10° min → always shades"]
-    C_CLAMP["clamp to [11°, max_tilt_angle]\nLower bound = tilt 16 (ventilation floor).\nEast branch (+180°) needs 90°–122°."]
+    GEOM["Geometry Constants (derived from inputs)\nw = slat_width, d = slat_pivot_spacing, t = slat_thickness\nR   = sqrt(d² + t²) / w          (default ≈ 0.9193)\nPHI = degrees(atan(t / d))       (default ≈ 8.53°)\nSAFETY = 5° (fixed)\n\nMaxOpenEast = A_eff + PHI + degrees(asin(R · sin(A_eff_rad)))\nMaxOpenWest = A_eff + PHI − degrees(asin(R · sin(A_eff_rad)))\nCOOLING_LOWER_BOUND = sensor.pergola_cooling_lower_bound\n(pre-computed: MaxOpenWest at the flip point A_eff_flip)"]
 
-    H_RAW["heating_raw = perfect_angle − 90\n(rotate 90° to align parallel)"]
-    H1{"heating_raw\n&lt;= threshold (−58°)?"}
-    H2{"heating_raw &gt;= 0?"}
-    H_BACK["slat_angle = heating_raw + 180"]
-    H_DIRECT["slat_angle = heating_raw"]
-    H_DEAD["slat_angle = 90°\ndead zone: max light transmission\n(slats present min area to sun)"]
-    H_CLAMP["clamp to [0°, max_tilt_angle]"]
+    FLIP{"A_eff &lt; 90°\nAND MaxOpenEast ≤ max_tilt − 5°?\n(back-face strategy is geometrically safe)"}
+    BACK_CHK{"A_eff + 90° ≤ max_tilt?"}
+    C_BACK["slat_angle = A_eff + 90°\n(back-face perpendicular block\nfrom eastern sun; A_eff 0°–32°)"]
+    C_DZ["slat_angle = max_tilt (122°)\nmorning dead zone (A_eff ≈ 32°–58°):\nideal back-face angle unreachable,\nbut 122° is in the shade-safe zone"]
+    C_CLOSE["slat_angle = max(A_eff − 90°, COOLING_LOWER_BOUND)\nafternoon / high-east: front-face closing\n(A_eff ≈ 58°+); floor ≈ 15.3° guarantees shade"]
+    C_CLAMP["clamp slat_angle to\n[COOLING_LOWER_BOUND, max_tilt]"]
 
-    OPT["Optimised cooling\nStep 7 — formula TBD\nSafe-zone max-open angle\nSlat geometry: w=22cm, t=3cm,\nd=20cm, R=0.919, phi=8.53°\nMaximises airflow while\nguaranteeing full shade"]
+    OPT["Optimised cooling (Step 7 — TBD)\nMorning: slat_angle = MaxOpenEast (max-open back-face)\nFlip+overhead: slat_angle = MaxOpenWest (max-open front-face)\nAfternoon: max(A_eff − 90°, COOLING_LOWER_BOUND)\nSame flip guard (MaxOpenEast check) as standard mode"]
+
+    H_CHK{"A_eff ≤ max_tilt (122°)?"}
+    H_NORMAL["slat_angle = max(A_eff, MIN_HEATING_ANGLE)\n(tracks sun directly; MIN_HEATING_ANGLE=16°\nfloor prevents near-parallel slats at dawn)"]
+    H_DZ["tilt_position = 100 directly\n(A_eff &gt; 122°: far-west sun —\nmax opening lets in the most light;\nskip hardware correction formula)"]
 
     STEP2["STEP 2 — Hardware Motor Correction\ncorrection = 7.0   if slat_angle &lt; 20°\n           = 5.5   if slat_angle &lt; 69°\n           = 0.5   otherwise\n\ntilt_position = INT(slat_angle / max_tilt_angle × 100 + correction)"]
 
     CLAMP_M{"Mode?"}
-    CLAMP_C["clamp tilt_position → [0, 100]\nEast branch (slat 90°–122°) needs tilt 71–100.\nWest branch stays &lt; tilt 71 naturally.\nFormula ~3 units high at exactly 90° — within deadband."]
-    CLAMP_H["clamp tilt_position → [0, 100]\n(full range in heating)"]
+    CLAMP_C["clamp tilt_position → [0, 100]\n(cooling: both branches stay within range\nnaturally; clamp is a safety net)"]
+    CLAMP_H["clamp tilt_position → [0, 100]\n(heating: full 0–100 range in use)"]
 
-    OUT(["set_cover_tilt_position\nboth covers → tilt_position"])
+    OUT(["script.pergola_set_slat_angle\n→ cover.set_cover_tilt_position\nboth covers → tilt_position"])
 
     IN --> STEP0
-    STEP0 --> PERF_CHK
-    PERF_CHK -->|Yes| PA_ZERO
-    PERF_CHK -->|No| PA_CALC
-    PA_ZERO --> MODE
-    PA_CALC --> MODE
+    STEP0 --> SING_CHK
+    SING_CHK -->|"Yes"| SH_90
+    SING_CHK -->|"No"| SH_CALC
+    SH_90 --> AEFF_CHK
+    SH_CALC --> AEFF_CHK
+    AEFF_CHK -->|"Yes — morning"| AEFF_M
+    AEFF_CHK -->|"No — afternoon"| AEFF_A
+    AEFF_M --> MODE
+    AEFF_A --> MODE
 
     MODE -->|"no_sun / not_enough_sun"| FIXED
-    MODE -->|"sun_automatik_cooling\ncooling_optimized = off"| C1
-    MODE -->|"sun_automatik_cooling\ncooling_optimized = on"| OPT
-    MODE -->|"sun_automatik_heating"| H_RAW
+    MODE -->|"cooling\n(optimized = off)"| GEOM
+    MODE -->|"cooling\n(optimized = on)"| OPT
+    MODE -->|"heating"| H_CHK
 
-    C1 -->|Yes| C_BACK
-    C1 -->|No| C2
-    C2 -->|Yes| C_DIRECT
-    C2 -->|"No — dead zone"| C_DEAD
+    GEOM --> FLIP
+    FLIP -->|"Yes — morning safe"| BACK_CHK
+    BACK_CHK -->|"Yes — direct back-face"| C_BACK
+    BACK_CHK -->|"No — dead zone"| C_DZ
+    FLIP -->|"No — flip to closing"| C_CLOSE
     C_BACK --> C_CLAMP
-    C_DIRECT --> C_CLAMP
-    C_DEAD --> C_CLAMP
+    C_DZ --> C_CLAMP
+    C_CLOSE --> C_CLAMP
 
-    H_RAW --> H1
-    H1 -->|Yes| H_BACK
-    H1 -->|No| H2
-    H2 -->|Yes| H_DIRECT
-    H2 -->|"No — dead zone"| H_DEAD
-    H_BACK --> H_CLAMP
-    H_DIRECT --> H_CLAMP
-    H_DEAD --> H_CLAMP
+    H_CHK -->|"Yes — normal range"| H_NORMAL
+    H_CHK -->|"No — far-west dead zone"| H_DZ
 
     FIXED --> OUT
     C_CLAMP --> STEP2
     OPT --> STEP2
-    H_CLAMP --> STEP2
+    H_NORMAL --> STEP2
+    H_DZ --> OUT
     STEP2 --> CLAMP_M
     CLAMP_M -->|"cooling"| CLAMP_C
     CLAMP_M -->|"heating"| CLAMP_H
@@ -382,22 +420,29 @@ flowchart TD
     CLAMP_H --> OUT
 
     style STEP0 fill:#f0f4ff,stroke:#4477cc
+    style GEOM fill:#f0f4ff,stroke:#4477cc
     style STEP2 fill:#f0f4ff,stroke:#4477cc
     style FIXED fill:#d1ecf1,stroke:#0c7c8c
-    style C_DEAD fill:#fff8dc,stroke:#c8960a
-    style H_DEAD fill:#fff8dc,stroke:#c8960a
+    style C_DZ fill:#fff8dc,stroke:#c8960a
     style OPT fill:#fef0ff,stroke:#9040bb
     style CLAMP_C fill:#d4edda,stroke:#28a745
     style CLAMP_H fill:#d4edda,stroke:#28a745
+    style H_DZ fill:#d4edda,stroke:#28a745
   </pre>
 
   <p class="desc" style="margin-top:1rem">
-    <strong>Verification examples</strong> (azimuth, elevation → perfect_angle → cooling slat / heating slat):
-    204°/57° → 0.0° → 11° (tilt=16 floor; ≥−5° direct branch) / 90° vertical &nbsp;|&nbsp;
-    220°/45° → 15.4° → 15.4° / 105.4° &nbsp;|&nbsp;
-    260°/30° → 55.1° → 55.1° / 90° dead-zone &nbsp;|&nbsp;
-    140°/40° → −47.0° → 122° (tilt=100) dead-zone / 43.0°
-    &nbsp;|&nbsp; <em>Direct blocking kicks in at perfect_angle ≥ −5° (was 0°); dead zone shrinks to −58° … −5°.</em>
+    <strong>Verification examples</strong> (azimuth / elevation → A_eff → cooling slat / heating slat):
+    <br>
+    115°/20° → 20.0° → 110° back-face (A_eff+90, MOE=37.7≤117) / 20.0° &nbsp;|&nbsp;
+    140°/40° → 43.0° → 122° dead-zone (MOE=89.5≤117, A_eff+90=133&gt;122) / 43.0° &nbsp;|&nbsp;
+    165°/50° → 55.0° → 122° dead-zone (MOE=112.4≤117) / 55.0° &nbsp;|&nbsp;
+    180°/40° → 64.1° → 15.3° floor (MOE=128.5&gt;117 → flip) / 64.1° &nbsp;|&nbsp;
+    204°/57° → 90.0° → 15.3° floor (90°−90°=0→CLB) / 90.0° &nbsp;|&nbsp;
+    220°/45° → 105.4° → 15.4° (105.4°−90°) / 105.4° &nbsp;|&nbsp;
+    260°/30° → 145.1° → 55.1° (145.1°−90°) / tilt=100 (dead zone: A_eff&gt;122°)
+    <br>
+    <em>Flip point at A_eff≈58° (MaxOpenEast&gt;117°) — earlier than the old −5° threshold (A_eff≈85°);
+    dead zone (122°) replaced by ventilation floor (~15°) from 58°–90°.</em>
   </p>
 </div>
 
@@ -410,7 +455,7 @@ flowchart TD
   <p class="desc">
     <code>script.pergola_post_rain_recovery</code> runs whenever <code>automation_state</code> enters <code>rain_stopped</code>
     (rain cleared, frost exited with residual rain, user_override exited with residual rain, or HA restarted with state persisted as rain_stopped).
-    Slat angles (8°, 15°) are converted via the hardware correction formula before sending to covers.
+    Slat angles (8°, 15°) are converted via <code>script.pergola_set_slat_angle</code> (hardware correction formula applied there).
     The state manager skips normal evaluation while <code>rain_stopped</code> is active — only this script exits it normally.
     Exception: if frost or rain triggers mid-sequence, the state manager cancels this script via <code>script.turn_off</code> and immediately sets the higher-priority state.
   </p>
@@ -419,14 +464,14 @@ flowchart TD
     ENTER(["automation_state enters: rain_stopped\nFrom: rain clears — both indicators off\nOR: frost exits with hourly_rain &gt; 0\nOR: user_override exits with hourly_rain &gt; 0\nOR: HA restart with state persisted as rain_stopped"])
 
     W30["Wait 30 s\nSystem stabilisation"]
-    T8["set_cover_tilt_position → 8°\nboth covers (tilt_position ≈ 13)\nSlight opening to start water drainage"]
+    T8["script.pergola_set_slat_angle\nslat_angle: 8°  (tilt_position ≈ 13)\nSlight opening to start water drainage"]
     W5A["Wait 5 min\nWater runs off slats"]
-    T15["set_cover_tilt_position → 15°\nboth covers (tilt_position ≈ 17)\nOpen further — continued drainage"]
+    T15["script.pergola_set_slat_angle\nslat_angle: 15°  (tilt_position ≈ 17)\nOpen further — continued drainage"]
     W5B["Wait 5 min\nMore water drains"]
-    CHK_RAIN{"wheatherstation\n_hourly_rain &gt; 0?"}
+    CHK_RAIN{"sensor.wheatherstation_hourly_rain &gt; 0?"}
     W30B["Wait 30 min\nSlats drying after recent rain"]
-    RE_EVAL["Re-evaluate state machine rules\npriority order:\nfrost → rain → user_override\n→ no_sun_behind_house\n→ not_enough_sun\n→ sun_automatik_heating\n→ sun_automatik_cooling"]
-    SET_STATE["Set input_select\npergola_automation_state\n← result of re-evaluation"]
+    RE_EVAL["Call script.pergola_evaluate_state\n(rules 5–8: no_sun → not_enough_sun\n→ sun_automatik_heating → sun_automatik_cooling)"]
+    SET_STATE["script.pergola_evaluate_state writes\ninput_select.pergola_automation_state\n← result of re-evaluation"]
     EXIT(["automation_state exits rain_stopped\nCover response automation resumes\nnormal tilt tracking"])
 
     ENTER --> W30
