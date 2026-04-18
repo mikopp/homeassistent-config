@@ -77,7 +77,7 @@ input_number:
 
   pergola_pv_conversion_factor:
     name: Pergola PV Conversion Factor
-    # Divisor to convert raw PV watt output (sensor.victronsolarcharger_yield_power226)
+    # Divisor to convert raw PV watt output (sensor.solar_yield_watts)
     # to equivalent W/m² irradiance.
     # Default 3.2 is empirically calibrated for 6× Axitec 440W bifacial panels at ~5–10°
     # tilt, 228° azimuth (bifacial back-gain + near-flat tilt + afternoon-facing geometry).
@@ -214,9 +214,9 @@ template:
       # ever changes, only this sensor needs updating.
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
-        state: "{{ states('sensor.victronsolarcharger_yield_power226') | float(0) }}"
+        state: "{{ states('sensor.solar_yield_watts') | float(0) }}"
         availability: >
-          {{ states('sensor.victronsolarcharger_yield_power226') not in ['unavailable', 'unknown'] }}
+          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement

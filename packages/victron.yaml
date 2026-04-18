@@ -1,0 +1,23 @@
+mqtt:
+  sensor:
+    - name: "Solar Yield Watts"
+      unique_id: "victron_solar_yield"
+      state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+      
+automation:
+  - alias: "Victron Bridge Keep-alive"
+    description: "Request data from specific charger once per minute"
+    id: victron_keep_alive_60s
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "R/c0619ab4c19e/keepalive"
+          payload: '["solarcharger/279"]'
+    mode: single
