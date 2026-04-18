@@ -9,6 +9,7 @@ entities:
   - type: section
     label: "State of Automation"
   - input_select.pergola_automation_state
+  - script.pergola_set_slat_angle
   # ── Computed / read-only sensors ──────────────────────────────────────────────
   - type: section
     label: "States and Sensors"
@@ -20,8 +21,6 @@ entities:
   - sensor.pergola_cooling_lower_bound
   - type: section
     label: "Parameters"
-  - input_number.pergola_frost_off_threshold
-  - input_number.pergola_frost_on_threshold
   - input_number.pergola_pv_conversion_factor
   - input_number.pergola_shading_sensitivity
   - input_number.pergola_min_sun_elevation
