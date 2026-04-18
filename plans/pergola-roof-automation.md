@@ -86,7 +86,7 @@ sun behind house when:     sun.azimuth < AZIMUTH_MIN  OR  sun.azimuth > AZIMUTH_
 ### PV & Derived Sun Sensor
 | Entity | Unit | Description |
 |---|---|---|
-| `sensor.victronsolarcharger_yield_power226` | W | Raw Victron solarcharger DC PV power |
+| `sensor.victron_solar_yield` | W | Raw Victron solarcharger DC PV power |
 
 ---
 
