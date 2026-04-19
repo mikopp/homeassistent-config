@@ -324,20 +324,41 @@ template:
             {# MaxOpenEast: minimum back-face slat angle for 100% shade from eastern sun   #}
             {# = A_eff + PHI + asin(R × sin(A_eff))                                       #}
             {% set moe = A + PHI + asin(R * sin(A * pi / 180)) * (180 / pi) %}
-            {# Morning (A_eff < 90°, back-face strategy still safe):                       #}
-            {#   Flip guard: MaxOpenEast < max_tilt − SAFETY_BUFFER. Stay in morning mode  #}
-            {#   while there is room to be at least SAFETY_BUFFER above MaxOpenEast within  #}
-            {#   max_tilt. Same guard used by optimised cooling (Step 7).                  #}
-            {#   target = A_eff + 90 (perpendicular blocking), clamped to max_tilt         #}
-            {% if A < 90 and moe <= mt - 5 %}
-              {% set slat = (A + 90) if (A + 90) <= mt else mt %}
+            {# Flip guard (shared by both modes): stay in morning mode while MaxOpenEast   #}
+            {# is at least SAFETY_BUFFER below max_tilt (room to add the buffer above it). #}
+            {% set optimized = states('input_boolean.pergola_cooling_optimized') == 'on' %}
+            {% if optimized %}
+              {# ── Optimised cooling: safe-zone max-open formula (Step 7) ────────────── #}
+              {# Targets the furthest-open slat angle that still guarantees 100% shade,  #}
+              {# maximising airflow by leveraging slat overlap / thickness geometry.     #}
+              {% set mow = states('sensor.pergola_max_open_west_cooling_angle') | float(15.3) %}
+              {% if A < 90 and moe <= mt - 5 %}
+                {# Morning back-face: max(90°, MaxOpenEast + SAFETY_BUFFER), ≤ max_tilt. #}
+                {# SAFETY_BUFFER keeps slat 5° inside the shade zone above MaxOpenEast.  #}
+                {# Floor at 90° — sub-vertical back-face provides no blocking benefit.   #}
+                {% set slat = [[90, moe + 5] | max, mt] | min %}
+              {% elif A <= 90 %}
+                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest morning, raw.  #}
+                {# For A ≤ 90 raw value is ≤ 31.7° — no 90° cap needed here.            #}
+                {% set slat = mow %}
+              {% else %}
+                {# Afternoon (A > 90): MaxOpenWestAfternoon = min(90°, raw sensor).      #}
+                {# For A > ~128° raw sensor > 90° → cap holds slat fully vertical.      #}
+                {% set slat = [mow, 90] | min %}
+              {% endif %}
+              {{ [[slat, 0] | max, mt] | min | round(1) }}
             {% else %}
-            {# Afternoon or past safe limit: front-face / closing formula                  #}
-            {#   A_eff − 90 floored at COOLING_LOWER_BOUND (ventilation minimum)           #}
-              {% set slat = [A - 90, LB] | max %}
+              {# ── Standard cooling: perfect-perpendicular formula ─────────────────── #}
+              {% if A < 90 and moe <= mt - 5 %}
+                {# Morning: perpendicular blocking (A_eff + 90), clamped to max_tilt    #}
+                {% set slat = (A + 90) if (A + 90) <= mt else mt %}
+              {% else %}
+                {# Afternoon or past safe limit: front-face closing, floored at LB      #}
+                {% set slat = [A - 90, LB] | max %}
+              {% endif %}
+              {# Clamp result to [LB, max_tilt] and round to 1 decimal                 #}
+              {{ [[slat, LB] | max, mt] | min | round(1) }}
             {% endif %}
-            {# Clamp result to [LB, max_tilt] and round to 1 decimal                      #}
-            {{ [[slat, LB] | max, mt] | min | round(1) }}
           {% elif s == 'sun_automatik_heating' %}
             {# ── Heating formula: slat tracks the sun's effective angle ───────────── #}
             {# In heating mode the goal is to let sun THROUGH the slats — the slat    #}
@@ -362,6 +383,55 @@ template:
           {% endif %}
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
+
+      # ── MaxOpenEast Morning Cooling Angle ─────────────────────────────────────────
+      # Geometric minimum back-face slat angle for 100% shade from eastern sun.
+      # Formula: A_eff + PHI + asin(R × sin(A_eff))  (raw value, no SAFETY_BUFFER).
+      # The slat-angle formula adds SAFETY_BUFFER (+5°) when computing the actual target
+      # so this sensor remains a clean diagnostic value independent of the buffer.
+      # Always computed regardless of pergola_cooling_optimized — useful for monitoring.
+      - name: "Pergola Max Open East Morning Cooling Angle"
+        unique_id: pergola_max_open_east_morning_cooling_angle
+        availability: >
+          {{ states('sensor.pergola_effective_sun_angle') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_width') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
+          {% set w   = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
+          {% set R   = ((d**2 + t**2) ** 0.5) / w %}
+          {% set PHI = atan(t / d) * (180 / pi) %}
+          {{ (A + PHI + asin(R * sin(A * pi / 180)) * (180 / pi)) | round(1) }}
+        unit_of_measurement: "°"
+        icon: mdi:angle-obtuse
+
+      # ── MaxOpenWest Cooling Angle ─────────────────────────────────────────────────
+      # Geometric maximum front-face slat angle for 100% shade — raw value, no cap.
+      # Formula: A_eff + PHI − asin(R × sin(A_eff))
+      # Used two ways in the slat-angle formula (depending on A_eff):
+      #   A ≤ 90 (morning/flip range): used directly as the front-face target (raw ≤ 31.7°)
+      #   A > 90 (afternoon): min(90°, raw) applied inline — cap only fires when A > ~128°
+      # Continuous at A_eff = 90° (≈ 31.7°). Always computed regardless of mode.
+      - name: "Pergola Max Open West Cooling Angle"
+        unique_id: pergola_max_open_west_cooling_angle
+        availability: >
+          {{ states('sensor.pergola_effective_sun_angle') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_width') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
+          {% set w   = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
+          {% set R   = ((d**2 + t**2) ** 0.5) / w %}
+          {% set PHI = atan(t / d) * (180 / pi) %}
+          {{ (A + PHI - asin(R * sin(A * pi / 180)) * (180 / pi)) | round(1) }}
+        unit_of_measurement: "°"
+        icon: mdi:angle-acute
 
       # ── Target Tilt Position ──────────────────────────────────────────────────────
       # Hardware-corrected tilt_position (0–100) derived from sensor.pergola_slat_angle.
@@ -1420,6 +1490,8 @@ group:
       - sensor.pergola_tilt_position
       - binary_sensor.pergola_sun_shining
       - sensor.pergola_cooling_lower_bound
+      - sensor.pergola_max_open_east_morning_cooling_angle
+      - sensor.pergola_max_open_west_cooling_angle
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────

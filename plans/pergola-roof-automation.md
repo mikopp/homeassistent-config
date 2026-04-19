@@ -710,7 +710,7 @@ Update state manager: when sun is active and `input_boolean.pergola_heating = on
 
 ### Phase 4 — Optimized Cooling
 
-#### Step 7 — Optimized Cooling Angle
+#### Step 7 — Optimized Cooling Angle [DONE]
 **File:** `packages/pergola.yaml` — add two readonly sensors; update `sensor.pergola_slat_angle` formula
 
 Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfect-perpendicular cooling formula with one that uses the **safe-zone max-open angle** — the furthest the slats can tilt toward vertical while still guaranteeing 100% shade (leveraging slat overlap/thickness).
