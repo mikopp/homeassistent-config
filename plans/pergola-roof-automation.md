@@ -129,6 +129,8 @@ group:
       - sensor.pergola_tilt_position
       - binary_sensor.pergola_sun_shining
       - sensor.pergola_cooling_lower_bound
+      - sensor.pergola_max_open_east_morning_cooling_angle
+      - sensor.pergola_max_open_west_cooling_angle
 ```
 
 The resulting `group.pergola_dach` entity can be added directly to any Lovelace dashboard card.
@@ -719,62 +721,112 @@ Gated by `input_boolean.pergola_cooling_optimized`. When `on`, replace the perfe
 
 ```
 MaxOpenEast = A_eff + PHI + degrees(asin(R × sin(radians(A_eff))))   # min back-face angle
-MaxOpenWest = A_eff + PHI − degrees(asin(R × sin(radians(A_eff))))   # max front-face angle; valid for A_eff ≤ 90
+MaxOpenWest = A_eff + PHI − degrees(asin(R × sin(radians(A_eff))))   # max front-face angle
 
-# Named computed values — both exposed as readonly template sensors:
-MaxOpenEastMorningCoolingAngle = max(90, MaxOpenEast + SAFETY_BUFFER)
+# MaxOpenWest is valid for ALL A_eff (0°–180°). For A_eff ≤ 90 it gives the morning flip-range
+# target; for A_eff > 90 the same formula gives MaxOpenWestAfternoon (see below).
+
+# ── Named targets applied in the slat-angle formula (NOT stored in sensors) ──
+
+MaxOpenEastMorningCoolingAngle = max(90, sensor.pergola_max_open_east_morning_cooling_angle + SAFETY_BUFFER)
     # Morning target: MaxOpenEast is the MINIMUM angle for full shade. Adding SAFETY_BUFFER
     # keeps the slat 5° ABOVE that threshold — safely inside the shade zone, never below it.
     # Floor at 90° (vertical) — sub-vertical angles provide no sun-blocking benefit.
-    # As A_eff rises, this climbs from 90° up to max_tilt right at the flip point.
 
-MaxOpenWestMorningCoolingAngle = MaxOpenWest
+MaxOpenWestMorningCoolingAngle = sensor.pergola_max_open_west_cooling_angle
     # Flip-range target: dynamic front-face max-open (15.3° at flip point → 31.7° at A_eff=90°).
-    # No fixed lower bound — purely dynamic.
+    # No buffer — MaxOpenWest is the permissive bound; use directly.
+    # For A_eff ≤ 90° the raw value is ≤ 31.7°; the 90° cap never fires here.
 
-# Optimized cooling decision tree (flip guard shared with standard mode):
-# Morning (A_eff < 90, MaxOpenEast < max_tilt − SAFETY_BUFFER):
-#   Stay in morning mode while there is still room to be SAFETY_BUFFER above MaxOpenEast
-#   within max_tilt. Flip fires when MaxOpenEast ≥ max_tilt − SAFETY_BUFFER
-#   (i.e. MaxOpenEast + SAFETY_BUFFER ≥ max_tilt — morning target would exceed max_tilt).
-if A_eff < 90 and MaxOpenEast < max_tilt - SAFETY_BUFFER:
+MaxOpenWestAfternoon = min(90, sensor.pergola_max_open_west_cooling_angle)
+    # Afternoon target: maximum front-face angle for full shade from western sun.
+    # Cap applied inline (not in the sensor). No buffer needed (it is the permissive bound).
+    # For A_eff > ~128°: raw sensor > 90° → capped to 90° → slat stays fully vertical, maximum airflow.
+    # Continuity: at A_eff = 90° (zenith) MaxOpenWestAfternoon = MaxOpenWestMorning ≈ 31.7°.
+
+# ── Optimized cooling decision tree (flip guard shared with standard mode) ──
+
+if A_eff < 90 and sensor.pergola_max_open_east_morning_cooling_angle < max_tilt − SAFETY_BUFFER:
+    # Morning: back-face strategy. SAFETY_BUFFER added to raw sensor value as the target.
+    # Floor at 90° (vertical) is the minimum useful back-face angle.
     slat_angle = min(MaxOpenEastMorningCoolingAngle, max_tilt)
 
-# Flip range (A_eff < 90, morning target saturated → switch to front-face strategy):
-#   Use MaxOpenWestMorningCoolingAngle dynamically — no fixed COOLING_LOWER_BOUND floor.
 elif A_eff <= 90:
+    # Flip range (A_eff < 90, morning target saturated → switch to front-face strategy).
+    # MaxOpenWest morning used directly — dynamic, no fixed floor.
     slat_angle = MaxOpenWestMorningCoolingAngle
 
-# Afternoon west sun (A_eff > 90) — same as standard formula:
 else:
-    slat_angle = max(A_eff − 90, COOLING_LOWER_BOUND)
+    # Afternoon west sun (A_eff > 90): front-face, optimized to be as open as possible.
+    # Uses MaxOpenWestAfternoon — same geometry as morning MaxOpenWest but for western sun,
+    # capped at 90°. For most afternoon positions (A_eff > ~128°) this is 90° (fully open).
+    slat_angle = MaxOpenWestAfternoon
 ```
+
+> **MaxOpenWestAfternoon derivation:** The formula `A_eff + PHI − degrees(asin(R × sin(radians(A_eff))))` is the natural extension of morning MaxOpenWest to A_eff > 90°. Both morning and afternoon use the same algebraic formula (same sensor `pergola_max_open_west_cooling_angle`); `sin(A_eff)` for A_eff > 90° mirrors `sin(A_eff_west)` with `A_eff_west = 180° − A_eff`, encoding the symmetric western-sun geometry. The formula is continuous at A_eff = 90° (both give ≈31.7° at the zenith). The afternoon branch applies `min(90, sensor)` inline: once the sun is far enough into the west (A_eff > ~128°) the raw value exceeds 90° and gets clamped — slat holds fully vertical, maximum airflow while shade is guaranteed by slat overlap. The morning branch never needs the cap (raw value ≤ 31.7° for A_eff ≤ 90°).
 
 **New readonly template sensors (add to `packages/pergola.yaml` template block, near `sensor.pergola_slat_angle`):**
 
+Both sensors expose the **raw geometric values** — no safety buffer applied. The buffer is added only in the slat-angle formula (below), keeping the sensors useful as pure diagnostic values.
+
 - `sensor.pergola_max_open_east_morning_cooling_angle`
-  - Formula: `max(90, A_eff + PHI + asin(R × sin(A_eff)) + SAFETY_BUFFER)`
-  - Meaning: MaxOpenEast is the bare minimum for full shade; +SAFETY_BUFFER keeps the slat safely above it
+  - Formula: `A_eff + PHI + degrees(asin(R × sin(radians(A_eff))))` (= MaxOpenEast — minimum back-face angle for full shade)
+  - Meaning: pure geometric value; the slat-angle formula adds SAFETY_BUFFER on top when computing the actual target
   - Unit: `°`; icon: `mdi:angle-obtuse`
   - Availability: same as `sensor.pergola_slat_angle` (requires A_eff sensor + geometry inputs)
   - Always computed regardless of `pergola_cooling_optimized` state
 
-- `sensor.pergola_max_open_west_morning_cooling_angle`
-  - Formula: `A_eff + PHI − asin(R × sin(A_eff))`
+- `sensor.pergola_max_open_west_cooling_angle`
+  - Formula: `A_eff + PHI − degrees(asin(R × sin(radians(A_eff))))` (= MaxOpenWest — maximum front-face angle for full shade, raw/uncapped)
+  - Meaning: pure geometric value; used directly as the flip-range (A_eff ≤ 90°) slat target; used with an inline `min(90, …)` cap as the afternoon (A_eff > 90°) slat target. The cap is applied in the slat-angle formula, not here, so this sensor remains a clean diagnostic value. For A_eff ≤ 90° the raw value is always ≤ 31.7° (cap would never fire anyway). For A_eff > ~128° the raw value exceeds 90°; the afternoon branch clamps it inline.
+  - Continuity: raw value ≈ 31.7° at A_eff = 90° — continuous across the morning/afternoon boundary.
   - Unit: `°`; icon: `mdi:angle-acute`
-  - Availability: same; only physically meaningful when A_eff ≤ 90° (morning)
+  - Availability: same as `sensor.pergola_slat_angle` (requires A_eff sensor + geometry inputs)
   - Always computed regardless of `pergola_cooling_optimized` state
 
-**Flip guard:** identical in both standard and optimised modes — `MaxOpenEast < max_tilt − SAFETY_BUFFER`. Flip fires when there is no longer room to stay SAFETY_BUFFER above MaxOpenEast within max_tilt. Only the target angle within the morning branch differs: standard uses `min(A_eff + 90, max_tilt)`; optimised uses `min(max(90, MaxOpenEast + SAFETY_BUFFER), max_tilt)`.
+**Key values for sensor.pergola_max_open_west_cooling_angle (raw, no cap; defaults w=22, d=20, t=3, max_tilt=122):**
+The afternoon slat-angle branch applies `min(90, sensor)` inline — values above 90° are clamped there.
+
+| A_eff | Standard (A−90) | Raw sensor value | Afternoon slat target (after inline cap) |
+|---|---|---|---|
+| 90° | 0° → floor 15.3° | 31.7° | 31.7° |
+| 100° | 10° | 43.6° | 43.6° |
+| 110° | 20° | 58.6° | 58.6° |
+| 120° | 30° | 76.0° | 76.0° |
+| 128° | 38° | ≈ 90° | ≈ 90° |
+| 130° | 40° | 93.8° | **90°** (capped) |
+| 150° | 60° | ≫ 90° | **90°** (capped) |
+
+**Derivation in the slat-angle formula** — read sensor values and apply adjustments inline:
+```
+MaxOpenEastMorningCoolingAngle = max(90, sensor.pergola_max_open_east_morning_cooling_angle + SAFETY_BUFFER)
+    # SAFETY_BUFFER added here (not in the sensor) — keeps slat 5° above the geometric minimum
+MaxOpenWestMorningCoolingAngle = sensor.pergola_max_open_west_cooling_angle
+    # No buffer — permissive bound; used directly as flip-range target
+MaxOpenWestAfternoon = min(90, sensor.pergola_max_open_west_cooling_angle)
+    # No buffer — permissive bound for western sun; cap applied inline (raw sensor > 90° for A_eff > ~128°)
+```
+
+**Flip guard:** identical in both standard and optimised modes — `sensor.pergola_max_open_east_morning_cooling_angle < max_tilt − SAFETY_BUFFER` (raw sensor value compared, buffer not re-added). Flip fires when there is no longer room to stay SAFETY_BUFFER above MaxOpenEast within max_tilt. Only the target angle within each branch differs between modes:
+
+| Branch | Standard | Optimized |
+|---|---|---|
+| Morning (A_eff < 90, flip guard passes) | `min(A_eff + 90, max_tilt)` | `min(MaxOpenEastMorningCoolingAngle, max_tilt)` |
+| Flip range (A_eff ≤ 90, flip guard fails) | `max(A_eff − 90, COOLING_LOWER_BOUND)` | `MaxOpenWestMorningCoolingAngle` |
+| Afternoon (A_eff > 90) | `max(A_eff − 90, COOLING_LOWER_BOUND)` | `MaxOpenWestAfternoon` |
 
 **Dependencies:** Step 3 (cover response and cooling formula must exist), `input_boolean.pergola_cooling_optimized` added in Step 1 update.
 
+**Add all two new sensors to `group.pergola_dach`** (after `sensor.pergola_cooling_lower_bound`) and to `dashboards/elements/pergola_card.yaml` (States and Sensors section).
+
 **Verify:**
-- `sensor.pergola_max_open_east_morning_cooling_angle`: holds at 90° while A_eff is low; climbs as A_eff rises; reaches max_tilt ≈ just before flip
-- `sensor.pergola_max_open_west_morning_cooling_angle`: ≈ 15.3° at flip point, ≈ 31.7° at A_eff = 90°
-- Toggle `pergola_cooling_optimized` off → standard perpendicular formula (`A_eff + 90`), slat tracks sun tightly
-- Toggle `pergola_cooling_optimized` on → morning: slat = `MaxOpenEastMorningCoolingAngle` (more open); flip: slat = `MaxOpenWestMorningCoolingAngle` (dynamic, no fixed floor)
-- At A_eff = 80° (flip range): standard gives ≈ 15° (static `COOLING_LOWER_BOUND`), optimised gives ≈ 23.7° (`MaxOpenWestMorningCoolingAngle`) — visible difference
+- `sensor.pergola_max_open_east_morning_cooling_angle`: raw MaxOpenEast — rises from ~28° at A_eff=0° toward max_tilt at the flip point; slat target in the formula is this value + 5° (SAFETY_BUFFER), floored at 90°
+- `sensor.pergola_max_open_west_cooling_angle`: raw MaxOpenWest — ≈ 15.3° at the flip point, ≈ 31.7° at A_eff=90°, ≈ 76° at A_eff=120°, ≈ 93.8° at A_eff=130° (raw); morning branch uses it directly; afternoon branch applies `min(90, …)` inline → 90° for A_eff > ~128°
+- Toggle `pergola_cooling_optimized` off → standard perpendicular formula, `sensor.pergola_slat_angle` unchanged
+- Toggle on, morning A_eff = 20°: slat = max(90, ~37.7+5) = 90° (floored at vertical; standard would be 110°)
+- Toggle on, flip zone A_eff = 80°: slat ≈ 23.7° (MaxOpenWestMorning = raw sensor; standard gives ~15.3°)
+- Toggle on, afternoon A_eff = 100°: slat ≈ 43.6° (min(90, raw sensor) = 43.6°; standard gives 10°)
+- Toggle on, afternoon A_eff = 140°: slat = 90° (min(90, raw ~110°) = 90°; standard gives 50°)
 
 ---
 
