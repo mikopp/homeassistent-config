@@ -296,7 +296,8 @@ template:
       #
       # State dispatch:
       #   sun_automatik_cooling  → full cooling formula (see plan Tilt Calc Step 1)
-      #   sun_automatik_heating  → stub: 90° until Step 5 (Phase 3)
+      #   sun_automatik_heating  → A_eff tracked directly; floor at min_heating_slat_angle;
+      #                            dead zone (A_eff > max_tilt) → max_tilt → tilt_position=100
       #   no_sun_behind_house,   → 90° (vertical, maximum ventilation)
       #   not_enough_sun         → 90°
       #   frost / rain / ...     → 90° (no movement; neutral display value)
@@ -305,14 +306,11 @@ template:
         availability: >
           {{ states('input_select.pergola_automation_state') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set s = states('input_select.pergola_automation_state') %}
-          {% if s != 'sun_automatik_cooling' %}
-            {# All non-cooling states (including heating stub) → vertical open position    #}
-            90
-          {% else %}
-            {# ── Cooling formula ────────────────────────────────────────────────────── #}
+          {% set s  = states('input_select.pergola_automation_state') %}
+          {% set mt = states('input_number.pergola_max_tilt_angle') | float(122) %}
+          {% if s == 'sun_automatik_cooling' %}
+            {# ── Cooling formula ──────────────────────────────────────────────────── #}
             {# Derived geometry constants — same derivation as sensor.pergola_cooling_lower_bound #}
-            {% set mt  = states('input_number.pergola_max_tilt_angle') | float(122) %}
             {% set w   = states('input_number.pergola_slat_width') | float(22) %}
             {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
             {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
@@ -340,6 +338,27 @@ template:
             {% endif %}
             {# Clamp result to [LB, max_tilt] and round to 1 decimal                      #}
             {{ [[slat, LB] | max, mt] | min | round(1) }}
+          {% elif s == 'sun_automatik_heating' %}
+            {# ── Heating formula: slat tracks the sun's effective angle ───────────── #}
+            {# In heating mode the goal is to let sun THROUGH the slats — the slat    #}
+            {# should be parallel to the sun rays. A_eff and the slat share the same  #}
+            {# number line so slat_angle = A_eff directly (plan Tilt Calc Step 1).    #}
+            {% set min_heat = states('input_number.pergola_min_heating_slat_angle') | float(16) %}
+            {% set A        = states('sensor.pergola_effective_sun_angle') | float(90) %}
+            {% if A > mt %}
+              {# Dead zone: A_eff beyond max_tilt (far west sun). Use max_tilt so the  #}
+              {# tilt_position formula produces 100 — back face angled toward the west, #}
+              {# opening the maximum gap. No other position admits more western sun.    #}
+              {{ mt | round(1) }}
+            {% else %}
+              {# Track sun directly; floor at MIN_HEATING_ANGLE prevents near-parallel  #}
+              {# slats at dawn when A_eff approaches 0° (tilt would barely move).       #}
+              {{ [[A, min_heat] | max, mt] | min | round(1) }}
+            {% endif %}
+          {% else %}
+            {# All other states (no_sun_behind_house, not_enough_sun, frost, rain, …) #}
+            {# → vertical open position (90°) — maximum ventilation, neutral display   #}
+            90
           {% endif %}
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
@@ -1083,19 +1102,30 @@ automation:
                 data:
                   slat_angle: "{{ states('sensor.pergola_slat_angle') | float(90) }}"
 
-          # ── Heating season stub: sun_automatik_heating ─────────────────────────────
-          # Heating formula is added in Step 5 (Phase 3). Until then, open to 90°
-          # (same as the no-sun position) — safe placeholder that lets sun through.
-          # No deadband: fixed target, same reasoning as no-sun states above.
+          # ── Heating season: sun_automatik_heating ────────────────────────────────
+          # sensor.pergola_slat_angle holds the heating formula result: A_eff tracked
+          # directly, floored at min_heating_slat_angle, with max_tilt used in the dead
+          # zone (A_eff > max_tilt, far west sun → tilt_position = 100).
+          # Applies the same 5° deadband as cooling to avoid micro-movements.
           - conditions:
               - condition: template
                 value_template: >
                   {{ states('input_select.pergola_automation_state') == 'sun_automatik_heating' }}
             sequence:
-              # Stub: heating formula replaced in Step 5 — open to 90° for now
+              # Deadband guard: 5° threshold in tilt_position units — compare
+              # sensor.pergola_tilt_position (target) against current cover position.
+              # Identical gate to cooling; prevents motor churn as the sun creeps west.
+              - condition: template
+                value_template: >
+                  {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
+                  {% set DB      = (5 / mt * 100) | round(0) | int %}
+                  {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
+                  {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
+                  {{ (target - current) | abs >= DB }}
+              # Pass heating formula result from sensor to the authoritative movement script
               - action: script.pergola_set_slat_angle
                 data:
-                  slat_angle: 90
+                  slat_angle: "{{ states('sensor.pergola_slat_angle') | float(90) }}"
     mode: queued
     max: 3
 

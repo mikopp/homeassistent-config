@@ -685,7 +685,7 @@ Action (`choose` on current state):
 
 ### Phase 3 — Heating Season
 
-#### Step 5 — Heating Season Logic [TODO]
+#### Step 5 — Heating Season Logic [DONE]
 **File:** `packages/pergola.yaml` — update `pergola_cover_response` and `pergola_state_manager`
 
 Prerequisites:
