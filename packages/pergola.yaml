@@ -327,8 +327,10 @@ template:
             {# = A_eff + PHI + asin(R × sin(A_eff))                                       #}
             {% set moe = A + PHI + asin(R * sin(A * pi / 180)) * (180 / pi) %}
             {# Morning (A_eff < 90°, back-face strategy still safe):                       #}
-            {#   target = A_eff + 90 (perpendicular blocking)                              #}
-            {#   if that exceeds max_tilt (dead zone), clamp to max_tilt                   #}
+            {#   Flip guard: MaxOpenEast < max_tilt − SAFETY_BUFFER. Stay in morning mode  #}
+            {#   while there is room to be at least SAFETY_BUFFER above MaxOpenEast within  #}
+            {#   max_tilt. Same guard used by optimised cooling (Step 7).                  #}
+            {#   target = A_eff + 90 (perpendicular blocking), clamped to max_tilt         #}
             {% if A < 90 and moe <= mt - 5 %}
               {% set slat = (A + 90) if (A + 90) <= mt else mt %}
             {% else %}
