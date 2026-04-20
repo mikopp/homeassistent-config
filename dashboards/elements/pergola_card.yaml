@@ -19,14 +19,43 @@ entities:
   - sensor.pergola_tilt_position
   - binary_sensor.pergola_sun_shining
   - sensor.pergola_cooling_lower_bound
+  - sensor.pergola_max_open_east_morning_cooling_angle
+  - sensor.pergola_max_open_west_cooling_angle
   - type: section
     label: "Parameters"
-  - input_number.pergola_pv_conversion_factor
-  - input_number.pergola_shading_sensitivity
-  - input_number.pergola_min_sun_elevation
-  - input_number.pergola_max_tilt_angle
-  - input_number.pergola_min_heating_slat_angle
-  - input_number.pergola_wall_azimuth
-  - input_number.pergola_slat_width
-  - input_number.pergola_slat_pivot_spacing
-  - input_number.pergola_slat_thickness
+  - input_number.pergola_pv_conversion_factor:
+      mode: box
+      min: 1
+      max: 4
+  - input_number.pergola_shading_sensitivity:
+      mode: box
+      min: 0.5
+      max: 1.2
+  - input_number.pergola_min_sun_elevation:
+      mode: box
+      min: 5
+      max: 20
+  - input_number.pergola_max_tilt_angle:
+      mode: box
+      min: 100
+      max: 180
+  - input_number.pergola_min_heating_slat_angle:
+      mode: box
+      min: 5
+      max: 30
+  - input_number.pergola_wall_azimuth:
+      mode: box
+      min: 0
+      max: 360
+  - input_number.pergola_slat_width:
+      mode: box
+      min: 10
+      max: 30
+  - input_number.pergola_slat_pivot_spacing:
+      mode: box
+      min: 8
+      max: 30
+  - input_number.pergola_slat_thickness:
+      mode: box
+      min: 1
+      max: 5
