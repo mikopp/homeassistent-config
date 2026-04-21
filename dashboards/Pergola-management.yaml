@@ -1,7 +1,7 @@
 views:
   - title: Main View
     cards:
-      - !include ../dashboards/elements/pergola_card.yaml
+      - !include elements/pergola_card.yaml
       - type: entities
         title: Dach Links
         show_header_toggle: false

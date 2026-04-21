@@ -83,9 +83,11 @@ input_number:
     # tilt, 228° azimuth (bifacial back-gain + near-flat tilt + afternoon-facing geometry).
     # STC baseline: 2640W / 1000 W/m² = 2.64; adjusted to 3.2 for real-world geometry.
     # Calibrate in Step 6 field testing on a clear morning.
-    min: 1
+    min: 2
     max: 6
     step: 0.1
+    mode: box
+ 
     icon: mdi:solar-panel
 
   pergola_shading_sensitivity:
@@ -98,6 +100,7 @@ input_number:
     min: 0.5
     max: 1.2
     step: 0.05
+    mode: box
     icon: mdi:weather-sunny
 
   pergola_min_sun_elevation:
@@ -110,6 +113,7 @@ input_number:
     max: 30
     step: 0.5
     unit_of_measurement: "°"
+    mode: box
     icon: mdi:weather-sunset
 
   # ── Rain recovery step tracker ───────────────────────────────────────────────────
@@ -143,6 +147,7 @@ input_number:
     max: 150
     step: 1
     unit_of_measurement: "°"
+    mode: box
     icon: mdi:rotate-right
 
   pergola_min_heating_slat_angle:
@@ -154,6 +159,7 @@ input_number:
     min: 0
     max: 40
     step: 1
+    mode: box
     unit_of_measurement: "°"
     icon: mdi:angle-acute
 
@@ -172,6 +178,7 @@ input_number:
     min: 0
     max: 359
     step: 1
+    mode: box
     unit_of_measurement: "°"
     icon: mdi:compass
 
@@ -186,9 +193,10 @@ input_number:
     name: Pergola Slat Width
     # Slat face width (w) in cm — the dimension perpendicular to the pivot axis.
     # Default 22 cm (Somfy bioclimatic standard).
-    min: 5
-    max: 50
+    min: 10
+    max: 30
     step: 0.5
+    mode: box
     unit_of_measurement: "cm"
     icon: mdi:ruler
 
@@ -196,9 +204,10 @@ input_number:
     name: Pergola Slat Pivot Spacing
     # Pivot-to-pivot spacing (d) in cm — distance between adjacent slat pivot axes.
     # Default 20 cm (Somfy bioclimatic standard).
-    min: 5
-    max: 40
+    min: 8
+    max: 30
     step: 0.5
+    mode: box
     unit_of_measurement: "cm"
     icon: mdi:ruler-square
 
@@ -207,7 +216,8 @@ input_number:
     # Slat thickness (t) in cm — the fin depth dimension.
     # Default 3 cm (Somfy bioclimatic standard).
     min: 0.5
-    max: 10
+    max: 5
+    mode: box
     step: 0.5
     unit_of_measurement: "cm"
     icon: mdi:layers
