@@ -63,16 +63,8 @@ jobs:
           echo "Waiting for Home Assistant onboarding 'user' step…"
           for i in $(seq 1 60); do
             ready=$(curl -s http://localhost:8123/api/onboarding 2>/dev/null \
-              | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print('yes' if isinstance(d, list)
-          and any(s.get('step') == 'user' and not s.get('done', True) for s in d)
-          else 'no')
-except:
-    print('no')
-")
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if isinstance(d,list) and any(s.get('step')=='user' and not s.get('done',True) for s in d) else 'no')" \
+              2>/dev/null || echo "no")
             if [ "$ready" = "yes" ]; then
               echo "Home Assistant is ready (attempt $i, $((i * 3))s elapsed)."
               exit 0
@@ -95,15 +87,8 @@ except:
             -H "Content-Type: application/json" \
             -d '{"client_id":"http://localhost:8123/","username":"ci","password":"ci-password","language":"en-US"}')
 
-          auth_code=$(echo "$onboarding" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-if 'auth_code' not in d:
-    import sys
-    print(f'ERROR: unexpected onboarding response: {d}', file=sys.stderr)
-    sys.exit(1)
-print(d['auth_code'])
-")
+          echo "Onboarding response keys: $(echo "$onboarding" | python3 -c "import sys,json; print(list(json.load(sys.stdin).keys()))" 2>&1)"
+          auth_code=$(echo "$onboarding" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['auth_code']) if 'auth_code' in d else (print('ERROR:'+str(d),file=sys.stderr) or sys.exit(1))")
           echo "::add-mask::$auth_code"
 
           # Exchange the auth code for an access token
@@ -113,14 +98,8 @@ print(d['auth_code'])
             --data-urlencode "code=${auth_code}" \
             --data-urlencode "client_id=http://localhost:8123/")
 
-          token=$(echo "$token_resp" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-if 'access_token' not in d:
-    print(f'ERROR: unexpected token response: {d}', file=sys.stderr)
-    sys.exit(1)
-print(d['access_token'])
-")
+          token=$(echo "$token_resp" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['access_token']) if 'access_token' in d else (print('ERROR:'+str(d),file=sys.stderr) or sys.exit(1))")
           echo "::add-mask::$token"
           echo "ha_token=$token" >> "$GITHUB_OUTPUT"
 
