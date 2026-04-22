@@ -54,19 +54,34 @@ jobs:
             -v /tmp/ha-ci-config:/config \
             ghcr.io/home-assistant/home-assistant:stable
 
-      # ── 5. Wait until the onboarding endpoint responds ───────────────────────
+      # ── 5. Wait until HA has registered the 'user' onboarding step ─────────────
+      #    /api/onboarding returns HTTP 200 early (before HA is fully ready).
+      #    We must wait until the response contains the 'user' step as not-done
+      #    before attempting user creation; otherwise the POST returns no auth_code.
       - name: Wait for Home Assistant to be ready
         run: |
-          echo "Waiting for Home Assistant to start…"
+          echo "Waiting for Home Assistant onboarding 'user' step…"
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:8123/api/onboarding > /dev/null 2>&1; then
-              echo "Home Assistant is ready (attempt $i)."
+            ready=$(curl -s http://localhost:8123/api/onboarding 2>/dev/null \
+              | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print('yes' if isinstance(d, list)
+          and any(s.get('step') == 'user' and not s.get('done', True) for s in d)
+          else 'no')
+except:
+    print('no')
+")
+            if [ "$ready" = "yes" ]; then
+              echo "Home Assistant is ready (attempt $i, $((i * 3))s elapsed)."
               exit 0
             fi
+            echo "Not ready yet (attempt $i)…"
             sleep 3
           done
-          echo "ERROR: Home Assistant did not start within 3 minutes." >&2
-          docker logs ha-ci >&2
+          echo "ERROR: HA did not enter onboarding mode within 3 minutes." >&2
+          docker logs ha-ci 2>&1 | tail -30 >&2
           exit 1
 
       # ── 6. Complete onboarding to obtain a short-lived API token ─────────────
@@ -80,8 +95,15 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"client_id":"http://localhost:8123/","username":"ci","password":"ci-password","language":"en-US"}')
 
-          auth_code=$(echo "$onboarding" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['auth_code'])")
+          auth_code=$(echo "$onboarding" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'auth_code' not in d:
+    import sys
+    print(f'ERROR: unexpected onboarding response: {d}', file=sys.stderr)
+    sys.exit(1)
+print(d['auth_code'])
+")
           echo "::add-mask::$auth_code"
 
           # Exchange the auth code for an access token
@@ -91,8 +113,14 @@ jobs:
             --data-urlencode "code=${auth_code}" \
             --data-urlencode "client_id=http://localhost:8123/")
 
-          token=$(echo "$token_resp" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+          token=$(echo "$token_resp" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if 'access_token' not in d:
+    print(f'ERROR: unexpected token response: {d}', file=sys.stderr)
+    sys.exit(1)
+print(d['access_token'])
+")
           echo "::add-mask::$token"
           echo "ha_token=$token" >> "$GITHUB_OUTPUT"
 
