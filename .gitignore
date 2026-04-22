@@ -1,3 +1,7 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Ignore sensitive files
 secrets.yaml
 ip_addresses.yaml
