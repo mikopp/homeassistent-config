@@ -120,14 +120,13 @@ jobs:
         env:
           HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
         run: |
-          output=$(python3 .github/scripts/validate_templates.py \
+          python3 .github/scripts/validate_templates.py \
             --templates /tmp/templates.json \
-            --ha-url http://localhost:8123 2>&1)
-          exit_code=$?
-          echo "$output"
-          echo "output<<EOF"  >> "$GITHUB_OUTPUT"
-          echo "$output"      >> "$GITHUB_OUTPUT"
-          echo "EOF"          >> "$GITHUB_OUTPUT"
+            --ha-url http://localhost:8123 2>&1 | tee /tmp/validate_output.txt
+          exit_code=${PIPESTATUS[0]}
+          echo "output<<EOF"       >> "$GITHUB_OUTPUT"
+          cat /tmp/validate_output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
       # ── 9. Stop the HA container (always, even on failure) ───────────────────
