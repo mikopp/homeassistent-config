@@ -1,5 +1,9 @@
 name: Home Assistant Core Configuration Check - Frenk
 on: [push, pull_request, workflow_dispatch]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   home-assistant:
     name: Home Assistant Core Configuration Check
