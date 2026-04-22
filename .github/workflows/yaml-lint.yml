@@ -10,6 +10,30 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  fix-yaml-style:
+    name: Auto-fix YAML style
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Fix style issues
+        run: python .github/scripts/fix_yaml_style.py .
+
+      - name: Commit and push fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "style: fix YAML trailing whitespace, CRLF and missing newlines"
+            git push
+          fi
+
   lint-yaml:
     name: Lint all YAML files
     runs-on: ubuntu-latest
