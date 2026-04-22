@@ -92,7 +92,7 @@ input_number:
     step: 0.1
     mode: box
     category: Pergola
- 
+
     icon: mdi:solar-panel
 
   pergola_shading_sensitivity:
