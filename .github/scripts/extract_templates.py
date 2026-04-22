@@ -3,7 +3,7 @@
 
 Usage: python extract_templates.py [repo_root]
   repo_root defaults to the current directory.
-Outputs a JSON array of unique template strings to stdout.
+Outputs a JSON array of {"template": "...", "file": "relative/path.yaml"} objects to stdout.
 """
 
 import json
@@ -38,17 +38,17 @@ def _make_loader():
 _LOADER = _make_loader()
 
 
-def _collect(value, out):
+def _collect(value, out, file_path):
     """Recursively collect template strings from a parsed YAML value."""
     if isinstance(value, str):
         if "{{" in value or "{%" in value:
-            out.append(value)
+            out.append({"template": value, "file": file_path})
     elif isinstance(value, dict):
         for v in value.values():
-            _collect(v, out)
+            _collect(v, out, file_path)
     elif isinstance(value, list):
         for item in value:
-            _collect(item, out)
+            _collect(item, out, file_path)
 
 
 def extract_templates(repo_root):
@@ -62,18 +62,19 @@ def extract_templates(repo_root):
         try:
             with open(path, encoding="utf-8") as fh:
                 data = yaml.load(fh, Loader=_LOADER)
-            _collect(data, raw)
+            rel = str(path.relative_to(root))
+            _collect(data, raw, rel)
         except yaml.YAMLError:
             # YAML errors are caught by the yaml-lint job; skip here
             pass
 
-    # Deduplicate, preserving first-seen order
+    # Deduplicate by template string, keeping first-seen file
     seen = set()
     unique = []
-    for t in raw:
-        if t not in seen:
-            seen.add(t)
-            unique.append(t)
+    for item in raw:
+        if item["template"] not in seen:
+            seen.add(item["template"])
+            unique.append(item)
     return unique
 
 

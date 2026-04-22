@@ -73,14 +73,16 @@ def main():
     failures = []
     skipped = 0
 
-    for i, tmpl in enumerate(templates, 1):
+    for item in templates:
+        tmpl = item["template"] if isinstance(item, dict) else item
+        file_path = item.get("file", "unknown") if isinstance(item, dict) else "unknown"
         ok, skip, error = validate_template(args.ha_url, token, tmpl)
         if ok:
             pass
         elif skip:
             skipped += 1
         else:
-            failures.append({"template": tmpl, "error": error})
+            failures.append({"template": tmpl, "file": file_path, "error": error})
 
     valid = total - len(failures) - skipped
     print(f"  ✓ valid:   {valid}")
@@ -91,11 +93,21 @@ def main():
         print(f"\n{'='*60}")
         print(f"FAILED: {len(failures)} invalid template(s)\n")
         for idx, item in enumerate(failures, 1):
+            file_path = item["file"]
+            error = item["error"]
             preview = item["template"].replace("\n", " ").strip()
             if len(preview) > 120:
                 preview = preview[:117] + "..."
-            print(f"  [{idx}] Template: {preview!r}")
-            print(f"       Error:    {item['error']}")
+
+            # GitHub Actions annotation — shows as an inline file annotation in the PR
+            def _esc(s):
+                return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
+            print(f"::error file={file_path},title=Invalid Jinja2 template::{_esc(preview)} — {_esc(error)}")
+
+            # Human-readable summary
+            print(f"  [{idx}] File:     {file_path}")
+            print(f"       Template: {preview!r}")
+            print(f"       Error:    {error}")
             print()
         sys.exit(1)
 
