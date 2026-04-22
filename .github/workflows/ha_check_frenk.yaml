@@ -85,7 +85,7 @@ jobs:
           # Create the first admin user
           onboarding=$(curl -s -X POST http://localhost:8123/api/onboarding/users \
             -H "Content-Type: application/json" \
-            -d '{"client_id":"http://localhost:8123/","username":"ci","password":"ci-password","language":"en-US"}')
+            -d '{"client_id":"http://localhost:8123/","name":"CI","username":"ci","password":"ci-password","language":"en-US"}')
 
           echo "Onboarding response keys: $(echo "$onboarding" | python3 -c "import sys,json; print(list(json.load(sys.stdin).keys()))" 2>&1)"
           auth_code=$(echo "$onboarding" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['auth_code']) if 'auth_code' in d else (print('ERROR:'+str(d),file=sys.stderr) or sys.exit(1))")
