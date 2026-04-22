@@ -100,9 +100,10 @@ def main():
                 preview = preview[:117] + "..."
 
             # GitHub Actions annotation — shows as an inline file annotation in the PR
-            def _esc(s):
-                return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
-            print(f"::error file={file_path},title=Invalid Jinja2 template::{_esc(preview)} — {_esc(error)}")
+            # Property values (before ::) need : and , escaped; the message after :: only needs % \r \n.
+            def _esc_msg(s):
+                return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::error file={file_path},title=Invalid Jinja2 template::{_esc_msg(preview)} — {_esc_msg(error)}")
 
             # Human-readable summary
             print(f"  [{idx}] File:     {file_path}")
