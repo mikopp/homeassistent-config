@@ -3,6 +3,10 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   home-assistant:
     name: Home Assistant Core Configuration Check
@@ -15,3 +19,138 @@ jobs:
         with:
           secrets: fakesecrets.yaml
           version: stable
+
+  validate_templates:
+    name: Validate Jinja2 Templates
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Check out the repository ─────────────────────────────────────────
+      - name: Check out configuration from GitHub
+        uses: actions/checkout@v6
+
+      # ── 2. Python tooling for extraction and validation ──────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install pyyaml requests
+
+      # ── 3. Pull the same HA image the frenk job uses ─────────────────────────
+      - name: Pull Home Assistant Docker image
+        run: docker pull ghcr.io/home-assistant/home-assistant:stable
+
+      # ── 4. Start a minimal HA instance for the template API ──────────────────
+      #    Use a fresh empty config dir so HA boots cleanly into onboarding
+      #    mode without trying to connect to MQTT, Loxone, or Victron.
+      - name: Start Home Assistant
+        run: |
+          mkdir -p /tmp/ha-ci-config
+          docker run -d \
+            --name ha-ci \
+            -p 8123:8123 \
+            -v /tmp/ha-ci-config:/config \
+            ghcr.io/home-assistant/home-assistant:stable
+
+      # ── 5. Wait until the onboarding endpoint responds ───────────────────────
+      - name: Wait for Home Assistant to be ready
+        run: |
+          echo "Waiting for Home Assistant to start…"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8123/api/onboarding > /dev/null 2>&1; then
+              echo "Home Assistant is ready (attempt $i)."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "ERROR: Home Assistant did not start within 3 minutes." >&2
+          docker logs ha-ci >&2
+          exit 1
+
+      # ── 6. Complete onboarding to obtain a short-lived API token ─────────────
+      #    Fresh HA instances have no users; the onboarding API lets us create
+      #    the first admin and returns an auth code we exchange for a token.
+      - name: Obtain HA API token via onboarding
+        id: ha_auth
+        run: |
+          # Create the first admin user
+          onboarding=$(curl -s -X POST http://localhost:8123/api/onboarding/users \
+            -H "Content-Type: application/json" \
+            -d '{"client_id":"http://localhost:8123/","username":"ci","password":"ci-password","language":"en-US"}')
+
+          auth_code=$(echo "$onboarding" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['auth_code'])")
+          echo "::add-mask::$auth_code"
+
+          # Exchange the auth code for an access token
+          token_resp=$(curl -s -X POST http://localhost:8123/auth/token \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=authorization_code" \
+            --data-urlencode "code=${auth_code}" \
+            --data-urlencode "client_id=http://localhost:8123/")
+
+          token=$(echo "$token_resp" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+          echo "::add-mask::$token"
+          echo "ha_token=$token" >> "$GITHUB_OUTPUT"
+
+      # ── 7. Extract all Jinja2 templates from the repo's HA YAML files ────────
+      - name: Extract Jinja2 templates
+        run: |
+          python3 .github/scripts/extract_templates.py . > /tmp/templates.json
+          count=$(python3 -c "import json; print(len(json.load(open('/tmp/templates.json'))))")
+          echo "Found ${count} template(s) to validate."
+
+      # ── 8. Validate every template via the HA REST API ───────────────────────
+      #    Templates using runtime-only variables (trigger, context, value, …)
+      #    are automatically skipped — they are syntactically correct but cannot
+      #    render without execution context. All other errors fail the job.
+      - name: Validate templates via HA REST API
+        id: validate
+        continue-on-error: true
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          output=$(python3 .github/scripts/validate_templates.py \
+            --templates /tmp/templates.json \
+            --ha-url http://localhost:8123 2>&1)
+          exit_code=$?
+          echo "$output"
+          echo "output<<EOF"  >> "$GITHUB_OUTPUT"
+          echo "$output"      >> "$GITHUB_OUTPUT"
+          echo "EOF"          >> "$GITHUB_OUTPUT"
+          exit $exit_code
+
+      # ── 9. Stop the HA container (always, even on failure) ───────────────────
+      - name: Stop Home Assistant
+        if: always()
+        run: docker stop ha-ci || true
+
+      # ── 10. Post a PR comment when templates fail ────────────────────────────
+      - name: Comment on PR with template errors
+        if: steps.validate.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `${{ steps.validate.outputs.output }}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                '## ❌ Jinja2 template validation failed',
+                '',
+                'One or more templates in the HA config are invalid.',
+                '',
+                '```',
+                output,
+                '```',
+              ].join('\n'),
+            });
+
+      # ── 11. Re-fail the job after the comment step ───────────────────────────
+      - name: Fail if any templates are invalid
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
