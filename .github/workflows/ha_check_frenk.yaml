@@ -1,8 +1,6 @@
 name: Home Assistant Core Configuration Check - Frenk
 on:
   push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
 env:
