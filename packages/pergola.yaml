@@ -176,20 +176,6 @@ input_number:
     icon: mdi:rotate-right
 
 
-  pergola_min_heating_slat_angle:
-    name: Pergola Min Heating Slat Angle
-    # Floor slat angle in heating mode — prevents near-parallel slats at dawn where
-    # A_eff approaches 0° and the angle gap between sun and slat is too small to matter.
-    # Default 16° is back-calculated from tilt-position 20:
-    #   (20 − 7) × max_tilt_angle / 100 = 15.86° ≈ 16° at default max_tilt_angle=122°
-    min: 0
-    max: 40
-    step: 1
-    mode: box
-    unit_of_measurement: "°"
-    icon: mdi:angle-acute
-
-
   # ── Location / orientation ────────────────────────────────────────────────────────
 
   pergola_wall_azimuth:
@@ -210,12 +196,14 @@ input_number:
     icon: mdi:compass
 
 
-  # ── Slat geometry (used to derive R and PHI) ──────────────────────────────────────
+  # ── Slat geometry (used to derive R, PHI, and min_heating_slat_angle) ───────────────
   # These three inputs feed the shade-overlap geometry (see plan "Derived Internal Constants"):
-  #   R   = sqrt(d² + t²) / w              — overlap ratio
-  #   PHI = degrees(atan(t / d))            — thickness angle offset (default ≈ 8.53°)
+  #   R        = sqrt(d² + t²) / w              — overlap ratio
+  #   PHI      = degrees(atan(t / d))            — thickness angle offset (default ≈ 8.53°)
+  #   θ_min    = degrees(acos(p/√(w²+t²))) + degrees(atan(t/w))  — heating seal-break angle (≈ 33.5°)
   # R and PHI are used to compute MaxOpenEast, MaxOpenWest, and COOLING_LOWER_BOUND.
-  # sensor.pergola_cooling_lower_bound is re-derived automatically when any of these change.
+  # sensor.pergola_cooling_lower_bound and sensor.pergola_min_heating_slat_angle
+  # are re-derived automatically when any of these change.
 
   pergola_slat_width:
     name: Pergola Slat Width
@@ -415,7 +403,7 @@ template:
             {# In heating mode the goal is to let sun THROUGH the slats — the slat    #}
             {# should be parallel to the sun rays. A_eff and the slat share the same  #}
             {# number line so slat_angle = A_eff directly (plan Tilt Calc Step 1).    #}
-            {% set min_heat = states('input_number.pergola_min_heating_slat_angle') | float(16) %}
+            {% set min_heat = states('sensor.pergola_min_heating_slat_angle') | float(33.5) %}
             {% set A        = states('sensor.pergola_effective_sun_angle') | float(90) %}
             {% if A > mt %}
               {# Dead zone: A_eff beyond max_tilt (far west sun). Use max_tilt so the  #}
@@ -481,6 +469,29 @@ template:
           {% set R   = ((d**2 + t**2) ** 0.5) / w %}
           {% set PHI = atan(t / d) * (180 / pi) %}
           {{ (A + PHI - asin(R * sin(A * pi / 180)) * (180 / pi)) | round(1) }}
+        unit_of_measurement: "°"
+        icon: mdi:angle-acute
+
+      # ── Min Heating Slat Angle ────────────────────────────────────────────────────
+      # Geometric minimum tilt where a gap first opens between adjacent slats so that
+      # direct sunlight can reach the interior (the "break-the-seal" angle).
+      #
+      # Derived from the gap condition  w cosθ + t sinθ = p:
+      #   θ_min = acos(p / √(w² + t²)) + atan(t / w)
+      #
+      # At defaults (w=22, p=20, t=3): ≈ 33.5°
+      # Used as the floor in sensor.pergola_slat_angle (Heating Mode).
+      - name: "Pergola Min Heating Slat Angle"
+        unique_id: pergola_min_heating_slat_angle
+        availability: >
+          {{ states('input_number.pergola_slat_width') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
+             and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set w = states('input_number.pergola_slat_width') | float(22) %}
+          {% set p = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t = states('input_number.pergola_slat_thickness') | float(3) %}
+          {{ (acos(p / (w**2 + t**2)**0.5) * (180 / pi) + atan(t / w) * (180 / pi)) | round(1) }}
         unit_of_measurement: "°"
         icon: mdi:angle-acute
 
@@ -1530,7 +1541,6 @@ group:
       - input_number.pergola_min_sun_elevation
       - input_number.pergola_deadband_angle
       - input_number.pergola_max_tilt_angle
-      - input_number.pergola_min_heating_slat_angle
       - input_number.pergola_wall_azimuth
       - input_number.pergola_slat_width
       - input_number.pergola_slat_pivot_spacing
@@ -1545,6 +1555,7 @@ group:
       - sensor.pergola_cooling_lower_bound
       - sensor.pergola_max_open_east_morning_cooling_angle
       - sensor.pergola_max_open_west_cooling_angle
+      - sensor.pergola_min_heating_slat_angle
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────
@@ -1557,3 +1568,5 @@ recorder:
       - sensor.pergola_cooling_lower_bound
       - sensor.pergola_pv_power
       - sensor.pergola_rain_recovery_step
+      # Derived from slat geometry (w, p, t) — pure constant, no history needed.
+      - sensor.pergola_min_heating_slat_angle
