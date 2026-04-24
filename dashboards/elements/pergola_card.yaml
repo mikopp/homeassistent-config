@@ -21,6 +21,7 @@ entities:
   - sensor.pergola_max_open_west_cooling_angle
   - binary_sensor.pergola_sun_shining
   - sensor.pergola_cooling_lower_bound
+  - sensor.pergola_min_heating_slat_angle
   - type: section
     label: "Parameters"
   - input_number.pergola_pv_conversion_factor
@@ -28,7 +29,6 @@ entities:
   - input_number.pergola_min_sun_elevation
   - input_number.pergola_deadband_angle
   - input_number.pergola_max_tilt_angle
-  - input_number.pergola_min_heating_slat_angle
   - input_number.pergola_wall_azimuth
   - input_number.pergola_slat_width
   - input_number.pergola_slat_pivot_spacing
