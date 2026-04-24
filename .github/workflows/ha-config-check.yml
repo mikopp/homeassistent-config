@@ -20,7 +20,7 @@ jobs:
     steps:
       # ── 1. Check out the repository ──────────────────────────────────────
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ── 2. Read the required HA version from the repo's own .HA_VERSION ──
       #    Fails fast with a clear message if the file is missing or empty.

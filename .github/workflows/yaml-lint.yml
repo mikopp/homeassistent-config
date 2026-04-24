@@ -1,0 +1,70 @@
+---
+name: YAML Lint
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  fix-yaml-style:
+    name: Auto-fix YAML style
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Fix style issues
+        run: python .github/scripts/fix_yaml_style.py .
+
+      - name: Commit and push fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "style: fix YAML trailing whitespace, CRLF and missing newlines [skip ci]"
+            git push
+          fi
+
+  lint-yaml:
+    name: Lint all YAML files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint.yaml
+          file_or_dir: .
+          strict: false
+
+  lint-resolved:
+    name: Lint resolved HA config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: pip install pyyaml yamllint
+
+      - name: Resolve and lint configuration.yaml
+        run: |
+          python .github/scripts/resolve_ha_yaml.py configuration.yaml . \
+            > /tmp/resolved_configuration.yaml
+          yamllint -c .yamllint.yaml /tmp/resolved_configuration.yaml
+
+      - name: Resolve and lint dashboard files
+        run: |
+          for f in dashboards/*.yaml; do
+            echo "Resolving $f ..."
+            python .github/scripts/resolve_ha_yaml.py "$f" . \
+              > "/tmp/resolved_$(basename "$f")"
+            yamllint -c .yamllint.yaml "/tmp/resolved_$(basename "$f")"
+          done

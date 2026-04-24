@@ -58,7 +58,3 @@ views:
           - cover.dach_rechts
           - sensor.dach_links_priority_lock_originator
           - sensor.dach_rechts_priority_lock_originator
-        
-        
-          
-

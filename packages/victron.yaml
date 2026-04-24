@@ -7,7 +7,7 @@ mqtt:
       device_class: power
       state_class: measurement
       value_template: "{{ value_json.value | round(0) }}"
-      
+
 automation:
   - alias: "Victron Bridge Keep-alive"
     description: "Request data from specific charger once per minute"
