@@ -23,7 +23,7 @@ input_boolean:
   pergola_automatic_enabled:
     name: Pergola Automatic Enabled
     icon: mdi:sun-clock
-    category: Pergola
+
 
   # Heating indicator: on = heating season (let sun through), off = cooling season (block sun).
   # Can be toggled by the user in the HA UI or written via the HA REST API by an external
@@ -31,7 +31,7 @@ input_boolean:
   pergola_heating:
     name: Pergola Heating
     icon: mdi:radiator
-    category: Pergola
+
 
   # Cooling formula selector (Step 7).
   # off = perfect-perpendicular (default, standard A_eff ± 90 formula)
@@ -39,7 +39,7 @@ input_boolean:
   pergola_cooling_optimized:
     name: Pergola Cooling Optimized
     icon: mdi:sine-wave
-    category: Pergola
+
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT SELECT — state machine
@@ -61,7 +61,7 @@ input_select:
   pergola_automation_state:
     name: Pergola Automation State
     icon: mdi:state-machine
-    category: Pergola
+
     options:
       - no_sun_behind_house
       - frost
@@ -91,7 +91,7 @@ input_number:
     max: 6
     step: 0.1
     mode: box
-    category: Pergola
+
 
     icon: mdi:solar-panel
 
@@ -107,7 +107,7 @@ input_number:
     step: 0.05
     mode: box
     icon: mdi:weather-sunny
-    category: Pergola
+
 
   pergola_min_sun_elevation:
     name: Pergola Min Sun Elevation
@@ -121,7 +121,7 @@ input_number:
     unit_of_measurement: "°"
     mode: box
     icon: mdi:weather-sunset
-    category: Pergola
+
 
   # ── Rain recovery step tracker ───────────────────────────────────────────────────
 
@@ -141,7 +141,7 @@ input_number:
     max: 4
     step: 1
     icon: mdi:water-sync
-    category: Pergola
+
 
   # ── Tilt / hardware geometry ──────────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ input_number:
     unit_of_measurement: "°"
     mode: box
     icon: mdi:rotate-right
-    category: Pergola
+
 
   pergola_min_heating_slat_angle:
     name: Pergola Min Heating Slat Angle
@@ -171,7 +171,7 @@ input_number:
     mode: box
     unit_of_measurement: "°"
     icon: mdi:angle-acute
-    category: Pergola
+
 
   # ── Location / orientation ────────────────────────────────────────────────────────
 
@@ -191,7 +191,7 @@ input_number:
     mode: box
     unit_of_measurement: "°"
     icon: mdi:compass
-    category: Pergola
+
 
   # ── Slat geometry (used to derive R and PHI) ──────────────────────────────────────
   # These three inputs feed the shade-overlap geometry (see plan "Derived Internal Constants"):
@@ -210,7 +210,7 @@ input_number:
     mode: box
     unit_of_measurement: "cm"
     icon: mdi:ruler
-    category: Pergola
+
 
   pergola_slat_pivot_spacing:
     name: Pergola Slat Pivot Spacing
@@ -222,7 +222,7 @@ input_number:
     mode: box
     unit_of_measurement: "cm"
     icon: mdi:ruler-square
-    category: Pergola
+
 
   pergola_slat_thickness:
     name: Pergola Slat Thickness
@@ -234,7 +234,7 @@ input_number:
     step: 0.5
     unit_of_measurement: "cm"
     icon: mdi:layers
-    category: Pergola
+
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # TEMPLATE SENSORS AND BINARY SENSORS
@@ -659,7 +659,7 @@ automation:
   # aborting a movement command mid-travel (race condition — see plan Step 2 notes).
   - id: '1771360145720'
     alias: 'Inactivity Watchdog: Dach Links'
-    category: Pergola
+
     description: >
       Forces an update of slat position and lock originator every 5 minutes when
       no cover movement or lock change has occurred. Prevents stale lock state.
@@ -701,7 +701,7 @@ automation:
   # Identical logic as the Dach Links watchdog — see comment above.
   - id: '1771361016291'
     alias: 'Inactivity Watchdog: Dach Rechts'
-    category: Pergola
+
     description: >
       Forces an update of slat position and lock originator every 5 minutes when
       no cover movement or lock change has occurred. Prevents stale lock state.
@@ -740,7 +740,7 @@ automation:
   # is available the moment the lock changes, without waiting for the next watchdog cycle.
   - id: '1771748333394'
     alias: 'Dach Links: Update state when lock originator changes'
-    category: Pergola
+
     description: >
       Sends stop_cover_tilt immediately when the lock originator changes so HA
       receives a fresh state report before the state manager evaluates the transition.
@@ -759,7 +759,7 @@ automation:
   # Same as Dach Links responder — see comment above.
   - id: '1771748414999'
     alias: 'Dach Rechts: Update state when lock originator changes'
-    category: Pergola
+
     description: >
       Sends stop_cover_tilt immediately when the lock originator changes so HA
       receives a fresh state report before the state manager evaluates the transition.
@@ -789,7 +789,7 @@ automation:
   # frost / rain / rain_stopped are active and no transition condition has fired.
   - id: 'pergola_state_manager'
     alias: 'Pergola State Manager'
-    category: Pergola
+
     description: >
       Evaluates rules 1–4 (frost, rain, rain_stopped, user_override) directly and
       delegates rules 5–8 to script.pergola_evaluate_state. Triggers on all inputs
@@ -1000,7 +1000,7 @@ automation:
   # has delay_off: 5 min, so it only turns off after 5 continuous minutes without sun.
   - id: 'pergola_not_enough_sun_entry'
     alias: 'Pergola: Not Enough Sun — Entry'
-    category: Pergola
+
     description: >
       Enters not_enough_sun when pergola_sun_shining turns off. The sensor's 5 min
       delay_off means this fires only after 5 continuous minutes of no sun — no extra
@@ -1031,7 +1031,7 @@ automation:
   # not apply (we were in not_enough_sun, meaning no frost/rain/no-sun conditions).
   - id: 'pergola_not_enough_sun_exit'
     alias: 'Pergola: Not Enough Sun — Exit'
-    category: Pergola
+
     description: >
       Exits not_enough_sun when pergola_sun_shining turns on. The sensor's 1 min
       delay_on means this fires only after 1 continuous minute of sun — no extra guard
@@ -1078,7 +1078,7 @@ automation:
   # freely for monitoring even when automatic is disabled.
   - id: 'pergola_cover_response'
     alias: 'Pergola Cover Response'
-    category: Pergola
+
     description: >
       Reacts to state machine transitions and tracks the sun every 5 min. Dispatches
       to the correct slat-angle formula per state and applies the movement deadband
@@ -1191,7 +1191,7 @@ script:
   # frost exit and user_override exit inside pergola_state_manager.
   pergola_exit_to_normal:
     alias: "Pergola: Exit to Normal (post-frost / post-override)"
-    category: Pergola
+
     description: >
       Shared handler for frost-clear and user_override-clear transitions. Checks
       hourly rain and either enters rain_stopped + starts drain, or calls
@@ -1235,7 +1235,7 @@ script:
   # This script never checks rules 1–4; callers guarantee those are not active.
   pergola_evaluate_state:
     alias: "Pergola: Evaluate State (Rules 5–8)"
-    category: Pergola
+
     description: >
       Evaluates rules 5–8 (no_sun_behind_house → not_enough_sun → heating → cooling)
       and writes the result to input_select.pergola_automation_state. Called from
@@ -1319,7 +1319,7 @@ script:
   # This allows the post-rain recovery script to bypass the deadband intentionally.
   pergola_set_slat_angle:
     alias: "Pergola: Set Slat Angle"
-    category: Pergola
+
     description: >
       Converts slat_angle (degrees) to hardware-corrected tilt_position and sends
       cover.set_cover_tilt_position to both covers. Exits without moving if the
@@ -1389,7 +1389,7 @@ script:
   # any running instance.
   pergola_post_rain_recovery:
     alias: "Pergola: Post-Rain Recovery"
-    category: Pergola
+
     description: >
       Stepped drain sequence after rain stops. Moves covers 8° → 15° to drain pooled
       water, optionally waits 30 min if hourly rain > 0, then calls
