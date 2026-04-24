@@ -356,13 +356,15 @@ template:
                 {# Floor at 90° — sub-vertical back-face provides no blocking benefit.   #}
                 {% set slat = [[90, moe + 5] | max, mt] | min %}
               {% elif A <= 90 %}
-                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest morning, raw.  #}
-                {# For A ≤ 90 raw value is ≤ 31.7° — no 90° cap needed here.            #}
-                {% set slat = mow %}
+                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest − SAFETY_BUFFER. #}
+                {# Symmetric to the back-face +5° buffer: stay 5° inside the shade zone   #}
+                {# below MaxOpenWest so real-world motor tolerance can't exceed the limit. #}
+                {% set slat = mow - 5 %}
               {% else %}
-                {# Afternoon (A > 90): MaxOpenWestAfternoon = min(90°, raw sensor).      #}
-                {# For A > ~128° raw sensor > 90° → cap holds slat fully vertical.      #}
-                {% set slat = [mow, 90] | min %}
+                {# Afternoon (A > 90): MaxOpenWest − SAFETY_BUFFER, capped at 90°.      #}
+                {# Same -5° buffer as flip range. Cap at 90° fires when A > ~133°       #}
+                {# (mow already > 95° there), so far-west behavior is unchanged.        #}
+                {% set slat = [mow - 5, 90] | min %}
               {% endif %}
               {{ [[slat, 0] | max, mt] | min | round(1) }}
             {% else %}
