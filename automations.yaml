@@ -29,3 +29,19 @@
       - cover.dach_rechts
       attribute_name: current_tilt_position
       value_template: '{{ value }}'
+- id: '1776801083533'
+  alias: Send Pergola Automation to Loxone
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - input_boolean.pergola_automatic_enabled
+  conditions: []
+  actions:
+  - action: rest_command.send_to_loxone
+    metadata: {}
+    data:
+      input_name: pergola_automatic_enabled
+      value: '{{ 1 if is_state(''input_boolean.pergola_automatic_enabled'', ''on'')
+        else 0 }}'
+  mode: single
