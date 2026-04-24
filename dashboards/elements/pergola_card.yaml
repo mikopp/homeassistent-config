@@ -26,6 +26,7 @@ entities:
   - input_number.pergola_pv_conversion_factor
   - input_number.pergola_shading_sensitivity
   - input_number.pergola_min_sun_elevation
+  - input_number.pergola_deadband_angle
   - input_number.pergola_max_tilt_angle
   - input_number.pergola_min_heating_slat_angle
   - input_number.pergola_wall_azimuth

@@ -122,6 +122,23 @@ input_number:
     mode: box
     icon: mdi:weather-sunset
 
+  pergola_deadband_angle:
+    name: Pergola Deadband Angle
+    # Minimum slat-angle change (°) required to trigger a motor move.
+    # Used in two places:
+    #   1. pergola_cover_response — suppresses sun-tracking moves smaller than this.
+    #   2. sensor.pergola_slat_angle optimised-cooling morning branch — the safety
+    #      buffer (moe + DB) equals this value so shade is guaranteed for one full
+    #      deadband cycle of sun advancement without a corrective move.
+    # Constraint: set no lower than the motor's positional accuracy (the morning
+    # formula relies on the buffer being ≥ actual motor error).
+    # Default 5°. Lower → more frequent motor movement; higher → less churn.
+    min: 1
+    max: 20
+    step: 0.5
+    unit_of_measurement: "°"
+    mode: box
+    icon: mdi:arrow-expand-horizontal
 
   # ── Rain recovery step tracker ───────────────────────────────────────────────────
 
@@ -350,20 +367,34 @@ template:
               {# Targets the furthest-open slat angle that still guarantees 100% shade,  #}
               {# maximising airflow by leveraging slat overlap / thickness geometry.     #}
               {% set mow = states('sensor.pergola_max_open_west_cooling_angle') | float(15.3) %}
-              {% if A < 90 and moe <= mt - 5 %}
-                {# Morning back-face: max(90°, MaxOpenEast + SAFETY_BUFFER), ≤ max_tilt. #}
-                {# SAFETY_BUFFER keeps slat 5° inside the shade zone above MaxOpenEast.  #}
-                {# Floor at 90° — sub-vertical back-face provides no blocking benefit.   #}
-                {% set slat = [[90, moe + 5] | max, mt] | min %}
+              {# DB: deadband in degrees — read from the same input used by the cover    #}
+              {# response automation so both thresholds stay in sync.                    #}
+              {% set DB  = states('input_number.pergola_deadband_angle') | float(5) %}
+              {% if A < 90 and moe <= mt - DB %}
+                {# Morning back-face: max(90°, MaxOpenEast + DB), clamped to max_tilt.  #}
+                {# DB doubles as safety buffer: slat is always DB° above MaxOpenEast.   #}
+                {# If the sun advances up to DB° before the next move fires, the slat   #}
+                {# still exceeds the new MaxOpenEast — shade is guaranteed.             #}
+                {# Floor at 90° — sub-vertical back-face provides no blocking benefit.  #}
+                {% set slat = [[90, moe + DB] | max, mt] | min %}
+                {# Snap to max_tilt when within DB/2: the deadband would otherwise       #}
+                {# prevent covers from reaching the physical maximum-open position.      #}
+                {% if mt - slat < DB / 2 %}
+                  {% set slat = mt %}
+                {% endif %}
               {% elif A <= 90 %}
-                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest − SAFETY_BUFFER. #}
-                {# Symmetric to the back-face +5° buffer: stay 5° inside the shade zone   #}
-                {# below MaxOpenWest so real-world motor tolerance can't exceed the limit. #}
+                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest − 5°.         #}
+                {# Fixed 5° motor-accuracy buffer — stays below the shade boundary       #}
+                {# regardless of the deadband value (mow increases with A here, so      #}
+                {# the slat is always below mow_new even if the deadband suppresses).   #}
                 {% set slat = mow - 5 %}
               {% else %}
-                {# Afternoon (A > 90): MaxOpenWest − SAFETY_BUFFER, capped at 90°.      #}
-                {# Same -5° buffer as flip range. Cap at 90° fires when A > ~133°       #}
-                {# (mow already > 95° there), so far-west behavior is unchanged.        #}
+                {# Afternoon (A > 90): MaxOpenWest − 5°, capped at 90°.                #}
+                {# Fixed 5° motor-accuracy buffer: motor can overshoot by up to 5°     #}
+                {# and still land at or below mow (the shade boundary).                #}
+                {# Cap at 90° fires naturally when mow reaches 95° — the cover_response #}
+                {# deadband fires at that point because slat jumps to 90° (= DB away   #}
+                {# from the previous position). No snap needed here.                   #}
                 {% set slat = [mow - 5, 90] | min %}
               {% endif %}
               {{ [[slat, 0] | max, mt] | min | round(1) }}
@@ -1159,13 +1190,15 @@ automation:
                   {{ states('input_select.pergola_automation_state') in
                      ['sun_automatik_cooling', 'sun_automatik_heating'] }}
             sequence:
-              # Deadband guard: 5° threshold in tilt_position units — compare
+              # Configurable deadband guard in tilt_position units — compare
               # sensor.pergola_tilt_position (target) against current cover position.
               # Prevents motor churn as the sun creeps; identical for cooling and heating.
+              # DB is read from input_number.pergola_deadband_angle (degrees), converted
+              # to tilt_position units so it matches the morning slat formula safety buffer.
               - condition: template
                 value_template: >
                   {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
-                  {% set DB      = (5 / mt * 100) | round(0) | int %}
+                  {% set DB      = (states('input_number.pergola_deadband_angle') | float(5) / mt * 100) | round(0) | int %}
                   {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
                   {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
                   {{ (target - current) | abs >= DB }}
@@ -1495,6 +1528,7 @@ group:
       - input_number.pergola_pv_conversion_factor
       - input_number.pergola_shading_sensitivity
       - input_number.pergola_min_sun_elevation
+      - input_number.pergola_deadband_angle
       - input_number.pergola_max_tilt_angle
       - input_number.pergola_min_heating_slat_angle
       - input_number.pergola_wall_azimuth
