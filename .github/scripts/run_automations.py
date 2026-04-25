@@ -185,10 +185,30 @@ def trigger_and_check(ha_url, token, automation, wait_s=0.5, poll_interval=0.1):
 
 # ── Main ───────────────────────────────────────────────────────────────────────────────
 
+def _load_exclude_patterns(path):
+    """Return a list of lowercase substring patterns from an exclude file, or []."""
+    if not path:
+        return []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = yaml.safe_load(fh)
+        return [str(p).lower() for p in (doc or {}).get("exclude", [])]
+    except FileNotFoundError:
+        print(f"WARN: exclude file not found: {path}", file=sys.stderr)
+        return []
+
+
+def _is_excluded(automation, patterns):
+    """Return True if any pattern is a substring of the automation entity_id."""
+    eid = automation["entity_id"].lower()
+    return any(p in eid for p in patterns)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run all automations under test scenarios.")
     parser.add_argument("--defaults", required=True, help="Path to state_defaults.yaml")
     parser.add_argument("--scenarios", required=True, help="Path to scenarios.yaml")
+    parser.add_argument("--exclude", default=None, help="Path to automation_exclude.yaml")
     parser.add_argument("--ha-url", default="http://localhost:8123", help="HA base URL")
     parser.add_argument("--retries", type=int, default=3, help="Retry count for seeding")
     args = parser.parse_args()
@@ -205,8 +225,16 @@ def main():
         scenarios_doc = yaml.safe_load(fh)
     scenarios = scenarios_doc.get("scenarios", [])
 
-    automations = discover_automations(args.ha_url, token)
-    print(f"Discovered {len(automations)} automation(s).")
+    exclude_patterns = _load_exclude_patterns(args.exclude)
+
+    all_automations = discover_automations(args.ha_url, token)
+    automations = [a for a in all_automations if not _is_excluded(a, exclude_patterns)]
+    excluded = [a for a in all_automations if _is_excluded(a, exclude_patterns)]
+
+    print(f"Discovered {len(all_automations)} automation(s).")
+    if excluded:
+        print(f"Excluded  {len(excluded)} automation(s): {', '.join(a['entity_id'] for a in excluded)}")
+    print(f"Testing   {len(automations)} automation(s).")
     print(f"Running {len(scenarios)} scenario(s).\n")
 
     all_failures = []  # list of {"scenario", "automation", "error"}
