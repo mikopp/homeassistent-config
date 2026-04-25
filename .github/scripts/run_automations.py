@@ -137,7 +137,7 @@ def apply_scenario(ha_url, token, defaults, scenario, retries=3):
 
 # ── Automation trigger + trace check ──────────────────────────────────────────────────
 
-def trigger_and_check(ha_url, token, automation, wait_s=3):
+def trigger_and_check(ha_url, token, automation, wait_s=3, poll_interval=0.2):
     """Trigger an automation and check its latest trace for errors.
 
     Returns (ok: bool, error_msg: str | None).
@@ -158,10 +158,16 @@ def trigger_and_check(ha_url, token, automation, wait_s=3):
         {"entity_id": entity_id, "skip_condition": False},
     )
 
-    # Wait briefly for the trace to be written
-    time.sleep(wait_s)
+    # Poll for a new trace instead of a fixed sleep — exits as soon as the trace
+    # appears (typically <500 ms) but respects the full wait_s as a hard timeout.
+    deadline = time.monotonic() + wait_s
+    latest_after = None
+    while time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        latest_after = get_latest_trace(ha_url, token, config_id)
+        if latest_after is not None and latest_after.get("run_id") != run_id_before:
+            break
 
-    latest_after = get_latest_trace(ha_url, token, config_id)
     if latest_after is None or latest_after.get("run_id") == run_id_before:
         # Automation did not run (conditions not met for this scenario) — that is OK
         return True, None

@@ -6,6 +6,7 @@ that dispatch by entity domain and retry on transient failures.
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -106,13 +107,21 @@ def apply_inputs(ha_url, token, mapping, retries=3):
 
     Returns a list of entity IDs that failed.
     """
+    items = list((mapping or {}).items())
+    if not items:
+        return []
     failures = []
-    for entity_id, value in (mapping or {}).items():
-        ok = _apply_input(ha_url, token, entity_id, value, retries)
-        status = "✓" if ok else "✗"
-        print(f"  {status} {entity_id} = {value!r}")
-        if not ok:
-            failures.append(entity_id)
+    with ThreadPoolExecutor(max_workers=min(len(items), 10)) as ex:
+        futures = {
+            ex.submit(_apply_input, ha_url, token, eid, val, retries): (eid, val)
+            for eid, val in items
+        }
+        for fut in as_completed(futures):
+            eid, val = futures[fut]
+            ok = fut.result()
+            print(f"  {'✓' if ok else '✗'} {eid} = {val!r}")
+            if not ok:
+                failures.append(eid)
     return failures
 
 
@@ -122,17 +131,26 @@ def apply_states(ha_url, token, mapping, retries=3):
     spec may be {"state": "x", "attributes": {...}} or just {"state": "x"}.
     Returns a list of entity IDs that failed.
     """
-    failures = []
-    for entity_id, spec in (mapping or {}).items():
+    items = list((mapping or {}).items())
+    if not items:
+        return []
+
+    def _resolve(spec):
         if isinstance(spec, dict):
-            state_val = spec.get("state", "unknown")
-            attributes = spec.get("attributes")
-        else:
-            state_val = str(spec)
-            attributes = None
-        ok = _set_state(ha_url, token, entity_id, state_val, attributes, retries)
-        status = "✓" if ok else "✗"
-        print(f"  {status} {entity_id} = {state_val!r}")
-        if not ok:
-            failures.append(entity_id)
+            return spec.get("state", "unknown"), spec.get("attributes")
+        return str(spec), None
+
+    failures = []
+    with ThreadPoolExecutor(max_workers=min(len(items), 10)) as ex:
+        futures = {
+            ex.submit(_set_state, ha_url, token, eid, *_resolve(spec), retries): (eid, spec)
+            for eid, spec in items
+        }
+        for fut in as_completed(futures):
+            eid, spec = futures[fut]
+            ok = fut.result()
+            state_val, _ = _resolve(spec)
+            print(f"  {'✓' if ok else '✗'} {eid} = {state_val!r}")
+            if not ok:
+                failures.append(eid)
     return failures
