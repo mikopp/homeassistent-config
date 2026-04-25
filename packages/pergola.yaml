@@ -262,7 +262,7 @@ template:
       # ever changes, only this sensor needs updating.
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
-        state: "{{ states('sensor.solar_yield_watts') | float }}"
+        state: "{{ states('sensor.solar_yield_watts') | float(0) }}"
         availability: >
           {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
@@ -294,9 +294,9 @@ template:
              and states('input_number.pergola_wall_azimuth') not in ['unavailable', 'unknown']
              and (state_attr('sun.sun', 'elevation') | float(0)) > 0 }}
         state: >
-          {% set elev    = state_attr('sun.sun', 'elevation') | float %}
-          {% set az      = state_attr('sun.sun', 'azimuth') | float %}
-          {% set wall_az = states('input_number.pergola_wall_azimuth') | float %}
+          {% set elev    = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% set az      = state_attr('sun.sun', 'azimuth') | float(0) %}
+          {% set wall_az = states('input_number.pergola_wall_azimuth') | float(204) %}
           {% if elev <= 0 %}
             0
           {% else %}
@@ -363,7 +363,7 @@ template:
           {% if s == 'sun_automatik_cooling' %}
             {% set LB  = states('sensor.pergola_cooling_lower_bound') | float(15.3) %}
             {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
-            {% set moe = states('sensor.pergola_max_open_east_morning_cooling_angle') | float %}
+            {% set moe = states('sensor.pergola_max_open_east_morning_cooling_angle') | float(90) %}
             {% set optimized = states('input_boolean.pergola_cooling_optimized') == 'on' %}
             {% if optimized %}
               {% set mow = states('sensor.pergola_max_open_west_cooling_angle') | float(15.3) %}
@@ -415,10 +415,10 @@ template:
              and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
              and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set A   = states('sensor.pergola_effective_sun_angle') | float %}
-          {% set w   = states('input_number.pergola_slat_width') | float %}
-          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float %}
-          {% set t   = states('input_number.pergola_slat_thickness') | float %}
+          {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
+          {% set w   = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
           {% set R   = ((d**2 + t**2) ** 0.5) / w %}
           {% set PHI = atan(t / d) * (180 / pi) %}
           {{ (A + PHI + asin(R * sin(A * pi / 180)) * (180 / pi)) | round(1) }}
@@ -440,10 +440,10 @@ template:
              and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
              and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set A   = states('sensor.pergola_effective_sun_angle') | float %}
-          {% set w   = states('input_number.pergola_slat_width') | float %}
-          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float %}
-          {% set t   = states('input_number.pergola_slat_thickness') | float %}
+          {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
+          {% set w   = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d   = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t   = states('input_number.pergola_slat_thickness') | float(3) %}
           {% set R   = ((d**2 + t**2) ** 0.5) / w %}
           {% set PHI = atan(t / d) * (180 / pi) %}
           {{ (A + PHI - asin(R * sin(A * pi / 180)) * (180 / pi)) | round(1) }}
@@ -466,9 +466,9 @@ template:
              and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
              and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set w = states('input_number.pergola_slat_width') | float %}
-          {% set p = states('input_number.pergola_slat_pivot_spacing') | float %}
-          {% set t = states('input_number.pergola_slat_thickness') | float %}
+          {% set w = states('input_number.pergola_slat_width') | float(22) %}
+          {% set p = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t = states('input_number.pergola_slat_thickness') | float(3) %}
           {{ (acos(p / (w**2 + t**2)**0.5) * (180 / pi) + atan(t / w) * (180 / pi)) | round(1) }}
         unit_of_measurement: "°"
         icon: mdi:angle-acute
@@ -489,8 +489,8 @@ template:
           {{ states('sensor.pergola_slat_angle') not in ['unavailable', 'unknown']
              and states('input_number.pergola_max_tilt_angle') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set slat = states('sensor.pergola_slat_angle') | float %}
-          {% set mt   = states('input_number.pergola_max_tilt_angle') | float %}
+          {% set slat = states('sensor.pergola_slat_angle') | float(90) %}
+          {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
           {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
           {% set raw  = (slat / mt * 100 + corr) | int %}
           {{ [[raw, 0] | max, 100] | min }}
@@ -514,7 +514,7 @@ template:
              and states('input_number.pergola_rain_recovery_step') not in ['unavailable', 'unknown'] }}
         state: >
           {% if states('input_select.pergola_automation_state') == 'rain_stopped' %}
-            {{ states('input_number.pergola_rain_recovery_step') | int }}
+            {{ states('input_number.pergola_rain_recovery_step') | int(0) }}
           {% else %}
             0
           {% endif %}
@@ -566,7 +566,7 @@ template:
           {% set solar       = states('sensor.wheatherstation_solar_radiation') | float(0) %}
           {% set factor      = states('input_number.pergola_pv_conversion_factor') | float(3.2) %}
           {% set pv          = states('sensor.pergola_pv_power') | float(0) / factor %}
-          {% set elev        = state_attr('sun.sun', 'elevation') | float %}
+          {% set elev        = state_attr('sun.sun', 'elevation') | float(0) %}
           {% set min_elev    = states('input_number.pergola_min_sun_elevation') | float(10) %}
           {% set sensitivity = states('input_number.pergola_shading_sensitivity') | float(0.9) %}
           {% set uv          = states('sensor.wheatherstation_uv_index') | float(0) %}
@@ -613,10 +613,10 @@ template:
              and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
              and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float %}
-          {% set w        = states('input_number.pergola_slat_width') | float %}
-          {% set d        = states('input_number.pergola_slat_pivot_spacing') | float %}
-          {% set t        = states('input_number.pergola_slat_thickness') | float %}
+          {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float(122) %}
+          {% set w        = states('input_number.pergola_slat_width') | float(22) %}
+          {% set d        = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
+          {% set t        = states('input_number.pergola_slat_thickness') | float(3) %}
           {% set R   = ((d**2 + t**2) ** 0.5) / w %}
           {% set PHI = atan(t / d) * (180 / pi) %}
           {% set SAFETY = 5 %}
