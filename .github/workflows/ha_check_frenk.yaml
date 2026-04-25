@@ -1,4 +1,4 @@
-name: Home Assistant Core Configuration Check - Frenk
+name: Home Assistant advanced Configuration Check
 on:
   push:
   workflow_dispatch:
