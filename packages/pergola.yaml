@@ -283,6 +283,9 @@ template:
       # A_eff: east-of-wall (az < wall_az) → A_eff = sun_height
       #         west-of-wall (az ≥ wall_az) → A_eff = 180 − sun_height
       # Derivation: plans/pergola-slat-formula-analysis.md
+      #
+      # The template also guards elev ≤ 0 directly — evaluation-order edge cases can
+      # deliver a stale elevation to the template before the availability filter clears.
       - name: "Pergola Effective Sun Angle"
         unique_id: pergola_effective_sun_angle
         availability: >
@@ -294,21 +297,15 @@ template:
           {% set elev    = state_attr('sun.sun', 'elevation') | float(0) %}
           {% set az      = state_attr('sun.sun', 'azimuth') | float(0) %}
           {% set wall_az = states('input_number.pergola_wall_azimuth') | float(204) %}
-          {# Safety guard: sun at or below horizon — availability template should already  #}
-          {# prevent this branch, but guard here against evaluation-order edge cases.      #}
           {% if elev <= 0 %}
             0
           {% else %}
             {% set delta_phi = az - wall_az %}
-            {# Singularity guard: sun azimuth ≈ wall_azimuth (along slat axis) →           #}
-            {# the formula divides by near-zero; mathematical limit is sun_height = 90°.   #}
             {% if (sin(delta_phi * pi / 180)) | abs < 0.001 %}
               {% set sun_height = 90 %}
             {% else %}
               {% set sun_height = (atan(tan(elev * pi / 180) / ((sin(delta_phi * pi / 180)) | abs))) * (180 / pi) %}
             {% endif %}
-            {# Map to east→west scale: morning east-of-wall → A_eff = sun_height;          #}
-            {#                          afternoon west-of-wall → A_eff = 180 − sun_height  #}
             {% if az < wall_az %}
               {{ sun_height | round(1) }}
             {% else %}
@@ -324,8 +321,33 @@ template:
       # correction. Always computes regardless of pergola_automatic_enabled.
       #
       # State dispatch:
-      #   sun_automatik_cooling  → full cooling formula (see plan Tilt Calc Step 1)
-      #   sun_automatik_heating  → A_eff tracked directly; floor at min_heating_slat_angle;
+      #   sun_automatik_cooling  → cooling formula; sub-mode from pergola_cooling_optimized:
+      #
+      #     Standard (off): perfect-perpendicular blocking
+      #       morning (A < 90, moe ≤ max_tilt − 5): slat = A_eff + 90, clamped to max_tilt
+      #       afternoon / past safe limit:            slat = max(A_eff − 90, LB)
+      #       result clamped to [LB, max_tilt]
+      #
+      #     Optimised (on): safe-zone max-open — furthest-open angle still guaranteeing
+      #       100% shade, maximising airflow via slat overlap / thickness geometry.
+      #       Flip guard (shared): morning branch applies while moe ≤ max_tilt − DB,
+      #         keeping room to place the DB safety buffer above MaxOpenEast.
+      #       Morning (A < 90, flip guard passes):
+      #         slat = max(90°, MaxOpenEast + DB), clamped to max_tilt.
+      #         DB doubles as safety buffer — sun can advance a full DB° before the next
+      #         move fires and shade is still guaranteed. Floor at 90°: sub-vertical
+      #         back-face provides no blocking benefit.
+      #         Snap to max_tilt when within DB/2 of it: deadband would otherwise prevent
+      #         covers from reaching the physical maximum-open position.
+      #       Flip range (A ≤ 90, flip guard failed): slat = MaxOpenWest − 5°.
+      #         Fixed 5° motor-accuracy buffer stays below the shade boundary regardless
+      #         of deadband (mow increases with A, so slat is always below future mow).
+      #       Afternoon (A > 90): slat = min(MaxOpenWest − 5°, 90°).
+      #         Fixed 5° buffer; cap at 90° fires naturally when mow reaches 95°.
+      #
+      #   sun_automatik_heating  → slat = A_eff directly;
+      #                            floor at min_heating_slat_angle (prevents near-horizontal
+      #                            slats at dawn when A_eff approaches 0°);
       #                            dead zone (A_eff > max_tilt) → max_tilt → tilt_position=100
       #   no_sun_behind_house,   → 90° (vertical, maximum ventilation)
       #   not_enough_sun         → 90°
@@ -339,85 +361,41 @@ template:
           {% set s  = states('input_select.pergola_automation_state') %}
           {% set mt = states('input_number.pergola_max_tilt_angle') | float(122) %}
           {% if s == 'sun_automatik_cooling' %}
-            {# ── Cooling formula ──────────────────────────────────────────────────── #}
-            {# COOLING_LOWER_BOUND: ventilation floor derived in sensor.pergola_cooling_lower_bound #}
             {% set LB  = states('sensor.pergola_cooling_lower_bound') | float(15.3) %}
-            {# A_eff from the companion sensor — already handles singularity + horizon guard #}
             {% set A   = states('sensor.pergola_effective_sun_angle') | float(90) %}
-            {# MaxOpenEast: read from dedicated sensor — canonical source; avoids re-deriving #}
-            {# R and PHI here (those geometry constants live in sensor.pergola_max_open_east). #}
             {% set moe = states('sensor.pergola_max_open_east_morning_cooling_angle') | float(90) %}
-            {# Flip guard (shared by both modes): stay in morning mode while MaxOpenEast   #}
-            {# is at least SAFETY_BUFFER below max_tilt (room to add the buffer above it). #}
             {% set optimized = states('input_boolean.pergola_cooling_optimized') == 'on' %}
             {% if optimized %}
-              {# ── Optimised cooling: safe-zone max-open formula (Step 7) ────────────── #}
-              {# Targets the furthest-open slat angle that still guarantees 100% shade,  #}
-              {# maximising airflow by leveraging slat overlap / thickness geometry.     #}
               {% set mow = states('sensor.pergola_max_open_west_cooling_angle') | float(15.3) %}
-              {# DB: deadband in degrees — read from the same input used by the cover    #}
-              {# response automation so both thresholds stay in sync.                    #}
               {% set DB  = states('input_number.pergola_deadband_angle') | float(5) %}
               {% if A < 90 and moe <= mt - DB %}
-                {# Morning back-face: max(90°, MaxOpenEast + DB), clamped to max_tilt.  #}
-                {# DB doubles as safety buffer: slat is always DB° above MaxOpenEast.   #}
-                {# If the sun advances up to DB° before the next move fires, the slat   #}
-                {# still exceeds the new MaxOpenEast — shade is guaranteed.             #}
-                {# Floor at 90° — sub-vertical back-face provides no blocking benefit.  #}
                 {% set slat = [[90, moe + DB] | max, mt] | min %}
-                {# Snap to max_tilt when within DB/2: the deadband would otherwise       #}
-                {# prevent covers from reaching the physical maximum-open position.      #}
                 {% if mt - slat < DB / 2 %}
                   {% set slat = mt %}
                 {% endif %}
               {% elif A <= 90 %}
-                {# Flip range (A ≤ 90, morning guard failed): MaxOpenWest − 5°.         #}
-                {# Fixed 5° motor-accuracy buffer — stays below the shade boundary       #}
-                {# regardless of the deadband value (mow increases with A here, so      #}
-                {# the slat is always below mow_new even if the deadband suppresses).   #}
                 {% set slat = mow - 5 %}
               {% else %}
-                {# Afternoon (A > 90): MaxOpenWest − 5°, capped at 90°.                #}
-                {# Fixed 5° motor-accuracy buffer: motor can overshoot by up to 5°     #}
-                {# and still land at or below mow (the shade boundary).                #}
-                {# Cap at 90° fires naturally when mow reaches 95° — the cover_response #}
-                {# deadband fires at that point because slat jumps to 90° (= DB away   #}
-                {# from the previous position). No snap needed here.                   #}
                 {% set slat = [mow - 5, 90] | min %}
               {% endif %}
               {{ [[slat, 0] | max, mt] | min | round(1) }}
             {% else %}
-              {# ── Standard cooling: perfect-perpendicular formula ─────────────────── #}
               {% if A < 90 and moe <= mt - 5 %}
-                {# Morning: perpendicular blocking (A_eff + 90), clamped to max_tilt    #}
                 {% set slat = (A + 90) if (A + 90) <= mt else mt %}
               {% else %}
-                {# Afternoon or past safe limit: front-face closing, floored at LB      #}
                 {% set slat = [A - 90, LB] | max %}
               {% endif %}
-              {# Clamp result to [LB, max_tilt] and round to 1 decimal                 #}
               {{ [[slat, LB] | max, mt] | min | round(1) }}
             {% endif %}
           {% elif s == 'sun_automatik_heating' %}
-            {# ── Heating formula: slat tracks the sun's effective angle ───────────── #}
-            {# In heating mode the goal is to let sun THROUGH the slats — the slat    #}
-            {# should be parallel to the sun rays. A_eff and the slat share the same  #}
-            {# number line so slat_angle = A_eff directly (plan Tilt Calc Step 1).    #}
             {% set min_heat = states('sensor.pergola_min_heating_slat_angle') | float(33.5) %}
             {% set A        = states('sensor.pergola_effective_sun_angle') | float(90) %}
             {% if A > mt %}
-              {# Dead zone: A_eff beyond max_tilt (far west sun). Use max_tilt so the  #}
-              {# tilt_position formula produces 100 — back face angled toward the west, #}
-              {# opening the maximum gap. No other position admits more western sun.    #}
               {{ mt | round(1) }}
             {% else %}
-              {# Track sun directly; floor at MIN_HEATING_ANGLE prevents near-parallel  #}
-              {# slats at dawn when A_eff approaches 0° (tilt would barely move).       #}
               {{ [[A, min_heat] | max, mt] | min | round(1) }}
             {% endif %}
           {% else %}
-            {# All other states (no_sun_behind_house, not_enough_sun, frost, rain, …) #}
-            {# → vertical open position (90°) — maximum ventilation, neutral display   #}
             90
           {% endif %}
         unit_of_measurement: "°"
@@ -513,7 +491,6 @@ template:
         state: >
           {% set slat = states('sensor.pergola_slat_angle') | float(90) %}
           {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
-          {# Hardware correction offsets: see plan "Step 2 — Convert slat_angle to tilt_position" #}
           {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
           {% set raw  = (slat / mt * 100 + corr) | int %}
           {{ [[raw, 0] | max, 100] | min }}
@@ -593,20 +570,11 @@ template:
           {% set min_elev    = states('input_number.pergola_min_sun_elevation') | float(10) %}
           {% set sensitivity = states('input_number.pergola_shading_sensitivity') | float(0.9) %}
           {% set uv          = states('sensor.wheatherstation_uv_index') | float(0) %}
-          {# Elevation guard: at or below min_sun_elevation the state machine enters     #}
-          {# no_sun_behind_house; shading is irrelevant at those angles.                 #}
           {% if elev <= min_elev %}
             false
           {% else %}
-            {# Both sources are compared; max() ensures that afternoon PV              #}
-            {# compensates when the weather station falls into building shadow.         #}
             {% set effective  = [solar, pv] | max %}
-            {# Shading threshold: 512 W/m² × sin(elevation) × sensitivity.            #}
-            {# 512 is the Loxone-derived "shade needed" baseline for Central Austria   #}
-            {# (≈47°N); sin(elevation) scales it correctly with sun angle.             #}
             {% set threshold  = 512 * sin(elev * pi / 180) * sensitivity %}
-            {# UV fallback: UV index ≥ 3 (WHO moderate) means shading is needed even  #}
-            {# on hazy days where irradiance is low but UV is still significant.       #}
             {{ effective > threshold or uv >= 3 }}
           {% endif %}
 
@@ -645,24 +613,13 @@ template:
              and states('input_number.pergola_slat_pivot_spacing') not in ['unavailable', 'unknown']
              and states('input_number.pergola_slat_thickness') not in ['unavailable', 'unknown'] }}
         state: >
-          {# ── Derived geometry constants ──────────────────────────────────────── #}
           {% set max_tilt = states('input_number.pergola_max_tilt_angle') | float(122) %}
           {% set w        = states('input_number.pergola_slat_width') | float(22) %}
           {% set d        = states('input_number.pergola_slat_pivot_spacing') | float(20) %}
           {% set t        = states('input_number.pergola_slat_thickness') | float(3) %}
-          {# R: overlap ratio — how much a slat overlaps its neighbour at 90°         #}
           {% set R   = ((d**2 + t**2) ** 0.5) / w %}
-          {# PHI: angle correction for slat thickness; shifts the MaxOpenEast/West    #}
-          {# formulas to account for the finite fin depth (default ≈ 8.53°).          #}
           {% set PHI = atan(t / d) * (180 / pi) %}
-          {# SAFETY_BUFFER: margin below max_tilt at which the back-face strategy     #}
-          {# is declared unsafe; flip occurs ~2 update cycles before shade loss.      #}
           {% set SAFETY = 5 %}
-          {# ── Find the flip point (A_eff_flip) ──────────────────────────────────── #}
-          {# Iterate A_eff from 1° to 90° in 1° steps.                               #}
-          {# MaxOpenEast = minimum back-face slat angle for 100% shade from eastern sun #}
-          {# = A_eff + PHI + asin(R × sin(A_eff))                                   #}
-          {# We record the LAST (= largest) A_eff for which MaxOpenEast ≤ max_tilt − 5 #}
           {% set ns = namespace(flip=1) %}
           {% for a in range(1, 91) %}
             {% set max_open_east = a + PHI + asin(R * sin(a * pi / 180)) * (180 / pi) %}
@@ -670,10 +627,6 @@ template:
               {% set ns.flip = a %}
             {% endif %}
           {% endfor %}
-          {# ── Compute COOLING_LOWER_BOUND from the flip point ──────────────────── #}
-          {# MaxOpenWest at A_eff_flip = A_eff_flip + PHI − asin(R × sin(A_eff_flip)) #}
-          {# This is the highest front-face angle that still blocks high-east/noon sun #}
-          {# when the back-face strategy becomes unusable.                             #}
           {% set a_flip = ns.flip %}
           {{ (a_flip + PHI - asin(R * sin(a_flip * pi / 180)) * (180 / pi)) | round(0) }}
         unit_of_measurement: "°"
@@ -711,6 +664,7 @@ automation:
       - trigger: homeassistant
         event: start
     conditions:
+      # Act only when none of the monitored entities has been updated in the last 5 min.
       - condition: template
         value_template: >
           {% set entities = [
@@ -718,7 +672,6 @@ automation:
             states.sensor.dach_links_priority_lock_timer,
             states.cover.dach_links
           ] %}
-          {# Act only when no entity has been updated in the last 5 minutes #}
           {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
              | list | count == 0 }}
       # Skip when the state machine is in an actively-moving state. The cover
@@ -753,6 +706,7 @@ automation:
       - trigger: homeassistant
         event: start
     conditions:
+      # Act only when none of the monitored entities has been updated in the last 5 min.
       - condition: template
         value_template: >
           {% set entities = [
@@ -760,7 +714,6 @@ automation:
             states.sensor.dach_rechts_priority_lock_timer,
             states.cover.dach_rechts
           ] %}
-          {# Act only when no entity has been updated in the last 5 minutes #}
           {{ entities | selectattr('last_updated', 'gt', now() - timedelta(minutes=5))
              | list | count == 0 }}
       # Same race-condition guard as Dach Links watchdog — see comment there.
