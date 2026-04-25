@@ -337,8 +337,6 @@ template:
       #         DB doubles as safety buffer — sun can advance a full DB° before the next
       #         move fires and shade is still guaranteed. Floor at 90°: sub-vertical
       #         back-face provides no blocking benefit.
-      #         Snap to max_tilt when within DB/2 of it: deadband would otherwise prevent
-      #         covers from reaching the physical maximum-open position.
       #       Flip range (A ≤ 90, flip guard failed): slat = MaxOpenWest − 5°.
       #         Fixed 5° motor-accuracy buffer stays below the shade boundary regardless
       #         of deadband (mow increases with A, so slat is always below future mow).
@@ -370,9 +368,6 @@ template:
               {% set DB  = states('input_number.pergola_deadband_angle') | float(5) %}
               {% if A < 90 and moe <= mt - DB %}
                 {% set slat = [[90, moe + DB] | max, mt] | min %}
-                {% if mt - slat < DB / 2 %}
-                  {% set slat = mt %}
-                {% endif %}
               {% elif A <= 90 %}
                 {% set slat = mow - 5 %}
               {% else %}
@@ -1165,7 +1160,7 @@ automation:
                   {% set DB      = (states('input_number.pergola_deadband_angle') | float(5) / mt * 100) | round(0) | int %}
                   {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
                   {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
-                  {{ (target - current) | abs >= DB }}
+                  {{ ((target - current) | abs >= DB) or (target >= 100) }}
               # Pass formula result from sensor to the authoritative movement script.
               # sensor.pergola_slat_angle dispatches to the correct cooling or heating
               # formula based on the current automation state.
