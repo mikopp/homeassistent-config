@@ -286,11 +286,32 @@ jobs:
             cp fakesecrets.yaml secrets.yaml
           fi
 
+      # ── 4b. Mock Loxone server ────────────────────────────────────────────────
+      #    Automations call rest_command.send_to_loxone (→ 192.168.1.92:80).
+      #    In CI that host is unreachable, so each call would block for HA's
+      #    10-second rest_command timeout before writing the trace.
+      #    We start a tiny HTTP server on the runner and route 192.168.1.92
+      #    to it via --add-host so every call returns 200 instantly.
+      - name: Start mock Loxone HTTP server
+        run: |
+          sudo python3 -c "
+          from http.server import HTTPServer, BaseHTTPRequestHandler
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200)
+                  self.end_headers()
+              def log_message(self, *a): pass
+          HTTPServer(('0.0.0.0', 80), H).serve_forever()
+          " &
+          # wait briefly so the socket is listening before Docker starts
+          sleep 0.5
+
       - name: Start Home Assistant
         run: |
           docker run -d \
             --name ha-ci \
             -p 8123:8123 \
+            --add-host 192.168.1.92:host-gateway \
             -v "${{ github.workspace }}:/config" \
             ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
 

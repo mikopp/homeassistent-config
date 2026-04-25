@@ -137,7 +137,7 @@ def apply_scenario(ha_url, token, defaults, scenario, retries=3):
 
 # ── Automation trigger + trace check ──────────────────────────────────────────────────
 
-def trigger_and_check(ha_url, token, automation, wait_s=3, poll_interval=0.2):
+def trigger_and_check(ha_url, token, automation, wait_s=0.5, poll_interval=0.1):
     """Trigger an automation and check its latest trace for errors.
 
     Returns (ok: bool, error_msg: str | None).
