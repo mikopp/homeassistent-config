@@ -38,21 +38,28 @@ jobs:
       - name: Install Python dependencies
         run: pip install pyyaml requests
 
-      # ── 3. Pull the same HA image the frenk job uses ─────────────────────────
+      # ── 3. Pull the HA image pinned to the deployed version ──────────────────
       - name: Pull Home Assistant Docker image
-        run: docker pull ghcr.io/home-assistant/home-assistant:stable
+        run: docker pull ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
 
-      # ── 4. Start a minimal HA instance for the template API ──────────────────
-      #    Use a fresh empty config dir so HA boots cleanly into onboarding
-      #    mode without trying to connect to MQTT, Loxone, or Victron.
+      # ── 4. Prepare config dir and start HA with the real repo as /config ─────
+      #    themes/ must exist or HA logs a warning; secrets.yaml must exist so
+      #    any !secret lookup resolves (fakesecrets.yaml is already present and
+      #    covers all keys — we symlink it as secrets.yaml for the container).
+      - name: Prepare HA config dir
+        run: |
+          mkdir -p themes
+          if [ ! -f secrets.yaml ] && [ -f fakesecrets.yaml ]; then
+            cp fakesecrets.yaml secrets.yaml
+          fi
+
       - name: Start Home Assistant
         run: |
-          mkdir -p /tmp/ha-ci-config
           docker run -d \
             --name ha-ci \
             -p 8123:8123 \
-            -v /tmp/ha-ci-config:/config \
-            ghcr.io/home-assistant/home-assistant:stable
+            -v "${{ github.workspace }}:/config" \
+            ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
 
       # ── 5. Wait until HA has registered the 'user' onboarding step ─────────────
       #    /api/onboarding returns HTTP 200 early (before HA is fully ready).
@@ -103,29 +110,235 @@ jobs:
           echo "::add-mask::$token"
           echo "ha_token=$token" >> "$GITHUB_OUTPUT"
 
-      # ── 7. Extract all Jinja2 templates from the repo's HA YAML files ────────
+      # ── 7. Wait for HA API to be fully operational ────────────────────────────
+      #    After onboarding completes, HA may still be initialising integrations.
+      #    Wait until GET /api/ returns {"message":"API running."} so that seeding
+      #    doesn't race against startup and input helpers aren't registered yet.
+      - name: Wait for HA REST API to be operational
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          echo "Waiting for HA REST API…"
+          for i in $(seq 1 40); do
+            msg=$(curl -s -H "Authorization: Bearer $HA_TOKEN" http://localhost:8123/api/ \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
+            if [ "$msg" = "API running." ]; then
+              echo "API is operational (attempt $i)."
+              exit 0
+            fi
+            echo "Not ready yet (attempt $i): '$msg'"
+            sleep 3
+          done
+          echo "ERROR: HA API did not become operational within 2 minutes." >&2
+          docker logs ha-ci 2>&1 | tail -30 >&2
+          exit 1
+
+      # ── 8. Seed all input helpers and stub states ─────────────────────────────
+      #    Applies tests/state_defaults.yaml so every entity referenced by templates
+      #    has a known-good value — enabling strict (no-skip) template validation.
+      - name: Seed test state
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          python3 .github/scripts/seed_state.py \
+            --defaults tests/state_defaults.yaml \
+            --ha-url http://localhost:8123
+
+      # ── 9. Extract all Jinja2 templates, split into state vs runtime ──────────
       - name: Extract Jinja2 templates
         run: |
           python3 .github/scripts/extract_templates.py . > /tmp/templates.json
-          count=$(python3 -c "import json; print(len(json.load(open('/tmp/templates.json'))))")
-          echo "Found ${count} template(s) to validate."
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/templates.json'))
+          print(f\"Found {len(d['state_templates'])} state template(s) and {len(d['runtime_templates'])} runtime template(s).\")
+          "
 
-      # ── 8. Validate every template via the HA REST API ───────────────────────
-      #    Templates using runtime-only variables (trigger, context, value, …)
-      #    are automatically skipped — they are syntactically correct but cannot
-      #    render without execution context. All other errors fail the job.
-      - name: Validate templates via HA REST API
-        id: validate
+      # ── 10. Validate state templates strictly ─────────────────────────────────
+      #    State templates only reference entities whose state has been seeded.
+      #    In strict mode, undefined-variable errors and sentinel outputs are failures.
+      - name: Validate state templates (strict)
+        id: validate_state
         continue-on-error: true
         env:
           HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
         run: |
+          python3 -c "import json; d=json.load(open('/tmp/templates.json')); open('/tmp/state_templates.json','w').write(json.dumps(d['state_templates']))"
           python3 .github/scripts/validate_templates.py \
-            --templates /tmp/templates.json \
-            --ha-url http://localhost:8123 2>&1 | tee /tmp/validate_output.txt
+            --templates /tmp/state_templates.json \
+            --ha-url http://localhost:8123 \
+            --strict 2>&1 | tee /tmp/validate_state_output.txt
           exit_code=${PIPESTATUS[0]}
           echo "output<<EOF"       >> "$GITHUB_OUTPUT"
-          cat /tmp/validate_output.txt >> "$GITHUB_OUTPUT"
+          cat /tmp/validate_state_output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF"               >> "$GITHUB_OUTPUT"
+          exit $exit_code
+
+      # ── 11. Validate runtime templates leniently ──────────────────────────────
+      #    Runtime templates reference trigger/wait/value/etc. which cannot be
+      #    evaluated outside a live automation run. Syntax errors still fail; undefined
+      #    variable errors are skipped as expected.
+      - name: Validate runtime templates (lenient)
+        id: validate_runtime
+        continue-on-error: true
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          python3 -c "import json; d=json.load(open('/tmp/templates.json')); open('/tmp/runtime_templates.json','w').write(json.dumps(d['runtime_templates']))"
+          python3 .github/scripts/validate_templates.py \
+            --templates /tmp/runtime_templates.json \
+            --ha-url http://localhost:8123 2>&1 | tee /tmp/validate_runtime_output.txt
+          exit_code=${PIPESTATUS[0]}
+          echo "output<<EOF"       >> "$GITHUB_OUTPUT"
+          cat /tmp/validate_runtime_output.txt >> "$GITHUB_OUTPUT"
+          echo "EOF"               >> "$GITHUB_OUTPUT"
+          exit $exit_code
+
+      # ── 12. Stop the HA container (always, even on failure) ──────────────────
+      - name: Stop Home Assistant
+        if: always()
+        run: docker stop ha-ci || true
+
+      # ── 13. Post a PR comment when templates fail ─────────────────────────────
+      - name: Comment on PR with template errors
+        if: (steps.validate_state.outcome == 'failure' || steps.validate_runtime.outcome == 'failure') && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const stateOut  = `${{ steps.validate_state.outputs.output }}`;
+            const runtimeOut = `${{ steps.validate_runtime.outputs.output }}`;
+            const sections = [];
+            if (`${{ steps.validate_state.outcome }}` === 'failure') {
+              sections.push('### State templates (strict)\n```\n' + stateOut + '\n```');
+            }
+            if (`${{ steps.validate_runtime.outcome }}` === 'failure') {
+              sections.push('### Runtime templates (lenient)\n```\n' + runtimeOut + '\n```');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: ['## ❌ Jinja2 template validation failed', '', ...sections].join('\n\n'),
+            });
+
+      # ── 14. Re-fail the job after the comment step ────────────────────────────
+      - name: Fail if any templates are invalid
+        if: steps.validate_state.outcome == 'failure' || steps.validate_runtime.outcome == 'failure'
+        run: exit 1
+
+  execute_automations:
+    name: Execute Automations Under Test Scenarios
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Check out the repository ─────────────────────────────────────────
+      - name: Check out configuration from GitHub
+        uses: actions/checkout@v6
+
+      # ── 2. Python tooling ────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install pyyaml requests
+
+      # ── 3. Pull the HA image pinned to the deployed version ──────────────────
+      - name: Pull Home Assistant Docker image
+        run: docker pull ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
+
+      # ── 4. Prepare config dir and start HA with the real repo as /config ─────
+      - name: Prepare HA config dir
+        run: |
+          mkdir -p themes
+          if [ ! -f secrets.yaml ] && [ -f fakesecrets.yaml ]; then
+            cp fakesecrets.yaml secrets.yaml
+          fi
+
+      - name: Start Home Assistant
+        run: |
+          docker run -d \
+            --name ha-ci \
+            -p 8123:8123 \
+            -v "${{ github.workspace }}:/config" \
+            ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
+
+      # ── 5. Wait for onboarding 'user' step ───────────────────────────────────
+      - name: Wait for Home Assistant to be ready
+        run: |
+          echo "Waiting for Home Assistant onboarding 'user' step…"
+          for i in $(seq 1 60); do
+            ready=$(curl -s http://localhost:8123/api/onboarding 2>/dev/null \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if isinstance(d,list) and any(s.get('step')=='user' and not s.get('done',True) for s in d) else 'no')" \
+              2>/dev/null || echo "no")
+            if [ "$ready" = "yes" ]; then
+              echo "Home Assistant is ready (attempt $i)."
+              exit 0
+            fi
+            echo "Not ready yet (attempt $i)…"
+            sleep 3
+          done
+          echo "ERROR: HA did not enter onboarding mode within 3 minutes." >&2
+          docker logs ha-ci 2>&1 | tail -30 >&2
+          exit 1
+
+      # ── 6. Onboarding — create user and obtain token ──────────────────────────
+      - name: Obtain HA API token via onboarding
+        id: ha_auth
+        run: |
+          onboarding=$(curl -s -X POST http://localhost:8123/api/onboarding/users \
+            -H "Content-Type: application/json" \
+            -d '{"client_id":"http://localhost:8123/","name":"CI","username":"ci","password":"ci-password","language":"en-US"}')
+          auth_code=$(echo "$onboarding" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['auth_code']) if 'auth_code' in d else (print('ERROR:'+str(d),file=sys.stderr) or sys.exit(1))")
+          echo "::add-mask::$auth_code"
+          token_resp=$(curl -s -X POST http://localhost:8123/auth/token \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=authorization_code" \
+            --data-urlencode "code=${auth_code}" \
+            --data-urlencode "client_id=http://localhost:8123/")
+          token=$(echo "$token_resp" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['access_token']) if 'access_token' in d else (print('ERROR:'+str(d),file=sys.stderr) or sys.exit(1))")
+          echo "::add-mask::$token"
+          echo "ha_token=$token" >> "$GITHUB_OUTPUT"
+
+      # ── 7. Wait for HA REST API to be operational ─────────────────────────────
+      - name: Wait for HA REST API to be operational
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          echo "Waiting for HA REST API…"
+          for i in $(seq 1 40); do
+            msg=$(curl -s -H "Authorization: Bearer $HA_TOKEN" http://localhost:8123/api/ \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
+            if [ "$msg" = "API running." ]; then
+              echo "API is operational (attempt $i)."
+              exit 0
+            fi
+            echo "Not ready yet (attempt $i): '$msg'"
+            sleep 3
+          done
+          echo "ERROR: HA API did not become operational within 2 minutes." >&2
+          docker logs ha-ci 2>&1 | tail -30 >&2
+          exit 1
+
+      # ── 8. Run all automations under every scenario ───────────────────────────
+      #    Discovers automations from /api/states, applies each scenario from
+      #    tests/scenarios.yaml on top of tests/state_defaults.yaml, triggers
+      #    every automation, and asserts no trace errors.
+      - name: Execute automations under test scenarios
+        id: run_automations
+        continue-on-error: true
+        env:
+          HA_TOKEN: ${{ steps.ha_auth.outputs.ha_token }}
+        run: |
+          python3 .github/scripts/run_automations.py \
+            --defaults tests/state_defaults.yaml \
+            --scenarios tests/scenarios.yaml \
+            --ha-url http://localhost:8123 2>&1 | tee /tmp/run_automations_output.txt
+          exit_code=${PIPESTATUS[0]}
+          echo "output<<EOF"       >> "$GITHUB_OUTPUT"
+          cat /tmp/run_automations_output.txt >> "$GITHUB_OUTPUT"
           echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
@@ -134,21 +347,21 @@ jobs:
         if: always()
         run: docker stop ha-ci || true
 
-      # ── 10. Post a PR comment when templates fail ────────────────────────────
-      - name: Comment on PR with template errors
-        if: steps.validate.outcome == 'failure' && github.event_name == 'pull_request'
+      # ── 10. Post a PR comment when automation runs fail ───────────────────────
+      - name: Comment on PR with automation errors
+        if: steps.run_automations.outcome == 'failure' && github.event_name == 'pull_request'
         uses: actions/github-script@v8
         with:
           script: |
-            const output = `${{ steps.validate.outputs.output }}`;
+            const output = `${{ steps.run_automations.outputs.output }}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: [
-                '## ❌ Jinja2 template validation failed',
+                '## ❌ Automation scenario tests failed',
                 '',
-                'One or more templates in the HA config are invalid.',
+                'One or more automations produced trace errors under a test scenario.',
                 '',
                 '```',
                 output,
@@ -156,7 +369,7 @@ jobs:
               ].join('\n'),
             });
 
-      # ── 11. Re-fail the job after the comment step ───────────────────────────
-      - name: Fail if any templates are invalid
-        if: steps.validate.outcome == 'failure'
+      # ── 11. Re-fail the job after the comment step ────────────────────────────
+      - name: Fail if any automation scenarios failed
+        if: steps.run_automations.outcome == 'failure'
         run: exit 1

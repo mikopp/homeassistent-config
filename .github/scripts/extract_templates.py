@@ -3,15 +3,27 @@
 
 Usage: python extract_templates.py [repo_root]
   repo_root defaults to the current directory.
-Outputs a JSON array of {"template": "...", "file": "relative/path.yaml"} objects to stdout.
+
+Outputs a JSON object with two keys to stdout:
+  state_templates   — templates that only reference state/input entities; safe for
+                      strict validation after state is seeded.
+  runtime_templates — templates that reference runtime-only variables (trigger, wait,
+                      value, repeat, this, context); validated leniently (syntax only).
 """
 
 import json
-import os
+import re
 import sys
 from pathlib import Path
 
 import yaml
+
+
+# Variables that only exist at automation/script execution time.
+# Templates referencing these cannot be evaluated outside a live execution context.
+_RUNTIME_VARS = re.compile(
+    r"\b(trigger|wait|value|repeat|this|context)\b"
+)
 
 
 def _make_loader():
@@ -51,7 +63,13 @@ def _collect(value, out, file_path):
             _collect(item, out, file_path)
 
 
+def _is_runtime(template):
+    """Return True when the template references runtime-only variables."""
+    return bool(_RUNTIME_VARS.search(template))
+
+
 def extract_templates(repo_root):
+    """Return {"state_templates": [...], "runtime_templates": [...]}."""
     root = Path(repo_root).resolve()
     raw = []
 
@@ -75,10 +93,15 @@ def extract_templates(repo_root):
         if item["template"] not in seen:
             seen.add(item["template"])
             unique.append(item)
-    return unique
+
+    # Split into state-resolvable vs runtime-only
+    state_templates = [t for t in unique if not _is_runtime(t["template"])]
+    runtime_templates = [t for t in unique if _is_runtime(t["template"])]
+
+    return {"state_templates": state_templates, "runtime_templates": runtime_templates}
 
 
 if __name__ == "__main__":
     root = sys.argv[1] if len(sys.argv) > 1 else "."
-    templates = extract_templates(root)
-    print(json.dumps(templates, ensure_ascii=False, indent=2))
+    result = extract_templates(root)
+    print(json.dumps(result, ensure_ascii=False, indent=2))

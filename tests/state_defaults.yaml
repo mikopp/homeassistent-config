@@ -1,0 +1,106 @@
+# Applied to a running HA instance via seed_state.py before any test runs.
+# Keep this file in sync with every external entity referenced in templates/automations.
+#
+# inputs:   applied via input_*.set_value / turn_on / turn_off / select_option
+# states:   applied via POST /api/states/{entity_id}
+
+# ── Input helpers — applied via service calls ─────────────────────────────────────────
+inputs:
+  # Master switch
+  input_boolean.pergola_automatic_enabled: "on"
+  # Heating season flag
+  input_boolean.pergola_heating: "off"
+  # Cooling formula selector (on = safe-zone max-open)
+  input_boolean.pergola_cooling_optimized: "on"
+
+  # State machine
+  input_select.pergola_automation_state: "sun_automatik_cooling"
+
+  # PV / sun detection
+  input_number.pergola_pv_conversion_factor: 3.2
+  input_number.pergola_shading_sensitivity: 0.9
+  input_number.pergola_min_sun_elevation: 10
+
+  # Cover movement deadband
+  input_number.pergola_deadband_angle: 5
+
+  # Rain recovery step counter (0 = idle)
+  input_number.pergola_rain_recovery_step: 0
+
+  # Hardware geometry
+  input_number.pergola_max_tilt_angle: 122
+
+  # Location / orientation
+  input_number.pergola_wall_azimuth: 204
+
+  # Slat geometry
+  input_number.pergola_slat_width: 22
+  input_number.pergola_slat_pivot_spacing: 20
+  input_number.pergola_slat_thickness: 3
+
+
+# ── Stubbed entity states — applied via POST /api/states/{entity_id} ─────────────────
+# Stand-ins for integrations not present in CI (MQTT, Somfy, weather station).
+states:
+  # Sun position — midday, sun clearly in the pergola window
+  sun.sun:
+    state: "above_horizon"
+    attributes:
+      elevation: 45
+      azimuth: 180
+
+  # Victron solar charger (MQTT — broker unreachable in CI)
+  sensor.solar_yield_watts:
+    state: "1500"
+    attributes:
+      unit_of_measurement: "W"
+      device_class: "power"
+
+  # Weather station sensors (UDP integration — not available in CI)
+  sensor.wheatherstation_outdoor_temperature:
+    state: "18.5"
+    attributes:
+      unit_of_measurement: "°C"
+      device_class: "temperature"
+
+  sensor.wheatherstation_solar_radiation:
+    state: "650"
+    attributes:
+      unit_of_measurement: "W/m²"
+
+  sensor.wheatherstation_uv_index:
+    state: "5"
+
+  sensor.wheatherstation_hourly_rain:
+    state: "0"
+    attributes:
+      unit_of_measurement: "mm"
+
+  sensor.wheatherstation_rain_rate:
+    state: "0"
+    attributes:
+      unit_of_measurement: "mm/h"
+
+  # Somfy cover priority-lock sensors (UI integration — not available in CI)
+  sensor.dach_links_priority_lock_originator:
+    state: "none"
+
+  sensor.dach_rechts_priority_lock_originator:
+    state: "none"
+
+  sensor.dach_links_priority_lock_timer:
+    state: "0"
+
+  sensor.dach_rechts_priority_lock_timer:
+    state: "0"
+
+  # Somfy covers (UI integration — not available in CI)
+  cover.dach_links:
+    state: "open"
+    attributes:
+      current_tilt_position: 50
+
+  cover.dach_rechts:
+    state: "open"
+    attributes:
+      current_tilt_position: 50
