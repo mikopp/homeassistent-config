@@ -25,6 +25,63 @@ _RUNTIME_VARS = re.compile(
     r"\b(trigger|wait|value|repeat|this|context)\b"
 )
 
+# HA template functions, Jinja2 built-ins, and Python primitives that are
+# always available in every template evaluation context (not "free variables").
+_KNOWN_NAMES = frozenset({
+    # Jinja2 / Python builtins
+    "namespace", "range", "loop", "true", "false", "none",
+    "True", "False", "None", "not", "and", "or", "is", "in",
+    "if", "else", "elif", "for", "endfor", "set", "do",
+    "dict", "list", "tuple", "set", "str", "int", "float", "bool", "len",
+    "zip", "map", "filter", "select", "reject", "items", "max", "min",
+    # Math (exposed in HA Jinja2 environment)
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sqrt",
+    "log", "pi", "e", "tau", "floor", "ceil", "round", "abs",
+    # HA global template functions
+    "states", "state_attr", "is_state", "is_state_attr", "has_value",
+    "state_translated", "device_attr", "is_device_attr",
+    "area_id", "area_name", "area_entities", "area_devices",
+    "expand", "closest", "distance",
+    "now", "today_at", "utcnow", "as_datetime", "as_timestamp",
+    "relative_time", "timedelta", "strptime", "as_local", "as_utc",
+    "iif",
+    # Common Jinja2 filter names (used as `| filtername`)
+    "default", "join", "split", "replace", "trim", "upper", "lower",
+    "title", "capitalize", "first", "last", "reverse", "sort", "unique",
+    "count", "batch", "slice", "indent", "wordcount", "truncate",
+    "urlencode", "xmlattr", "striptags", "escape", "safe",
+    "tojson", "fromjson", "pprint", "string",
+})
+
+# Matches identifiers used in expressions that are NOT preceded by a '(' or '.' or
+# quote (which would mean they are arguments inside a call or attribute access).
+_IDENTIFIER_RE = re.compile(r"(?<![(\w.'\"\\])\b([a-z_][a-z0-9_]*)\b")
+# Matches filter names: `| filtername`
+_FILTER_NAME_RE = re.compile(r"\|\s*([a-z_]\w*)")
+# Matches locally-defined names: `{% set varname`
+_SET_VAR_RE = re.compile(r"\{%-?\s*set\s+(\w+)")
+
+
+def _has_free_variables(template: str) -> bool:
+    """Return True when template references identifiers not defined within it.
+
+    Catches templates that depend on script field parameters or script-local
+    variables set in a previous step (e.g. ``slat_angle``, ``_tilt``).
+    These cannot be evaluated standalone because the external variables are
+    injected only when the script/automation is executing.
+    """
+    # Names introduced by {% set %} within this template
+    locally_defined = set(_SET_VAR_RE.findall(template))
+    # Filter names are part of Jinja2 syntax, not variable references
+    filter_names = set(_FILTER_NAME_RE.findall(template))
+    safe = _KNOWN_NAMES | locally_defined | filter_names
+
+    for m in _IDENTIFIER_RE.finditer(template):
+        name = m.group(1)
+        if name not in safe:
+            return True
+    return False
+
 
 def _make_loader():
     """Build a YAML loader that no-ops all HA custom tags."""
@@ -64,8 +121,8 @@ def _collect(value, out, file_path):
 
 
 def _is_runtime(template):
-    """Return True when the template references runtime-only variables."""
-    return bool(_RUNTIME_VARS.search(template))
+    """Return True when the template references runtime-only or free variables."""
+    return bool(_RUNTIME_VARS.search(template)) or _has_free_variables(template)
 
 
 def extract_templates(repo_root):
