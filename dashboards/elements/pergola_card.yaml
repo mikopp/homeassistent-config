@@ -16,6 +16,7 @@ entities:
   - sensor.pergola_pv_power
   - sensor.pergola_effective_sun_angle
   - sensor.pergola_slat_angle
+  - sensor.pergola_effective_slat_angle
   - sensor.pergola_tilt_position
   - sensor.pergola_max_open_east_morning_cooling_angle
   - sensor.pergola_max_open_west_cooling_angle

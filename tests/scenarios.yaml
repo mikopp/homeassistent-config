@@ -1,0 +1,114 @@
+# Automation test scenarios for run_automations.py.
+# Each scenario is a named overlay applied on top of tests/state_defaults.yaml.
+# The runner re-seeds baseline state before each scenario, then applies the overlay,
+# triggers every discovered automation, and asserts no trace errors.
+#
+# Authoring rule: add a scenario whenever a new choose: branch or guard is introduced.
+# The runner code does not change — coverage is declared here.
+
+scenarios:
+
+  # ── Baseline: heating off, cooling optimized on, auto enabled, sunny midday ──────────
+  - name: baseline_cooling_optimized
+    overrides: {}
+
+  # ── Cooling un-optimized (perfect-perpendicular formula) ─────────────────────────────
+  - name: cooling_unoptimized
+    overrides:
+      inputs:
+        input_boolean.pergola_cooling_optimized: "off"
+
+  # ── Heating mode — slat uses pergola_min_heating_slat_angle as floor ─────────────────
+  - name: heating_mode
+    overrides:
+      inputs:
+        input_boolean.pergola_heating: "on"
+        input_boolean.pergola_cooling_optimized: "off"
+        input_select.pergola_automation_state: "sun_automatik_heating"
+
+  # ── Master switch off — every automation must early-return without moving covers ──────
+  - name: automation_disabled
+    overrides:
+      inputs:
+        input_boolean.pergola_automatic_enabled: "off"
+
+  # ── State: not_enough_sun (low elevation + low PV + low radiation) ───────────────────
+  - name: not_enough_sun
+    overrides:
+      inputs:
+        input_select.pergola_automation_state: "not_enough_sun"
+      states:
+        sun.sun:
+          state: "above_horizon"
+          attributes:
+            elevation: 6
+            azimuth: 180
+        sensor.solar_yield_watts:
+          state: "30"
+        sensor.wheatherstation_solar_radiation:
+          state: "40"
+        sensor.wheatherstation_uv_index:
+          state: "0.5"
+
+  # ── State: no_sun_behind_house (sun azimuth past the wall's azimuth window) ─────────
+  - name: no_sun_behind_house
+    overrides:
+      inputs:
+        input_select.pergola_automation_state: "no_sun_behind_house"
+      states:
+        sun.sun:
+          state: "above_horizon"
+          attributes:
+            elevation: 25
+            azimuth: 350
+
+  # ── Frost entry — temperature below 2.5°C, state transitions to frost ────────────────
+  - name: frost
+    overrides:
+      states:
+        sensor.wheatherstation_outdoor_temperature:
+          state: "-1.5"
+
+  # ── Frost recovery — temperature back above 3.0°C, state was frost ───────────────────
+  - name: frost_recovery
+    overrides:
+      inputs:
+        input_select.pergola_automation_state: "frost"
+      states:
+        sensor.wheatherstation_outdoor_temperature:
+          state: "5.0"
+
+  # ── Rain starts — rain_rate > 0 should transition to rain ────────────────────────────
+  - name: rain_starts
+    overrides:
+      states:
+        sensor.wheatherstation_rain_rate:
+          state: "2.5"
+
+  # ── Post-rain recovery — rain stopped, drain sequence is running (step=1) ─────────────
+  - name: post_rain_recovery
+    overrides:
+      inputs:
+        input_select.pergola_automation_state: "rain_stopped"
+        input_number.pergola_rain_recovery_step: 1
+      states:
+        sensor.wheatherstation_rain_rate:
+          state: "0"
+
+  # ── User override — cover was manually operated (lock originator = user) ─────────────
+  - name: user_override_left
+    overrides:
+      states:
+        sensor.dach_links_priority_lock_originator:
+          state: "user"
+        sensor.dach_links_priority_lock_timer:
+          state: "300"
+
+  # ── Rain-originated cover lock (lock originator = rain on both covers) ───────────────
+  - name: rain_lock_from_cover
+    overrides:
+      states:
+        sensor.dach_links_priority_lock_originator:
+          state: "rain"
+        sensor.dach_rechts_priority_lock_originator:
+          state: "rain"
