@@ -149,7 +149,7 @@ input_number:
     # gate passes. Never written by automations or the user.
     min: 0
     max: 150
-    step: 0.1
+    step: 0.5
     unit_of_measurement: "°"
     icon: mdi:angle-obtuse
 
@@ -517,6 +517,7 @@ template:
           {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
           {% set raw  = (slat / mt * 100 + corr) | int %}
           {{ [[raw, 0] | max, 100] | min }}
+        unit_of_measurement: "%"
         icon: mdi:format-align-middle
 
       # ── Rain Recovery Step ────────────────────────────────────────────────────────
