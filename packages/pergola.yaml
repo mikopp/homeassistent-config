@@ -140,6 +140,20 @@ input_number:
     mode: box
     icon: mdi:arrow-expand-horizontal
 
+  # ── Last commanded slat angle tracker ───────────────────────────────────────────
+
+  pergola_last_set_slat_angle:
+    name: Pergola Last Set Slat Angle
+    # Internal backing store for sensor.pergola_effective_slat_angle.
+    # Written by script.pergola_set_slat_angle after the pergola_automatic_enabled
+    # gate passes. Never written by automations or the user.
+    min: 0
+    max: 150
+    step: 0.1
+    unit_of_measurement: "°"
+    icon: mdi:angle-obtuse
+
+
   # ── Rain recovery step tracker ───────────────────────────────────────────────────
 
   pergola_rain_recovery_step:
@@ -393,6 +407,20 @@ template:
           {% else %}
             90
           {% endif %}
+        unit_of_measurement: "°"
+        icon: mdi:angle-obtuse
+
+      # ── Effective (Last-Commanded) Slat Angle ─────────────────────────────────────
+      # Records the last slat_angle value actually sent to the covers via
+      # script.pergola_set_slat_angle — updated only when the pergola_automatic_enabled
+      # gate passes. Contrast with sensor.pergola_slat_angle (calculated target, always
+      # computed) and sensor.pergola_tilt_position (hardware-corrected target, 0–100).
+      - name: "Pergola Effective Slat Angle"
+        unique_id: pergola_effective_slat_angle
+        availability: >
+          {{ states('input_number.pergola_last_set_slat_angle') not in ['unavailable', 'unknown'] }}
+        state: >
+          {{ states('input_number.pergola_last_set_slat_angle') | float(0) | round(1) }}
         unit_of_measurement: "°"
         icon: mdi:angle-obtuse
 
@@ -1333,6 +1361,14 @@ script:
       - condition: state
         entity_id: input_boolean.pergola_automatic_enabled
         state: "on"
+      # ── Record the angle that was actually commanded ─────────────────────────────────
+      # Backing store for sensor.pergola_effective_slat_angle. Written here (after the
+      # gate) so the sensor only reflects angles that were actually sent to the covers.
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.pergola_last_set_slat_angle
+        data:
+          value: "{{ slat_angle | float(90) | round(1) }}"
       # ── Hardware-corrected tilt_position ────────────────────────────────────────────
       # correction offsets compensate for observed non-linear motor behaviour:
       #   below 20°: motor barely moves at small angles → +7 to actually reach target
@@ -1498,6 +1534,7 @@ group:
       - sensor.pergola_pv_power
       - sensor.pergola_effective_sun_angle
       - sensor.pergola_slat_angle
+      - sensor.pergola_effective_slat_angle
       - sensor.pergola_tilt_position
       - binary_sensor.pergola_sun_shining
       - sensor.pergola_cooling_lower_bound
