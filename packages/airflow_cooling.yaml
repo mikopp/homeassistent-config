@@ -12,6 +12,7 @@ sensor:
   # 5-minute rolling mean to smooth noise before free-cooling decision
   - platform: statistics
     unique_id: airflow_min_indoor_dew_5min
+    name: "Airflow Min Indoor Dew Point 5min Mean"
     entity_id: sensor.airflow_min_indoor_dew
     state_characteristic: mean
     max_age:
@@ -20,6 +21,7 @@ sensor:
 
   - platform: statistics
     unique_id: airflow_avg_indoor_temp_5min
+    name: "Airflow Avg Indoor Temperature 5min Mean"
     entity_id: sensor.airflow_avg_indoor_temp
     state_characteristic: mean
     max_age:
@@ -29,6 +31,7 @@ sensor:
   # 5-minute rolling mean to smooth outdoor dew point noise
   - platform: statistics
     unique_id: airflow_outdoor_dew_5min
+    name: "Airflow Outdoor Dew Point 5min Mean"
     entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
     state_characteristic: mean
     max_age:
@@ -38,6 +41,7 @@ sensor:
   # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
   - platform: statistics
     unique_id: airflow_outdoor_temp_5min
+    name: "Airflow Outdoor Temp 5min Mean"
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
     state_characteristic: mean
     max_age:
@@ -50,6 +54,7 @@ template:
   - sensor:
       # Minimum dewpoint across all monitored indoor areas
       - unique_id: airflow_min_indoor_dew
+        name: "Airflow Min Indoor Dew"
         unit_of_measurement: "°C"
         device_class: temperature
         state: >
@@ -62,6 +67,7 @@ template:
 
       # Average temperature across all monitored indoor areas
       - unique_id: airflow_avg_indoor_temp
+        name: "Airflow Avg Indoor Temp"
         unit_of_measurement: "°C"
         device_class: temperature
         state: >
@@ -75,6 +81,7 @@ template:
     binary_sensor:
       # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
       - unique_id: airflow_free_cooling_active
+        name: "Airflow Free Cooling Active"
         device_class: running
         state: >
           {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
