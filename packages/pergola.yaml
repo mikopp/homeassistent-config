@@ -914,12 +914,17 @@ automation:
           # Can override rain_stopped (rain restarted mid-drain — stop drain, stay closed).
           # Cannot override frost — frost remains highest priority.
           # Guard: skip if already in rain to avoid redundant state writes.
+          # Guard: also skip if either lock originator is 'user' — the transition rule
+          # below handles that, and allowing rain entry from user_override when rain_rate
+          # > 0 would create a loop (user_override → rain → new rule → user_override → …).
           - conditions:
               - condition: template
                 value_template: >
                   {{ (states('sensor.wheatherstation_rain_rate') | float(0) > 0
                       or states('sensor.dach_links_priority_lock_originator') == 'rain'
                       or states('sensor.dach_rechts_priority_lock_originator') == 'rain')
+                     and states('sensor.dach_links_priority_lock_originator') != 'user'
+                     and states('sensor.dach_rechts_priority_lock_originator') != 'user'
                      and states('input_select.pergola_automation_state') not in ['frost', 'rain'] }}
             sequence:
               # Stop any in-progress recovery — rain has (re)started
@@ -952,6 +957,32 @@ automation:
               - action: script.turn_on
                 target:
                   entity_id: script.pergola_post_rain_recovery
+
+          # ── RULE 2 → USER OVERRIDE: User overrides while in rain state ──────────────
+          # User manually operated one or both covers while the state machine was in rain
+          # (e.g. rain stopped at the weather station but the Somfy countdown was still
+          # running, or actively raining). Respect the user's intent — the Somfy hardware
+          # already recorded the originator as 'user'. Transition to user_override so the
+          # lock is honoured without being fought by rain state.
+          # When the user lock expires (originator → unknown), the existing USER OVERRIDE
+          # EXIT rule fires → script.pergola_exit_to_normal → if rain_rate > 0, RAIN ENTRY
+          # will re-engage on the next state manager trigger (originator is 'unknown' by
+          # then, so the != 'user' guard no longer blocks it).
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'rain'
+                     and (states('sensor.dach_links_priority_lock_originator') == 'user'
+                          or states('sensor.dach_rechts_priority_lock_originator') == 'user') }}
+            sequence:
+              - action: script.turn_off
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: user_override
 
           # ── RULE 4 ENTRY: USER OVERRIDE ───────────────────────────────────────────
           # A user has manually operated one or both covers (lock originator = 'user').

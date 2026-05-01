@@ -15,3 +15,4 @@ ip_addresses.yaml
 custom_components/
 .ssh/
 .ha_run.lock
+.vscode/settings.json
