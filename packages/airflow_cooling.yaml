@@ -11,7 +11,6 @@ sensor:
 
   # 5-minute rolling mean to smooth noise before free-cooling decision
   - platform: statistics
-    name: "Min Indoor Dew Point 5min Mean"
     unique_id: airflow_min_indoor_dew_5min
     entity_id: sensor.airflow_min_indoor_dew
     state_characteristic: mean
@@ -19,7 +18,6 @@ sensor:
       minutes: 5
 
   - platform: statistics
-    name: "Avg Indoor Temperature 5min Mean"
     unique_id: airflow_avg_indoor_temp_5min
     entity_id: sensor.airflow_avg_indoor_temp
     state_characteristic: mean
@@ -28,7 +26,6 @@ sensor:
 
   # 5-minute rolling mean to smooth outdoor dew point noise
   - platform: statistics
-    name: "Outdoor Dew Point 5min Mean"
     unique_id: airflow_outdoor_dew_5min
     entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
     state_characteristic: mean
@@ -37,7 +34,6 @@ sensor:
 
   # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
   - platform: statistics
-    name: "Outdoor Temp 5min Mean"
     unique_id: airflow_outdoor_temp_5min
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
     state_characteristic: mean
@@ -49,8 +45,7 @@ sensor:
 template:
   - sensor:
       # Minimum dewpoint across all monitored indoor areas
-      - name: "Min Indoor Dew Point"
-        unique_id: airflow_min_indoor_dew
+      - unique_id: airflow_min_indoor_dew
         unit_of_measurement: "°C"
         state: >
           {% set indoor_dews = label_entities('Indoor.Dewpoint')
@@ -58,8 +53,7 @@ template:
           {{ indoor_dews | min if indoor_dews | count > 0 else 100 }}
 
       # Average temperature across all monitored indoor areas
-      - name: "Avg Indoor Temperature"
-        unique_id: airflow_avg_indoor_temp
+      - unique_id: airflow_avg_indoor_temp
         unit_of_measurement: "°C"
         state: >
           {% set indoor_temps = label_entities('Indoor.Temperature')
@@ -68,8 +62,7 @@ template:
 
     binary_sensor:
       # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
-      - name: "Free Cooling Active"
-        unique_id: airflow_free_cooling_active
+      - unique_id: airflow_free_cooling_active
         state: >
           {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
           {% set outdoor_temp = states('sensor.outdoor_temp_5min_mean') | float(0) %}
@@ -217,7 +210,6 @@ automation:
 # The group key is the unique identifier — entity_id becomes group.airflow_cooling.
 group:
   airflow_cooling:
-    name: "Airflow Cooling"
     entities:
       - sensor.min_indoor_dew_point
       - sensor.avg_indoor_temperature
