@@ -1,6 +1,6 @@
 {
     "files.associations": {
-        "*.yaml": "home-assistant",
+        "*.yaml": "yaml",
         "compose.yml": "yaml",
         "compose.yaml": "yaml",
         "compose.*.yml": "yaml",
