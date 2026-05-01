@@ -227,4 +227,4 @@ group:
       - sensor.outdoor_temp_5min_mean
       - binary_sensor.airflow_free_cooling_active
       - input_boolean.airflow_cooling_automatic_enabled
-      - automation.airflow_set_temperature_profile
+      - automation.airflow_cooling_set_temperature_profile
