@@ -100,7 +100,7 @@ recorder:
 # --- HELPERS ---
 # Enable/disable automatic ventilation profile switching from the UI or other automations
 input_boolean:
-  airflow_cooling__automatic_enabled:
+  airflow_cooling_automatic_enabled:
     name: "Airflow Cooling: Automatic Enabled"
     icon: mdi:fan-auto
 
@@ -118,7 +118,7 @@ automation:
     # Guard: skip all profile changes when automatic control is disabled
     condition:
       - condition: state
-        entity_id: input_boolean.airflow_cooling__automatic_enabled
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
     action:
       - choose:
@@ -226,5 +226,5 @@ group:
       - sensor.outdoor_dew_point_5min_mean
       - sensor.outdoor_temp_5min_mean
       - binary_sensor.airflow_free_cooling_active
-      - input_boolean.airflow_cooling__automatic_enabled
+      - input_boolean.airflow_cooling_automatic_enabled
       - automation.airflow_set_temperature_profile
