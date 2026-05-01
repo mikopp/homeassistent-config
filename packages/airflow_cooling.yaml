@@ -11,7 +11,6 @@ sensor:
 
   # 5-minute rolling mean to smooth noise before free-cooling decision
   - platform: statistics
-    name: "Min Indoor Dew Point 5min Mean"
     unique_id: airflow_min_indoor_dew_5min
     entity_id: sensor.airflow_min_indoor_dew
     state_characteristic: mean
@@ -20,7 +19,6 @@ sensor:
     sampling_size: 20
 
   - platform: statistics
-    name: "Avg Indoor Temperature 5min Mean"
     unique_id: airflow_avg_indoor_temp_5min
     entity_id: sensor.airflow_avg_indoor_temp
     state_characteristic: mean
@@ -30,7 +28,6 @@ sensor:
 
   # 5-minute rolling mean to smooth outdoor dew point noise
   - platform: statistics
-    name: "Outdoor Dew Point 5min Mean"
     unique_id: airflow_outdoor_dew_5min
     entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
     state_characteristic: mean
@@ -40,7 +37,6 @@ sensor:
 
   # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
   - platform: statistics
-    name: "Outdoor Temp 5min Mean"
     unique_id: airflow_outdoor_temp_5min
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
     state_characteristic: mean
@@ -53,8 +49,7 @@ sensor:
 template:
   - sensor:
       # Minimum dewpoint across all monitored indoor areas
-      - name: "Min Indoor Dew Point"
-        unique_id: airflow_min_indoor_dew
+      - unique_id: airflow_min_indoor_dew
         unit_of_measurement: "°C"
         device_class: temperature
         state: >
@@ -66,8 +61,7 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count > 0 }}
 
       # Average temperature across all monitored indoor areas
-      - name: "Avg Indoor Temperature"
-        unique_id: airflow_avg_indoor_temp
+      - unique_id: airflow_avg_indoor_temp
         unit_of_measurement: "°C"
         device_class: temperature
         state: >
@@ -80,8 +74,7 @@ template:
 
     binary_sensor:
       # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
-      - name: "Free Cooling Active"
-        unique_id: airflow_free_cooling_active
+      - unique_id: airflow_free_cooling_active
         device_class: running
         state: >
           {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
