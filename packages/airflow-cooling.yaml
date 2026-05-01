@@ -1,0 +1,230 @@
+# --- STATISTICS SENSORS ---
+# 48-hour mean per source; feeds the combined running mean template sensor.
+sensor:
+  #  - platform: statistics
+#    name: "Outdoor Temp 48h Mean ComfoConnect"
+#    unique_id: airflow_outdoor_temp_48h_cc
+#    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
+#    state_characteristic: mean
+#    max_age:
+#      hours: 48
+
+  # 5-minute rolling mean to smooth noise before free-cooling decision
+  - platform: statistics
+    name: "Min Indoor Dew Point 5min Mean"
+    unique_id: airflow_min_indoor_dew_5min
+    entity_id: sensor.airflow_min_indoor_dew
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+  - platform: statistics
+    name: "Avg Indoor Temperature 5min Mean"
+    unique_id: airflow_avg_indoor_temp_5min
+    entity_id: sensor.airflow_avg_indoor_temp
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+  # 5-minute rolling mean to smooth outdoor dew point noise
+  - platform: statistics
+    name: "Outdoor Dew Point 5min Mean"
+    unique_id: airflow_outdoor_dew_5min
+    entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+  # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
+  - platform: statistics
+    name: "Outdoor Temp 5min Mean"
+    unique_id: airflow_outdoor_temp_5min
+    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+# --- TEMPLATE SENSORS & BINARY SENSORS ---
+# Derived values used by automations; excluded from recorder to avoid DB bloat.
+template:
+  - sensor:
+      # Minimum dewpoint across all monitored indoor areas
+      - name: "Min Indoor Dew Point"
+        unique_id: airflow_min_indoor_dew
+        unit_of_measurement: "°C"
+        state: >
+          {% set indoor_dews = label_entities('Indoor.Dewpoint')
+            | map('states') | map('float', none) | reject('none') | list %}
+          {{ indoor_dews | min if indoor_dews | count > 0 else 100 }}
+
+      # Average temperature across all monitored indoor areas
+      - name: "Avg Indoor Temperature"
+        unique_id: airflow_avg_indoor_temp
+        unit_of_measurement: "°C"
+        state: >
+          {% set indoor_temps = label_entities('Indoor.Temperature')
+            | map('states') | map('float', none) | reject('none') | list %}
+          {{ (indoor_temps | sum / indoor_temps | count) if indoor_temps | count > 0 else 0 }}
+
+    binary_sensor:
+      # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
+      - name: "Free Cooling Active"
+        unique_id: airflow_free_cooling_active
+        state: >
+          {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
+          {% set outdoor_temp = states('sensor.outdoor_temp_5min_mean') | float(0) %}
+          {% set min_indoor_dew = states('sensor.min_indoor_dew_point_5min_mean') | float(100) %}
+          {% set avg_indoor_temp = states('sensor.avg_indoor_temperature_5min_mean') | float(0) %}
+          {{
+            (outdoor_dew + 2) < min_indoor_dew and
+            outdoor_temp < 20 and
+            avg_indoor_temp >= 21.5
+          }}
+        delay_on:
+          minutes: 10
+        delay_off:
+          minutes: 10
+
+# Exclude derived sensors — values recalculated on demand, no history needed.
+# Template sensors (min_indoor_dew_point, avg_indoor_temperature) are NOT excluded
+# because the statistics sensors above need their history to compute 5-min mean.
+recorder:
+  exclude:
+    entities:
+      - sensor.min_indoor_dew_point_5min_mean
+      - sensor.avg_indoor_temperature_5min_mean
+      - sensor.outdoor_dew_point_5min_mean
+      - sensor.outdoor_temp_5min_mean
+      - binary_sensor.airflow_free_cooling_active
+
+# --- HELPERS ---
+# Enable/disable automatic ventilation profile switching from the UI or other automations
+input_boolean:
+  airflow_cooling__automatic_enabled:
+    name: "Airflow Cooling: Automatic Enabled"
+    icon: mdi:fan-auto
+
+automation:
+  # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
+  - id: airflow_cooling_set_temperature_profile
+    alias: "Airflow: Set Temperature Profile"
+    description: "Profile warm/comfort/eco driven by heating-cooling-indicator and free cooling binary sensor"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: sensor.heating_cooling_indicator
+      - platform: state
+        entity_id: binary_sensor.airflow_free_cooling_active
+    # Guard: skip all profile changes when automatic control is disabled
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling__automatic_enabled
+        state: "on"
+    action:
+      - choose:
+          # Active heating mode: warm profile
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state: "active_heating"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "warm"
+              - service: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Warm Profile"
+                  message: "Outdoor ≤5°C — profile set to Warm."
+
+          # Neutral mode: comfort profile
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state: "neutral"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "comfort"
+              - service: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Comfort Profile"
+                  message: "Outdoor 5–10°C — profile set to Comfort."
+
+          # Cooling mode + free cooling active: eco to encourage bypass
+          - conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "passive_cooling"
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "active_cooling"
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_active
+                state: "on"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "eco"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "eco"
+              - service: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Eco Profile"
+                  message: "Free cooling active — profile set to Eco."
+
+          # Cooling mode + free cooling inactive: comfort
+          - conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "passive_cooling"
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "active_cooling"
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_active
+                state: "off"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "comfort"
+            sequence:
+              - service: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "comfort"
+              - service: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Comfort Profile"
+                  message: "Free cooling inactive — profile set to Comfort."
+
+# --- GROUP ---
+# Single entity (group.airflow_cooling) groups all entities and automations in this package.
+# The group key is the unique identifier — entity_id becomes group.airflow_cooling.
+group:
+  airflow_cooling:
+    name: "Airflow Cooling"
+    entities:
+      - sensor.min_indoor_dew_point
+      - sensor.avg_indoor_temperature
+      - sensor.min_indoor_dew_point_5min_mean
+      - sensor.avg_indoor_temperature_5min_mean
+      - sensor.outdoor_dew_point_5min_mean
+      - sensor.outdoor_temp_5min_mean
+      - binary_sensor.airflow_free_cooling_active
+      - input_boolean.airflow_cooling__automatic_enabled
+      - automation.airflow_set_temperature_profile

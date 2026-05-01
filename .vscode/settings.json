@@ -11,5 +11,8 @@
         "docker-compose.*.yaml": "yaml",
         "esphome/**/*.yml": "esphome",
         "esphome/**/*.yaml": "esphome"
-    }
+    },
+    "claudeCode.enableNewConversationShortcut": true,
+    "github.copilot.chat.claudeAgent.enabled": false,
+    "claudeCode.hideOnboarding": true
 }
