@@ -1,9 +1,8 @@
-
 # --- HEATING/COOLING INDICATOR ---
 # Classifies outdoor temperature into 4 operational modes used by ventilation automations.
 sensor:
   - platform: statistics
-    #name: "Outdoor Temp 48h Mean Weatherstation"
+    # name: "Outdoor Temp 48h Mean Weatherstation"
     unique_id: wheatherstation_outdoor_temperature_48h_mean
     entity_id: sensor.wheatherstation_outdoor_temperature
     state_characteristic: mean

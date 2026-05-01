@@ -10,7 +10,9 @@
       "Read(//c/Users/mikop/Documents/Loxone/Loxone Config/Projects/**)",
       "mcp__ha-mcp__ha_get_overview",
       "mcp__ha-mcp__ha_get_states",
-      "WebSearch"
+      "WebSearch",
+      "mcp__ha-mcp__ha_config_get_label",
+      "mcp__ha-mcp__ha_list_services"
     ]
   }
 }

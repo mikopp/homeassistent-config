@@ -1,8 +1,7 @@
-
 # --- STATISTICS SENSORS ---
 # 48-hour mean per source; feeds the combined running mean template sensor.
 sensor:
-#  - platform: statistics
+  #  - platform: statistics
 #    name: "Outdoor Temp 48h Mean ComfoConnect"
 #    unique_id: airflow_outdoor_temp_48h_cc
 #    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
