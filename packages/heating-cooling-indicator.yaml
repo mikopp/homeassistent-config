@@ -1,18 +1,36 @@
 
 # --- HEATING/COOLING INDICATOR ---
 # Classifies outdoor temperature into 4 operational modes used by ventilation automations.
+sensor:
+  - platform: statistics
+    #name: "Outdoor Temp 48h Mean Weatherstation"
+    unique_id: wheatherstation_outdoor_temperature_48h_mean
+    entity_id: sensor.wheatherstation_outdoor_temperature
+    state_characteristic: mean
+    max_age:
+      hours: 48
 template:
   - sensor:
       - name: "Heating Cooling Indicator"
         unique_id: heating_cooling_indicator
         state: >
-          {% set temp = states('sensor.wheatherstation_outdoor_temperature') | float(0) %}
-          {% if temp <= 5 %}
-            active_heating
-          {% elif temp < 10 %}
-            neutral
-          {% elif temp < 15 %}
-            passive_cooling
+          {% set temp = states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(0) %}
+          {% set current = states('sensor.heating_cooling_indicator') %}
+          {% if current == 'active_heating' %}
+            {% if temp >= 6 %}neutral{% else %}active_heating{% endif %}
+          {% elif current == 'neutral' %}
+            {% if temp <= 5 %}active_heating
+            {% elif temp >= 11 %}passive_cooling
+            {% else %}neutral{% endif %}
+          {% elif current == 'passive_cooling' %}
+            {% if temp <= 10 %}neutral
+            {% elif temp >= 16 %}active_cooling
+            {% else %}passive_cooling{% endif %}
+          {% elif current == 'active_cooling' %}
+            {% if temp <= 15 %}passive_cooling{% else %}active_cooling{% endif %}
           {% else %}
-            active_cooling
+            {% if temp <= 5 %}active_heating
+            {% elif temp < 10 %}neutral
+            {% elif temp < 15 %}passive_cooling
+            {% else %}active_cooling{% endif %}
           {% endif %}

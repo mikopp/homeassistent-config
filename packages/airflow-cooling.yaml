@@ -2,27 +2,19 @@
 # --- STATISTICS SENSORS ---
 # 48-hour mean per source; feeds the combined running mean template sensor.
 sensor:
-  - platform: statistics
-    name: "Outdoor Temp 48h Mean Weatherstation"
-    unique_id: airflow_outdoor_temp_48h_ws
-    entity_id: sensor.wheatherstation_outdoor_temperature
-    state_characteristic: mean
-    max_age:
-      hours: 48
-
-  - platform: statistics
-    name: "Outdoor Temp 48h Mean ComfoConnect"
-    unique_id: airflow_outdoor_temp_48h_cc
-    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
-    state_characteristic: mean
-    max_age:
-      hours: 48
+#  - platform: statistics
+#    name: "Outdoor Temp 48h Mean ComfoConnect"
+#    unique_id: airflow_outdoor_temp_48h_cc
+#    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
+#    state_characteristic: mean
+#    max_age:
+#      hours: 48
 
   # 5-minute rolling mean to smooth noise before free-cooling decision
   - platform: statistics
     name: "Min Indoor Dew Point 5min Mean"
     unique_id: airflow_min_indoor_dew_5min
-    entity_id: sensor.min_indoor_dew_point
+    entity_id: sensor.airflow_min_indoor_dew
     state_characteristic: mean
     max_age:
       minutes: 5
@@ -30,7 +22,25 @@ sensor:
   - platform: statistics
     name: "Avg Indoor Temperature 5min Mean"
     unique_id: airflow_avg_indoor_temp_5min
-    entity_id: sensor.avg_indoor_temperature
+    entity_id: sensor.airflow_avg_indoor_temp
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+  # 5-minute rolling mean to smooth outdoor dew point noise
+  - platform: statistics
+    name: "Outdoor Dew Point 5min Mean"
+    unique_id: airflow_outdoor_dew_5min
+    entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
+    state_characteristic: mean
+    max_age:
+      minutes: 5
+
+  # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
+  - platform: statistics
+    name: "Outdoor Temp 5min Mean"
+    unique_id: airflow_outdoor_temp_5min
+    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
     state_characteristic: mean
     max_age:
       minutes: 5
@@ -46,7 +56,7 @@ template:
         state: >
           {% set indoor_dews = label_entities('Indoor.Dewpoint')
             | map('states') | map('float', none) | reject('none') | list %}
-          {{ indoor_dews | min if indoor_dews | count > 0 else -100 }}
+          {{ indoor_dews | min if indoor_dews | count > 0 else 100 }}
 
       # Average temperature across all monitored indoor areas
       - name: "Avg Indoor Temperature"
@@ -62,9 +72,9 @@ template:
       - name: "Free Cooling Active"
         unique_id: airflow_free_cooling_active
         state: >
-          {% set outdoor_dew = states('sensor.comfoconnect_pro_comfoconnect_pro_outdoor_air_dewpoint') | float(-100) %}
-          {% set outdoor_temp = states('sensor.comfoconnect_pro_outdoor_air_temperature') | float(100) %}
-          {% set min_indoor_dew = states('sensor.min_indoor_dew_point_5min_mean') | float(-100) %}
+          {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
+          {% set outdoor_temp = states('sensor.outdoor_temp_5min_mean') | float(0) %}
+          {% set min_indoor_dew = states('sensor.min_indoor_dew_point_5min_mean') | float(100) %}
           {% set avg_indoor_temp = states('sensor.avg_indoor_temperature_5min_mean') | float(0) %}
           {{
             (outdoor_dew + 2) < min_indoor_dew and
@@ -74,7 +84,7 @@ template:
         delay_on:
           minutes: 10
         delay_off:
-          minutes: 15
+          minutes: 10
 
 # Exclude derived sensors — values recalculated on demand, no history needed.
 # Template sensors (min_indoor_dew_point, avg_indoor_temperature) are NOT excluded
@@ -84,6 +94,8 @@ recorder:
     entities:
       - sensor.min_indoor_dew_point_5min_mean
       - sensor.avg_indoor_temperature_5min_mean
+      - sensor.outdoor_dew_point_5min_mean
+      - sensor.outdoor_temp_5min_mean
       - binary_sensor.free_cooling_active
 
 automation:
@@ -143,6 +155,11 @@ automation:
               - condition: state
                 entity_id: binary_sensor.free_cooling_active
                 state: "on"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "eco"
             sequence:
               - service: select.select_option
                 target:
@@ -167,6 +184,11 @@ automation:
               - condition: state
                 entity_id: binary_sensor.free_cooling_active
                 state: "off"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "comfort"
             sequence:
               - service: select.select_option
                 target:
