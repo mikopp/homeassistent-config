@@ -514,7 +514,7 @@ template:
         state: >
           {% set slat = states('sensor.pergola_slat_angle') | float(90) %}
           {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
-          {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
+          {% set corr = 6 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
           {% set raw  = (slat / mt * 100 + corr) | int %}
           {{ [[raw, 0] | max, 100] | min }}
         unit_of_measurement: "%"
@@ -915,12 +915,17 @@ automation:
           # Can override rain_stopped (rain restarted mid-drain — stop drain, stay closed).
           # Cannot override frost — frost remains highest priority.
           # Guard: skip if already in rain to avoid redundant state writes.
+          # Guard: also skip if either lock originator is 'user' — the transition rule
+          # below handles that, and allowing rain entry from user_override when rain_rate
+          # > 0 would create a loop (user_override → rain → new rule → user_override → …).
           - conditions:
               - condition: template
                 value_template: >
                   {{ (states('sensor.wheatherstation_rain_rate') | float(0) > 0
                       or states('sensor.dach_links_priority_lock_originator') == 'rain'
                       or states('sensor.dach_rechts_priority_lock_originator') == 'rain')
+                     and states('sensor.dach_links_priority_lock_originator') != 'user'
+                     and states('sensor.dach_rechts_priority_lock_originator') != 'user'
                      and states('input_select.pergola_automation_state') not in ['frost', 'rain'] }}
             sequence:
               # Stop any in-progress recovery — rain has (re)started
@@ -953,6 +958,32 @@ automation:
               - action: script.turn_on
                 target:
                   entity_id: script.pergola_post_rain_recovery
+
+          # ── RULE 2 → USER OVERRIDE: User overrides while in rain state ──────────────
+          # User manually operated one or both covers while the state machine was in rain
+          # (e.g. rain stopped at the weather station but the Somfy countdown was still
+          # running, or actively raining). Respect the user's intent — the Somfy hardware
+          # already recorded the originator as 'user'. Transition to user_override so the
+          # lock is honoured without being fought by rain state.
+          # When the user lock expires (originator → unknown), the existing USER OVERRIDE
+          # EXIT rule fires → script.pergola_exit_to_normal → if rain_rate > 0, RAIN ENTRY
+          # will re-engage on the next state manager trigger (originator is 'unknown' by
+          # then, so the != 'user' guard no longer blocks it).
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('input_select.pergola_automation_state') == 'rain'
+                     and (states('sensor.dach_links_priority_lock_originator') == 'user'
+                          or states('sensor.dach_rechts_priority_lock_originator') == 'user') }}
+            sequence:
+              - action: script.turn_off
+                target:
+                  entity_id: script.pergola_post_rain_recovery
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: user_override
 
           # ── RULE 4 ENTRY: USER OVERRIDE ───────────────────────────────────────────
           # A user has manually operated one or both covers (lock originator = 'user').
@@ -1144,7 +1175,7 @@ automation:
           #
           # Reverse conversion: slat_angle ≈ (tilt_position − correction) × max_tilt / 100
           # Correction is estimated from a rough first-pass (same breakpoints as the forward
-          # formula): < 20° → 7, < 69° → 5.5, else → 0.5.
+          # formula): < 20° → 6, < 69° → 5.5, else → 0.5.
           - conditions:
               - condition: template
                 value_template: >
@@ -1372,7 +1403,7 @@ script:
           value: "{{ slat_angle | float(90) | round(1) }}"
       # ── Hardware-corrected tilt_position ────────────────────────────────────────────
       # correction offsets compensate for observed non-linear motor behaviour:
-      #   below 20°: motor barely moves at small angles → +7 to actually reach target
+      #   below 20°: motor barely moves at small angles → +6 to actually reach target
       #   20°–69°:   linear range → +5.5 rounds to nearest integer correctly
       #   above 69°: slight jerk above vertical → +0.5 to avoid small overshoot
       # Result is clamped to [0, 100] — values > 100 are dead zone on the Somfy.
@@ -1380,7 +1411,7 @@ script:
           _tilt: >
             {% set s    = slat_angle | float(90) %}
             {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
-            {% set corr = 7 if s < 20 else (5.5 if s < 69 else 0.5) %}
+            {% set corr = 6 if s < 20 else (5.5 if s < 69 else 0.5) %}
             {{ [[(s / mt * 100 + corr) | int, 0] | max, 100] | min }}
       # ── Send movement command to both covers ─────────────────────────────────────────
       # Both covers always move together as one unit.
@@ -1436,8 +1467,7 @@ script:
 
       # ── Step 2: First drain position — 8° ──────────────────────────────────────────
       # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
-      # pulls water toward the front edge. Hardware-corrected tilt_position ≈ 13.
-      # (INT(8 / 122 × 100 + 7) = INT(13.6) = 13)
+      # pulls water toward the front edge.
       # Counter set to 2 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:
@@ -1452,8 +1482,7 @@ script:
       - delay: "00:05:00"
 
       # ── Step 4: Second drain position — 15° ────────────────────────────────────────
-      # Open further so remaining water continues to run off. Hardware-corrected
-      # tilt_position ≈ 17. (INT(15 / 122 × 100 + 5.5) = INT(17.8) = 17)
+      # Open further so remaining water continues to run off.
       # Counter set to 3 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:

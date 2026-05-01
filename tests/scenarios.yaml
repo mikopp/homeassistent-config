@@ -112,3 +112,19 @@ scenarios:
           state: "rain"
         sensor.dach_rechts_priority_lock_originator:
           state: "rain"
+
+  # ── User operates cover while state machine is in rain ───────────────────────────────
+  # Exercises the new RULE 2 → USER OVERRIDE branch and the updated RAIN ENTRY guard.
+  - name: rain_with_user_originator
+    overrides:
+      inputs:
+        input_select.pergola_automation_state: "rain"
+      states:
+        sensor.wheatherstation_rain_rate:
+          state: "2.5"
+        sensor.dach_links_priority_lock_originator:
+          state: "user"
+        sensor.dach_rechts_priority_lock_originator:
+          state: "rain"
+        sensor.dach_links_priority_lock_timer:
+          state: "300"
