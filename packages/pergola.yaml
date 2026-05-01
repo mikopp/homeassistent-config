@@ -514,7 +514,7 @@ template:
         state: >
           {% set slat = states('sensor.pergola_slat_angle') | float(90) %}
           {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
-          {% set corr = 7 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
+          {% set corr = 6 if slat < 20 else (5.5 if slat < 69 else 0.5) %}
           {% set raw  = (slat / mt * 100 + corr) | int %}
           {{ [[raw, 0] | max, 100] | min }}
         icon: mdi:format-align-middle
@@ -1174,7 +1174,7 @@ automation:
           #
           # Reverse conversion: slat_angle ≈ (tilt_position − correction) × max_tilt / 100
           # Correction is estimated from a rough first-pass (same breakpoints as the forward
-          # formula): < 20° → 7, < 69° → 5.5, else → 0.5.
+          # formula): < 20° → 6, < 69° → 5.5, else → 0.5.
           - conditions:
               - condition: template
                 value_template: >
@@ -1402,7 +1402,7 @@ script:
           value: "{{ slat_angle | float(90) | round(1) }}"
       # ── Hardware-corrected tilt_position ────────────────────────────────────────────
       # correction offsets compensate for observed non-linear motor behaviour:
-      #   below 20°: motor barely moves at small angles → +7 to actually reach target
+      #   below 20°: motor barely moves at small angles → +6 to actually reach target
       #   20°–69°:   linear range → +5.5 rounds to nearest integer correctly
       #   above 69°: slight jerk above vertical → +0.5 to avoid small overshoot
       # Result is clamped to [0, 100] — values > 100 are dead zone on the Somfy.
@@ -1410,7 +1410,7 @@ script:
           _tilt: >
             {% set s    = slat_angle | float(90) %}
             {% set mt   = states('input_number.pergola_max_tilt_angle') | float(122) %}
-            {% set corr = 7 if s < 20 else (5.5 if s < 69 else 0.5) %}
+            {% set corr = 6 if s < 20 else (5.5 if s < 69 else 0.5) %}
             {{ [[(s / mt * 100 + corr) | int, 0] | max, 100] | min }}
       # ── Send movement command to both covers ─────────────────────────────────────────
       # Both covers always move together as one unit.
@@ -1466,8 +1466,7 @@ script:
 
       # ── Step 2: First drain position — 8° ──────────────────────────────────────────
       # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
-      # pulls water toward the front edge. Hardware-corrected tilt_position ≈ 13.
-      # (INT(8 / 122 × 100 + 7) = INT(13.6) = 13)
+      # pulls water toward the front edge. 
       # Counter set to 2 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:
@@ -1482,8 +1481,7 @@ script:
       - delay: "00:05:00"
 
       # ── Step 4: Second drain position — 15° ────────────────────────────────────────
-      # Open further so remaining water continues to run off. Hardware-corrected
-      # tilt_position ≈ 17. (INT(15 / 122 × 100 + 5.5) = INT(17.8) = 17)
+      # Open further so remaining water continues to run off. 
       # Counter set to 3 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:
