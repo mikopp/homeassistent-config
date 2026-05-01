@@ -58,12 +58,19 @@ jobs:
       # ── 5. Config check (one-shot, no server) ────────────────────────────────
       #    Runs HA in check_config mode using the pinned image — equivalent to
       #    frenck/action-home-assistant but reuses the image already pulled above.
+      #    HA exits 0 even when packages fail to load (slug errors, etc.), so we
+      #    capture output and grep for known error patterns explicitly.
       - name: Run Home Assistant config check
         run: |
-          docker run --rm \
+          output=$(docker run --rm \
             -v "${{ github.workspace }}:/config" \
             ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
-            python -m homeassistant --config /config --script check_config
+            python -m homeassistant --config /config --script check_config 2>&1)
+          echo "$output"
+          if echo "$output" | grep -qiE "invalid slug|Setup of package.*failed|ERROR"; then
+            echo "::error::check_config reported errors — see output above"
+            exit 1
+          fi
 
       # ── 6. Start HA server for template validation + automation tests ─────────
       - name: Start Home Assistant
