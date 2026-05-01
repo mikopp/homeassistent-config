@@ -1466,7 +1466,7 @@ script:
 
       # ── Step 2: First drain position — 8° ──────────────────────────────────────────
       # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
-      # pulls water toward the front edge. 
+      # pulls water toward the front edge.
       # Counter set to 2 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:
@@ -1481,7 +1481,7 @@ script:
       - delay: "00:05:00"
 
       # ── Step 4: Second drain position — 15° ────────────────────────────────────────
-      # Open further so remaining water continues to run off. 
+      # Open further so remaining water continues to run off.
       # Counter set to 3 before the 5 min hold so the sensor shows the active phase.
       - action: script.pergola_set_slat_angle
         data:
