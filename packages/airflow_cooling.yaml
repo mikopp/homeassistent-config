@@ -1,52 +1,53 @@
-# --- STATISTICS SENSORS ---
-# 48-hour mean per source; feeds the combined running mean template sensor.
+# --- FILTER SENSORS ---
+# 5-minute time-weighted moving average + throttle per source; feeds free-cooling binary sensor.
 sensor:
-  #  - platform: statistics
-#    name: "Outdoor Temp 48h Mean ComfoConnect"
-#    unique_id: airflow_outdoor_temp_48h_cc
-#    entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
-#    state_characteristic: mean
-#    max_age:
-#      hours: 48
-
-  # 5-minute rolling mean to smooth noise before free-cooling decision
-  - platform: statistics
+  # Smooth min indoor dew point — source is template sensor aggregating all indoor dew sensors
+  - platform: filter
     unique_id: airflow_min_indoor_dew_5min
-    name: "Airflow Min Indoor Dew Point 5min Mean"
+    name: "Airflow Min Indoor Dew 5min"
     entity_id: sensor.airflow_min_indoor_dew
-    state_characteristic: mean
-    max_age:
-      minutes: 5
-    sampling_size: 20
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
 
-  - platform: statistics
+  # Smooth avg indoor temperature — source is template sensor aggregating all indoor temp sensors
+  - platform: filter
     unique_id: airflow_avg_indoor_temp_5min
-    name: "Airflow Avg Indoor Temperature 5min Mean"
+    name: "Airflow Avg Indoor Temp 5min"
     entity_id: sensor.airflow_avg_indoor_temp
-    state_characteristic: mean
-    max_age:
-      minutes: 5
-    sampling_size: 20
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
 
-  # 5-minute rolling mean to smooth outdoor dew point noise
-  - platform: statistics
+  # Smooth outdoor dew point from ComfoConnect
+  - platform: filter
     unique_id: airflow_outdoor_dew_5min
-    name: "Airflow Outdoor Dew Point 5min Mean"
+    name: "Airflow Outdoor Dew 5min"
     entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
-    state_characteristic: mean
-    max_age:
-      minutes: 5
-    sampling_size: 50
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
 
-  # 5-minute rolling mean to smooth outdoor temp for free-cooling decision
-  - platform: statistics
+  # Smooth outdoor temperature from ComfoConnect
+  - platform: filter
     unique_id: airflow_outdoor_temp_5min
-    name: "Airflow Outdoor Temp 5min Mean"
+    name: "Airflow Outdoor Temp 5min"
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
-    state_characteristic: mean
-    max_age:
-      minutes: 5
-    sampling_size: 20
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
 
 # --- TEMPLATE SENSORS & BINARY SENSORS ---
 # Derived values used by automations; excluded from recorder to avoid DB bloat.
@@ -57,6 +58,7 @@ template:
         name: "Airflow Min Indoor Dew"
         unit_of_measurement: "°C"
         device_class: temperature
+        state_class: measurement
         state: >
           {% set indoor_dews = label_entities('Indoor.Dewpoint')
             | map('states') | map('float', none) | reject('none') | list %}
@@ -70,6 +72,7 @@ template:
         name: "Airflow Avg Indoor Temp"
         unit_of_measurement: "°C"
         device_class: temperature
+        state_class: measurement
         state: >
           {% set indoor_temps = label_entities('Indoor.Temperature')
             | map('states') | map('float', none) | reject('none') | list %}
@@ -84,10 +87,10 @@ template:
         name: "Airflow Free Cooling Active"
         device_class: running
         state: >
-          {% set outdoor_dew = states('sensor.outdoor_dew_point_5min_mean') | float(100) %}
-          {% set outdoor_temp = states('sensor.outdoor_temp_5min_mean') | float(0) %}
-          {% set min_indoor_dew = states('sensor.min_indoor_dew_point_5min_mean') | float(100) %}
-          {% set avg_indoor_temp = states('sensor.avg_indoor_temperature_5min_mean') | float(0) %}
+          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
+          {% set outdoor_temp = states('sensor.airflow_outdoor_temp_5min') | float(0) %}
+          {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
+          {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
           {{
             (outdoor_dew + 2) < min_indoor_dew and
             outdoor_temp < 20 and
@@ -98,16 +101,16 @@ template:
         delay_off:
           minutes: 10
 
-# Exclude derived sensors — values recalculated on demand, no history needed.
-# Template sensors (min_indoor_dew_point, avg_indoor_temperature) are NOT excluded
-# because the statistics sensors above need their history to compute 5-min mean.
+# Exclude smoothed filter sensors — throttled output, no history value; recalculated on restart.
+# Template sensors (airflow_min_indoor_dew, airflow_avg_indoor_temp) are NOT excluded
+# because the filter sensors above need their history to seed the moving average.
 recorder:
   exclude:
     entities:
-      - sensor.min_indoor_dew_point_5min_mean
-      - sensor.avg_indoor_temperature_5min_mean
-      - sensor.outdoor_dew_point_5min_mean
-      - sensor.outdoor_temp_5min_mean
+      - sensor.airflow_min_indoor_dew_5min
+      - sensor.airflow_avg_indoor_temp_5min
+      - sensor.airflow_outdoor_dew_5min
+      - sensor.airflow_outdoor_temp_5min
       - binary_sensor.airflow_free_cooling_active
 
 # --- HELPERS ---
