@@ -1,13 +1,27 @@
 # --- HEATING/COOLING INDICATOR ---
 # Classifies outdoor temperature into 4 operational modes used by ventilation automations.
 sensor:
-  - platform: statistics
-    # name: "Outdoor Temp 48h Mean Weatherstation"
-    unique_id: wheatherstation_outdoor_temperature_48h_mean
+  # 15-min smoothed weatherstation temp — persisted (not excluded from recorder) so
+  # statistics sensor below can seed its sample window from history on HA restart.
+  - platform: filter
+    unique_id: wheatherstation_outdoor_temperature_15min
+    name: "Weatherstation Outdoor Temperature 15min"
     entity_id: sensor.wheatherstation_outdoor_temperature
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:15"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:15"
+
+  # 48h mean of 15min-throttled source; fixed sampling_size avoids unbounded history scan
+  # 192 = 4 samples/hour × 48h
+  - platform: statistics
+    unique_id: wheatherstation_outdoor_temperature_48h_mean
+    name: "Weatherstation Outdoor Temperature 48h Mean"
+    entity_id: sensor.wheatherstation_outdoor_temperature_15min
     state_characteristic: mean
-    max_age:
-      hours: 48
+    sampling_size: 192
 template:
   - sensor:
       - name: "Heating Cooling Indicator"
