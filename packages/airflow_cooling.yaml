@@ -101,16 +101,11 @@ template:
         delay_off:
           minutes: 10
 
-# Exclude smoothed filter sensors — throttled output, no history value; recalculated on restart.
 # Template sensors (airflow_min_indoor_dew, airflow_avg_indoor_temp) are NOT excluded
 # because the filter sensors above need their history to seed the moving average.
 recorder:
   exclude:
     entities:
-      - sensor.airflow_min_indoor_dew_5min
-      - sensor.airflow_avg_indoor_temp_5min
-      - sensor.airflow_outdoor_dew_5min
-      - sensor.airflow_outdoor_temp_5min
       - binary_sensor.airflow_free_cooling_active
 
 # --- HELPERS ---
