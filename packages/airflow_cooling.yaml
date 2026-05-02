@@ -231,3 +231,24 @@ automation:
             data:
               message: "Airflow: heating_cooling_indicator unavailable — skipping profile change"
               level: warning
+
+# --- GROUP ---
+# All entities belonging to the airflow_cooling feature
+group:
+  airflow_cooling:
+    name: "Airflow Cooling"
+    entities:
+      # Filter sensors (smoothed inputs)
+      - sensor.airflow_min_indoor_dew_5min
+      - sensor.airflow_avg_indoor_temp_5min
+      - sensor.airflow_outdoor_dew_5min
+      - sensor.airflow_outdoor_temp_5min
+      # Template sensors (raw aggregates)
+      - sensor.airflow_min_indoor_dew
+      - sensor.airflow_avg_indoor_temp
+      # Binary sensor (free cooling decision)
+      - binary_sensor.airflow_free_cooling_active
+      # Helper
+      - input_boolean.airflow_cooling_automatic_enabled
+      # Automation
+      - automation.airflow_cooling_set_temperature_profile

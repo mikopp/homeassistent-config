@@ -47,3 +47,16 @@ template:
             {% elif temp < 15 %}passive_cooling
             {% else %}active_cooling{% endif %}
           {% endif %}
+
+# --- GROUP ---
+# All entities belonging to the heating_cooling_indicator feature
+group:
+  heating_cooling_indicator:
+    name: "Heating Cooling Indicator"
+    entities:
+      # Filter sensor (15min smoothed source)
+      - sensor.wheatherstation_outdoor_temperature_15min
+      # Statistics sensor (48h mean)
+      - sensor.wheatherstation_outdoor_temperature_48h_mean
+      # Template sensor (heating/cooling state)
+      - sensor.heating_cooling_indicator
