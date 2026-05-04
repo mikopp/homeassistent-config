@@ -91,10 +91,11 @@ template:
           {% set outdoor_temp = states('sensor.airflow_outdoor_temp_5min') | float(0) %}
           {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
           {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
+          {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
           {{
             (outdoor_dew + 2) < min_indoor_dew and
-            outdoor_temp < 20 and
-            avg_indoor_temp >= 21.5
+            outdoor_temp < (target_temp - 1.5) and
+            avg_indoor_temp >= target_temp
           }}
         delay_on:
           minutes: 10
@@ -248,7 +249,10 @@ group:
       - sensor.airflow_avg_indoor_temp
       # Binary sensor (free cooling decision)
       - binary_sensor.airflow_free_cooling_active
-      # Helper
+      # Helpers
       - input_boolean.airflow_cooling_automatic_enabled
+      - input_number.airflow_cooling_target_temperature
+      # Climate entity
+      - climate.airflow_cooling
       # Automation
       - automation.airflow_cooling_set_temperature_profile
