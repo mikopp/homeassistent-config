@@ -1,7 +1,7 @@
 # Custom components required by this Home Assistant configuration.
 # Install via HACS (preferred) or manually from the repository links below.
 #
-# This file is also read by the CI workflow (.github/workflows/ha_check_frenk.yaml)
+# This file is read by the CI workflow (.github/workflows/ha_check_frenk.yaml)
 # to install dependencies before running the config check.
 
 dependencies:
