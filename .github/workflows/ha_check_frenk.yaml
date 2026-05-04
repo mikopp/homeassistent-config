@@ -56,19 +56,47 @@ jobs:
           fi
 
       # ── 5. Install custom component dependencies ─────────────────────────────
-      #    Reads custom_components.yaml, downloads each component from GitHub,
-      #    and copies it into custom_components/ so HA can load it during check.
+      #    Reads tests/custom_components.yaml, downloads each listed component
+      #    from its GitHub repository, and copies it into custom_components/ so
+      #    HA can load it during the config check and live server run.
       - name: Install custom component dependencies
         run: |
           mkdir -p custom_components
-          # hass-template-climate → custom_components/climate_template
-          tmp=$(mktemp -d)
-          curl -sL https://github.com/jcwillox/hass-template-climate/archive/refs/heads/main.tar.gz \
-            | tar -xz -C "$tmp" --strip-components=1
-          cp -r "$tmp/custom_components/climate_template" custom_components/
-          rm -rf "$tmp"
-          echo "Installed custom components:"
-          ls custom_components/
+          python3 - <<'EOF'
+          import subprocess, sys, tempfile, shutil, os
+          import urllib.request
+          try:
+              import yaml
+          except ImportError:
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml"])
+              import yaml
+
+          with open("tests/custom_components.yaml") as f:
+              deps = yaml.safe_load(f).get("dependencies", [])
+
+          for dep in deps:
+              repo = dep["repository"]
+              domain = dep["domain"]
+              name = dep.get("name", domain)
+              # Convert https://github.com/owner/repo → tarball URL for main branch
+              owner_repo = repo.rstrip("/").removeprefix("https://github.com/")
+              url = f"https://github.com/{owner_repo}/archive/refs/heads/main.tar.gz"
+              print(f"Installing {name} ({domain}) from {repo}")
+              with tempfile.TemporaryDirectory() as tmp:
+                  archive = os.path.join(tmp, "component.tar.gz")
+                  urllib.request.urlretrieve(url, archive)
+                  subprocess.check_call(
+                      ["tar", "-xz", "-C", tmp, "--strip-components=1", "-f", archive]
+                  )
+                  src = os.path.join(tmp, "custom_components", domain)
+                  dst = os.path.join("custom_components", domain)
+                  if os.path.exists(dst):
+                      shutil.rmtree(dst)
+                  shutil.copytree(src, dst)
+                  print(f"  → installed to custom_components/{domain}/")
+
+          print("Installed custom components:", os.listdir("custom_components"))
+          EOF
 
       # ── 6. Config check (one-shot, no server) ────────────────────────────────
       #    Runs HA in check_config mode using the pinned image — equivalent to
