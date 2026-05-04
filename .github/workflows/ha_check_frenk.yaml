@@ -55,7 +55,22 @@ jobs:
             cp fakesecrets.yaml secrets.yaml
           fi
 
-      # ── 5. Config check (one-shot, no server) ────────────────────────────────
+      # ── 5. Install custom component dependencies ─────────────────────────────
+      #    Reads custom_components.yaml, downloads each component from GitHub,
+      #    and copies it into custom_components/ so HA can load it during check.
+      - name: Install custom component dependencies
+        run: |
+          mkdir -p custom_components
+          # hass-template-climate → custom_components/climate_template
+          tmp=$(mktemp -d)
+          curl -sL https://github.com/jcwillox/hass-template-climate/archive/refs/heads/main.tar.gz \
+            | tar -xz -C "$tmp" --strip-components=1
+          cp -r "$tmp/custom_components/climate_template" custom_components/
+          rm -rf "$tmp"
+          echo "Installed custom components:"
+          ls custom_components/
+
+      # ── 6. Config check (one-shot, no server) ────────────────────────────────
       #    Runs HA in check_config mode using the pinned image — equivalent to
       #    frenck/action-home-assistant but reuses the image already pulled above.
       #    HA exits 0 even when packages fail to load (slug errors, etc.), so we
@@ -72,7 +87,7 @@ jobs:
             exit 1
           fi
 
-      # ── 6. Start HA server for template validation + automation tests ─────────
+      # ── 7. Start HA server for template validation + automation tests ─────────
       - name: Start Home Assistant
         run: |
           docker run -d \
@@ -81,7 +96,7 @@ jobs:
             -v "${{ github.workspace }}:/config" \
             ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
 
-      # ── 7. Wait until HA has registered the 'user' onboarding step ───────────
+      # ── 8. Wait until HA has registered the 'user' onboarding step ───────────
       #    /api/onboarding returns HTTP 200 early (before HA is fully ready).
       #    We must wait until the response contains the 'user' step as not-done
       #    before attempting user creation; otherwise the POST returns no auth_code.
@@ -103,7 +118,7 @@ jobs:
           docker logs ha-ci 2>&1 | tail -30 >&2
           exit 1
 
-      # ── 8. Complete onboarding to obtain a short-lived API token ─────────────
+      # ── 9. Complete onboarding to obtain a short-lived API token ─────────────
       #    Fresh HA instances have no users; the onboarding API lets us create
       #    the first admin and returns an auth code we exchange for a token.
       - name: Obtain HA API token via onboarding
@@ -128,7 +143,7 @@ jobs:
           echo "::add-mask::$token"
           echo "ha_token=$token" >> "$GITHUB_OUTPUT"
 
-      # ── 9. Wait for HA REST API to be fully operational ──────────────────────
+      # ── 10. Wait for HA REST API to be fully operational ─────────────────────
       #    After onboarding completes, HA may still be initialising integrations.
       #    Wait until GET /api/ returns {"message":"API running."} so that seeding
       #    doesn't race against startup and input helpers aren't registered yet.
@@ -151,7 +166,7 @@ jobs:
           docker logs ha-ci 2>&1 | tail -30 >&2
           exit 1
 
-      # ── 10. Seed all input helpers and stub states ────────────────────────────
+      # ── 11. Seed all input helpers and stub states ───────────────────────────
       #    Applies tests/state_defaults.yaml so every entity referenced by
       #    templates has a known-good value — enabling strict template validation.
       - name: Seed test state
@@ -162,7 +177,7 @@ jobs:
             --defaults tests/state_defaults.yaml \
             --ha-url http://localhost:8123
 
-      # ── 11. Extract all Jinja2 templates, split into state vs runtime ─────────
+      # ── 12. Extract all Jinja2 templates, split into state vs runtime ────────
       - name: Extract Jinja2 templates
         run: |
           python3 .github/scripts/extract_templates.py . > /tmp/templates.json
@@ -172,7 +187,7 @@ jobs:
           print(f\"Found {len(d['state_templates'])} state template(s) and {len(d['runtime_templates'])} runtime template(s).\")
           "
 
-      # ── 12. Validate state templates strictly ─────────────────────────────────
+      # ── 13. Validate state templates strictly ────────────────────────────────
       #    State templates only reference entities whose state has been seeded.
       #    In strict mode, undefined-variable errors and sentinel outputs are failures.
       - name: Validate state templates (strict)
@@ -192,7 +207,7 @@ jobs:
           echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
-      # ── 13. Validate runtime templates leniently ──────────────────────────────
+      # ── 14. Validate runtime templates leniently ─────────────────────────────
       #    Runtime templates reference trigger/wait/value/etc. which cannot be
       #    evaluated outside a live automation run. Syntax errors still fail;
       #    undefined variable errors are skipped as expected.
@@ -212,7 +227,7 @@ jobs:
           echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
-      # ── 14. Execute automations under every test scenario ────────────────────
+      # ── 15. Execute automations under every test scenario ───────────────────
       #    Discovers automations from /api/states, applies each scenario from
       #    tests/scenarios.yaml on top of tests/state_defaults.yaml, triggers
       #    every non-excluded automation, and asserts no trace errors.
@@ -233,12 +248,12 @@ jobs:
           echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
-      # ── 15. Stop the HA container (always, even on failure) ──────────────────
+      # ── 16. Stop the HA container (always, even on failure) ─────────────────
       - name: Stop Home Assistant
         if: always()
         run: docker stop ha-ci || true
 
-      # ── 16. Post a single PR comment covering all failures ───────────────────
+      # ── 17. Post a single PR comment covering all failures ──────────────────
       - name: Comment on PR with failures
         if: >-
           (
@@ -280,7 +295,7 @@ jobs:
               body: ['## ❌ Home Assistant CI failed', '', ...sections].join('\n\n'),
             });
 
-      # ── 17. Re-fail the job after the comment step ────────────────────────────
+      # ── 18. Re-fail the job after the comment step ───────────────────────────
       - name: Fail if any check failed
         if: >-
           steps.validate_state.outcome == 'failure' ||

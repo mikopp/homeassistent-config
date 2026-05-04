@@ -1,0 +1,14 @@
+# Custom components required by this Home Assistant configuration.
+# Install via HACS (preferred) or manually from the repository links below.
+#
+# This file is also read by the CI workflow (.github/workflows/ha_check_frenk.yaml)
+# to install dependencies before running the config check.
+
+dependencies:
+  - name: Template Climate
+    domain: climate_template
+    repository: https://github.com/jcwillox/hass-template-climate
+    hacs: jcwillox/hass-template-climate
+    description: >
+      Provides the climate_template platform used in packages/climate_airflow.yaml
+      to create a virtual climate entity driven by Jinja2 templates.
