@@ -1,0 +1,133 @@
+input_number:
+  airflow_cooling_target_temperature:
+    name: "Airflow Cooling Target Temperature"
+    min: 18
+    max: 26
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-auto
+    initial: 21.5
+
+# Requires HACS custom component: jcwillox/hass-template-climate
+# Install via HACS or copy custom_components/climate_template/ from
+# https://github.com/jcwillox/hass-template-climate
+climate:
+  - platform: climate_template
+    name: "Airflow Climate"
+    unique_id: airflow_climate
+
+    current_temperature_template: >
+      {{ states('sensor.airflow_avg_indoor_temp_5min') | float(20) }}
+
+    # Drives both free-cooling thresholds via input_number (see airflow_cooling.yaml)
+    target_temperature_template: >
+      {{ states('input_number.airflow_cooling_target_temperature') | float(21.5) }}
+    min_temp: 18
+    max_temp: 26
+    temp_step: 0.5
+
+    # Modes:
+    #   off       — release automation without touching the profile
+    #   heat      — manual warm profile
+    #   heat_cool — manual comfort profile
+    #   cool      — manual eco profile
+    #   auto      — automation enabled (profile auto-selected)
+    modes:
+      - "off"
+      - "heat"
+      - "heat_cool"
+      - "cool"
+      - "auto"
+    hvac_mode_template: >
+      {% if is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
+        auto
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'warm') %}
+        heat
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'comfort') %}
+        heat_cool
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'eco') %}
+        cool
+      {% else %}
+        off
+      {% endif %}
+    set_hvac_mode:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'auto' }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'off' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'heat' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: warm
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'heat_cool' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: comfort
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'cool' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: eco
+
+    # In auto mode: derived from indicator + free-cooling state.
+    # In manual modes: warm=heating, eco=cooling, comfort=fan.
+    hvac_action_template: >
+      {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
+      {% if is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
+        {% if is_state('sensor.heating_cooling_indicator', 'active_heating') %}
+          heating
+        {% elif is_state('binary_sensor.airflow_free_cooling_active', 'on') %}
+          cooling
+        {% else %}
+          fan
+        {% endif %}
+      {% elif profile == 'warm' %}
+        heating
+      {% elif profile == 'eco' %}
+        cooling
+      {% elif profile == 'comfort' %}
+        fan
+      {% else %}
+        idle
+      {% endif %}
+
+    set_temperature:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.airflow_cooling_target_temperature
+        data:
+          value: "{{ temperature }}"
