@@ -36,7 +36,7 @@ input_number:
     step: 0.5
     unit_of_measurement: "°C"
     icon: mdi:thermometer-auto
-    initial: 21.5
+#    initial: 21.5
 
 # Requires HACS custom component: jcwillox/hass-template-climate
 # Install via HACS or copy custom_components/climate_template/ from
@@ -62,9 +62,9 @@ climate:
     # Modes:
     #   off       — stop automation, reset profile to comfort (default)
     #   heat      — manual warm profile
-    #   heat_cool — manual comfort profile
+    #   heat_cool — manual comfort profile - will in the future also be used for spring times to heat with sun, but don't let it heat up as much as in winter.
     #   cool      — manual eco profile
-    #   auto      — automation enabled (profile auto-selected)
+    #   auto      — automation enabled (profile auto-selected) - uses heating-cooling indicator
     modes:
       - "off"
       - "heat"
