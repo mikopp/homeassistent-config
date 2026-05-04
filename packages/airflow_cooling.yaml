@@ -83,8 +83,8 @@ template:
 
     binary_sensor:
       # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
-      - unique_id: airflow_free_cooling_active
-        name: "Airflow Free Cooling Active"
+      - unique_id: airflow_free_cooling_available
+        name: "Airflow Free Cooling Available"
         device_class: running
         state: >
           {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
@@ -92,9 +92,11 @@ template:
           {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
           {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
           {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
+          {% set min_dew_diff = states('input_number.airflow_min_dew_diff') | float(2) %}
+          {% set min_temp_diff = states('input_number.airflow_min_temp_diff') | float(1.5) %}
           {{
-            (outdoor_dew + 2) < min_indoor_dew and
-            outdoor_temp < (target_temp - 1.5) and
+            (outdoor_dew + min_dew_diff) < min_indoor_dew and
+            outdoor_temp < (target_temp - min_temp_diff) and
             avg_indoor_temp >= target_temp
           }}
         delay_on:
@@ -107,7 +109,7 @@ template:
 recorder:
   exclude:
     entities:
-      - binary_sensor.airflow_free_cooling_active
+      - binary_sensor.airflow_free_cooling_available
 
 # --- HELPERS ---
 # Enable/disable automatic ventilation profile switching from the UI or other automations
@@ -127,7 +129,7 @@ automation:
         entity_id: sensor.heating_cooling_indicator
         id: heating_cooling_changed
       - platform: state
-        entity_id: binary_sensor.airflow_free_cooling_active
+        entity_id: binary_sensor.airflow_free_cooling_available
         id: free_cooling_changed
     # Guard: skip all profile changes when automatic control is disabled
     condition:
@@ -179,7 +181,7 @@ automation:
                     entity_id: sensor.heating_cooling_indicator
                     state: "active_cooling"
               - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_active
+                entity_id: binary_sensor.airflow_free_cooling_available
                 state: "on"
               - condition: not
                 conditions:
@@ -208,7 +210,7 @@ automation:
                     entity_id: sensor.heating_cooling_indicator
                     state: "active_cooling"
               - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_active
+                entity_id: binary_sensor.airflow_free_cooling_available
                 state: "off"
               - condition: not
                 conditions:
@@ -248,10 +250,12 @@ group:
       - sensor.airflow_min_indoor_dew
       - sensor.airflow_avg_indoor_temp
       # Binary sensor (free cooling decision)
-      - binary_sensor.airflow_free_cooling_active
+      - binary_sensor.airflow_free_cooling_available
       # Helpers
       - input_boolean.airflow_cooling_automatic_enabled
       - input_number.airflow_cooling_target_temperature
+      - input_number.airflow_min_dew_diff
+      - input_number.airflow_min_temp_diff
       # Climate entity + humidity sensors
       - climate.airflow_cooling
       - sensor.airflow_avg_indoor_humidity
