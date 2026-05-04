@@ -1,3 +1,33 @@
+# --- FILTER SENSOR ---
+sensor:
+  - platform: filter
+    unique_id: airflow_avg_indoor_humidity_5min
+    name: "Airflow Avg Indoor Humidity 5min"
+    entity_id: sensor.airflow_avg_indoor_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
+      - filter: time_throttle
+        window_size: "00:05"
+
+# --- TEMPLATE SENSOR ---
+template:
+  - sensor:
+      - unique_id: airflow_avg_indoor_humidity
+        name: "Airflow Avg Indoor Humidity"
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: >
+          {% set indoor_hums = label_entities('Indoor.Humidity')
+            | map('states') | map('float', none) | reject('none') | list %}
+          {{ (indoor_hums | sum / indoor_hums | count) | round(1) if indoor_hums | count > 0 else 0 }}
+        availability: >
+          {{ label_entities('Indoor.Humidity')
+             | map('states') | map('float', none) | reject('none') | list | count > 0 }}
+
+# --- HELPERS ---
 input_number:
   airflow_cooling_target_temperature:
     name: "Airflow Cooling Target Temperature"
@@ -19,6 +49,9 @@ climate:
     current_temperature_template: >
       {{ states('sensor.airflow_avg_indoor_temp_5min') | float(20) }}
 
+    current_humidity_template: >
+      {{ states('sensor.airflow_avg_indoor_humidity_5min') | float(50) }}
+
     # Drives both free-cooling thresholds via input_number (see airflow_cooling.yaml)
     target_temperature_template: >
       {{ states('input_number.airflow_cooling_target_temperature') | float(21.5) }}
@@ -27,7 +60,7 @@ climate:
     temp_step: 0.5
 
     # Modes:
-    #   off       — release automation without touching the profile
+    #   off       — stop automation, reset profile to comfort (default)
     #   heat      — manual warm profile
     #   heat_cool — manual comfort profile
     #   cool      — manual eco profile
@@ -66,6 +99,11 @@ climate:
               - action: input_boolean.turn_off
                 target:
                   entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: comfort
           - conditions:
               - condition: template
                 value_template: "{{ hvac_mode == 'heat' }}"
@@ -103,19 +141,10 @@ climate:
                 data:
                   option: eco
 
-    # In auto mode: derived from indicator + free-cooling state.
-    # In manual modes: warm=heating, eco=cooling, comfort=fan.
+    # Always reflects the current ComfoConnect profile.
     hvac_action_template: >
       {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
-      {% if is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
-        {% if is_state('sensor.heating_cooling_indicator', 'active_heating') %}
-          heating
-        {% elif is_state('binary_sensor.airflow_free_cooling_active', 'on') %}
-          cooling
-        {% else %}
-          fan
-        {% endif %}
-      {% elif profile == 'warm' %}
+      {% if profile == 'warm' %}
         heating
       {% elif profile == 'eco' %}
         cooling

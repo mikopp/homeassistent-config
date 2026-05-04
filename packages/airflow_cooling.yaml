@@ -252,7 +252,9 @@ group:
       # Helpers
       - input_boolean.airflow_cooling_automatic_enabled
       - input_number.airflow_cooling_target_temperature
-      # Climate entity
+      # Climate entity + humidity sensors
       - climate.airflow_cooling
+      - sensor.airflow_avg_indoor_humidity
+      - sensor.airflow_avg_indoor_humidity_5min
       # Automation
       - automation.airflow_cooling_set_temperature_profile
