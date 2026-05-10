@@ -1,6 +1,20 @@
 # --- FILTER SENSORS ---
-# 5-minute time-weighted moving average + throttle per source; feeds free-cooling binary sensor.
+# 5-minute time-weighted moving average + throttle per source.
+# Template sensors (airflow_min_indoor_dew, airflow_avg_indoor_temp) are NOT excluded
+# from recorder because the filter sensors below seed their moving average from history.
 sensor:
+  # Smooth avg indoor humidity — source is template sensor aggregating all indoor humidity sensors
+  - platform: filter
+    unique_id: airflow_avg_indoor_humidity_5min
+    name: "Airflow Avg Indoor Humidity 5min"
+    entity_id: sensor.airflow_avg_indoor_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
+      - filter: time_throttle
+        window_size: "00:05"
+
   # Smooth min indoor dew point — source is template sensor aggregating all indoor dew sensors
   - platform: filter
     unique_id: airflow_min_indoor_dew_5min
@@ -49,10 +63,23 @@ sensor:
       - filter: time_throttle
         window_size: "00:05"
 
-# --- TEMPLATE SENSORS & BINARY SENSORS ---
-# Derived values used by automations; excluded from recorder to avoid DB bloat.
+# --- TEMPLATE SENSORS & BINARY SENSOR ---
 template:
   - sensor:
+      # Average humidity across all monitored indoor areas
+      - unique_id: airflow_avg_indoor_humidity
+        name: "Airflow Avg Indoor Humidity"
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: >
+          {% set indoor_hums = label_entities('Indoor.Humidity')
+            | map('states') | map('float', none) | reject('none') | list %}
+          {{ (indoor_hums | sum / indoor_hums | count) | round(1) if indoor_hums | count > 0 else 0 }}
+        availability: >
+          {{ label_entities('Indoor.Humidity')
+             | map('states') | map('float', none) | reject('none') | list | count > 0 }}
+
       # Minimum dewpoint across all monitored indoor areas
       - unique_id: airflow_min_indoor_dew
         name: "Airflow Min Indoor Dew"
@@ -82,7 +109,8 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count > 0 }}
 
     binary_sensor:
-      # True when outdoor air is suitable for free cooling; debounced to prevent flip-flop
+      # True when outdoor air is suitable for free cooling; debounced 10min each way to prevent flip-flop.
+      # min_dew_diff and min_temp_diff are internal constants (2.0 °C / 1.5 °C); not user-settable.
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
@@ -92,8 +120,8 @@ template:
           {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
           {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
           {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
-          {% set min_dew_diff = states('input_number.airflow_min_dew_diff') | float(2) %}
-          {% set min_temp_diff = states('input_number.airflow_min_temp_diff') | float(1.5) %}
+          {% set min_dew_diff = 2.0 %}
+          {% set min_temp_diff = 1.5 %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
             outdoor_temp < (target_temp - min_temp_diff) and
@@ -104,8 +132,7 @@ template:
         delay_off:
           minutes: 10
 
-# Template sensors (airflow_min_indoor_dew, airflow_avg_indoor_temp) are NOT excluded
-# because the filter sensors above need their history to seed the moving average.
+# binary_sensor.airflow_free_cooling_available excluded — intermediate computed state, not worth archiving
 recorder:
   exclude:
     entities:
@@ -118,6 +145,149 @@ input_boolean:
     name: "Airflow Cooling: Automatic Enabled"
     icon: mdi:fan-auto
 
+# Target temperature is a standard climate property backed by this helper so it persists across restarts
+input_number:
+  airflow_cooling_target_temperature:
+    name: "Airflow Cooling Target Temperature"
+    min: 18
+    max: 26
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-auto
+#    initial: 21.5
+
+# --- CLIMATE ENTITY ---
+# Requires HACS custom component: jcwillox/hass-template-climate
+# https://github.com/jcwillox/hass-template-climate
+climate:
+  - platform: climate_template
+    name: "Airflow Climate"
+    unique_id: airflow_climate
+
+    # Internal threshold constants; same values used in binary_sensor.airflow_free_cooling_available
+    variables:
+      min_dew_diff: 2.0
+      min_temp_diff: 1.5
+
+    # Standard climate property: current observed temperature (read-only)
+    current_temperature_template: >
+      {{ states('sensor.airflow_avg_indoor_temp_5min') | float(20) }}
+
+    # Standard climate property: current observed humidity (read-only)
+    current_humidity_template: >
+      {{ states('sensor.airflow_avg_indoor_humidity_5min') | float(50) }}
+
+    # Standard climate property: user-set target temperature, backed by input_number for persistence
+    target_temperature_template: >
+      {{ states('input_number.airflow_cooling_target_temperature') | float(21.5) }}
+    min_temp: 18
+    max_temp: 26
+    temp_step: 0.5
+
+    # Modes:
+    #   off       — stop automation, reset profile to comfort (default)
+    #   heat      — manual warm profile
+    #   heat_cool — manual comfort profile - will in the future also be used for spring times to heat with sun, but don't let it heat up as much as in winter.
+    #   cool      — manual eco profile
+    #   auto      — automation enabled (profile auto-selected) - uses heating-cooling indicator
+    modes:
+      - "off"
+      - "heat"
+      - "heat_cool"
+      - "cool"
+      - "auto"
+    hvac_mode_template: >
+      {% if is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
+        auto
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'warm') %}
+        heat
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'comfort') %}
+        heat_cool
+      {% elif is_state('select.comfoconnect_pro_temperature_profile', 'eco') %}
+        cool
+      {% else %}
+        off
+      {% endif %}
+    set_hvac_mode:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'auto' }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'off' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: comfort
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'heat' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: warm
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'heat_cool' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: comfort
+          - conditions:
+              - condition: template
+                value_template: "{{ hvac_mode == 'cool' }}"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.airflow_cooling_automatic_enabled
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: eco
+
+    # Standard climate property: reflects actual ComfoConnect profile state (read-only)
+    hvac_action_template: >
+      {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
+      {% if profile == 'warm' %}
+        heating
+      {% elif profile == 'eco' %}
+        cooling
+      {% elif profile == 'comfort' %}
+        fan
+      {% else %}
+        idle
+      {% endif %}
+
+    # Standard climate setter: persists new target temperature to input_number
+    set_temperature:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.airflow_cooling_target_temperature
+        data:
+          value: "{{ temperature }}"
+
+# --- AUTOMATION ---
 automation:
   # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
   - id: airflow_cooling_set_temperature_profile
@@ -236,7 +406,7 @@ automation:
               level: warning
 
 # --- GROUP ---
-# All entities belonging to the airflow_cooling feature
+# All entities belonging to the airflow feature
 group:
   airflow_cooling:
     name: "Airflow Cooling"
@@ -254,10 +424,8 @@ group:
       # Helpers
       - input_boolean.airflow_cooling_automatic_enabled
       - input_number.airflow_cooling_target_temperature
-      - input_number.airflow_min_dew_diff
-      - input_number.airflow_min_temp_diff
       # Climate entity + humidity sensors
-      - climate.airflow_cooling
+      - climate.airflow_climate
       - sensor.airflow_avg_indoor_humidity
       - sensor.airflow_avg_indoor_humidity_5min
       # Automation
