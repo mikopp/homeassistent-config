@@ -63,7 +63,7 @@ scenarios:
         #   az < wall_az → A_eff = 67.9°
         #   slat = max(A_eff=67.9°, min_heat=33.5°) = 67.9°
         # Deadband passes (|67.9 − 0| = 67.9 ≥ DB=5) → script writes 67.9 to last_set_slat_angle.
-        sensor.pergola_effective_slat_angle: "67.9"
+        sensor.pergola_slat_angle: "67.9"
 
   # ── Master switch off — state machine still runs; covers suppressed inside script ──────
   - name: automation_disabled
