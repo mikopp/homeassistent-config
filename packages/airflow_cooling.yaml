@@ -119,7 +119,7 @@ automation:
   # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
   - id: airflow_cooling_set_temperature_profile
     alias: "Airflow: Set Temperature Profile"
-    description: "Profile warm/comfort/eco driven by heating-cooling-indicator and free cooling binary sensor"
+    description: "Profile warm/comfort/cool driven by heating-cooling-indicator and free cooling binary sensor"
     mode: single
     trigger:
       - platform: state
@@ -167,7 +167,7 @@ automation:
                   title: "Ventilation: Comfort Profile"
                   message: "Outdoor 5–10°C — profile set to Comfort."
 
-          # Cooling mode + free cooling active: eco to encourage bypass
+          # Cooling mode + free cooling active: Cool to encourage bypass
           - conditions:
               - condition: or
                 conditions:
@@ -184,17 +184,17 @@ automation:
                 conditions:
                   - condition: state
                     entity_id: select.comfoconnect_pro_temperature_profile
-                    state: "eco"
+                    state: "cool"
             sequence:
               - action: select.select_option
                 target:
                   entity_id: select.comfoconnect_pro_temperature_profile
                 data:
-                  option: "eco"
+                  option: "cool"
               - action: notify.mobile_app_greywinds_iphone
                 data:
-                  title: "Ventilation: Eco Profile"
-                  message: "Free cooling active — profile set to Eco."
+                  title: "Ventilation: Cool Profile"
+                  message: "Free cooling active — profile set to Cool."
 
           # Cooling mode + free cooling inactive: comfort
           - conditions:
