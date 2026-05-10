@@ -1357,8 +1357,7 @@ script:
               entity_id: input_select.pergola_automation_state
             data:
               option: sun_automatik_cooling
-    mode: single
-    max_exceeded: silent
+    mode: restart
 
   # ── Pergola Set Slat Angle ────────────────────────────────────────────────────────
   # Single authoritative slat_angle→tilt_position converter and cover movement script.
@@ -1464,6 +1463,10 @@ script:
         data:
           value: 1
       - delay: "00:00:30"
+      # Abort if the state was manually changed away from rain_stopped during this delay.
+      - condition: state
+        entity_id: input_select.pergola_automation_state
+        state: rain_stopped
 
       # ── Step 2: First drain position — 8° ──────────────────────────────────────────
       # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
@@ -1480,6 +1483,10 @@ script:
 
       # ── Step 3: Wait 5 minutes — initial drainage ──────────────────────────────────
       - delay: "00:05:00"
+      # Abort if the state was manually changed away from rain_stopped during this delay.
+      - condition: state
+        entity_id: input_select.pergola_automation_state
+        state: rain_stopped
 
       # ── Step 4: Second drain position — 15° ────────────────────────────────────────
       # Open further so remaining water continues to run off.
@@ -1495,6 +1502,10 @@ script:
 
       # ── Step 5: Wait 5 minutes — continued drainage ────────────────────────────────
       - delay: "00:05:00"
+      # Abort if the state was manually changed away from rain_stopped during this delay.
+      - condition: state
+        entity_id: input_select.pergola_automation_state
+        state: rain_stopped
 
       # ── Step 6: Check whether rain accumulated in the last hour ────────────────────
       # Counter set to 4 before the choose so the sensor shows "drying" during any wait.
@@ -1515,6 +1526,10 @@ script:
             sequence:
               # Rain still shows in the 60-min accumulation window — wait for slats to dry
               - delay: "00:30:00"
+              # Abort if the state was manually changed away from rain_stopped during this wait.
+              - condition: state
+                entity_id: input_select.pergola_automation_state
+                state: rain_stopped
 
       # ── Step 7: Re-evaluate state and exit rain_stopped ────────────────────────────
       # Rules 1–4 (frost, rain, user_override) are guaranteed to not apply here:
