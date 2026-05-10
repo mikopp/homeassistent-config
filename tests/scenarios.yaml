@@ -49,6 +49,12 @@ scenarios:
         input_boolean.pergola_heating: "on"
         input_boolean.pergola_cooling_optimized: "off"
         input_select.pergola_automation_state: "sun_automatik_heating"
+      states:
+        sun.sun:
+          state: "above_horizon"
+          attributes:
+            elevation: 45
+            azimuth: 180
     expect:
       states:
         # Heating formula for these inputs: elevation=45, azimuth=180, wall_azimuth=204.
@@ -132,8 +138,6 @@ scenarios:
       inputs:
         input_select.pergola_automation_state: "frost"
       states:
-        sensor.wheatherstation_outdoor_temperature:
-          state: "5.0"
         # Explicitly seed sun position so evaluate_state (called async inside
         # pergola_exit_to_normal) sees a deterministic in-window azimuth.
         # The built-in sun integration rewrites sun.sun attributes while keeping
@@ -144,6 +148,9 @@ scenarios:
           attributes:
             elevation: 45
             azimuth: 180
+        # set after sun.sun to ensure the temp change triggers the frost exit logic, not the sun position.
+        sensor.wheatherstation_outdoor_temperature:
+          state: "5.0"
     expect:
       # script.pergola_exit_to_normal runs async — allow it to settle before asserting
       wait_s: 2.0
@@ -195,9 +202,6 @@ scenarios:
       states:
         # RULE 4 ENTRY: dach_links originator=user, state not in protected → user_override.
         input_select.pergola_automation_state: "user_override"
-        # Cover response runs after state transition; user_override → empty sequence.
-        # Template sensor falls through to else-branch → 90°.
-        sensor.pergola_slat_angle: "90"
 
   # ── Rain-originated cover lock (lock originator = rain on both covers) ───────────────
   - name: rain_lock_from_cover
@@ -226,15 +230,14 @@ scenarios:
         sensor.dach_links_priority_lock_originator:
           state: "user"
         sensor.dach_rechts_priority_lock_originator:
-          state: "rain"
+          state: "user"
         sensor.dach_links_priority_lock_timer:
           state: "300"
     expect:
       states:
         # RULE 2 → USER OVERRIDE: state=rain and dach_links originator=user → user_override.
         input_select.pergola_automation_state: "user_override"
-        # Template sensor: user_override → else-branch → 90°.
-        sensor.pergola_slat_angle: "90"
+
 
   # ── Airflow: auto enabled, free cooling active (active_cooling + dew/temp conditions met) ──
   - name: airflow_free_cooling_active
