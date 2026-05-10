@@ -38,7 +38,7 @@ def _call_service(ha_url, token, domain, service, data, entity_id, retries):
 
 
 def _set_state(ha_url, token, entity_id, state, attributes, retries):
-    """POST /api/states/{entity_id} and verify by reading back."""
+    """POST /api/states/{entity_id} and verify by reading back state AND attributes."""
     url = f"{ha_url}/api/states/{entity_id}"
     payload = {"state": str(state)}
     if attributes:
@@ -50,10 +50,25 @@ def _set_state(ha_url, token, entity_id, state, attributes, retries):
             if resp.status_code in (200, 201):
                 verify = requests.get(url, headers=_headers(token), timeout=10)
                 if verify.status_code == 200:
-                    actual = verify.json().get("state")
-                    if actual == str(state):
+                    body = verify.json()
+                    actual_state = body.get("state")
+                    if actual_state != str(state):
+                        print(f"  WARN [{entity_id}] wrote state '{state}' but read back '{actual_state}'")
+                    elif attributes:
+                        # Verify all seeded attributes match — integrations like sun can
+                        # overwrite attributes (elevation/azimuth) while keeping state intact.
+                        actual_attrs = body.get("attributes", {})
+                        mismatches = {
+                            k: (v, actual_attrs.get(k))
+                            for k, v in attributes.items()
+                            if actual_attrs.get(k) != v
+                        }
+                        if mismatches:
+                            print(f"  WARN [{entity_id}] attribute mismatch: {mismatches}")
+                        else:
+                            return True
+                    else:
                         return True
-                    print(f"  WARN [{entity_id}] wrote '{state}' but read back '{actual}'")
                 else:
                     print(f"  WARN [{entity_id}] verify GET returned {verify.status_code}")
             else:
@@ -67,32 +82,79 @@ def _set_state(ha_url, token, entity_id, state, attributes, retries):
 
 # ── Input seeding — dispatch by domain prefix ──────────────────────────────────────────
 
+def _read_state(ha_url, token, entity_id):
+    """Return the current state string for entity_id, or None on error."""
+    try:
+        resp = requests.get(
+            f"{ha_url}/api/states/{entity_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("state")
+    except requests.RequestException:
+        pass
+    return None
+
+
 def _apply_input(ha_url, token, entity_id, value, retries):
-    """Apply a single input_* helper via the appropriate service call."""
+    """Apply a single input_* helper via the appropriate service call.
+
+    Each service call is followed by a read-back verify loop because HA processes
+    services asynchronously — the HTTP 200 means 'queued', not 'applied'. Without
+    verification, the state machine may still hold the previous scenario's value
+    when automations are triggered.
+    """
     domain = entity_id.split(".")[0]
+
+    def _call_and_verify(svc_domain, svc, data, expected_state):
+        for attempt in range(1, retries + 1):
+            ok = _call_service(ha_url, token, svc_domain, svc, data, entity_id, retries=1)
+            if not ok:
+                if attempt < retries:
+                    time.sleep(1)
+                continue
+            # Poll until state matches or we exhaust retries.
+            for _ in range(5):
+                actual = _read_state(ha_url, token, entity_id)
+                if actual == str(expected_state):
+                    return True
+                time.sleep(0.2)
+            print(f"  WARN [{entity_id}] service called but state did not reach '{expected_state}'")
+            if attempt < retries:
+                time.sleep(1)
+        return False
 
     if domain == "input_boolean":
         svc = "turn_on" if str(value).lower() in ("on", "true", "1") else "turn_off"
-        return _call_service(ha_url, token, "input_boolean", svc,
-                             {"entity_id": entity_id}, entity_id, retries)
+        expected = "on" if svc == "turn_on" else "off"
+        return _call_and_verify("input_boolean", svc, {"entity_id": entity_id}, expected)
 
     if domain == "input_number":
-        return _call_service(ha_url, token, "input_number", "set_value",
-                             {"entity_id": entity_id, "value": value}, entity_id, retries)
+        return _call_and_verify(
+            "input_number", "set_value",
+            {"entity_id": entity_id, "value": value}, str(float(value)),
+        )
 
     if domain == "input_select":
-        return _call_service(ha_url, token, "input_select", "select_option",
-                             {"entity_id": entity_id, "option": str(value)}, entity_id, retries)
+        return _call_and_verify(
+            "input_select", "select_option",
+            {"entity_id": entity_id, "option": str(value)}, str(value),
+        )
 
     if domain == "input_text":
-        return _call_service(ha_url, token, "input_text", "set_value",
-                             {"entity_id": entity_id, "value": str(value)}, entity_id, retries)
+        return _call_and_verify(
+            "input_text", "set_value",
+            {"entity_id": entity_id, "value": str(value)}, str(value),
+        )
 
     if domain == "input_datetime":
         if isinstance(value, dict):
             data = {"entity_id": entity_id, **value}
+            expected = data.get("datetime", str(value))
         else:
             data = {"entity_id": entity_id, "datetime": str(value)}
+            expected = str(value)
         return _call_service(ha_url, token, "input_datetime", "set_datetime",
                              data, entity_id, retries)
 

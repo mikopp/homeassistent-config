@@ -51,15 +51,13 @@ scenarios:
         input_select.pergola_automation_state: "sun_automatik_heating"
     expect:
       states:
-        # sensor.pergola_effective_sun_angle computes from sun position alone — no state-machine
-        # dependency, never written by any automation. Proves the A_eff formula is correct for
-        # these inputs: elevation=45, azimuth=180, wall_azimuth=204.
+        # Heating formula for these inputs: elevation=45, azimuth=180, wall_azimuth=204.
         #   delta_phi = 180 − 204 = −24°
         #   sun_height = atan(tan(45°) / |sin(−24°)|) = atan(1 / 0.407) ≈ 67.9°
-        #   az < wall_az → A_eff = sun_height = 67.9°
-        # Heating formula (verified by inspection given correct inputs):
+        #   az < wall_az → A_eff = 67.9°
         #   slat = max(A_eff=67.9°, min_heat=33.5°) = 67.9°
-        sensor.pergola_effective_sun_angle: "67.9"
+        # Deadband passes (|67.9 − 0| = 67.9 ≥ DB=5) → script writes 67.9 to last_set_slat_angle.
+        sensor.pergola_effective_slat_angle: "67.9"
 
   # ── Master switch off — state machine still runs; covers suppressed inside script ──────
   - name: automation_disabled
@@ -136,6 +134,16 @@ scenarios:
       states:
         sensor.wheatherstation_outdoor_temperature:
           state: "5.0"
+        # Explicitly seed sun position so evaluate_state (called async inside
+        # pergola_exit_to_normal) sees a deterministic in-window azimuth.
+        # The built-in sun integration rewrites sun.sun attributes while keeping
+        # state="above_horizon", so _set_state attribute-verification retries until
+        # the seed sticks before automations are triggered.
+        sun.sun:
+          state: "above_horizon"
+          attributes:
+            elevation: 45
+            azimuth: 180
     expect:
       # script.pergola_exit_to_normal runs async — allow it to settle before asserting
       wait_s: 2.0
