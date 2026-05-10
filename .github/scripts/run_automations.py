@@ -67,6 +67,36 @@ def discover_automations(ha_url, token):
     return automations
 
 
+# ── Expectation assertions ────────────────────────────────────────────────────────────
+
+def check_expectations(ha_url, token, scenario):
+    """Assert expected entity states declared in scenario.expect.states.
+
+    Returns list of failure strings, empty on success.
+    """
+    expect = scenario.get("expect") or {}
+    expected_states = expect.get("states") or {}
+    if not expected_states:
+        return []
+
+    wait_s = float(expect.get("wait_s", 0))
+    if wait_s > 0:
+        time.sleep(wait_s)
+
+    failures = []
+    for entity_id, expected in expected_states.items():
+        try:
+            result = _get(ha_url, token, f"/api/states/{entity_id}")
+            actual = result.get("state")
+            if str(actual) != str(expected):
+                failures.append(
+                    f"expect {entity_id} = {expected!r}, got {actual!r}"
+                )
+        except requests.HTTPError as exc:
+            failures.append(f"expect {entity_id}: HTTP {exc}")
+    return failures
+
+
 # ── Trace inspection ───────────────────────────────────────────────────────────────────
 
 def _trace_has_error(trace):
@@ -263,6 +293,16 @@ def main():
                 })
             else:
                 print(f"  ✓ {auto['name']}")
+
+        # Assert expected entity states after all automations have run
+        expect_failures = check_expectations(args.ha_url, token, scenario)
+        for msg in expect_failures:
+            print(f"  ✗ (expect) {msg}")
+            all_failures.append({
+                "scenario": name,
+                "automation": "(expectation)",
+                "error": msg,
+            })
 
         # Check for new HA error-log entries produced during this scenario
         log_after = get_error_log_lines(args.ha_url, token)
