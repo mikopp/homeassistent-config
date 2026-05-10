@@ -367,8 +367,10 @@ template:
       - name: "Pergola Slat Angle"
         unique_id: pergola_slat_angle
         availability: >
-          {{ states('input_select.pergola_automation_state') not in ['unavailable', 'unknown']
-             and states('sensor.pergola_max_open_east_morning_cooling_angle') not in ['unavailable', 'unknown'] }}
+          {% set s = states('input_select.pergola_automation_state') %}
+          {{ s not in ['unavailable', 'unknown']
+             and (s != 'sun_automatik_cooling'
+                  or states('sensor.pergola_max_open_east_morning_cooling_angle') not in ['unavailable', 'unknown']) }}
         state: >
           {% set s  = states('input_select.pergola_automation_state') %}
           {% set mt = states('input_number.pergola_max_tilt_angle') | float(122) %}

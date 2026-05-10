@@ -59,16 +59,6 @@ states:
       elevation: 45
       azimuth: 180
 
-  # Pergola effective sun angle — derived from sun.sun (elevation=45, azimuth=180,
-  # wall_azimuth=204). Seeded explicitly so the template chain that feeds
-  # sensor.pergola_slat_angle's availability check is pre-satisfied; otherwise HA's
-  # async template evaluation may not have propagated before expectations are checked.
-  # Value: atan(tan(45°) / |sin(180°−204°)|) ≈ 67.9° (sun east of wall).
-  sensor.pergola_effective_sun_angle:
-    state: "67.9"
-    attributes:
-      unit_of_measurement: "°"
-
   # Victron solar charger (MQTT — broker unreachable in CI)
   sensor.solar_yield_watts:
     state: "1500"

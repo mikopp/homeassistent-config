@@ -63,7 +63,11 @@ scenarios:
         #   az < wall_az → A_eff = 67.9°
         #   slat = max(A_eff=67.9°, min_heat=33.5°) = 67.9°
         # Deadband passes (|67.9 − 0| = 67.9 ≥ DB=5) → script writes 67.9 to last_set_slat_angle.
-        sensor.pergola_slat_angle: "67.9"
+        # Assert effective_slat_angle (backed by input_number.pergola_last_set_slat_angle)
+        # rather than sensor.pergola_slat_angle: the template sensor depends on sun.sun which
+        # the built-in sun integration can overwrite between automation execution and the
+        # expectation check, making the reading volatile.
+        sensor.pergola_effective_slat_angle: "67.9"
 
   # ── Master switch off — state machine still runs; covers suppressed inside script ──────
   - name: automation_disabled
