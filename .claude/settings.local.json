@@ -17,7 +17,8 @@
       "mcp__ha-mcp__ha_config_list_groups",
       "mcp__ha-mcp__ha_get_logs",
       "mcp__ha-mcp__ha_get_helper_schema",
-      "mcp__ha-mcp__ha_config_get_category"
+      "mcp__ha-mcp__ha_config_get_category",
+      "mcp__ha-mcp__ha_eval_template"
     ]
   }
 }
