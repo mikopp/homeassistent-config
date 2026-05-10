@@ -91,6 +91,13 @@ states:
     attributes:
       unit_of_measurement: "mm/h"
 
+  # Pergola sun-shining binary sensor — seeded "on" so evaluate_state (Rule 6) never
+  # triggers not_enough_sun transitions during tests, keeping all sun-tracking scenarios
+  # in their intended sun_automatik_* state. The sensor has delay_on/delay_off in
+  # production that prevents it reaching "on" within a CI test run.
+  binary_sensor.pergola_sun_shining:
+    state: "on"
+
   # Somfy cover priority-lock sensors (UI integration — not available in CI)
   sensor.dach_links_priority_lock_originator:
     state: "none"
