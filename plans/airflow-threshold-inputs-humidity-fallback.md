@@ -1,6 +1,6 @@
 # Plan: Airflow Threshold Inputs + Humidity Fallback
 
-## Status: IMPLEMENTED
+## Status: IMPLEMENTED (extended 2026-05-10)
 
 ## Goal
 1. Expose `min_dew_diff` and `min_temp_diff` as user-settable `input_number` helpers
@@ -113,6 +113,20 @@ Add to `group.airflow_cooling.entities`:
 - input_number.airflow_min_dew_diff
 - input_number.airflow_min_temp_diff
 ```
+
+---
+
+## Extension 2026-05-10: airflow_min_indoor_dew rename + dewpoint fallback
+
+### Changes
+- Renamed `airflow_min_indoor_dew` template sensor: "Airflow Min Indoor Dew" → "Airflow Avg Indoor Dew" (entity_id unchanged)
+- Renamed filter sensor: "Airflow Min Indoor Dew 5min" → "Airflow Avg Indoor Dew 5min"
+- State logic changed from `min` to average (`sum / count`)
+- Fallback: when `label_entities('Indoor.Dewpoint')` empty, compute dew point from ComfoConnect extract air via Magnus formula (a=17.625, b=243.04) — same formula verified against `sensor.comfoconnect_pro_outdoor_air_dewpoint`
+- Availability: available when either labeled entities exist OR both extract air temp+humidity are available
+
+### Verified
+Magnus formula `Td = b*(ln(RH/100)+a*T/(b+T)) / (a-(ln(RH/100)+a*T/(b+T)))` with a=17.625, b=243.04 matches `sensor.comfoconnect_pro_outdoor_air_dewpoint` exactly (8.13°C at 13.5°C / 70%).
 
 ---
 

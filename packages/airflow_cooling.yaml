@@ -15,10 +15,10 @@ sensor:
       - filter: time_throttle
         window_size: "00:05"
 
-  # Smooth min indoor dew point — source is template sensor aggregating all indoor dew sensors
+  # Smooth avg indoor dew point — source is template sensor aggregating all indoor dew sensors
   - platform: filter
     unique_id: airflow_min_indoor_dew_5min
-    name: "Airflow Min Indoor Dew 5min"
+    name: "Airflow Avg Indoor Dew 5min"
     entity_id: sensor.airflow_min_indoor_dew
     filters:
       - filter: time_simple_moving_average
@@ -85,19 +85,32 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count %}
           {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown'] }}
 
-      # Minimum dewpoint across all monitored indoor areas
+      # Average dewpoint across all monitored indoor areas; falls back to Magnus formula from ComfoConnect extract air when no labeled entities exist
       - unique_id: airflow_min_indoor_dew
-        name: "Airflow Min Indoor Dew"
+        name: "Airflow Avg Indoor Dew"
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         state: >
           {% set indoor_dews = label_entities('Indoor.Dewpoint')
             | map('states') | map('float', none) | reject('none') | list %}
-          {{ indoor_dews | min if indoor_dews | count > 0 else 100 }}
+          {% if indoor_dews | count > 0 %}
+            {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
+          {% else %}
+            {% set T = states('sensor.comfoconnect_pro_extract_air_temperature') | float(20) %}
+            {% set RH = states('sensor.comfoconnect_pro_extract_air_humidity') | float(50) %}
+            {% set a = 17.625 %}
+            {% set b = 243.04 %}
+            {% set alpha = log(RH / 100) + a * T / (b + T) %}
+            {{ (b * alpha / (a - alpha)) | round(2) }}
+          {% endif %}
         availability: >
-          {{ label_entities('Indoor.Dewpoint')
-             | map('states') | map('float', none) | reject('none') | list | count > 0 }}
+          {% set label_count = label_entities('Indoor.Dewpoint')
+             | map('states') | map('float', none) | reject('none') | list | count %}
+          {{ label_count > 0 or (
+               states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] and
+               states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown']
+             ) }}
 
       # Average temperature across all monitored indoor areas
       - unique_id: airflow_avg_indoor_temp
@@ -305,6 +318,17 @@ climate:
         data:
           value: "{{ temperature }}"
 
+    # Extra attributes: expose related sensors/inputs not covered by standard climate properties
+    attributes:
+      outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
+      outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
+      indoor_dew: "{{ states('sensor.airflow_min_indoor_dew_5min') | float(none) }}"
+      free_cooling_available: "{{ is_state('binary_sensor.airflow_free_cooling_available', 'on') }}"
+      min_dew_diff: "{{ states('input_number.airflow_min_dew_diff') | float(none) }}"
+      min_temp_diff: "{{ states('input_number.airflow_min_temp_diff') | float(none) }}"
+      heating_cooling_indicator: "{{ states('sensor.heating_cooling_indicator') }}"
+      outdoor_temp_48h_mean: "{{ states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(none) }}"
+
 # --- AUTOMATION ---
 automation:
   # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
@@ -449,4 +473,4 @@ group:
       - sensor.airflow_avg_indoor_humidity
       - sensor.airflow_avg_indoor_humidity_5min
       # Automation
-      - automation.airflow_cooling_set_temperature_profile
+      - automation.airflow_set_temperature_profile
