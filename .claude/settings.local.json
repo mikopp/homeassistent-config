@@ -12,7 +12,15 @@
       "mcp__ha-mcp__ha_get_states",
       "WebSearch",
       "mcp__ha-mcp__ha_config_get_label",
-      "mcp__ha-mcp__ha_list_services"
+      "mcp__ha-mcp__ha_list_services",
+      "mcp__ha-mcp__ha_get_automation_traces",
+      "mcp__ha-mcp__ha_config_list_groups",
+      "mcp__ha-mcp__ha_get_logs",
+      "mcp__ha-mcp__ha_get_helper_schema",
+      "mcp__ha-mcp__ha_config_get_category",
+      "mcp__ha-mcp__ha_eval_template",
+      "Bash(gh api *)",
+      "Bash(Get-Content *)"
     ]
   }
 }

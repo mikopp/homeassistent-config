@@ -1020,15 +1020,18 @@ automation:
                   entity_id: script.pergola_exit_to_normal
 
           # ── PROTECTED STATE GUARD ─────────────────────────────────────────────────
-          # Current state is a protected safety state (frost, rain, or rain_stopped)
-          # and none of the transition conditions above matched (e.g. a time_pattern
-          # fired while indicators are still active). Do nothing — these states are
-          # only exited by their explicit exit conditions above.
+          # Current state is a protected safety state and none of the transition
+          # conditions above matched (e.g. a time_pattern fired while indicators
+          # are still active). Do nothing — these states are only exited by their
+          # explicit exit conditions above.
+          # user_override is included here: without it, a periodic time_pattern or
+          # lock-originator state update would fall through to the default branch,
+          # call evaluate_state, and silently replace user_override with a sun state.
           - conditions:
               - condition: template
                 value_template: >
                   {{ states('input_select.pergola_automation_state') in
-                     ['frost', 'rain', 'rain_stopped'] }}
+                     ['frost', 'rain', 'rain_stopped', 'user_override'] }}
             sequence: []
 
         # ── DEFAULT: delegate to evaluate_state (rules 5–8) ───────────────────────
