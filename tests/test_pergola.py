@@ -7,8 +7,6 @@ apply test-specific overrides, trigger the relevant automation, and assert outco
 Automation entity IDs come from the `id:` field in packages/pergola.yaml.
 """
 
-from datetime import timedelta
-
 import pytest
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
@@ -68,6 +66,13 @@ def test_automation_disabled(home_assistant: HomeAssistant, midday_sun: None) ->
     """Master switch off: script gate suppresses write → effective_slat stays at seeded 0."""
     home_assistant.call_action("input_boolean", "turn_off",
                                {"entity_id": "input_boolean.pergola_automatic_enabled"})
+    # midday_sun fixture may have triggered cover_response during setup (time_pattern fires
+    # on the clock jump) and written 13.0 to last_set_slat_angle. Reset explicitly now that
+    # the gate is closed so the starting value is deterministic.
+    home_assistant.call_action("input_number", "set_value", {
+        "entity_id": "input_number.pergola_last_set_slat_angle",
+        "value": 0,
+    })
     home_assistant.set_state("sensor.pergola_effective_sun_angle", "67.9",
                              {"unit_of_measurement": "°"})
     home_assistant.call_action("automation", "trigger", {
@@ -84,21 +89,10 @@ def test_automation_disabled(home_assistant: HomeAssistant, midday_sun: None) ->
 # which state_manager calls asynchronously when rules 1–4 do not match.
 
 
-def test_not_enough_sun(home_assistant: HomeAssistant, time_machine: TimeMachine) -> None:
+def test_not_enough_sun(home_assistant: HomeAssistant, low_elevation_sun: None) -> None:
     """evaluate_state Rule 5: elevation < min_sun_elevation=10° → no_sun_behind_house → slat=90."""
-    # Jump to 15 min after sunrise — natural elevation ~3–5° (well below min of 10).
-    # time_machine is session-scoped; advance_to_preset always goes to the NEXT sunrise
-    # from wherever the clock currently is, regardless of which test ran before.
-    time_machine.advance_to_preset("sunrise", offset=timedelta(minutes=15))
-    # Seed to speed up initial state; integration recomputes to match the fake time.
-    home_assistant.set_state("sun.sun", "above_horizon", {"elevation": 5, "azimuth": 90})
-    # Verify the sun integration settled to a low elevation before triggering.
-    home_assistant.assert_entity_state(
-        "sun.sun",
-        expected_state="above_horizon",
-        expected_attributes={"elevation": lambda e: float(e) < 10},
-        timeout=10,
-    )
+    # low_elevation_sun pins the clock to June 21 04:00 UTC so the sun integration
+    # computes elevation ≈ 3° — stable across runs. Fixture asserts it settled before here.
     # Keep sun_shining=on so Rule 6 (not_enough_sun) does not compete with Rule 5.
     home_assistant.set_state("binary_sensor.pergola_sun_shining", "on", {})
     home_assistant.call_action("input_select", "select_option", {
@@ -114,8 +108,13 @@ def test_not_enough_sun(home_assistant: HomeAssistant, time_machine: TimeMachine
         "entity_id": "automation.pergola_state_manager",
         "skip_condition": True,
     })
-    # Rule 5 → no_sun_behind_house → cover_response fires on state change → slat = 90.
-    # cover_response no_sun_behind_house branch has no deadband, so movement is unconditional.
+    # state_manager → Rule 5 → sets state to no_sun_behind_house.
+    # Explicitly trigger cover_response (automations do not fire automatically in harness).
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": "automation.pergola_cover_response",
+        "skip_condition": True,
+    })
+    # no_sun_behind_house branch has no deadband → unconditional move to 90°.
     home_assistant.assert_entity_state("sensor.pergola_effective_slat_angle", "90.0", timeout=10)
 
 

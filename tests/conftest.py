@@ -113,6 +113,24 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
 
 
 @pytest.fixture
+def low_elevation_sun(home_assistant: HomeAssistant, time_machine: TimeMachine) -> None:
+    """Jump to June 21 at 04:00 UTC — sun just above horizon, elevation ~3° (below min_sun_elevation=10°).
+
+    Linz (48.3°N): June 21 sunrise ≈ 03:47 UTC; at 04:00 UTC elevation ≈ 3°, azimuth ≈ 55°.
+    Mirrors midday_sun: pin clock so the sun integration computes a stable low elevation,
+    then assert the integration settled before the test proceeds.
+    """
+    time_machine.jump_to_next(month="Jun", day_of_month=21, hour=4, minute=0, second=0)
+    home_assistant.set_state("sun.sun", "above_horizon", {"elevation": 3, "azimuth": 55})
+    home_assistant.assert_entity_state(
+        "sun.sun",
+        expected_state="above_horizon",
+        expected_attributes={"elevation": lambda e: float(e) < 10},
+        timeout=10,
+    )
+
+
+@pytest.fixture
 def midday_sun(home_assistant: HomeAssistant, time_machine: TimeMachine) -> None:
     """Jump to June 21 at 10:00 UTC — sun above_horizon, elevation ~45°, azimuth ~150°.
 
