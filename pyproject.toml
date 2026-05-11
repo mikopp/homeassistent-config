@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# HOME_ASSISTANT_CONFIG_ROOT must be set to the repo root so the harness can find
+# configuration.yaml. Set it in the CI workflow env or locally before running pytest:
+#   export HOME_ASSISTANT_CONFIG_ROOT=$(pwd)
+addopts = "-v"
+testpaths = ["tests"]

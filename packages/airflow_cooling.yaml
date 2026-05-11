@@ -319,15 +319,17 @@ climate:
           value: "{{ temperature }}"
 
     # Extra attributes: expose related sensors/inputs not covered by standard climate properties
-    attributes:
-      outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
-      outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
-      indoor_dew: "{{ states('sensor.airflow_min_indoor_dew_5min') | float(none) }}"
-      free_cooling_available: "{{ is_state('binary_sensor.airflow_free_cooling_available', 'on') }}"
-      min_dew_diff: "{{ states('input_number.airflow_min_dew_diff') | float(none) }}"
-      min_temp_diff: "{{ states('input_number.airflow_min_temp_diff') | float(none) }}"
-      heating_cooling_indicator: "{{ states('sensor.heating_cooling_indicator') }}"
-      outdoor_temp_48h_mean: "{{ states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(none) }}"
+    # needs https://github.com/jcwillox/hass-template-climate/pull/134/changes
+    # TODO: we will fork and fix it.
+ #   attributes:
+ #     outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
+ #     outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
+ #     indoor_dew: "{{ states('sensor.airflow_min_indoor_dew_5min') | float(none) }}"
+ #     free_cooling_available: "{{ is_state('binary_sensor.airflow_free_cooling_available', 'on') }}"
+ #     min_dew_diff: "{{ states('input_number.airflow_min_dew_diff') | float(none) }}"
+ #     min_temp_diff: "{{ states('input_number.airflow_min_temp_diff') | float(none) }}"
+ #     heating_cooling_indicator: "{{ states('sensor.heating_cooling_indicator') }}"
+ #     outdoor_temp_48h_mean: "{{ states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(none) }}"
 
 # --- AUTOMATION ---
 automation:
