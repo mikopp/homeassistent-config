@@ -57,11 +57,15 @@ scenarios:
         input_boolean.pergola_cooling_optimized: "off"
         input_select.pergola_automation_state: "sun_automatik_heating"
       states:
-        sun.sun:
-          state: "above_horizon"
+        # Seed effective_sun_angle directly instead of sun.sun: the sun integration
+        # competes to overwrite sun.sun causing the template chain to compute
+        # effective_sun_angle as unavailable (nighttime CI). Seeding the template
+        # sensor directly avoids the race — no dependency changes in this step mean
+        # the template engine has no trigger to recompute and the value sticks.
+        sensor.pergola_effective_sun_angle:
+          state: "67.9"
           attributes:
-            elevation: 45
-            azimuth: 180
+            unit_of_measurement: "°"
     expect:
       states:
         # Heating formula for these inputs: elevation=45, azimuth=180, wall_azimuth=204.
