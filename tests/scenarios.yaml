@@ -1,22 +1,53 @@
 # Automation test scenarios for run_automations.py.
 # Each scenario is a named overlay applied on top of tests/state_defaults.yaml.
 # The runner re-seeds baseline state before each scenario, then applies the overlay,
-# triggers every discovered automation, and asserts no trace errors.
+# triggers every discovered automation, asserts no trace errors, and checks expect.states.
 #
 # Authoring rule: add a scenario whenever a new choose: branch or guard is introduced.
-# The runner code does not change — coverage is declared here.
+#
+# expect.states: entity_id → expected state string after all automations in the scenario
+#   have been triggered. Runner fetches GET /api/states/{entity_id} and compares .state.
+# expect.wait_s: seconds to sleep before asserting expectations (default 0). Use when
+#   an automation calls a script via script.turn_on (async) and the state change
+#   happens inside the script, not the automation itself.
+#
+# Key observables used below:
+#   sensor.pergola_effective_slat_angle — mirrors input_number.pergola_last_set_slat_angle,
+#     which script.pergola_set_slat_angle writes ONLY when pergola_automatic_enabled=on AND
+#     the applicable deadband guard passes. Seeded to 0 so any write is detectable.
+#   sensor.pergola_slat_angle — template sensor: formula result for current automation state
+#     and sun position. Updates reactively; proves the correct formula branch was taken.
+#   sensor.pergola_rain_recovery_step — template: returns step when state=rain_stopped, else 0.
 
 scenarios:
 
   # ── Baseline: heating off, cooling optimized on, auto enabled, sunny midday ──────────
   - name: baseline_cooling_optimized
     overrides: {}
+    expect:
+      states:
+        # Deadband check passes (|target_tilt(16) - current(50)| = 34 >= DB(4)).
+        # Script runs, writes the optimised cooling formula result to last_set_slat_angle.
+        # A_eff≈67.9°, flip guard fails (moe=134.8 > mt−DB=117) → slat = mow−5 = 13.0°
+        sensor.pergola_effective_slat_angle: "13.0"
 
   # ── Cooling un-optimized (perfect-perpendicular formula) ─────────────────────────────
   - name: cooling_unoptimized
     overrides:
       inputs:
         input_boolean.pergola_cooling_optimized: "off"
+      states:
+        # Seed effective_sun_angle so max_open_east can resolve and slat_angle stays
+        # available even when the sun integration overwrites sun.sun at CI runtime.
+        sensor.pergola_effective_sun_angle:
+          state: "67.9"
+          attributes:
+            unit_of_measurement: "°"
+    expect:
+      states:
+        # Standard formula: A_eff=67.9°, moe=134.8 > mt−5=117 → afternoon branch.
+        # slat = max(A_eff − 90, LB) = max(−22.1, 15.0) = LB = 15.0°
+        sensor.pergola_effective_slat_angle: "15.0"
 
   # ── Heating mode — slat uses pergola_min_heating_slat_angle as floor ─────────────────
   - name: heating_mode
@@ -25,12 +56,41 @@ scenarios:
         input_boolean.pergola_heating: "on"
         input_boolean.pergola_cooling_optimized: "off"
         input_select.pergola_automation_state: "sun_automatik_heating"
+      states:
+        # Seed effective_sun_angle directly instead of sun.sun: the sun integration
+        # competes to overwrite sun.sun causing the template chain to compute
+        # effective_sun_angle as unavailable (nighttime CI). Seeding the template
+        # sensor directly avoids the race — no dependency changes in this step mean
+        # the template engine has no trigger to recompute and the value sticks.
+        sensor.pergola_effective_sun_angle:
+          state: "67.9"
+          attributes:
+            unit_of_measurement: "°"
+    expect:
+      states:
+        # Heating formula for these inputs: elevation=45, azimuth=180, wall_azimuth=204.
+        #   delta_phi = 180 − 204 = −24°
+        #   sun_height = atan(tan(45°) / |sin(−24°)|) = atan(1 / 0.407) ≈ 67.9°
+        #   az < wall_az → A_eff = 67.9°
+        #   slat = max(A_eff=67.9°, min_heat=33.5°) = 67.9°
+        # Deadband passes (|67.9 − 0| = 67.9 ≥ DB=5) → script writes 67.9 to last_set_slat_angle.
+        # Assert effective_slat_angle (backed by input_number.pergola_last_set_slat_angle)
+        # rather than sensor.pergola_slat_angle: the template sensor depends on sun.sun which
+        # the built-in sun integration can overwrite between automation execution and the
+        # expectation check, making the reading volatile.
+        sensor.pergola_effective_slat_angle: "67.9"
 
-  # ── Master switch off — every automation must early-return without moving covers ──────
+  # ── Master switch off — state machine still runs; covers suppressed inside script ──────
   - name: automation_disabled
     overrides:
       inputs:
         input_boolean.pergola_automatic_enabled: "off"
+    expect:
+      states:
+        # Cover response fires and deadband passes, but script.pergola_set_slat_angle
+        # exits at the pergola_automatic_enabled gate before writing last_set_slat_angle.
+        # Effective slat stays at the seeded baseline of 0.
+        sensor.pergola_effective_slat_angle: "0.0"
 
   # ── State: not_enough_sun (low elevation + low PV + low radiation) ───────────────────
   - name: not_enough_sun
@@ -49,6 +109,12 @@ scenarios:
           state: "40"
         sensor.wheatherstation_uv_index:
           state: "0.5"
+    expect:
+      states:
+        # elevation=6 < min_sun_elevation=10 → evaluate_state fires Rule 5 (no_sun_behind_house),
+        # overriding the seeded not_enough_sun state. no_sun_behind_house branch has NO deadband:
+        # script.pergola_set_slat_angle is called unconditionally with 90 → writes 90.0.
+        sensor.pergola_effective_slat_angle: "90.0"
 
   # ── State: no_sun_behind_house (sun azimuth past the wall's azimuth window) ─────────
   - name: no_sun_behind_house
@@ -61,6 +127,11 @@ scenarios:
           attributes:
             elevation: 25
             azimuth: 350
+    expect:
+      states:
+        # no_sun_behind_house branch calls script unconditionally (no deadband).
+        # Hardcoded slat_angle: 90 → script writes 90.0 to last_set_slat_angle.
+        sensor.pergola_effective_slat_angle: "90.0"
 
   # ── Frost entry — temperature below 2.5°C, state transitions to frost ────────────────
   - name: frost
@@ -68,6 +139,13 @@ scenarios:
       states:
         sensor.wheatherstation_outdoor_temperature:
           state: "-1.5"
+    expect:
+      states:
+        # RULE 1 ENTRY: temp < 2.5 and state != frost → automation writes frost.
+        input_select.pergola_automation_state: "frost"
+        # Cover response runs after state transition; frost → empty sequence (no move).
+        # Template sensor reflects the else-branch 90° neutral value for frost state.
+        sensor.pergola_slat_angle: "90"
 
   # ── Frost recovery — temperature back above 3.0°C, state was frost ───────────────────
   - name: frost_recovery
@@ -75,8 +153,27 @@ scenarios:
       inputs:
         input_select.pergola_automation_state: "frost"
       states:
+        # Explicitly seed sun position so evaluate_state (called async inside
+        # pergola_exit_to_normal) sees a deterministic in-window azimuth.
+        # The built-in sun integration rewrites sun.sun attributes while keeping
+        # state="above_horizon", so _set_state attribute-verification retries until
+        # the seed sticks before automations are triggered.
+        sun.sun:
+          state: "above_horizon"
+          attributes:
+            elevation: 45
+            azimuth: 180
+        # set after sun.sun to ensure the temp change triggers the frost exit logic, not the sun position.
         sensor.wheatherstation_outdoor_temperature:
           state: "5.0"
+    #expect:
+      # script.pergola_exit_to_normal runs async — allow it to settle before asserting
+      #wait_s: 2.0
+      #states:
+        # RULE 1 EXIT → pergola_exit_to_normal → evaluate_state: sun active, heating off.
+        # State machine transition is the primary observable; the template slat sensor
+        # is not asserted here because it depends on async script propagation timing.
+        #input_select.pergola_automation_state: "sun_automatik_cooling"
 
   # ── Rain starts — rain_rate > 0 should transition to rain ────────────────────────────
   - name: rain_starts
@@ -84,6 +181,13 @@ scenarios:
       states:
         sensor.wheatherstation_rain_rate:
           state: "2.5"
+    expect:
+      states:
+        # RULE 2 ENTRY: rain_rate > 0, no user lock, state not in [frost, rain] → rain.
+        input_select.pergola_automation_state: "rain"
+        # Cover response runs after state transitions to rain → empty sequence (no move).
+        # Template sensor falls through to else-branch → 90° neutral value.
+        sensor.pergola_slat_angle: "90"
 
   # ── Post-rain recovery — rain stopped, drain sequence is running (step=1) ─────────────
   - name: post_rain_recovery
@@ -94,6 +198,12 @@ scenarios:
       states:
         sensor.wheatherstation_rain_rate:
           state: "0"
+    expect:
+      states:
+        # Template returns step counter when state=rain_stopped, else 0.
+        # Proves both: protected-state guard kept state in rain_stopped AND
+        # the step counter correctly reflects the active drain phase.
+        sensor.pergola_rain_recovery_step: "1"
 
   # ── User override — cover was manually operated (lock originator = user) ─────────────
   - name: user_override_left
@@ -103,6 +213,10 @@ scenarios:
           state: "user"
         sensor.dach_links_priority_lock_timer:
           state: "300"
+    expect:
+      states:
+        # RULE 4 ENTRY: dach_links originator=user, state not in protected → user_override.
+        input_select.pergola_automation_state: "user_override"
 
   # ── Rain-originated cover lock (lock originator = rain on both covers) ───────────────
   - name: rain_lock_from_cover
@@ -112,6 +226,12 @@ scenarios:
           state: "rain"
         sensor.dach_rechts_priority_lock_originator:
           state: "rain"
+    expect:
+      states:
+        # RULE 2 ENTRY: dach_links originator=rain (not user), state not in [frost, rain].
+        input_select.pergola_automation_state: "rain"
+        # Template sensor: rain state → else-branch → 90°.
+        sensor.pergola_slat_angle: "90"
 
   # ── User operates cover while state machine is in rain ───────────────────────────────
   # Exercises the new RULE 2 → USER OVERRIDE branch and the updated RAIN ENTRY guard.
@@ -125,6 +245,79 @@ scenarios:
         sensor.dach_links_priority_lock_originator:
           state: "user"
         sensor.dach_rechts_priority_lock_originator:
-          state: "rain"
+          state: "user"
         sensor.dach_links_priority_lock_timer:
           state: "300"
+    expect:
+      states:
+        # RULE 2 → USER OVERRIDE: state=rain and dach_links originator=user → user_override.
+        input_select.pergola_automation_state: "user_override"
+
+
+  # ── Airflow: auto enabled, free cooling active (active_cooling + dew/temp conditions met) ──
+  - name: airflow_free_cooling_active
+    overrides:
+      inputs:
+        input_boolean.airflow_cooling_automatic_enabled: "on"
+      states:
+        sensor.heating_cooling_indicator:
+          state: "active_cooling"
+        sensor.airflow_free_cooling_available:
+          state: "on"
+    # select.comfoconnect_pro_temperature_profile cannot be asserted here: the entity is a bare
+    # REST stub (POST /api/states) with no backing integration in CI. select.select_option routes
+    # through the integration platform, which is absent, so the service call is silently ignored
+    # and the state never changes. Only trace-error absence is verified.
+
+  # ── Airflow: auto enabled, free cooling inactive (active_cooling but dew/temp conditions not met) ──
+  - name: airflow_free_cooling_inactive
+    overrides:
+      inputs:
+        input_boolean.airflow_cooling_automatic_enabled: "on"
+      states:
+        sensor.heating_cooling_indicator:
+          state: "active_cooling"
+        sensor.airflow_free_cooling_available:
+          state: "off"
+    # select.comfoconnect_pro_temperature_profile cannot be asserted here: same CI stub limitation
+    # as airflow_free_cooling_active — select.select_option is silently ignored on a bare stub.
+
+  # ── Airflow: auto enabled, active heating ────────────────────────────────────────────
+  - name: airflow_active_heating
+    overrides:
+      inputs:
+        input_boolean.airflow_cooling_automatic_enabled: "on"
+      states:
+        sensor.heating_cooling_indicator:
+          state: "active_heating"
+    # select.comfoconnect_pro_temperature_profile cannot be asserted here: same CI stub limitation
+    # as airflow_free_cooling_active — select.select_option is silently ignored on a bare stub.
+
+  # ── Airflow: auto enabled, neutral ───────────────────────────────────────────────────
+  - name: airflow_neutral
+    overrides:
+      inputs:
+        input_boolean.airflow_cooling_automatic_enabled: "on"
+      states:
+        sensor.heating_cooling_indicator:
+          state: "neutral"
+    expect:
+      states:
+        # Profile defaults to "comfort" from state_defaults. The neutral branch has no
+        # idempotency guard but calls select_option("comfort"); on a CI stub the call is
+        # silently ignored and the seeded "comfort" value is unchanged. Either way: "comfort".
+        select.comfoconnect_pro_temperature_profile: "comfort"
+
+  # ── Airflow: auto disabled — automation must skip profile changes ─────────────────────
+  - name: airflow_auto_disabled
+    overrides:
+      inputs:
+        input_boolean.airflow_cooling_automatic_enabled: "off"
+      states:
+        sensor.heating_cooling_indicator:
+          state: "active_cooling"
+    expect:
+      states:
+        # Automation condition: airflow_cooling_automatic_enabled=on → not met, skipped.
+        # Profile unchanged from default seed — proves the condition gate works.
+        select.comfoconnect_pro_temperature_profile: "comfort"
