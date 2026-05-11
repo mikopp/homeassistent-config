@@ -369,7 +369,7 @@ template:
         availability: >
           {% set s = states('input_select.pergola_automation_state') %}
           {{ s not in ['unavailable', 'unknown']
-             and (s != 'sun_automatik_cooling'
+             and (s == 'sun_automatik_heating'
                   or states('sensor.pergola_max_open_east_morning_cooling_angle') not in ['unavailable', 'unknown']) }}
         state: >
           {% set s  = states('input_select.pergola_automation_state') %}

@@ -36,6 +36,13 @@ scenarios:
     overrides:
       inputs:
         input_boolean.pergola_cooling_optimized: "off"
+      states:
+        # Seed effective_sun_angle so max_open_east can resolve and slat_angle stays
+        # available even when the sun integration overwrites sun.sun at CI runtime.
+        sensor.pergola_effective_sun_angle:
+          state: "67.9"
+          attributes:
+            unit_of_measurement: "°"
     expect:
       states:
         # Standard formula: A_eff=67.9°, moe=134.8 > mt−5=117 → afternoon branch.
