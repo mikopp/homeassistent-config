@@ -1,9 +1,0 @@
-# Automations excluded from CI scenario testing.
-#
-# Each entry is matched as a case-insensitive substring of the automation
-# entity_id (e.g. "automation.send_lock_originator_to_loxone").
-# Add any automation that calls external services unavailable in CI
-# (REST endpoints, MQTT brokers, cloud APIs, etc.).
-
-exclude:
-  - loxone
