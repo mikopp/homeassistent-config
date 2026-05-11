@@ -320,7 +320,7 @@ climate:
 
     # Extra attributes: expose related sensors/inputs not covered by standard climate properties
     # needs https://github.com/jcwillox/hass-template-climate/pull/134/changes
-    # TODO: we will fork and fix it. 
+    # TODO: we will fork and fix it.
  #   attributes:
  #     outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
  #     outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
