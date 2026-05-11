@@ -5,8 +5,11 @@ The ha_integration_test_harness plugin provides the `home_assistant` and `time_m
 session-scoped fixtures automatically via its installed conftest.
 """
 
+import json
+
 import pytest
 import requests
+import websocket
 from datetime import timedelta
 
 from ha_integration_test_harness import HomeAssistant, TimeMachine
@@ -19,20 +22,27 @@ from ha_integration_test_harness import HomeAssistant, TimeMachine
 def set_location(home_assistant: HomeAssistant) -> None:
     """Set HA core location to Linz, Austria for reproducible sun calculations.
 
-    Without an explicit location the harness onboarding may default to 0,0 or some
-    arbitrary position, making sun elevation/azimuth non-deterministic across runs.
-    POST /api/config/core/update fires EVENT_CORE_CONFIG_UPDATE so the sun integration
-    recomputes with the new coordinates immediately.
+    Uses the WebSocket API (config/update) because HA does not expose location
+    update as a REST endpoint — POST /api/config/core/update returns 404.
     """
-    requests.post(
-        f"{home_assistant._base_url}/api/config/core/update",
-        headers={
-            "Authorization": f"Bearer {home_assistant._access_token}",
-            "Content-Type": "application/json",
-        },
-        json={"latitude": 48.3069, "longitude": 14.2858, "elevation": 266},
-        timeout=10,
-    ).raise_for_status()
+    ws_url = home_assistant._base_url.replace("http://", "ws://") + "/api/websocket"
+    ws = websocket.create_connection(ws_url, timeout=10)
+    try:
+        ws.recv()  # auth_required
+        ws.send(json.dumps({"type": "auth", "access_token": home_assistant._access_token}))
+        auth_result = json.loads(ws.recv())
+        assert auth_result.get("type") == "auth_ok", f"WebSocket auth failed: {auth_result}"
+        ws.send(json.dumps({
+            "id": 1,
+            "type": "config/update",
+            "latitude": 48.3069,
+            "longitude": 14.2858,
+            "elevation": 266,
+        }))
+        result = json.loads(ws.recv())
+        assert result.get("success"), f"config/update failed: {result}"
+    finally:
+        ws.close()
     # Wait for the sun integration to recompute and emit a valid state.
     home_assistant.assert_entity_state(
         "sun.sun", lambda s: s in ("above_horizon", "below_horizon"), timeout=15
