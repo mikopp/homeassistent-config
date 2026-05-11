@@ -369,8 +369,10 @@ template:
         availability: >
           {% set s = states('input_select.pergola_automation_state') %}
           {{ s not in ['unavailable', 'unknown']
-             and (s == 'sun_automatik_heating'
-                  or states('sensor.pergola_max_open_east_morning_cooling_angle') not in ['unavailable', 'unknown']) }}
+             and (s not in ['sun_automatik_cooling', 'sun_automatik_heating']
+                  or (states('sensor.pergola_effective_sun_angle') not in ['unavailable', 'unknown']
+                      and (s == 'sun_automatik_heating'
+                           or states('sensor.pergola_max_open_east_morning_cooling_angle') not in ['unavailable', 'unknown']))) }}
         state: >
           {% set s  = states('input_select.pergola_automation_state') %}
           {% set mt = states('input_number.pergola_max_tilt_angle') | float(122) %}
@@ -1226,6 +1228,14 @@ automation:
                   {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
                   {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
                   {{ ((target - current) | abs >= DB) or (target >= 100) }}
+              # Guard: only move if the formula sensor is available. If the sun
+              # integration has reset sun.sun to an unusable position, slat_angle
+              # becomes unavailable (see availability template above) and we skip
+              # rather than issuing a fallback 90° command that would overwrite a
+              # previously correct value.
+              - condition: template
+                value_template: >
+                  {{ states('sensor.pergola_slat_angle') not in ['unavailable', 'unknown'] }}
               # Pass formula result from sensor to the authoritative movement script.
               # sensor.pergola_slat_angle dispatches to the correct cooling or heating
               # formula based on the current automation state.
