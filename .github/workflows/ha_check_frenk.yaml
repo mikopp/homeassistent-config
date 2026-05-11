@@ -56,6 +56,10 @@ jobs:
           if [ ! -f secrets.yaml ] && [ -f fakesecrets.yaml ]; then
             cp fakesecrets.yaml secrets.yaml
           fi
+          # Inject location into the homeassistant: block so the sun integration
+          # uses Linz, Austria coordinates. Done here (not committed) so the repo
+          # stays clean. Applies to both check_config and the harness HA instance.
+          sed -i '/^homeassistant:/a\  latitude: 48.3069\n  longitude: 14.2858\n  elevation: 266' configuration.yaml
 
       # ── 5. Install custom component dependencies ─────────────────────────────
       #    Downloads components listed in tests/custom_components.yaml into
