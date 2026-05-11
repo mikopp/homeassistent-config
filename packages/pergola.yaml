@@ -1209,6 +1209,15 @@ automation:
                   {{ states('input_select.pergola_automation_state') in
                      ['sun_automatik_cooling', 'sun_automatik_heating'] }}
             sequence:
+              # Allow the 4-hop template-sensor cascade to settle after a state
+              # transition (state → effective_sun_angle → max_open_east → slat_angle
+              # → tilt_position). Without this delay, cover_response fires on the
+              # state-change event before the sensors have propagated, so stale values
+              # (90°/74 from the previous state) either cause a false deadband pass
+              # that moves covers to 90°, or a false deadband match (74 = 74) that
+              # silently suppresses the move to the correct cooling/heating angle.
+              - delay:
+                  milliseconds: 500
               # Configurable deadband guard in tilt_position units — compare
               # sensor.pergola_tilt_position (target) against current cover position.
               # Prevents motor churn as the sun creeps; identical for cooling and heating.
