@@ -1,0 +1,58 @@
+title: Ventilation
+views:
+  - title: Overview
+    cards:
+      - type: thermostat
+        entity: climate.airflow_climate
+        name: Ventilation Climate
+
+      - type: entities
+        title: Mode
+        entities:
+          - entity: select.comfoconnect_pro_temperature_profile
+          - entity: input_boolean.airflow_cooling_automatic_enabled
+          - entity: binary_sensor.airflow_free_cooling_available
+          - entity: sensor.comfoconnect_pro_supply_fan_volume
+
+      - type: gauge
+        entity: sensor.airflow_bypass_estimation
+        name: Bypass
+        min: 0
+        max: 100
+        needle: true
+        severity:
+          green: 0
+          yellow: 30
+          red: 75
+
+      - type: entities
+        title: Air Streams
+        entities:
+          - type: section
+            label: Outdoor Air
+          - entity: sensor.airflow_outdoor_temp_5min
+          - entity: sensor.airflow_outdoor_dew_5min
+          - type: section
+            label: Supply Air
+          - entity: sensor.airflow_supply_air_temp_5min
+          - entity: sensor.airflow_supply_air_humidity_5min
+          - type: section
+            label: Extract Air
+          - entity: sensor.airflow_extract_air_temp_5min
+          - entity: sensor.airflow_extract_air_humidity_5min
+          - type: section
+            label: Indoor Average
+          - entity: sensor.airflow_avg_indoor_temp_5min
+          - entity: sensor.airflow_avg_indoor_humidity_5min
+
+      - type: entities
+        title: Settings
+        entities:
+          - entity: input_number.airflow_bypass_efficiency_max
+          - entity: input_number.airflow_bypass_efficiency_min
+          - entity: input_number.airflow_cooling_target_temperature
+          - entity: input_number.airflow_min_dew_diff
+          - entity: input_number.airflow_min_temp_diff
+
+      - type: tile
+        entity: automation.airflow_cooling_set_temperature_profile
