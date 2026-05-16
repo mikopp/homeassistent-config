@@ -63,6 +63,18 @@ sensor:
       - filter: time_throttle
         window_size: "00:05"
 
+  # Smooth outdoor humidity from ComfoConnect
+  - platform: filter
+    unique_id: airflow_outdoor_air_humidity_5min
+    name: "Airflow Outdoor Air Humidity 5min"
+    entity_id: sensor.comfoconnect_pro_outdoor_air_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
+      - filter: time_throttle
+        window_size: "00:05"
+
   # Smooth supply air temperature from ComfoConnect
   - platform: filter
     unique_id: airflow_supply_air_temp_5min
@@ -183,22 +195,20 @@ template:
         icon: mdi:valve
         availability: >
           {{ states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_outdoor_air_humidity_5min') not in ['unavailable', 'unknown'] and
              states('sensor.airflow_supply_air_temp_5min') not in ['unavailable', 'unknown'] and
              states('sensor.airflow_supply_air_humidity_5min') not in ['unavailable', 'unknown'] and
              states('sensor.airflow_extract_air_temp_5min') not in ['unavailable', 'unknown'] and
              states('sensor.airflow_extract_air_humidity_5min') not in ['unavailable', 'unknown'] }}
         state: >
           {% set T_oa  = states('sensor.airflow_outdoor_temp_5min') | float %}
-          {% set T_dew = states('sensor.airflow_outdoor_dew_5min') | float %}
+          {% set RH_oa = states('sensor.airflow_outdoor_air_humidity_5min') | float %}
           {% set T_sa  = states('sensor.airflow_supply_air_temp_5min') | float %}
           {% set RH_sa = states('sensor.airflow_supply_air_humidity_5min') | float %}
           {% set T_ra  = states('sensor.airflow_extract_air_temp_5min') | float %}
           {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
           {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float(0.85) %}
           {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float(0.05) %}
-          {# OA: derive RH from dewpoint, then same 4-step formula as SA and RA #}
-          {% set RH_oa = 100.0 * e ** (17.27 * T_dew / (T_dew + 237.3) - 17.27 * T_oa / (T_oa + 237.3)) %}
           {# OA enthalpy #}
           {% set ps_oa = 0.61078 * e ** (17.27 * T_oa / (T_oa + 237.3)) %}
           {% set pv_oa = ps_oa * RH_oa / 100 %}
@@ -573,6 +583,7 @@ group:
       - sensor.airflow_avg_indoor_temp_5min
       - sensor.airflow_outdoor_dew_5min
       - sensor.airflow_outdoor_temp_5min
+      - sensor.airflow_outdoor_air_humidity_5min
       - sensor.airflow_supply_air_temp_5min
       - sensor.airflow_supply_air_humidity_5min
       - sensor.airflow_extract_air_temp_5min

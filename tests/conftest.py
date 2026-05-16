@@ -96,6 +96,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_dewpoint", "8.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.comfoconnect_pro_outdoor_air_humidity", "61",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
     ha.set_state("sensor.comfoconnect_pro_supply_air_temperature", "19.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_supply_air_humidity", "45",
@@ -107,6 +109,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.airflow_outdoor_dew_5min", "8.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.airflow_outdoor_air_humidity_5min", "61.0",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
     ha.set_state("sensor.airflow_supply_air_temp_5min", "19.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.airflow_supply_air_humidity_5min", "45.0",

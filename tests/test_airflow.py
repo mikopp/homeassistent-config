@@ -111,7 +111,7 @@ def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
     hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
     # Set outdoor and extract to same temperature/humidity so delta is negligible
     home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "20.0", temp_attrs)
-    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "10.7", temp_attrs)
+    home_assistant.set_state("sensor.airflow_outdoor_air_humidity_5min", "55.0", hum_attrs)
     home_assistant.set_state("sensor.airflow_extract_air_temp_5min", "20.0", temp_attrs)
     home_assistant.set_state("sensor.airflow_extract_air_humidity_5min", "55.0", hum_attrs)
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation",
