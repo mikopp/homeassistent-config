@@ -106,7 +106,11 @@ def test_bypass_clamped_hundred(home_assistant: HomeAssistant) -> None:
 
 
 def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
-    """Indoor ≈ outdoor conditions → |h_ra−h_oa|<0.5 → sensor unavailable."""
+    """Indoor ≈ outdoor conditions → |h_ra−h_oa|<0.5 → state template returns none → 'unknown'.
+
+    Sensor availability is True (all sources set), so HA uses 'unknown' rather than
+    'unavailable' when the state template itself returns none.
+    """
     temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
     hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
     # Set outdoor and extract to same temperature/humidity so delta is negligible
@@ -114,5 +118,4 @@ def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
     home_assistant.set_state("sensor.airflow_outdoor_air_humidity_5min", "55.0", hum_attrs)
     home_assistant.set_state("sensor.airflow_extract_air_temp_5min", "20.0", temp_attrs)
     home_assistant.set_state("sensor.airflow_extract_air_humidity_5min", "55.0", hum_attrs)
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation",
-                                       "unavailable", timeout=5)
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unknown", timeout=5)
