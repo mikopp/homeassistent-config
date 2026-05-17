@@ -43,7 +43,7 @@ sensor:
   - platform: filter
     unique_id: airflow_outdoor_dew_5min
     name: "Airflow Outdoor Dew 5min"
-    entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
+    entity_id: sensor.comfoconnect_pro_outdoor_air_dew_point
     filters:
       - filter: time_simple_moving_average
         window_size: "00:05"

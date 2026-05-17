@@ -51,4 +51,4 @@ action:
     data:
       input_name: "{{ trigger.to_state.object_id }}{% if attr_input | length > 0 %}.{{ attr_input }}{% endif %}"
       value: !input value_template
-mode: parallel
+mode: queued
