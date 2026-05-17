@@ -43,7 +43,7 @@ sensor:
   - platform: filter
     unique_id: airflow_outdoor_dew_5min
     name: "Airflow Outdoor Dew 5min"
-    entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
+    entity_id: sensor.comfoconnect_pro_outdoor_air_dew_point
     filters:
       - filter: time_simple_moving_average
         window_size: "00:05"
@@ -60,6 +60,66 @@ sensor:
       - filter: time_simple_moving_average
         window_size: "00:05"
         precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
+
+  # Smooth outdoor humidity from ComfoConnect
+  - platform: filter
+    unique_id: airflow_outdoor_air_humidity_5min
+    name: "Airflow Outdoor Air Humidity 5min"
+    entity_id: sensor.comfoconnect_pro_outdoor_air_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
+      - filter: time_throttle
+        window_size: "00:05"
+
+  # Smooth supply air temperature from ComfoConnect
+  - platform: filter
+    unique_id: airflow_supply_air_temp_5min
+    name: "Airflow Supply Air Temp 5min"
+    entity_id: sensor.comfoconnect_pro_supply_air_temperature
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
+
+  # Smooth supply air humidity from ComfoConnect
+  - platform: filter
+    unique_id: airflow_supply_air_humidity_5min
+    name: "Airflow Supply Air Humidity 5min"
+    entity_id: sensor.comfoconnect_pro_supply_air_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
+      - filter: time_throttle
+        window_size: "00:05"
+
+  # Smooth extract air temperature from ComfoConnect
+  - platform: filter
+    unique_id: airflow_extract_air_temp_5min
+    name: "Airflow Extract Air Temp 5min"
+    entity_id: sensor.comfoconnect_pro_extract_air_temperature
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 2
+      - filter: time_throttle
+        window_size: "00:05"
+
+  # Smooth extract air humidity from ComfoConnect
+  - platform: filter
+    unique_id: airflow_extract_air_humidity_5min
+    name: "Airflow Extract Air Humidity 5min"
+    entity_id: sensor.comfoconnect_pro_extract_air_humidity
+    filters:
+      - filter: time_simple_moving_average
+        window_size: "00:05"
+        precision: 1
       - filter: time_throttle
         window_size: "00:05"
 
@@ -85,7 +145,7 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count %}
           {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown'] }}
 
-      # Average dewpoint across all monitored indoor areas; falls back to Magnus formula from ComfoConnect extract air when no labeled entities exist
+      # Average dewpoint across all monitored indoor areas; falls back to ComfoConnect extract air dew point when no labeled entities exist
       - unique_id: airflow_min_indoor_dew
         name: "Airflow Avg Indoor Dew"
         unit_of_measurement: "°C"
@@ -97,22 +157,14 @@ template:
           {% if indoor_dews | count > 0 %}
             {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
           {% else %}
-            {% set T = states('sensor.comfoconnect_pro_extract_air_temperature') | float(20) %}
-            {% set RH = states('sensor.comfoconnect_pro_extract_air_humidity') | float(50) %}
-            {% set a = 17.625 %}
-            {% set b = 243.04 %}
-            {% set alpha = log(RH / 100) + a * T / (b + T) %}
-            {{ (b * alpha / (a - alpha)) | round(2) }}
+            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float(0) | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Dewpoint')
              | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or (
-               states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] and
-               states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown']
-             ) }}
+          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_dew_point') not in ['unavailable', 'unknown'] }}
 
-      # Average temperature across all monitored indoor areas
+      # Average temperature across all monitored indoor areas; falls back to ComfoConnect extract air temperature when no labeled entities exist
       - unique_id: airflow_avg_indoor_temp
         name: "Airflow Avg Indoor Temp"
         unit_of_measurement: "°C"
@@ -121,10 +173,64 @@ template:
         state: >
           {% set indoor_temps = label_entities('Indoor.Temperature')
             | map('states') | map('float', none) | reject('none') | list %}
-          {{ (indoor_temps | sum / indoor_temps | count) if indoor_temps | count > 0 else 0 }}
+          {% if indoor_temps | count > 0 %}
+            {{ (indoor_temps | sum / indoor_temps | count) | round(2) }}
+          {% else %}
+            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float(0) | round(2) }}
+          {% endif %}
         availability: >
-          {{ label_entities('Indoor.Temperature')
-             | map('states') | map('float', none) | reject('none') | list | count > 0 }}
+          {% set label_count = label_entities('Indoor.Temperature')
+             | map('states') | map('float', none) | reject('none') | list | count %}
+          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] }}
+
+      # Bypass percentage estimated from enthalpy efficiency, expressed in 15% steps.
+      # Returns unavailable when the indoor/outdoor enthalpy delta is too small to be meaningful.
+      - unique_id: airflow_bypass_estimation
+        name: "Airflow Bypass Estimation"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:valve
+        availability: >
+          {{ states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_outdoor_air_humidity_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_supply_air_temp_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_supply_air_humidity_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_extract_air_temp_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_extract_air_humidity_5min') not in ['unavailable', 'unknown'] }}
+        state: >
+          {% set T_oa  = states('sensor.airflow_outdoor_temp_5min') | float %}
+          {% set RH_oa = states('sensor.airflow_outdoor_air_humidity_5min') | float %}
+          {% set T_sa  = states('sensor.airflow_supply_air_temp_5min') | float %}
+          {% set RH_sa = states('sensor.airflow_supply_air_humidity_5min') | float %}
+          {% set T_ra  = states('sensor.airflow_extract_air_temp_5min') | float %}
+          {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
+          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float(0.85) %}
+          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float(0.05) %}
+          {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
+          {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
+          {# OA enthalpy #}
+          {% set ps_oa = 0.61078 * e ** (17.27 * T_oa / (T_oa + 237.3)) %}
+          {% set pv_oa = ps_oa * RH_oa / 100 %}
+          {% set w_oa  = 0.622 * pv_oa / (P_kpa - pv_oa) %}
+          {% set h_oa  = 1.006 * T_oa + w_oa * (2501 + 1.86 * T_oa) %}
+          {# SA enthalpy — identical structure #}
+          {% set ps_sa = 0.61078 * e ** (17.27 * T_sa / (T_sa + 237.3)) %}
+          {% set pv_sa = ps_sa * RH_sa / 100 %}
+          {% set w_sa  = 0.622 * pv_sa / (P_kpa - pv_sa) %}
+          {% set h_sa  = 1.006 * T_sa + w_sa * (2501 + 1.86 * T_sa) %}
+          {# RA enthalpy — identical structure #}
+          {% set ps_ra = 0.61078 * e ** (17.27 * T_ra / (T_ra + 237.3)) %}
+          {% set pv_ra = ps_ra * RH_ra / 100 %}
+          {% set w_ra  = 0.622 * pv_ra / (P_kpa - pv_ra) %}
+          {% set h_ra  = 1.006 * T_ra + w_ra * (2501 + 1.86 * T_ra) %}
+          {% if (h_ra - h_oa) | abs < 0.5 %}
+            {{ none }}
+          {% else %}
+            {% set eta   = (h_sa - h_oa) / (h_ra - h_oa) %}
+            {% set b_raw = (eta_max - eta) / (eta_max - eta_min) %}
+            {% set b_15  = ((b_raw * 100 / 15) | round(0) | int) * 15 %}
+            {{ [0, [100, b_15] | min] | max }}
+          {% endif %}
 
     binary_sensor:
       # True when outdoor air is suitable for free cooling; debounced 10min each way to prevent flip-flop.
@@ -191,6 +297,22 @@ input_number:
     step: 0.5
     unit_of_measurement: "°C"
     icon: mdi:thermometer-chevron-up
+
+  # Calibration: expected enthalpy efficiency when bypass is fully closed (maximum heat recovery)
+  airflow_bypass_efficiency_max:
+    name: "Airflow Bypass Efficiency Max"
+    min: 0.50
+    max: 1.00
+    step: 0.01
+    icon: mdi:valve-closed
+
+  # Calibration: residual enthalpy efficiency when bypass is fully open (leakage only)
+  airflow_bypass_efficiency_min:
+    name: "Airflow Bypass Efficiency Min"
+    min: 0.00
+    max: 0.30
+    step: 0.01
+    icon: mdi:valve-open
 
 # --- CLIMATE ENTITY ---
 # Requires HACS custom component: jcwillox/hass-template-climate
@@ -460,9 +582,15 @@ group:
       - sensor.airflow_avg_indoor_temp_5min
       - sensor.airflow_outdoor_dew_5min
       - sensor.airflow_outdoor_temp_5min
-      # Template sensors (raw aggregates)
+      - sensor.airflow_outdoor_air_humidity_5min
+      - sensor.airflow_supply_air_temp_5min
+      - sensor.airflow_supply_air_humidity_5min
+      - sensor.airflow_extract_air_temp_5min
+      - sensor.airflow_extract_air_humidity_5min
+      # Template sensors (raw aggregates + bypass)
       - sensor.airflow_min_indoor_dew
       - sensor.airflow_avg_indoor_temp
+      - sensor.airflow_bypass_estimation
       # Binary sensor (free cooling decision)
       - binary_sensor.airflow_free_cooling_available
       # Helpers
@@ -470,6 +598,8 @@ group:
       - input_number.airflow_cooling_target_temperature
       - input_number.airflow_min_dew_diff
       - input_number.airflow_min_temp_diff
+      - input_number.airflow_bypass_efficiency_max
+      - input_number.airflow_bypass_efficiency_min
       # Climate entity + humidity sensors
       - climate.airflow_climate
       - sensor.airflow_avg_indoor_humidity

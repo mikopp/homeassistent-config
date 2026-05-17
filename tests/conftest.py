@@ -41,6 +41,8 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.pergola_slat_width": 22,
         "input_number.pergola_slat_pivot_spacing": 20,
         "input_number.pergola_slat_thickness": 3,
+        "input_number.airflow_bypass_efficiency_max": 0.85,
+        "input_number.airflow_bypass_efficiency_min": 0.05,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
@@ -94,11 +96,29 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_dewpoint", "8.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.comfoconnect_pro_outdoor_air_humidity", "61",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.comfoconnect_pro_supply_air_temperature", "19.5",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.comfoconnect_pro_supply_air_humidity", "45",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.comfoconnect_pro_supply_fan_volume", "150",
+                 {"unit_of_measurement": "m³/h"})
     # Airflow filter sensors (platform:filter does not compute in CI; seed directly)
     ha.set_state("sensor.airflow_outdoor_temp_5min", "16.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.airflow_outdoor_dew_5min", "8.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.airflow_outdoor_air_humidity_5min", "61.0",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.airflow_supply_air_temp_5min", "19.5",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.airflow_supply_air_humidity_5min", "45.0",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.airflow_extract_air_temp_5min", "21.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.airflow_extract_air_humidity_5min", "55.0",
+                 {"unit_of_measurement": "%", "device_class": "humidity"})
     ha.set_state("sensor.airflow_min_indoor_dew_5min", "12.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.airflow_avg_indoor_temp_5min", "22.0",
