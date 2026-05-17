@@ -37,7 +37,7 @@ template:
              not in ['unavailable', 'unknown'] }}
         state: >
           {% set temp = states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(0) %}
-          {% set current = states('sensor.heating_cooling_indicator') %}
+          {% set current = this.state %}
           {% if current == 'active_heating' %}
             {% if temp >= 6 %}neutral{% else %}active_heating{% endif %}
           {% elif current == 'neutral' %}
