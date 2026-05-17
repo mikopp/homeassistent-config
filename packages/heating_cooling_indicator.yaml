@@ -51,9 +51,9 @@ template:
           {% elif current == 'active_cooling' %}
             {% if temp <= 15 %}passive_cooling{% else %}active_cooling{% endif %}
           {% else %}
-            {% if temp <= 5 %}active_heating
-            {% elif temp < 10 %}neutral
-            {% elif temp < 15 %}passive_cooling
+            {% if temp <= 5.5 %}active_heating
+            {% elif temp < 10.5 %}neutral
+            {% elif temp < 15.5 %}passive_cooling
             {% else %}active_cooling{% endif %}
           {% endif %}
 
