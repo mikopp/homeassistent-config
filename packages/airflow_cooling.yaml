@@ -43,7 +43,7 @@ sensor:
   - platform: filter
     unique_id: airflow_outdoor_dew_5min
     name: "Airflow Outdoor Dew 5min"
-    entity_id: sensor.comfoconnect_pro_outdoor_air_dewpoint
+    entity_id: sensor.comfoconnect_pro_outdoor_air_dew_point
     filters:
       - filter: time_simple_moving_average
         window_size: "00:05"
@@ -145,7 +145,7 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count %}
           {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown'] }}
 
-      # Average dewpoint across all monitored indoor areas; falls back to Magnus formula from ComfoConnect extract air when no labeled entities exist
+      # Average dewpoint across all monitored indoor areas; falls back to ComfoConnect extract air dew point when no labeled entities exist
       - unique_id: airflow_min_indoor_dew
         name: "Airflow Avg Indoor Dew"
         unit_of_measurement: "°C"
@@ -157,22 +157,14 @@ template:
           {% if indoor_dews | count > 0 %}
             {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
           {% else %}
-            {% set T = states('sensor.comfoconnect_pro_extract_air_temperature') | float(20) %}
-            {% set RH = states('sensor.comfoconnect_pro_extract_air_humidity') | float(50) %}
-            {% set a = 17.625 %}
-            {% set b = 243.04 %}
-            {% set alpha = log(RH / 100) + a * T / (b + T) %}
-            {{ (b * alpha / (a - alpha)) | round(2) }}
+            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float(0) | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Dewpoint')
              | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or (
-               states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] and
-               states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown']
-             ) }}
+          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_dew_point') not in ['unavailable', 'unknown'] }}
 
-      # Average temperature across all monitored indoor areas
+      # Average temperature across all monitored indoor areas; falls back to ComfoConnect extract air temperature when no labeled entities exist
       - unique_id: airflow_avg_indoor_temp
         name: "Airflow Avg Indoor Temp"
         unit_of_measurement: "°C"
@@ -181,10 +173,15 @@ template:
         state: >
           {% set indoor_temps = label_entities('Indoor.Temperature')
             | map('states') | map('float', none) | reject('none') | list %}
-          {{ (indoor_temps | sum / indoor_temps | count) if indoor_temps | count > 0 else 0 }}
+          {% if indoor_temps | count > 0 %}
+            {{ (indoor_temps | sum / indoor_temps | count) | round(2) }}
+          {% else %}
+            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float(0) | round(2) }}
+          {% endif %}
         availability: >
-          {{ label_entities('Indoor.Temperature')
-             | map('states') | map('float', none) | reject('none') | list | count > 0 }}
+          {% set label_count = label_entities('Indoor.Temperature')
+             | map('states') | map('float', none) | reject('none') | list | count %}
+          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] }}
 
       # Bypass percentage estimated from enthalpy efficiency, expressed in 15% steps.
       # Returns unavailable when the indoor/outdoor enthalpy delta is too small to be meaningful.
