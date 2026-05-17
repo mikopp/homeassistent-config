@@ -1193,9 +1193,10 @@ automation:
                 value_template: >
                   {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
                   {% set DB      = (30 / mt * 100) | round(0) | int %}
-                  {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(74) %}
                   {% set target  = states('sensor.pergola_tilt_position') | int(74) %}
-                  {{ (current - target) | abs > DB }}
+                  {% set dev_l   = (state_attr('cover.dach_links',  'current_tilt_position') | int(74) - target) | abs %}
+                  {% set dev_r   = (state_attr('cover.dach_rechts', 'current_tilt_position') | int(74) - target) | abs %}
+                  {{ [dev_l, dev_r] | max > DB }}
               - action: script.pergola_set_slat_angle
                 data:
                   slat_angle: 90
@@ -1230,9 +1231,10 @@ automation:
                 value_template: >
                   {% set mt      = states('input_number.pergola_max_tilt_angle') | float(122) %}
                   {% set DB      = (states('input_number.pergola_deadband_angle') | float(5) / mt * 100) | round(0) | int %}
-                  {% set current = state_attr('cover.dach_links', 'current_tilt_position') | int(0) %}
                   {% set target  = states('sensor.pergola_tilt_position') | int(0) %}
-                  {{ ((target - current) | abs >= DB) or (target >= 100) }}
+                  {% set dev_l   = (state_attr('cover.dach_links',  'current_tilt_position') | int(0) - target) | abs %}
+                  {% set dev_r   = (state_attr('cover.dach_rechts', 'current_tilt_position') | int(0) - target) | abs %}
+                  {{ ([dev_l, dev_r] | max >= DB) or (target >= 100) }}
               # Pass formula result from sensor to the authoritative movement script.
               # sensor.pergola_slat_angle dispatches to the correct cooling or heating
               # formula based on the current automation state.
