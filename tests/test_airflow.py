@@ -70,3 +70,52 @@ def test_airflow_auto_disabled(home_assistant: HomeAssistant) -> None:
     # Automation condition (airflow_cooling_automatic_enabled=on) is not met → no action.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
+
+
+# ── Bypass estimation tests ──────────────────────────────────────────────────────────────
+# Pre-computed expected values (η_max=0.85, η_min=0.05):
+#   baseline: h_oa≈33.53, h_sa≈35.67, h_ra≈42.75 kJ/kg → η≈0.231 → b_raw≈0.774 → 75%
+#   clamped_zero: T_sa=T_ra → η=1.0 → b_raw<0 → clamped to 0%
+#   clamped_hundred: T_sa=T_oa → η≈0 → b_raw>1 → clamped to 100%
+#   inconclusive: T_oa≈T_ra, same humidity → |h_ra-h_oa|<0.5 → unavailable
+
+
+def test_bypass_baseline(home_assistant: HomeAssistant) -> None:
+    """Baseline stubs give η≈0.231, which maps to 75% (nearest 15-step)."""
+    # Baseline already seeds: T_oa=16, T_dew=8.5, T_sa=19.5, RH_sa=45, T_ra=21, RH_ra=55
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "75", timeout=5)
+
+
+def test_bypass_clamped_zero(home_assistant: HomeAssistant) -> None:
+    """Supply air equals return air → η=1.0 → b_raw<0 → bypass clamped to 0%."""
+    attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "21.0", attrs)
+    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "55.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
+
+
+def test_bypass_clamped_hundred(home_assistant: HomeAssistant) -> None:
+    """Supply air equals outdoor air → η≈0 → b_raw>1 → bypass clamped to 100%."""
+    attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "16.0", attrs)
+    # RH≈61% matches OA (T_oa=16, T_dew=8.5 → RH_oa≈61%)
+    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "61.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "100", timeout=5)
+
+
+def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
+    """Indoor ≈ outdoor conditions → |h_ra−h_oa|<0.5 → state template returns none → 'unknown'.
+
+    Sensor availability is True (all sources set), so HA uses 'unknown' rather than
+    'unavailable' when the state template itself returns none.
+    """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
+    # Set outdoor and extract to same temperature/humidity so delta is negligible
+    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "20.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_outdoor_air_humidity_5min", "55.0", hum_attrs)
+    home_assistant.set_state("sensor.airflow_extract_air_temp_5min", "20.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_extract_air_humidity_5min", "55.0", hum_attrs)
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unknown", timeout=5)
