@@ -1,8 +1,8 @@
 # --- HEATING/COOLING INDICATOR ---
 # Classifies outdoor temperature into 4 operational modes used by ventilation automations.
 sensor:
-  # 15-min smoothed weatherstation temp — persisted (not excluded from recorder) so
-  # statistics sensor below can seed its sample window from history on HA restart.
+  # 15-min smoothed weatherstation temp — recorded by HA so the statistics sensor's
+  # max_age can load historical samples on HA restart.
   - platform: filter
     unique_id: wheatherstation_outdoor_temperature_15min
     name: "Weatherstation Outdoor Temperature 15min"
@@ -14,18 +14,27 @@ sensor:
       - filter: time_throttle
         window_size: "00:15"
 
-  # 48h mean of 15min-throttled source; fixed sampling_size avoids unbounded history scan
-  # 192 = 4 samples/hour × 48h
+  # 48h mean of 15min-throttled source.
+  # max_age causes HA to pre-populate the sample window from the recorder on restart
+  # (sampling_size alone does NOT load history — max_age is required for that).
+  # sampling_size: 192 = 4 samples/hour × 48h, kept as an upper-bound memory cap.
   - platform: statistics
     unique_id: wheatherstation_outdoor_temperature_48h_mean
     name: "Weatherstation Outdoor Temperature 48h Mean"
     entity_id: sensor.wheatherstation_outdoor_temperature_15min
     state_characteristic: mean
     sampling_size: 192
+    max_age: "48:00:00"
 template:
   - sensor:
       - name: "Heating Cooling Indicator"
         unique_id: heating_cooling_indicator
+        # Prevents cascade jumps during config reload: when the 48h mean is
+        # unavailable, the indicator becomes unavailable too instead of computing
+        # from float(0) and cycling through spurious states.
+        availability: >
+          {{ states('sensor.wheatherstation_outdoor_temperature_48h_mean')
+             not in ['unavailable', 'unknown'] }}
         state: >
           {% set temp = states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(0) %}
           {% set current = states('sensor.heating_cooling_indicator') %}
