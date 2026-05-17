@@ -206,20 +206,22 @@ template:
           {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
           {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float(0.85) %}
           {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float(0.05) %}
+          {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
+          {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
           {# OA enthalpy #}
           {% set ps_oa = 0.61078 * e ** (17.27 * T_oa / (T_oa + 237.3)) %}
           {% set pv_oa = ps_oa * RH_oa / 100 %}
-          {% set w_oa  = 0.622 * pv_oa / (101.325 - pv_oa) %}
+          {% set w_oa  = 0.622 * pv_oa / (P_kpa - pv_oa) %}
           {% set h_oa  = 1.006 * T_oa + w_oa * (2501 + 1.86 * T_oa) %}
           {# SA enthalpy — identical structure #}
           {% set ps_sa = 0.61078 * e ** (17.27 * T_sa / (T_sa + 237.3)) %}
           {% set pv_sa = ps_sa * RH_sa / 100 %}
-          {% set w_sa  = 0.622 * pv_sa / (101.325 - pv_sa) %}
+          {% set w_sa  = 0.622 * pv_sa / (P_kpa - pv_sa) %}
           {% set h_sa  = 1.006 * T_sa + w_sa * (2501 + 1.86 * T_sa) %}
           {# RA enthalpy — identical structure #}
           {% set ps_ra = 0.61078 * e ** (17.27 * T_ra / (T_ra + 237.3)) %}
           {% set pv_ra = ps_ra * RH_ra / 100 %}
-          {% set w_ra  = 0.622 * pv_ra / (101.325 - pv_ra) %}
+          {% set w_ra  = 0.622 * pv_ra / (P_kpa - pv_ra) %}
           {% set h_ra  = 1.006 * T_ra + w_ra * (2501 + 1.86 * T_ra) %}
           {% if (h_ra - h_oa) | abs < 0.5 %}
             {{ none }}
