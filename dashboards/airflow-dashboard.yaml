@@ -66,4 +66,3 @@ views:
           - sensor.airflow_bypass_estimation
           - select.comfoconnect_pro_temperature_profile
           - sensor.heating_cooling_indicator
-          
