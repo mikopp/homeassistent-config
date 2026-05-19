@@ -41,7 +41,7 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.pergola_slat_width": 22,
         "input_number.pergola_slat_pivot_spacing": 20,
         "input_number.pergola_slat_thickness": 3,
-        "input_number.airflow_bypass_efficiency_max": 0.85,
+        "input_number.airflow_bypass_efficiency_max": 0.818,
         "input_number.airflow_bypass_efficiency_min": 0.05,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})

@@ -73,8 +73,10 @@ def test_airflow_auto_disabled(home_assistant: HomeAssistant) -> None:
 
 
 # ── Bypass estimation tests ──────────────────────────────────────────────────────────────
-# Pre-computed expected values (η_max=0.85, η_min=0.05):
-#   baseline: h_oa≈33.53, h_sa≈35.67, h_ra≈42.75 kJ/kg → η≈0.231 → b_raw≈0.774 → 75%
+# η_max=0.818 (Zehnder Q350 enthalpy efficiency interpolated at 150 m³/h between
+#   100 m³/h=85.9% and 200 m³/h=77.7%), η_min=0.05.
+# Pre-computed expected values:
+#   baseline: h_oa≈33.55, h_sa≈35.67, h_ra≈42.75 kJ/kg → η≈0.231 → b_raw≈0.765 → 75%
 #   clamped_zero: T_sa=T_ra → η=1.0 → b_raw<0 → clamped to 0%
 #   clamped_hundred: T_sa=T_oa → η≈0 → b_raw>1 → clamped to 100%
 #   inconclusive: T_oa≈T_ra, same humidity → |h_ra-h_oa|<0.5 → unavailable
@@ -108,9 +110,9 @@ def test_bypass_clamped_hundred(home_assistant: HomeAssistant) -> None:
 def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> None:
     """Floor rounding: b_raw in (7.5%, 15%) must show 0%, not round up to 15%.
 
-    T_sa=20.0, RH_sa=55 (baseline T_oa=16, T_ra=21, RH_ra=55, η_max=0.85, η_min=0.05):
-      h_oa≈33.55, h_sa≈40.41, h_ra≈42.75 → η≈0.746 → b_raw≈13% → floor → 0%.
-    With symmetric round(0.87)=1 the old code returned 15% — regression guard.
+    T_sa=20.0, RH_sa=55 (baseline T_oa=16, T_ra=21, RH_ra=55, η_max=0.818, η_min=0.05):
+      h_oa≈33.55, h_sa≈40.41, h_ra≈42.75 → η≈0.746 → b_raw≈9.4% → floor(0.625)=0 → 0%.
+    With symmetric round(0.625)=1 the old code returned 15% — regression guard.
     """
     attrs_t = {"unit_of_measurement": "°C", "device_class": "temperature"}
     attrs_h = {"unit_of_measurement": "%", "device_class": "humidity"}
