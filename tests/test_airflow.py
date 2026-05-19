@@ -105,6 +105,20 @@ def test_bypass_clamped_hundred(home_assistant: HomeAssistant) -> None:
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "100", timeout=5)
 
 
+def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> None:
+    """Floor rounding: b_raw in (7.5%, 15%) must show 0%, not round up to 15%.
+
+    T_sa=20.0, RH_sa=55 (baseline T_oa=16, T_ra=21, RH_ra=55, η_max=0.85, η_min=0.05):
+      h_oa≈33.55, h_sa≈40.41, h_ra≈42.75 → η≈0.746 → b_raw≈13% → floor → 0%.
+    With symmetric round(0.87)=1 the old code returned 15% — regression guard.
+    """
+    attrs_t = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    attrs_h = {"unit_of_measurement": "%", "device_class": "humidity"}
+    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "20.0", attrs_t)
+    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "55.0", attrs_h)
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
+
+
 def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
     """Indoor ≈ outdoor conditions → |h_ra−h_oa|<0.5 → state template returns none → 'unknown'.
 
