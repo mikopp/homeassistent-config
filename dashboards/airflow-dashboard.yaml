@@ -56,3 +56,14 @@ views:
 
       - type: tile
         entity: automation.airflow_cooling_set_temperature_profile
+      - type: logbook
+        title: Airflow Activity
+        hours_to_show: 24
+        target:
+          label_id: ventilation  # Use the ID of your label here
+        entities:
+          - sensor.airflow_bypass_estimation
+          - sensor.airflow_bypass_estimation
+          - select.comfoconnect_pro_temperature_profile
+          - sensor.heating_cooling_indicator
+          
