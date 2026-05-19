@@ -228,7 +228,7 @@ template:
           {% else %}
             {% set eta   = (h_sa - h_oa) / (h_ra - h_oa) %}
             {% set b_raw = (eta_max - eta) / (eta_max - eta_min) %}
-            {% set b_15  = ((b_raw * 100 / 15) | round(0) | int) * 15 %}
+            {% set b_15  = ((b_raw * 100 / 15) | round(0, 'floor') | int) * 15 %}
             {{ [0, [100, b_15] | min] | max }}
           {% endif %}
 
