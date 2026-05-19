@@ -4,7 +4,7 @@ views:
     cards:
       - type: thermostat
         entity: climate.airflow_climate
-        name: Ventilation Climate
+        name: Airflow automation
 
       - type: entities
         title: Mode
