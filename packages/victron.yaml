@@ -1,5 +1,31 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Victron Energy System
+#
+# Hardware:
+#   GX portal      c0619ab4c19e
+#   MPPT charger   device 279   (DC-coupled solar panels)
+#   PV inverter    device 20    (AC-coupled third-party inverter, measured in AC)
+#   VEBus          device 276   (MultiPlus 2, 3-phase)
+#   Battery        Smart BMS
+#
+# Grid billing note (Austria):
+#   The Netzbetreiber measures energy in 15-minute intervals using the SUM of
+#   all three phases — no per-phase billing. All grid import/export calculations
+#   use the combined L1+L2+L3 total to match that billing method exactly.
+#
+# Energy flow overview:
+#   DC bus: MPPT → VEBus (MultiPlus) ↔ Battery
+#   AC bus: VEBus output ↔ Grid ↔ AC-coupled PV inverter ↔ Loads
+#   VEBus DC power sign: positive = charger mode (AC→DC), negative = inverter mode (DC→AC)
+# ──────────────────────────────────────────────────────────────────────────────
+
 mqtt:
   sensor:
+
+    # ── MPPT Solar DC (solarcharger 279) ─────────────────────────────────────
+
+    # Instantaneous DC power from panels — kept as-is for backward compatibility
+    # (referenced by packages/pergola.yaml via sensor.solar_yield_watts)
     - name: "Solar Yield Watts"
       unique_id: "victron_solar_yield"
       state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/Power"
@@ -8,9 +34,347 @@ mqtt:
       state_class: measurement
       value_template: "{{ value_json.value | round(0) }}"
 
+    # Cumulative lifetime yield from the MPPT — never resets, always increasing.
+    # Used directly as a solar production source in the HA Energy Dashboard.
+    - name: "Victron Solar Yield Total kWh"
+      unique_id: "victron_solar_yield_total_kwh"
+      state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/System"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      value_template: "{{ value_json.value | round(3) }}"
+
+    # Daily yield — resets each day at midnight; for display/notifications only
+    - name: "Victron Solar Yield Today kWh"
+      unique_id: "victron_solar_yield_today_kwh"
+      state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/User"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      value_template: "{{ value_json.value | round(3) }}"
+
+    - name: "Victron Solar PV Voltage"
+      unique_id: "victron_solar_pv_voltage"
+      state_topic: "N/c0619ab4c19e/solarcharger/279/Pv/V"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      value_template: "{{ value_json.value | round(1) }}"
+
+    # ── AC-coupled PV Inverter (pvinverter 20) ────────────────────────────────
+    # This inverter generates AC power directly — measured on the AC side.
+
+    - name: "Victron AC Inverter Power"
+      unique_id: "victron_ac_inverter_power"
+      state_topic: "N/c0619ab4c19e/pvinverter/20/Ac/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    # Cumulative lifetime AC energy — used as the second solar production source
+    # in the HA Energy Dashboard (already AC, no conversion needed).
+    - name: "Victron AC Inverter Energy Total kWh"
+      unique_id: "victron_ac_inverter_energy_total_kwh"
+      state_topic: "N/c0619ab4c19e/pvinverter/20/Ac/Energy/Forward"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      value_template: "{{ value_json.value | round(3) }}"
+
+    # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
+    # Positive = charger mode: AC grid energy flows through MultiPlus to DC bus.
+    # Negative = inverter mode: DC bus energy flows through MultiPlus to AC loads.
+    # Used to attribute AC output between MPPT and battery sources (see templates).
+    - name: "Victron VEBus DC Power"
+      unique_id: "victron_vebus_dc_power"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Vebus/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    # Total DC PV power aggregated across all MPPTs connected to the GX
+    - name: "Victron DC PV Total Power"
+      unique_id: "victron_dc_pv_total_power"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Pv/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    # ── Battery (system/0 aggregate) ──────────────────────────────────────────
+
+    - name: "Victron Battery SOC"
+      unique_id: "victron_battery_soc"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Soc"
+      unit_of_measurement: "%"
+      device_class: battery
+      state_class: measurement
+      value_template: "{{ value_json.value | round(1) }}"
+
+    # Signed: positive = charging (power into battery), negative = discharging (power from battery)
+    - name: "Victron Battery Power"
+      unique_id: "victron_battery_power"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    - name: "Victron Battery Voltage"
+      unique_id: "victron_battery_voltage"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Voltage"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      value_template: "{{ value_json.value | round(2) }}"
+
+    - name: "Victron Battery Current"
+      unique_id: "victron_battery_current"
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Current"
+      unit_of_measurement: "A"
+      device_class: current
+      state_class: measurement
+      value_template: "{{ value_json.value | round(1) }}"
+
+    # ── Grid — 3-phase via MultiPlus AC-in ────────────────────────────────────
+    # Per-phase sensors for phase-balance diagnostics.
+    # All energy calculations use the combined total (see template section).
+    - name: "Victron Grid L1 Power"
+      unique_id: "victron_grid_l1_power"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Grid/L1/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    - name: "Victron Grid L2 Power"
+      unique_id: "victron_grid_l2_power"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Grid/L2/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    - name: "Victron Grid L3 Power"
+      unique_id: "victron_grid_l3_power"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Grid/L3/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    # ── AC Consumption per phase (diagnostic) ─────────────────────────────────
+    - name: "Victron AC Load L1"
+      unique_id: "victron_ac_load_l1"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Consumption/L1/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    - name: "Victron AC Load L2"
+      unique_id: "victron_ac_load_l2"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Consumption/L2/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+    - name: "Victron AC Load L3"
+      unique_id: "victron_ac_load_l3"
+      state_topic: "N/c0619ab4c19e/system/0/Ac/Consumption/L3/Power"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      value_template: "{{ value_json.value | round(0) }}"
+
+
+# ── Derived template sensors ───────────────────────────────────────────────────
+template:
+  - sensor:
+
+      # ── Grid: combined 3-phase (Austrian billing alignment) ───────────────────
+      # Sum of all three phases, sign preserved: positive = import, negative = export.
+      # This matches exactly how the Netzbetreiber measures in 15-min intervals.
+      - name: "Victron Grid Total Power"
+        unique_id: victron_grid_total_power
+        state: >
+          {{ (states('sensor.victron_grid_l1_power') | float(0))
+           + (states('sensor.victron_grid_l2_power') | float(0))
+           + (states('sensor.victron_grid_l3_power') | float(0)) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        availability: >
+          {{ states('sensor.victron_grid_l1_power') not in ['unavailable', 'unknown']
+          and states('sensor.victron_grid_l2_power') not in ['unavailable', 'unknown']
+          and states('sensor.victron_grid_l3_power') not in ['unavailable', 'unknown'] }}
+
+      # Non-negative import half-wave — source for Riemann sum integration
+      - name: "Victron Grid Power Import"
+        unique_id: victron_grid_power_import
+        state: "{{ [states('sensor.victron_grid_total_power') | float(0), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # Non-negative export half-wave (absolute value) — source for Riemann sum integration
+      - name: "Victron Grid Power Export"
+        unique_id: victron_grid_power_export
+        state: "{{ [-(states('sensor.victron_grid_total_power') | float(0)), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # ── Battery half-waves ────────────────────────────────────────────────────
+      # Measured at DC battery terminals — most accurate point for battery SOC tracking.
+      - name: "Victron Battery Power Charge"
+        unique_id: victron_battery_power_charge
+        state: "{{ [states('sensor.victron_battery_power') | float(0), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      - name: "Victron Battery Power Discharge"
+        unique_id: victron_battery_power_discharge
+        state: "{{ [-(states('sensor.victron_battery_power') | float(0)), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # ── VEBus conversion direction (DC↔AC via MultiPlus) ─────────────────────
+      # Charger mode: W flowing AC grid → MultiPlus → DC bus
+      - name: "Victron VEBus Charger Power"
+        unique_id: victron_vebus_charger_power
+        state: "{{ [states('sensor.victron_vebus_dc_power') | float(0), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # Inverter mode: W flowing DC bus → MultiPlus → AC loads
+      - name: "Victron VEBus Inverter Power"
+        unique_id: victron_vebus_inverter_power
+        state: "{{ [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # Of the DC→AC inverter output, how much originates from MPPT solar panels
+      # (capped: PV contribution cannot exceed total inverter output)
+      - name: "Victron DC PV to AC Power"
+        unique_id: victron_dc_pv_to_ac_power
+        state: >
+          {% set inv = [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max %}
+          {% set pv  = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {{ [pv, inv] | min }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # Of the DC→AC inverter output, how much originates from battery discharge
+      - name: "Victron Battery to AC Power"
+        unique_id: victron_battery_to_ac_power
+        state: >
+          {% set inv = [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max %}
+          {% set pv  = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {{ [inv - pv, 0] | max }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # Combined AC house load across all three phases
+      - name: "Victron AC Load Total Power"
+        unique_id: victron_ac_load_total_power
+        state: >
+          {{ (states('sensor.victron_ac_load_l1') | float(0))
+           + (states('sensor.victron_ac_load_l2') | float(0))
+           + (states('sensor.victron_ac_load_l3') | float(0)) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+
+# ── Riemann sum integration (W → kWh) ─────────────────────────────────────────
+# Converts instantaneous power to cumulative energy using the trapezoidal method.
+# HA long-term statistics recorder persists these across restarts, so the Energy
+# Dashboard history is preserved even when the sensor value resets to 0 on restart.
+sensor:
+  - platform: integration
+    source: sensor.victron_grid_power_import
+    name: "Victron Grid Energy Import"
+    unique_id: victron_grid_energy_import
+    unit_prefix: k
+    round: 3
+    method: trapezoidal
+
+  - platform: integration
+    source: sensor.victron_grid_power_export
+    name: "Victron Grid Energy Export"
+    unique_id: victron_grid_energy_export
+    unit_prefix: k
+    round: 3
+    method: trapezoidal
+
+  - platform: integration
+    source: sensor.victron_battery_power_charge
+    name: "Victron Battery Energy In"
+    unique_id: victron_battery_energy_in
+    unit_prefix: k
+    round: 3
+    method: trapezoidal
+
+  - platform: integration
+    source: sensor.victron_battery_power_discharge
+    name: "Victron Battery Energy Out"
+    unique_id: victron_battery_energy_out
+    unit_prefix: k
+    round: 3
+    method: trapezoidal
+
+
+# ── Utility meters — monthly billing alignment ────────────────────────────────
+# Reset on the 1st of each month, matching the Austrian monthly billing cycle.
+# Unlike integration sensors, utility_meter persists its value across HA restarts
+# (state is stored in the HA database), making it the reliable source for
+# comparing against the Netzbetreiber / EVN / Verbund monthly invoice.
+utility_meter:
+  victron_grid_import_monthly:
+    source: sensor.victron_grid_energy_import
+    name: "Victron Grid Import Monthly"
+    cycle: monthly
+
+  victron_grid_export_monthly:
+    source: sensor.victron_grid_energy_export
+    name: "Victron Grid Export Monthly"
+    cycle: monthly
+
+  victron_solar_mppt_monthly:
+    source: sensor.victron_solar_yield_total_kwh
+    name: "Victron Solar MPPT Monthly"
+    cycle: monthly
+
+  victron_solar_ac_inverter_monthly:
+    source: sensor.victron_ac_inverter_energy_total_kwh
+    name: "Victron Solar AC Inverter Monthly"
+    cycle: monthly
+
+  victron_battery_in_monthly:
+    source: sensor.victron_battery_energy_in
+    name: "Victron Battery In Monthly"
+    cycle: monthly
+
+  victron_battery_out_monthly:
+    source: sensor.victron_battery_energy_out
+    name: "Victron Battery Out Monthly"
+    cycle: monthly
+
+
+# ── Automations ───────────────────────────────────────────────────────────────
 automation:
   - alias: "Victron Bridge Keep-alive"
-    description: "Request data from specific charger once per minute"
+    description: "Keep Venus OS MQTT bridge active for all monitored devices"
     id: victron_keep_alive_60s
     trigger:
       - platform: time_pattern
@@ -19,5 +383,5 @@ automation:
       - service: mqtt.publish
         data:
           topic: "R/c0619ab4c19e/keepalive"
-          payload: '["solarcharger/279"]'
+          payload: '["solarcharger/279","system/0","pvinverter/20","vebus/276"]'
     mode: single
