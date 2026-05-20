@@ -100,7 +100,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:solar-power-variant
       device: *victron_device
-      value_template: "{{ value_json.value | float(0) | round(3) }}"
+      value_template: "{{ value_json.value | round(3) }}"
 
     # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
     # Positive = charger mode: AC grid energy flows through MultiPlus to DC bus.
