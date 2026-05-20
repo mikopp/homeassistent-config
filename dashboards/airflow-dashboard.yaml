@@ -5,6 +5,9 @@ views:
       - type: thermostat
         entity: climate.airflow_climate
         name: Airflow automation
+      - type: thermostat
+        entity: climate.comfoconnect_pro_climate
+        name: Comfo Q350
 
       - type: entities
         title: Mode
