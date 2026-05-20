@@ -73,7 +73,7 @@ def test_grid_import_half_wave(home_assistant: HomeAssistant) -> None:
     _seed(home_assistant, grid_l1=200, grid_l2=200, grid_l3=100)
     home_assistant.assert_entity_state("sensor.victron_grid_total_power", "500.0", timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "500.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_grid_export_half_wave(home_assistant: HomeAssistant) -> None:
@@ -81,21 +81,21 @@ def test_grid_export_half_wave(home_assistant: HomeAssistant) -> None:
     _seed(home_assistant, grid_l1=-300, grid_l2=-200, grid_l3=-200)
     home_assistant.assert_entity_state("sensor.victron_grid_total_power", "-700.0", timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", "700.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_battery_charge_half_wave(home_assistant: HomeAssistant) -> None:
     """Battery charging: power=+1200 W → charge=1200, discharge=0."""
     _seed(home_assistant, battery_power=1200)
     home_assistant.assert_entity_state("sensor.victron_battery_power_charge", "1200.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_battery_discharge_half_wave(home_assistant: HomeAssistant) -> None:
     """Battery discharging: power=−800 W → discharge=800, charge=0."""
     _seed(home_assistant, battery_power=-800)
     home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "800.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_power_charge", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_power_charge", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_vebus_inverter_mode(home_assistant: HomeAssistant) -> None:
@@ -106,16 +106,16 @@ def test_vebus_inverter_mode(home_assistant: HomeAssistant) -> None:
     """
     _seed(home_assistant, vebus_dc=-2000, dc_pv=2500)
     home_assistant.assert_entity_state("sensor.victron_vebus_inverter_power", "2000.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_vebus_charger_power", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_vebus_charger_power", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_dc_pv_to_ac_power", "2000.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_to_ac_power", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_to_ac_power", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_vebus_charger_mode(home_assistant: HomeAssistant) -> None:
     """VEBus charger mode: vebus_dc=+1500 W → charger=1500, inverter=0."""
     _seed(home_assistant, vebus_dc=1500)
     home_assistant.assert_entity_state("sensor.victron_vebus_charger_power", "1500.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_vebus_inverter_power", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_vebus_inverter_power", lambda s: float(s) == 0.0, timeout=5)
 
 
 def test_battery_supplements_pv_in_inverter_mode(home_assistant: HomeAssistant) -> None:
@@ -152,12 +152,12 @@ def test_night_solar_off_battery_discharge(home_assistant: HomeAssistant) -> Non
         dc_pv=0, ac_inverter=0, solar_dc=0,
     )
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "1000.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "600.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_power_charge", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_power_charge", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_vebus_inverter_power", "600.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_vebus_charger_power", "0.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_dc_pv_to_ac_power", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_vebus_charger_power", lambda s: float(s) == 0.0, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_dc_pv_to_ac_power", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_battery_to_ac_power", "600.0", timeout=5)
 
 
@@ -225,8 +225,8 @@ def test_night_no_grid_energy_accumulates(
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, battery_power=-1500)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", "0.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", "0.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state("sensor.victron_grid_energy_import", "0.0", timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_energy_export", "0.0", timeout=5)
