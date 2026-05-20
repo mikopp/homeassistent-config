@@ -54,6 +54,7 @@ input_select:
   #   rain               — rain active (weather station or cover lock); no movement
   #   rain_stopped       — rain just ended; recovery script running
   #   user_override      — cover(s) locked by user; no movement
+  #   sun_down           — PV=0 AND solar_radiation=0 (night); no movement
   #   no_sun_behind_house — sun below horizon, low elevation, or outside azimuth window
   #   not_enough_sun     — pergola_sun_shining off (sensor has built-in 5 min delay_off)
   #   sun_automatik_heating — sun active, heating indicator on
@@ -68,6 +69,7 @@ input_select:
       - rain
       - rain_stopped
       - user_override
+      - sun_down
       - not_enough_sun
       - sun_automatik_heating
       - sun_automatik_cooling
@@ -363,7 +365,7 @@ template:
       #                            dead zone (A_eff > max_tilt) → max_tilt → tilt_position=100
       #   no_sun_behind_house,   → 90° (vertical, maximum ventilation)
       #   not_enough_sun         → 90°
-      #   frost / rain / ...     → 90° (no movement; neutral display value)
+      #   frost / rain / sun_down / ... → 90° (no movement; neutral display value)
       - name: "Pergola Slat Angle"
         unique_id: pergola_slat_angle
         availability: >
@@ -1067,7 +1069,7 @@ automation:
       - condition: template
         value_template: >
           {{ states('input_select.pergola_automation_state') not in
-             ['frost', 'rain', 'rain_stopped', 'user_override', 'no_sun_behind_house'] }}
+             ['frost', 'rain', 'rain_stopped', 'user_override', 'sun_down', 'no_sun_behind_house'] }}
     actions:
       - action: input_select.select_option
         target:
@@ -1148,14 +1150,14 @@ automation:
     conditions: []
     actions:
       - choose:
-          # ── Safety / protected states: frost, rain, rain_stopped, user_override ────
+          # ── Safety / protected states: frost, rain, rain_stopped, user_override, sun_down ──
           # Covers must not move during these states. An explicit no-op branch prevents
           # falling through to the default branch.
           - conditions:
               - condition: template
                 value_template: >
                   {{ states('input_select.pergola_automation_state') in
-                     ['frost', 'rain', 'rain_stopped', 'user_override'] }}
+                     ['frost', 'rain', 'rain_stopped', 'user_override', 'sun_down'] }}
             sequence: []
 
           # ── No sun behind house ───────────────────────────────────────────────────
@@ -1308,7 +1310,26 @@ script:
       the state manager default branch and from the post-rain recovery script.
     sequence:
       - choose:
-          # ── Rule 5: no_sun_behind_house ──────────────────────────────────────────
+          # ── Rule 5: sun_down ─────────────────────────────────────────────────────
+          # Both energy sources read zero → night. Slats stay where they are; no
+          # automatic movement. When the sun rises, the next evaluate_state call
+          # (via time_pattern or sun_shining state change) finds PV or solar > 0,
+          # skips this branch, and re-enters normal operation.
+          # float(-1) fail-safe: unavailable/unknown sensor → −1 ≠ 0 → condition
+          # false → skip sun_down and proceed to the normal sun rules.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.pergola_pv_power') | float(-1) == 0
+                     and states('sensor.wheatherstation_solar_radiation') | float(-1) == 0 }}
+            sequence:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.pergola_automation_state
+                data:
+                  option: sun_down
+
+          # ── Rule 6: no_sun_behind_house ──────────────────────────────────────────
           # Sun is geometrically incapable of hitting the terrasse — slat formulas
           # are irrelevant. Three sub-conditions (any one is sufficient):
           #   a) sun.sun below horizon
@@ -1334,7 +1355,7 @@ script:
                 data:
                   option: no_sun_behind_house
 
-          # ── Rule 6: not_enough_sun ───────────────────────────────────────────────
+          # ── Rule 7: not_enough_sun ───────────────────────────────────────────────
           # Sun is above the horizon and in the azimuth window but not bright enough
           # for shading. The sensor's 5 min delay_off means it has already been off
           # for 5 continuous minutes when this script is called from that path.
@@ -1349,7 +1370,7 @@ script:
                 data:
                   option: not_enough_sun
 
-          # ── Rule 7: sun_automatik_heating ────────────────────────────────────────
+          # ── Rule 8: sun_automatik_heating ────────────────────────────────────────
           # Sun is shining and the heating indicator is on — let sun through.
           # Safe default when pergola_heating is unavailable: treat as cooling season.
           - conditions:
@@ -1363,7 +1384,7 @@ script:
                 data:
                   option: sun_automatik_heating
 
-        # ── Rule 8: sun_automatik_cooling (default) ──────────────────────────────
+        # ── Rule 9: sun_automatik_cooling (default) ──────────────────────────────
         # Sun is active and cooling season — block sun via the cover formula.
         default:
           - action: input_select.select_option
