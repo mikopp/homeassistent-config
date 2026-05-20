@@ -88,7 +88,7 @@ mqtt:
       state_class: measurement
       icon: mdi:solar-power-variant
       device: *victron_device
-      value_template: "{{ value_json.value | round(0) }}"
+      value_template: "{{ value_json.value | float(0) | round(0) }}"
 
     # Cumulative lifetime AC energy — used as the second solar production source
     # in the HA Energy Dashboard (already AC, no conversion needed).
@@ -100,7 +100,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:solar-power-variant
       device: *victron_device
-      value_template: "{{ value_json.value | round(3) }}"
+      value_template: "{{ value_json.value | float(0) | round(3) }}"
 
     # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
     # Positive = charger mode: AC grid energy flows through MultiPlus to DC bus.
@@ -340,42 +340,43 @@ template:
         state_class: measurement
 
 
-# ── Riemann sum integration (W → kWh) ─────────────────────────────────────────
-# Converts instantaneous power to cumulative energy using the trapezoidal method.
-# HA long-term statistics recorder persists these across restarts, so the Energy
-# Dashboard history is preserved even when the sensor value resets to 0 on restart.
-sensor:
-  - platform: integration
-    source: sensor.victron_grid_power_import
-    name: "Victron Grid Energy Import"
-    unique_id: victron_grid_energy_import
-    unit_prefix: k
-    round: 3
-    method: trapezoidal
+# ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
+# Fires every minute and adds power_W / 60000 kWh to the running total.
+# Lives in `template:` (not `sensor: platform: integration`) so it initialises
+# after all source entities exist. State is persisted across HA restarts via
+# unique_id — this.state | float(0) restores the last value on startup.
 
-  - platform: integration
-    source: sensor.victron_grid_power_export
-    name: "Victron Grid Energy Export"
-    unique_id: victron_grid_energy_export
-    unit_prefix: k
-    round: 3
-    method: trapezoidal
+  - trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    sensor:
+      - name: "Victron Grid Energy Import"
+        unique_id: victron_grid_energy_import
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_import') | float(0) / 60000)) | round(3) }}"
 
-  - platform: integration
-    source: sensor.victron_battery_power_charge
-    name: "Victron Battery Energy In"
-    unique_id: victron_battery_energy_in
-    unit_prefix: k
-    round: 3
-    method: trapezoidal
+      - name: "Victron Grid Energy Export"
+        unique_id: victron_grid_energy_export
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_export') | float(0) / 60000)) | round(3) }}"
 
-  - platform: integration
-    source: sensor.victron_battery_power_discharge
-    name: "Victron Battery Energy Out"
-    unique_id: victron_battery_energy_out
-    unit_prefix: k
-    round: 3
-    method: trapezoidal
+      - name: "Victron Battery Energy In"
+        unique_id: victron_battery_energy_in
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_charge') | float(0) / 60000)) | round(3) }}"
+
+      - name: "Victron Battery Energy Out"
+        unique_id: victron_battery_energy_out
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_discharge') | float(0) / 60000)) | round(3) }}"
 
 
 # ── Utility meters — monthly billing alignment ────────────────────────────────
