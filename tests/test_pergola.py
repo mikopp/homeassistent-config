@@ -240,6 +240,16 @@ def test_rain_with_user_originator(home_assistant: HomeAssistant) -> None:
 
 def test_sun_down_state(home_assistant: HomeAssistant) -> None:
     """Rule 5: PV=0 AND solar_radiation=0 → state=sun_down; cover_response is a no-op."""
+    # Ensure the state machine is not in a protected state before triggering.
+    # test_rain_with_user_originator (runs just before this in file order) leaves the
+    # lock originator as 'user'. baseline_states resets rain_rate first, which fires
+    # the state manager while the lock is still 'user' → Rule 4 Entry → user_override.
+    # The protected-state guard then blocks evaluate_state for the rest of the fixture.
+    # Resetting to a non-protected state here guarantees the default branch runs.
+    home_assistant.call_action("input_select", "select_option", {
+        "entity_id": "input_select.pergola_automation_state",
+        "option": "not_enough_sun",
+    })
     # Seed a non-default slat angle so we can confirm no movement occurs.
     home_assistant.call_action("input_number", "set_value", {
         "entity_id": "input_number.pergola_last_set_slat_angle",
