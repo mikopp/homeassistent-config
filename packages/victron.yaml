@@ -339,6 +339,24 @@ template:
         device_class: power
         state_class: measurement
 
+      # ── Energy Dashboard battery power sensor ────────────────────────────────
+      # Standard convention: positive = charging, negative = discharging.
+      # Derived from AC energy balance: battery_ac = -(ac_load - grid - dc_pv - ac_pv)
+      # This identity guarantees HA "Power usage" = victron_ac_load_total_power exactly,
+      # in all operating modes, because it uses the same DC PV measurement as HA's
+      # configured solar sensor — the DC/AC mismatch cancels algebraically.
+      - name: "Victron Battery AC Power"
+        unique_id: victron_battery_ac_power
+        state: >
+          {% set ac_load = states('sensor.victron_ac_load_total_power') | float(0) %}
+          {% set grid_net = states('sensor.victron_grid_total_power') | float(0) %}
+          {% set dc_pv    = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float(0) %}
+          {{ (-(ac_load - grid_net - dc_pv - ac_pv)) | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
 
 # ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
 # Fires every minute and adds power_W / 60000 kWh to the running total.
