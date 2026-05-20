@@ -236,3 +236,27 @@ def test_rain_with_user_originator(home_assistant: HomeAssistant) -> None:
     })
     home_assistant.assert_entity_state("input_select.pergola_automation_state",
                                        "user_override", timeout=5)
+
+
+def test_sun_down_state(home_assistant: HomeAssistant) -> None:
+    """Rule 5: PV=0 AND solar_radiation=0 → state=sun_down; cover_response is a no-op."""
+    # Seed a non-default slat angle so we can confirm no movement occurs.
+    home_assistant.call_action("input_number", "set_value", {
+        "entity_id": "input_number.pergola_last_set_slat_angle",
+        "value": 45,
+    })
+    home_assistant.set_state("sensor.solar_yield_watts", "0", {"unit_of_measurement": "W"})
+    home_assistant.set_state("sensor.wheatherstation_solar_radiation", "0",
+                             {"unit_of_measurement": "W/m²"})
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": "automation.pergola_state_manager",
+        "skip_condition": True,
+    })
+    home_assistant.assert_entity_state("input_select.pergola_automation_state",
+                                       "sun_down", timeout=5)
+    # cover_response must not move covers when state=sun_down.
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": "automation.pergola_cover_response",
+        "skip_condition": True,
+    })
+    home_assistant.assert_entity_state("sensor.pergola_effective_slat_angle", "45.0", timeout=5)
