@@ -32,12 +32,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:solar-power
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     # Cumulative lifetime yield from the MPPT — never resets, always increasing.
@@ -48,12 +52,16 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
+      icon: mdi:solar-power
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(3) }}"
 
     # Daily yield — resets each day at midnight; for display/notifications only
@@ -63,12 +71,16 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
+      icon: mdi:solar-power
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(3) }}"
 
     - name: "Victron Solar PV Voltage"
@@ -77,12 +89,16 @@ mqtt:
       unit_of_measurement: "V"
       device_class: voltage
       state_class: measurement
+      icon: mdi:sine-wave
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(1) }}"
 
     # ── AC-coupled PV Inverter (pvinverter 20) ────────────────────────────────
@@ -94,12 +110,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:solar-power-variant
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     # Cumulative lifetime AC energy — used as the second solar production source
@@ -110,12 +130,16 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
+      icon: mdi:solar-power-variant
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(3) }}"
 
     # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
@@ -128,12 +152,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:lightning-bolt-circle
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     # Total DC PV power aggregated across all MPPTs connected to the GX
@@ -143,16 +171,21 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:solar-power
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     # ── Battery (system/0 aggregate) ──────────────────────────────────────────
 
+    # No explicit icon — device_class: battery auto-renders a dynamic level icon
     - name: "Victron Battery SOC"
       unique_id: "victron_battery_soc"
       state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Soc"
@@ -165,6 +198,9 @@ mqtt:
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(1) }}"
 
     # Signed: positive = charging (power into battery), negative = discharging (power from battery)
@@ -174,12 +210,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:battery-charging
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     - name: "Victron Battery Voltage"
@@ -188,12 +228,16 @@ mqtt:
       unit_of_measurement: "V"
       device_class: voltage
       state_class: measurement
+      icon: mdi:battery-charging-outline
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(2) }}"
 
     - name: "Victron Battery Current"
@@ -202,12 +246,16 @@ mqtt:
       unit_of_measurement: "A"
       device_class: current
       state_class: measurement
+      icon: mdi:current-dc
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(1) }}"
 
     # ── Grid — 3-phase via MultiPlus AC-in ────────────────────────────────────
@@ -219,12 +267,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:transmission-tower
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     - name: "Victron Grid L2 Power"
@@ -233,12 +285,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:transmission-tower
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     - name: "Victron Grid L3 Power"
@@ -247,12 +303,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:transmission-tower
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     # ── AC Consumption per phase (diagnostic) ─────────────────────────────────
@@ -262,12 +322,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:home-lightning-bolt
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     - name: "Victron AC Load L2"
@@ -276,12 +340,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:home-lightning-bolt
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
     - name: "Victron AC Load L3"
@@ -290,12 +358,16 @@ mqtt:
       unit_of_measurement: "W"
       device_class: power
       state_class: measurement
+      icon: mdi:home-lightning-bolt
       device:
         identifiers:
           - victron_c0619ab4c19e
         name: "Victron Energy System"
         manufacturer: "Victron Energy"
         model: "Cerbo GX"
+        model_id: "BPP010300200"
+        configuration_url: "http://venus.local"
+        suggested_area: "Electrical"
       value_template: "{{ value_json.value | round(0) }}"
 
 
