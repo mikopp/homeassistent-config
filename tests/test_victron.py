@@ -232,11 +232,16 @@ def test_grid_export_energy_accumulates(
 def test_battery_discharge_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """1200 W battery discharge × 1 min = 0.02 kWh accumulated in battery_energy_out."""
+    """1200 W battery discharge supplying 1200 W AC load (no grid, no solar) × 1 min = 0.02 kWh.
+
+    battery_ac_power = -(ac_load - grid - dc_pv - ac_pv) = -(1200 - 0 - 0 - 0) = -1200 W.
+    Energy accumulates from the AC-equivalent half-wave, not the DC battery sensor.
+    """
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
-    _seed(home_assistant, battery_power=-1200)
+    _seed(home_assistant, battery_power=-1200, ac_l1=1200)
     home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "1200.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", "-1200.0", timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
@@ -249,10 +254,13 @@ def test_battery_discharge_energy_accumulates(
 def test_night_no_grid_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """Night: zero grid flow, 1500 W battery discharge → grid energy stays 0, batt_out grows."""
+    """Night: zero grid flow, 1500 W battery discharge supplying 1500 W AC load → grid stays 0, batt_out grows.
+
+    battery_ac_power = -(1500 - 0 - 0 - 0) = -1500 W → energy_out accumulates.
+    """
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
-    _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, battery_power=-1500)
+    _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, battery_power=-1500, ac_l1=1500)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)

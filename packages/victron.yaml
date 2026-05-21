@@ -422,19 +422,24 @@ template:
         state_class: total_increasing
         state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_export') | float(0) / 60000)) | round(3) }}"
 
+      # AC-equivalent battery energy — accumulated from battery_ac_power (not DC battery power).
+      # Formula: battery_ac = -(ac_load - grid - dc_pv - ac_pv), so
+      #   home = solar(DC) + grid + batt_out_AC - batt_in_AC = ac_load  exactly.
+      # Conversion losses (~5%) appear in the solar slot as the DC vs AC yield gap,
+      # not in home consumption. DC battery power stays available as a separate diagnostic.
       - name: "Victron Battery Energy In"
         unique_id: victron_battery_energy_in
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_charge') | float(0) / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([states('sensor.victron_battery_ac_power') | float(0), 0] | max / 60000)) | round(3) }}"
 
       - name: "Victron Battery Energy Out"
         unique_id: victron_battery_energy_out
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_discharge') | float(0) / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_battery_ac_power') | float(0)), 0] | max / 60000)) | round(3) }}"
 
       - name: "Victron System Losses Energy"
         unique_id: victron_system_losses_energy
