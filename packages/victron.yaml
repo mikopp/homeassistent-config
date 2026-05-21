@@ -116,6 +116,30 @@ mqtt:
       device: *victron_device
       value_template: "{{ value_json.value | round(0) }}"
 
+    # Direct energy counters from the MultiPlus hardware — measure actual kWh
+    # crossing the DC↔AC conversion stage, independent of MPPT yield and battery BMS.
+    # No float(0): a null payload means the device is offline; sensor goes unavailable
+    # so HA Statistics skips the data point and the counter is not reset to 0.
+    - name: "Victron VEBus DC to AC Energy"
+      unique_id: "victron_vebus_dc_to_ac_energy"
+      state_topic: "N/c0619ab4c19e/vebus/276/Energy/InverterToAcOut"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt-circle
+      device: *victron_device
+      value_template: "{{ value_json.value | round(3) }}"
+
+    - name: "Victron VEBus AC to DC Energy"
+      unique_id: "victron_vebus_ac_to_dc_energy"
+      state_topic: "N/c0619ab4c19e/vebus/276/Energy/AcIn1ToInverter"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt-circle
+      device: *victron_device
+      value_template: "{{ value_json.value | round(3) }}"
+
     # Total DC PV power aggregated across all MPPTs connected to the GX
     - name: "Victron DC PV Total Power"
       unique_id: "victron_dc_pv_total_power"

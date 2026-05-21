@@ -89,6 +89,10 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
     ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
+    ha.set_state("sensor.victron_vebus_dc_to_ac_energy", "0.0",
+                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
+    ha.set_state("sensor.victron_vebus_ac_to_dc_energy", "0.0",
+                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
