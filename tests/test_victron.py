@@ -60,6 +60,7 @@ def _reset_energy(ha: HomeAssistant) -> None:
         "sensor.victron_grid_energy_export",
         "sensor.victron_battery_energy_in",
         "sensor.victron_battery_energy_out",
+        "sensor.victron_system_losses_energy",
     ):
         ha.set_state(eid, "0.0", attrs_kwh)
 
@@ -134,6 +135,33 @@ def test_ac_load_total(home_assistant: HomeAssistant) -> None:
     home_assistant.assert_entity_state("sensor.victron_ac_load_total_power", "1200.0", timeout=5)
 
 
+def test_battery_ac_power_night(home_assistant: HomeAssistant) -> None:
+    """Night: ac_load=102, grid=10, solar=0 → battery_ac = -(102-10) = -92 W (Standard: discharging).
+
+    HA Power usage = grid(10) + |battery_discharge(92)| = 102 W = actual AC load.
+    """
+    _seed(home_assistant, grid_l1=10, ac_l1=102)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -92, timeout=5)
+
+
+def test_battery_ac_power_solar_charging(home_assistant: HomeAssistant) -> None:
+    """Solar surplus charges battery: dc_pv=1200, ac_load=600, grid=0 → battery_ac = +600 W (charging).
+
+    HA Power usage = solar(1200) + grid(0) - battery_charge(600) = 600 W = actual AC load.
+    """
+    _seed(home_assistant, dc_pv=1200, ac_l1=600)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 600, timeout=5)
+
+
+def test_battery_ac_power_grid_exporting(home_assistant: HomeAssistant) -> None:
+    """Solar covers load and exports: dc_pv=800, ac_load=600, grid=−200 → battery_ac = 0.
+
+    HA Power usage = solar(800) + grid(−200) + battery(0) = 600 W = actual AC load.
+    """
+    _seed(home_assistant, dc_pv=800, grid_l1=-200, ac_l1=600)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 0.0, timeout=5)
+
+
 # ── Night scenario test ───────────────────────────────────────────────────────
 
 
@@ -204,11 +232,16 @@ def test_grid_export_energy_accumulates(
 def test_battery_discharge_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """1200 W battery discharge × 1 min = 0.02 kWh accumulated in battery_energy_out."""
+    """1200 W battery discharge supplying 1200 W AC load (no grid, no solar) × 1 min = 0.02 kWh.
+
+    battery_ac_power = -(ac_load - grid - dc_pv - ac_pv) = -(1200 - 0 - 0 - 0) = -1200 W.
+    Energy accumulates from the AC-equivalent half-wave, not the DC battery sensor.
+    """
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
-    _seed(home_assistant, battery_power=-1200)
+    _seed(home_assistant, battery_power=-1200, ac_l1=1200)
     home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "1200.0", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -1200, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
@@ -221,10 +254,13 @@ def test_battery_discharge_energy_accumulates(
 def test_night_no_grid_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """Night: zero grid flow, 1500 W battery discharge → grid energy stays 0, batt_out grows."""
+    """Night: zero grid flow, 1500 W battery discharge supplying 1500 W AC load → grid stays 0, batt_out grows.
+
+    battery_ac_power = -(1500 - 0 - 0 - 0) = -1500 W → energy_out accumulates.
+    """
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
-    _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, battery_power=-1500)
+    _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, battery_power=-1500, ac_l1=1500)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
@@ -233,5 +269,42 @@ def test_night_no_grid_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: float(s) > 0,
+        timeout=5,
+    )
+
+
+# ── System losses tests ───────────────────────────────────────────────────────
+
+
+def test_system_losses_daytime(home_assistant: HomeAssistant) -> None:
+    """Daytime: dc_pv=922, vebus_dc=+2878, battery=+3600 → losses = 922+2878-3600 = 200 W."""
+    _seed(home_assistant, dc_pv=922, vebus_dc=2878, battery_power=3600)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", lambda s: float(s) == 200, timeout=5)
+
+
+def test_system_losses_night(home_assistant: HomeAssistant) -> None:
+    """Night: dc_pv=0, vebus_dc=−87 (inverter mode), battery=−180 → losses = 0-87-(-180) = 93 W."""
+    _seed(home_assistant, dc_pv=0, vebus_dc=-87, battery_power=-180)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", lambda s: float(s) == 93, timeout=5)
+
+
+def test_system_losses_clamped_to_zero(home_assistant: HomeAssistant) -> None:
+    """All sensors at 0 W → losses = 0 (clamped, no negative values)."""
+    _seed(home_assistant)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", lambda s: float(s) == 0.0, timeout=5)
+
+
+def test_system_losses_energy_accumulates(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """200 W losses × 1 min = 0.003333… kWh → rounded to 0.003 kWh accumulated."""
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    _seed(home_assistant, dc_pv=922, vebus_dc=2878, battery_power=3600)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", lambda s: float(s) == 200, timeout=5)
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    home_assistant.assert_entity_state(
+        "sensor.victron_system_losses_energy",
+        lambda s: abs(float(s) - 200 / 60000) < 0.001,
         timeout=5,
     )

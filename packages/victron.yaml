@@ -116,6 +116,30 @@ mqtt:
       device: *victron_device
       value_template: "{{ value_json.value | round(0) }}"
 
+    # Direct energy counters from the MultiPlus hardware — measure actual kWh
+    # crossing the DC↔AC conversion stage, independent of MPPT yield and battery BMS.
+    # No float(0): a null payload means the device is offline; sensor goes unavailable
+    # so HA Statistics skips the data point and the counter is not reset to 0.
+    - name: "Victron VEBus DC to AC Energy"
+      unique_id: "victron_vebus_dc_to_ac_energy"
+      state_topic: "N/c0619ab4c19e/vebus/276/Energy/InverterToAcOut"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt-circle
+      device: *victron_device
+      value_template: "{{ value_json.value | round(3) }}"
+
+    - name: "Victron VEBus AC to DC Energy"
+      unique_id: "victron_vebus_ac_to_dc_energy"
+      state_topic: "N/c0619ab4c19e/vebus/276/Energy/AcIn1ToInverter"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt-circle
+      device: *victron_device
+      value_template: "{{ value_json.value | round(3) }}"
+
     # Total DC PV power aggregated across all MPPTs connected to the GX
     - name: "Victron DC PV Total Power"
       unique_id: "victron_dc_pv_total_power"
@@ -339,6 +363,40 @@ template:
         device_class: power
         state_class: measurement
 
+      # ── Energy Dashboard battery power sensor ────────────────────────────────
+      # Standard convention: positive = charging, negative = discharging.
+      # Derived from AC energy balance: battery_ac = -(ac_load - grid - dc_pv - ac_pv)
+      # This identity guarantees HA "Power usage" = victron_ac_load_total_power exactly,
+      # in all operating modes, because it uses the same DC PV measurement as HA's
+      # configured solar sensor — the DC/AC mismatch cancels algebraically.
+      - name: "Victron Battery AC Power"
+        unique_id: victron_battery_ac_power
+        state: >
+          {% set ac_load = states('sensor.victron_ac_load_total_power') | float(0) %}
+          {% set grid_net = states('sensor.victron_grid_total_power') | float(0) %}
+          {% set dc_pv    = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float(0) %}
+          {{ (-(ac_load - grid_net - dc_pv - ac_pv)) | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
+      # ── System losses ────────────────────────────────────────────────────────
+      # DC bus identity: losses = dc_pv + vebus_dc - battery_power
+      # Captures inverter/charger conversion inefficiency, GX self-consumption,
+      # BMS overhead, and wiring losses. Clamped to ≥ 0 to avoid negative values
+      # when measurement timing skew makes the identity temporarily negative.
+      - name: "Victron System Losses Power"
+        unique_id: victron_system_losses_power
+        state: >
+          {% set dc_pv    = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {% set vebus_dc = states('sensor.victron_vebus_dc_power') | float(0) %}
+          {% set batt     = states('sensor.victron_battery_power') | float(0) %}
+          {{ [dc_pv + vebus_dc - batt, 0] | max | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
 
 # ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
 # Fires every minute and adds power_W / 60000 kWh to the running total.
@@ -364,19 +422,31 @@ template:
         state_class: total_increasing
         state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_export') | float(0) / 60000)) | round(3) }}"
 
+      # AC-equivalent battery energy — accumulated from battery_ac_power (not DC battery power).
+      # Formula: battery_ac = -(ac_load - grid - dc_pv - ac_pv), so
+      #   home = solar(DC) + grid + batt_out_AC - batt_in_AC = ac_load  exactly.
+      # Conversion losses (~5%) appear in the solar slot as the DC vs AC yield gap,
+      # not in home consumption. DC battery power stays available as a separate diagnostic.
       - name: "Victron Battery Energy In"
         unique_id: victron_battery_energy_in
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_charge') | float(0) / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([states('sensor.victron_battery_ac_power') | float(0), 0] | max / 60000)) | round(3) }}"
 
       - name: "Victron Battery Energy Out"
         unique_id: victron_battery_energy_out
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_discharge') | float(0) / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_battery_ac_power') | float(0)), 0] | max / 60000)) | round(3) }}"
+
+      - name: "Victron System Losses Energy"
+        unique_id: victron_system_losses_energy
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_system_losses_power') | float(0) / 60000)) | round(3) }}"
 
 
 # ── Utility meters — monthly billing alignment ────────────────────────────────
