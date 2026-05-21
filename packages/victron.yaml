@@ -357,6 +357,22 @@ template:
         device_class: power
         state_class: measurement
 
+      # ── System losses ────────────────────────────────────────────────────────
+      # DC bus identity: losses = dc_pv + vebus_dc - battery_power
+      # Captures inverter/charger conversion inefficiency, GX self-consumption,
+      # BMS overhead, and wiring losses. Clamped to ≥ 0 to avoid negative values
+      # when measurement timing skew makes the identity temporarily negative.
+      - name: "Victron System Losses Power"
+        unique_id: victron_system_losses_power
+        state: >
+          {% set dc_pv    = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {% set vebus_dc = states('sensor.victron_vebus_dc_power') | float(0) %}
+          {% set batt     = states('sensor.victron_battery_power') | float(0) %}
+          {{ [dc_pv + vebus_dc - batt, 0] | max | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+
 
 # ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
 # Fires every minute and adds power_W / 60000 kWh to the running total.
@@ -395,6 +411,13 @@ template:
         device_class: energy
         state_class: total_increasing
         state: "{{ ((this.state | float(0)) + (states('sensor.victron_battery_power_discharge') | float(0) / 60000)) | round(3) }}"
+
+      - name: "Victron System Losses Energy"
+        unique_id: victron_system_losses_energy
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ ((this.state | float(0)) + (states('sensor.victron_system_losses_power') | float(0) / 60000)) | round(3) }}"
 
 
 # ── Utility meters — monthly billing alignment ────────────────────────────────

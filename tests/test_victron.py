@@ -60,6 +60,7 @@ def _reset_energy(ha: HomeAssistant) -> None:
         "sensor.victron_grid_energy_export",
         "sensor.victron_battery_energy_in",
         "sensor.victron_battery_energy_out",
+        "sensor.victron_system_losses_energy",
     ):
         ha.set_state(eid, "0.0", attrs_kwh)
 
@@ -260,5 +261,42 @@ def test_night_no_grid_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: float(s) > 0,
+        timeout=5,
+    )
+
+
+# ── System losses tests ───────────────────────────────────────────────────────
+
+
+def test_system_losses_daytime(home_assistant: HomeAssistant) -> None:
+    """Daytime: dc_pv=922, vebus_dc=+2878, battery=+3600 → losses = 922+2878-3600 = 200 W."""
+    _seed(home_assistant, dc_pv=922, vebus_dc=2878, battery_power=3600)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", "200.0", timeout=5)
+
+
+def test_system_losses_night(home_assistant: HomeAssistant) -> None:
+    """Night: dc_pv=0, vebus_dc=−87 (inverter mode), battery=−180 → losses = 0-87-(-180) = 93 W."""
+    _seed(home_assistant, dc_pv=0, vebus_dc=-87, battery_power=-180)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", "93.0", timeout=5)
+
+
+def test_system_losses_clamped_to_zero(home_assistant: HomeAssistant) -> None:
+    """All sensors at 0 W → losses = 0 (clamped, no negative values)."""
+    _seed(home_assistant)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", lambda s: float(s) == 0.0, timeout=5)
+
+
+def test_system_losses_energy_accumulates(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """200 W losses × 1 min = 0.003333… kWh → rounded to 0.003 kWh accumulated."""
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    _seed(home_assistant, dc_pv=922, vebus_dc=2878, battery_power=3600)
+    home_assistant.assert_entity_state("sensor.victron_system_losses_power", "200.0", timeout=5)
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    home_assistant.assert_entity_state(
+        "sensor.victron_system_losses_energy",
+        lambda s: abs(float(s) - 200 / 60000) < 0.001,
         timeout=5,
     )
