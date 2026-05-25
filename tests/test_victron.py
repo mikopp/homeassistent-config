@@ -136,21 +136,21 @@ def test_ac_load_total(home_assistant: HomeAssistant) -> None:
 
 
 def test_battery_ac_power_night(home_assistant: HomeAssistant) -> None:
-    """Night: ac_load=102, grid=10, solar=0 → battery_ac = -(102-10) = -92 W (Standard: discharging).
+    """Night: ac_load=102, grid=10, solar=0 → battery_ac = 102-10 = +92 W (discharging, positive).
 
-    HA Power usage = grid(10) + |battery_discharge(92)| = 102 W = actual AC load.
+    HA Power usage = solar(0) + grid(10) + battery(92) = 102 W = actual AC load.
     """
     _seed(home_assistant, grid_l1=10, ac_l1=102)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -92, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 92, timeout=5)
 
 
 def test_battery_ac_power_solar_charging(home_assistant: HomeAssistant) -> None:
-    """Solar surplus charges battery: dc_pv=1200, ac_load=600, grid=0 → battery_ac = +600 W (charging).
+    """Solar surplus charges battery: dc_pv=1200, ac_load=600, grid=0 → battery_ac = −600 W (charging, negative).
 
-    HA Power usage = solar(1200) + grid(0) - battery_charge(600) = 600 W = actual AC load.
+    HA Power usage = solar(1200) + grid(0) + battery(−600) = 600 W = actual AC load.
     """
     _seed(home_assistant, dc_pv=1200, ac_l1=600)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 600, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -600, timeout=5)
 
 
 def test_battery_ac_power_grid_exporting(home_assistant: HomeAssistant) -> None:
@@ -241,7 +241,7 @@ def test_battery_discharge_energy_accumulates(
     _reset_energy(home_assistant)
     _seed(home_assistant, battery_power=-1200, ac_l1=1200)
     home_assistant.assert_entity_state("sensor.victron_battery_power_discharge", "1200.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -1200, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 1200, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
