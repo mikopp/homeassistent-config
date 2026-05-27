@@ -626,6 +626,8 @@ automation:
 
           # Block 4: Neutral season or cooling season without free cooling — comfort profile.
           # Merges original neutral and cooling+no-free-cooling branches.
+          # Dead-band guard required: without it, Block 4 would override Block 1's warm profile
+          # whenever a second trigger fires after Block 1's idempotent guard prevents re-assertion.
           - conditions:
               - condition: or
                 conditions:
@@ -645,6 +647,12 @@ automation:
                       - condition: state
                         entity_id: binary_sensor.airflow_free_cooling_available
                         state: "off"
+              - condition: template
+                value_template: >
+                  {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
+                  {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
+                  {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+                  {{ (tgt - hyst) <= hum <= (tgt + hyst) }}
               - condition: not
                 conditions:
                   - condition: state

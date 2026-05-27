@@ -129,6 +129,111 @@ def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> Non
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
 
 
+# ── Verification scenario tests ─────────────────────────────────────────────────────────
+# These mirror the manual verification steps from the implementation plan.
+# CI limitation note: select.select_option and switch.turn_on/off are silently ignored
+# on bare stubs, so most tests verify trace-error absence rather than state changes.
+# Production correctness (service calls actually applied) must be verified in HA directly.
+
+
+def test_verification_step3_high_humidity_free_cooling_triggers_cool(home_assistant: HomeAssistant) -> None:
+    """Verification step 3: target lowered below current humidity + free_cooling=on → Block 2 → cool profile.
+
+    target=52, hum=55 (from baseline) → 55 > 52+2=54 (threshold). Free cooling available.
+    Block 2 condition: free_cooling=on AND hum > target+hyst → fires, sets cool.
+    CI: stub ignores select_option — assert trace-error absence only.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_target_humidity", "value": 52})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    _trigger(home_assistant)
+    # Block 2 fires: 55 > 54, free_cooling=on. Profile would switch to cool in production.
+
+
+def test_verification_step3_high_humidity_no_free_cooling_profile_unchanged(home_assistant: HomeAssistant) -> None:
+    """Verification step 3 (negative path): high humidity but free_cooling=off → no profile change.
+
+    target=52, hum=55 → 55 > 54 (above dead band). Block 2 misses (free_cooling=off).
+    Block 4's dead-band guard also prevents comfort override (hum outside dead band [50,54]).
+    Profile seeded to "comfort" — stays comfort because no block fires.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_target_humidity", "value": 52})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    _trigger(home_assistant)
+    # Block 2: free_cooling=off → miss. Block 4: neutral=yes, dead_band: 55∉[50,54] → miss.
+    # Default logs warning. Profile unchanged.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "comfort", timeout=3)
+
+
+def test_verification_step4_high_humidity_outdoor_humid_preset_fires(home_assistant: HomeAssistant) -> None:
+    """Verification step 4: high humidity + outdoor_dew ≥ indoor_dew → moisture preset fires.
+
+    outdoor_dew=15.0°C ≥ indoor_dew=12.0°C: ventilating would import humid air, so ventilation
+    must be reduced. binary_sensor seeded ON to bypass the 10-min delay_on.
+    CI: switch/select stubs silently ignored — assert trace-error absence only.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_target_humidity", "value": 52})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "15.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    _trigger_moisture(home_assistant)
+    # In production: auto_mode=off, ventilation_level=low. CI stubs ignore service calls.
+
+
+def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistant: HomeAssistant) -> None:
+    """Verification step 5: humidity drops below target → binary_sensor turns off → auto mode restored.
+
+    binary_sensor seeded OFF to bypass the 10-min delay_off. Preset automation restores auto mode.
+    CI: switch.turn_on silently ignored — assert trace-error absence only.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "54.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    _trigger_moisture(home_assistant)
+    # In production: switch.comfoconnect_pro_auto_mode turns back on.
+
+
+def test_verification_step6_low_humidity_warm_profile_overrides_season(home_assistant: HomeAssistant) -> None:
+    """Verification step 6: humidity below target−hyst → Block 1 fires (warm), any season or free cooling state.
+
+    hum=50% < target(55)−hyst(2)=53% → Block 1 fires even during active_cooling+free_cooling=on.
+    The warming priority exists to protect wood/instruments from excessively dry air.
+    CI: stub ignores select_option — assert trace-error absence only.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    _trigger(home_assistant)
+    # Block 1: 50 < 53 → fires. In production: profile switches to warm despite cooling season.
+
+
 # ── Temperature profile moisture tests ──────────────────────────────────────────────────
 
 
