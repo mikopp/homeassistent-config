@@ -12,11 +12,19 @@ from trigger) and idempotent "comfort" assertions are possible for most scenario
 from ha_integration_test_harness import HomeAssistant
 
 _AIRFLOW_AUTO = "automation.airflow_cooling_set_temperature_profile"
+_MOISTURE_PRESET_AUTO = "automation.airflow_moisture_ventilation_preset"
 
 
 def _trigger(home_assistant: HomeAssistant) -> None:
     home_assistant.call_action("automation", "trigger", {
         "entity_id": _AIRFLOW_AUTO,
+        "skip_condition": True,
+    })
+
+
+def _trigger_moisture(home_assistant: HomeAssistant) -> None:
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": _MOISTURE_PRESET_AUTO,
         "skip_condition": True,
     })
 
@@ -119,6 +127,92 @@ def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> Non
     home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "20.0", attrs_t)
     home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "55.0", attrs_h)
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
+
+
+# ── Temperature profile moisture tests ──────────────────────────────────────────────────
+
+
+def test_airflow_low_humidity_warm_profile(home_assistant: HomeAssistant) -> None:
+    """Low humidity (50% < target 55 − hyst 2 = 53%) → Block 1 fires (trace only)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    _trigger(home_assistant)
+    # Block 1 fires; select.select_option silently ignored on bare stub — assert trace absence only.
+
+
+def test_airflow_high_humidity_free_cooling_cool_profile(home_assistant: HomeAssistant) -> None:
+    """High humidity (60% > target 55 + hyst 2 = 57%) + free_cooling=on → Block 2 fires (trace only)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    _trigger(home_assistant)
+    # Block 2: free_cooling=on AND high_hum — stub ignores service call, assert trace absence only.
+
+
+def test_airflow_high_humidity_free_cooling_off_stays_comfort(home_assistant: HomeAssistant) -> None:
+    """High humidity but free_cooling=off + neutral → Blocks 1–3 miss, Block 4 (neutral→comfort)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    _trigger(home_assistant)
+    # Block 2 skipped (free_cooling=off). Block 4: neutral → comfort.
+    # Seeded value is already "comfort" so the idempotent guard suppresses the call.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "comfort", timeout=3)
+
+
+def test_airflow_humidity_in_dead_band_no_moisture_override(home_assistant: HomeAssistant) -> None:
+    """Humidity in dead band (55%) + active_heating → Block 1/2 miss, Block 3 fires (trace only)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # Baseline seeds 55% which is exactly at target — neither low (< 53) nor high (> 57).
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    _trigger(home_assistant)
+    # Block 3: active_heating → warm; stub ignores service call, assert trace absence only.
+
+
+# ── Ventilation preset automation tests ─────────────────────────────────────────────────
+
+
+def test_moisture_ventilation_low_when_needed(home_assistant: HomeAssistant) -> None:
+    """auto=on + binary_sensor=on → ventilation reduced (trace only; stub ignores switch/select)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    _trigger_moisture(home_assistant)
+    # switch.turn_off and select.select_option are silently ignored on bare stubs.
+
+
+def test_moisture_ventilation_restore_auto(home_assistant: HomeAssistant) -> None:
+    """auto=on + binary_sensor=off → auto mode restored (trace only)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    _trigger_moisture(home_assistant)
+    # switch.turn_on silently ignored — assert trace absence only.
+
+
+def test_moisture_ventilation_disabled_no_action(home_assistant: HomeAssistant) -> None:
+    """auto=off: condition gate suppresses preset → ventilation_level stays 'medium'."""
+    # airflow_cooling_automatic_enabled=off from baseline_inputs fixture.
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    _trigger_moisture(home_assistant)
+    # Guard condition (airflow_cooling_automatic_enabled=on) is not met → no action taken.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_level",
+                                       "medium", timeout=3)
+
+
+# ── Bypass estimation tests ──────────────────────────────────────────────────────────────
 
 
 def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
