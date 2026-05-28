@@ -164,14 +164,24 @@ jobs:
 
       # ── 9. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
-        if: steps.run_tests.outcome == 'failure' && github.event_name == 'pull_request'
+        if: steps.run_tests.outcome == 'failure'
         uses: actions/github-script@v8
         with:
           script: |
+            // Find the open PR for this branch (works for push events too)
+            const branch = context.ref.replace('refs/heads/', '');
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open',
+            });
+            const prNumber = prs[0]?.number ?? context.issue?.number;
+            if (!prNumber) { console.log('No PR found for branch', branch); return; }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number: prNumber,
               body: [
                 '## ❌ Home Assistant CI failed',
                 '',
