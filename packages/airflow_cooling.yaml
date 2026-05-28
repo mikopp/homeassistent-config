@@ -463,7 +463,7 @@ automation:
   - id: airflow_cooling_set_temperature_profile
     alias: "Airflow: Set Temperature Profile"
     description: "Profile warm/comfort/cool driven by heating-cooling-indicator and free cooling binary sensor"
-    mode: single
+    mode: restart
     trigger:
       - platform: state
         entity_id: sensor.heating_cooling_indicator
@@ -471,12 +471,28 @@ automation:
       - platform: state
         entity_id: binary_sensor.airflow_free_cooling_available
         id: free_cooling_changed
+      # Re-evaluate once on startup after sensors leave unavailable
+      - platform: homeassistant
+        event: start
+        id: ha_start
     # Guard: skip all profile changes when automatic control is disabled
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
     action:
+      # On HA startup, wait for decision sensors to be available before evaluating.
+      # Real state-change triggers skip this block entirely.
+      # mode: restart ensures a real trigger aborts this wait and runs immediately.
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('sensor.heating_cooling_indicator') not in ['unavailable', 'unknown'] and
+                 states('binary_sensor.airflow_free_cooling_available') not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
       - choose:
           # Active heating mode: warm profile
           - conditions:
