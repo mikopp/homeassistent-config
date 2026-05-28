@@ -123,6 +123,14 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     ha.set_state("select.comfoconnect_pro_ventilation_level", "medium", {})
     ha.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    ha.set_state("switch.comfoconnect_pro_boost", "off", {})
+    ha.set_state("number.comfoconnect_pro_boost_time", "0",
+                 {"unit_of_measurement": "min", "min": 0, "max": 1092, "step": 1})
+    # Workday integration (absent in CI) — seeded to workday so tests are deterministic
+    ha.set_state("binary_sensor.workday", "on", {})
+    # Schedule helpers (UI-only, absent in CI) — workday schedule on, non-workday off by default
+    ha.set_state("schedule.airflow_boost_workday", "on", {})
+    ha.set_state("schedule.airflow_boost_non_workday", "off", {})
     ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
