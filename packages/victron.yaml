@@ -364,11 +364,11 @@ template:
         state_class: measurement
 
       # ── Energy Dashboard battery power sensor ────────────────────────────────
-      # Standard convention: positive = charging, negative = discharging.
-      # Derived from AC energy balance: battery_ac = -(ac_load - grid - dc_pv - ac_pv)
-      # This identity guarantees HA "Power usage" = victron_ac_load_total_power exactly,
-      # in all operating modes, because it uses the same DC PV measurement as HA's
-      # configured solar sensor — the DC/AC mismatch cancels algebraically.
+      # HA house-centric convention: positive = discharging (battery contributing to home),
+      # negative = charging. HA adds this directly: home = solar + grid + battery_power.
+      # Derived from AC energy balance: battery_ac = ac_load - grid - dc_pv - ac_pv.
+      # This identity guarantees HA "Power usage" = victron_ac_load_total_power exactly
+      # in all operating modes.
       - name: "Victron Battery AC Power"
         unique_id: victron_battery_ac_power
         state: >
@@ -376,7 +376,7 @@ template:
           {% set grid_net = states('sensor.victron_grid_total_power') | float(0) %}
           {% set dc_pv    = states('sensor.victron_dc_pv_total_power') | float(0) %}
           {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float(0) %}
-          {{ (-(ac_load - grid_net - dc_pv - ac_pv)) | round(0) }}
+          {{ (ac_load - grid_net - dc_pv - ac_pv) | round(0) }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
@@ -422,24 +422,25 @@ template:
         state_class: total_increasing
         state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_export') | float(0) / 60000)) | round(3) }}"
 
-      # AC-equivalent battery energy — accumulated from battery_ac_power (not DC battery power).
-      # Formula: battery_ac = -(ac_load - grid - dc_pv - ac_pv), so
-      #   home = solar(DC) + grid + batt_out_AC - batt_in_AC = ac_load  exactly.
-      # Conversion losses (~5%) appear in the solar slot as the DC vs AC yield gap,
-      # not in home consumption. DC battery power stays available as a separate diagnostic.
+      # AC-equivalent battery energy — accumulated from battery_ac_power half-waves.
+      # battery_ac = ac_load - grid - dc_pv - ac_pv (positive = discharging, negative = charging).
+      # Half-waves are negated relative to the old formula to match the flipped sign convention:
+      #   energy_in  accumulates max(-battery_ac, 0)  — negative half = charging
+      #   energy_out accumulates max(+battery_ac, 0)  — positive half = discharging
+      # Identity: home = solar(DC) + grid + batt_out - batt_in = ac_load  exactly.
       - name: "Victron Battery Energy In"
         unique_id: victron_battery_energy_in
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + ([states('sensor.victron_battery_ac_power') | float(0), 0] | max / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_battery_ac_power') | float(0)), 0] | max / 60000)) | round(3) }}"
 
       - name: "Victron Battery Energy Out"
         unique_id: victron_battery_energy_out
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_battery_ac_power') | float(0)), 0] | max / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([states('sensor.victron_battery_ac_power') | float(0), 0] | max / 60000)) | round(3) }}"
 
       - name: "Victron System Losses Energy"
         unique_id: victron_system_losses_energy
