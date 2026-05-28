@@ -36,6 +36,8 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.airflow_cooling_target_temperature": 21.5,
         "input_number.airflow_min_dew_diff": 2.0,
         "input_number.airflow_min_temp_diff": 1.5,
+        "input_number.airflow_target_humidity": 55,
+        "input_number.airflow_humidity_hysteresis": 2.0,
         "input_number.pergola_max_tilt_angle": 122,
         "input_number.pergola_wall_azimuth": 204,
         "input_number.pergola_slat_width": 22,
@@ -119,6 +121,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("cover.dach_rechts", "open", {"current_tilt_position": 50})
     # ComfoConnect (absent in CI)
     ha.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    ha.set_state("select.comfoconnect_pro_ventilation_level", "medium", {})
+    ha.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",

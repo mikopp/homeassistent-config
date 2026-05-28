@@ -260,11 +260,31 @@ template:
         delay_off:
           minutes: 10
 
+      # True when ventilation must be reduced to avoid importing humid outdoor air.
+      # Turns ON at (target + hyst), stays ON until hum < target. Mutually exclusive with
+      # airflow_free_cooling_available (opposite dew conditions when min_dew_diff > 0).
+      - unique_id: airflow_moisture_ventilation_low_needed
+        name: "Airflow Moisture Ventilation Low Needed"
+        device_class: moisture
+        state: >
+          {% set indoor_hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
+          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
+          {% set indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float(0) %}
+          {% set target      = states('input_number.airflow_target_humidity') | float(55) %}
+          {% set hysteresis  = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+          {% set threshold   = target if this.state == 'on' else (target + hysteresis) %}
+          {{ indoor_hum >= threshold and outdoor_dew >= indoor_dew }}
+        delay_on:
+          minutes: 10
+        delay_off:
+          minutes: 10
+
 # binary_sensor.airflow_free_cooling_available excluded — intermediate computed state, not worth archiving
 recorder:
   exclude:
     entities:
       - binary_sensor.airflow_free_cooling_available
+      - binary_sensor.airflow_moisture_ventilation_low_needed
 
 # --- HELPERS ---
 # Enable/disable automatic ventilation profile switching from the UI or other automations
@@ -302,6 +322,24 @@ input_number:
     unit_of_measurement: "°C"
     icon: mdi:thermometer-chevron-up
 
+  # Target indoor humidity. Dead band [target−hyst, target+hyst] → no moisture action.
+  airflow_target_humidity:
+    name: "Airflow Target Humidity"
+    min: 30
+    max: 60
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+
+  # Hysteresis half-band for all moisture triggers.
+  airflow_humidity_hysteresis:
+    name: "Airflow Humidity Hysteresis"
+    min: 0.5
+    max: 5
+    step: 0.5
+    unit_of_measurement: "%"
+    icon: mdi:water-sync
+
   # Calibration: expected enthalpy efficiency when bypass is fully closed (maximum heat recovery)
   airflow_bypass_efficiency_max:
     name: "Airflow Bypass Efficiency Max"
@@ -333,6 +371,19 @@ climate:
     # Standard climate property: current observed humidity (read-only)
     current_humidity_template: >
       {{ states('sensor.airflow_avg_indoor_humidity_5min') | float(50) }}
+
+    # Standard climate property: user-set target humidity, backed by input_number for persistence
+    target_humidity_template: >
+      {{ states('input_number.airflow_target_humidity') | float(55) }}
+    min_humidity: 30
+    max_humidity: 80
+
+    set_humidity:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.airflow_target_humidity
+        data:
+          value: "{{ humidity }}"
 
     # Standard climate property: user-set target temperature, backed by input_number for persistence
     target_temperature_template: >
@@ -462,7 +513,7 @@ automation:
   # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
   - id: airflow_cooling_set_temperature_profile
     alias: "Airflow: Set Temperature Profile"
-    description: "Profile warm/comfort/cool driven by heating-cooling-indicator and free cooling binary sensor"
+    description: "Profile warm/comfort/cool driven by heating-cooling indicator, free cooling state, and indoor humidity"
     mode: restart
     trigger:
       - platform: state
@@ -471,6 +522,9 @@ automation:
       - platform: state
         entity_id: binary_sensor.airflow_free_cooling_available
         id: free_cooling_changed
+      - platform: state
+        entity_id: sensor.airflow_avg_indoor_humidity_5min
+        id: humidity_changed
       # Re-evaluate once on startup after sensors leave unavailable
       - platform: homeassistant
         event: start
@@ -494,11 +548,19 @@ automation:
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
-          # Active heating mode: warm profile
+          # Block 1: Low moisture — warm profile to retain humidity (any season)
           - conditions:
-              - condition: state
-                entity_id: sensor.heating_cooling_indicator
-                state: "active_heating"
+              - condition: template
+                value_template: >
+                  {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
+                  {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
+                  {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+                  {{ hum < (tgt - hyst) }}
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "warm"
             sequence:
               - action: select.select_option
                 target:
@@ -508,37 +570,31 @@ automation:
               - action: notify.mobile_app_greywinds_iphone
                 data:
                   title: "Ventilation: Warm Profile"
-                  message: "Outdoor ≤5°C — profile set to Warm."
+                  message: >
+                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
+                    below target {{ states('input_number.airflow_target_humidity') }}%
+                    — profile set to Warm to retain moisture.
 
-          # Neutral mode: comfort profile
+          # Block 2: Free cooling available + (high moisture OR cooling season) — cool profile.
+          # Merges original cooling-season branch with new moisture-driven branch.
           - conditions:
               - condition: state
-                entity_id: sensor.heating_cooling_indicator
-                state: "neutral"
-            sequence:
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "comfort"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Comfort Profile"
-                  message: "Outdoor 5–10°C — profile set to Comfort."
-
-          # Cooling mode + free cooling active: Cool to encourage bypass
-          - conditions:
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "on"
               - condition: or
                 conditions:
+                  - condition: template
+                    value_template: >
+                      {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
+                      {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
+                      {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+                      {{ hum > (tgt + hyst) }}
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
                     state: "passive_cooling"
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
                     state: "active_cooling"
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "on"
               - condition: not
                 conditions:
                   - condition: state
@@ -553,21 +609,66 @@ automation:
               - action: notify.mobile_app_greywinds_iphone
                 data:
                   title: "Ventilation: Cool Profile"
-                  message: "Free cooling active — profile set to Cool."
+                  message: >
+                    {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
+                    {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
+                    {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+                    {% if hum > (tgt + hyst) %}
+                      High indoor humidity {{ hum }}% + free cooling active — profile set to Cool to flush humid air.
+                    {% else %}
+                      Free cooling active — profile set to Cool.
+                    {% endif %}
 
-          # Cooling mode + free cooling inactive: comfort
+          # Block 3: Active heating — warm profile
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state: "active_heating"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_temperature_profile
+                    state: "warm"
+            sequence:
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "warm"
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Warm Profile"
+                  message: "Outdoor ≤5°C — profile set to Warm."
+
+          # Block 4: Neutral season or cooling season without free cooling — comfort profile.
+          # Merges original neutral and cooling+no-free-cooling branches.
+          # Dead-band guard required: without it, Block 4 would override Block 1's warm profile
+          # whenever a second trigger fires after Block 1's idempotent guard prevents re-assertion.
           - conditions:
               - condition: or
                 conditions:
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
-                    state: "passive_cooling"
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "active_cooling"
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "off"
+                    state: "neutral"
+                  - condition: and
+                    conditions:
+                      - condition: or
+                        conditions:
+                          - condition: state
+                            entity_id: sensor.heating_cooling_indicator
+                            state: "passive_cooling"
+                          - condition: state
+                            entity_id: sensor.heating_cooling_indicator
+                            state: "active_cooling"
+                      - condition: state
+                        entity_id: binary_sensor.airflow_free_cooling_available
+                        state: "off"
+              - condition: template
+                value_template: >
+                  {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
+                  {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
+                  {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
+                  {{ (tgt - hyst) <= hum <= (tgt + hyst) }}
               - condition: not
                 conditions:
                   - condition: state
@@ -582,13 +683,75 @@ automation:
               - action: notify.mobile_app_greywinds_iphone
                 data:
                   title: "Ventilation: Comfort Profile"
-                  message: "Free cooling inactive — profile set to Comfort."
+                  message: >
+                    {% if is_state('sensor.heating_cooling_indicator', 'neutral') %}
+                      Outdoor 5–10°C — profile set to Comfort.
+                    {% else %}
+                      Cooling season, free cooling inactive — profile set to Comfort.
+                    {% endif %}
 
-        # Fallback: heating_cooling_indicator unavailable/unknown — skip profile change
+        # Fallback: indicator unavailable and no humidity override — skip profile change
         default:
           - action: system_log.write
             data:
               message: "Airflow: heating_cooling_indicator unavailable — skipping profile change"
+              level: warning
+
+  # Reduces ventilation to low when humidity is high AND outdoor air is too humid to help.
+  # Restores auto mode when resolved. Auto mode is disabled first to prevent ComfoConnect
+  # from overriding the manual level.
+  - id: airflow_moisture_ventilation_preset
+    alias: "Airflow: Moisture Ventilation Preset"
+    description: >
+      Reduces ventilation to low when humidity exceeds (target + hysteresis) AND outdoor air
+      is too humid to help. Restores auto mode when resolved.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
+        state: "on"
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                state: "on"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_ventilation_level
+                data:
+                  option: "low"
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Low Level"
+                  message: >
+                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
+                    above target and outdoor air too humid — ventilation set to Low.
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                state: "off"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Auto Mode Restored"
+                  message: >
+                    Indoor humidity normalized or outdoor air now drier
+                    — ComfoConnect auto mode restored.
+        default:
+          - action: system_log.write
+            data:
+              message: "Airflow moisture preset: unexpected binary sensor state — no action"
               level: warning
 
 # --- GROUP ---
@@ -624,5 +787,10 @@ group:
       - climate.airflow_climate
       - sensor.airflow_avg_indoor_humidity
       - sensor.airflow_avg_indoor_humidity_5min
-      # Automation
-      - automation.airflow_set_temperature_profile
+      # Humidity helpers + binary sensor
+      - input_number.airflow_target_humidity
+      - input_number.airflow_humidity_hysteresis
+      - binary_sensor.airflow_moisture_ventilation_low_needed
+      # Automations
+      - automation.airflow_cooling_set_temperature_profile
+      - automation.airflow_moisture_ventilation_preset

@@ -15,6 +15,9 @@ views:
           - entity: select.comfoconnect_pro_temperature_profile
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
+          - entity: binary_sensor.airflow_moisture_ventilation_low_needed
+          - entity: select.comfoconnect_pro_ventilation_level
+          - entity: switch.comfoconnect_pro_auto_mode
           - entity: sensor.comfoconnect_pro_supply_fan_volume
 
       - type: gauge
@@ -56,9 +59,13 @@ views:
           - entity: input_number.airflow_cooling_target_temperature
           - entity: input_number.airflow_min_dew_diff
           - entity: input_number.airflow_min_temp_diff
+          - entity: input_number.airflow_target_humidity
+          - entity: input_number.airflow_humidity_hysteresis
 
       - type: tile
         entity: automation.airflow_cooling_set_temperature_profile
+      - type: tile
+        entity: automation.airflow_moisture_ventilation_preset
       - type: logbook
         title: Airflow Activity
         hours_to_show: 24
@@ -66,6 +73,6 @@ views:
           label_id: ventilation  # Use the ID of your label here
         entities:
           - sensor.airflow_bypass_estimation
-          - sensor.airflow_bypass_estimation
           - select.comfoconnect_pro_temperature_profile
           - sensor.heating_cooling_indicator
+          - binary_sensor.airflow_moisture_ventilation_low_needed
