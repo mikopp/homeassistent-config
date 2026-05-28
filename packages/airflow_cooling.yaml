@@ -326,7 +326,7 @@ input_number:
   airflow_target_humidity:
     name: "Airflow Target Humidity"
     min: 30
-    max: 80
+    max: 60
     step: 1
     unit_of_measurement: "%"
     icon: mdi:water-percent
