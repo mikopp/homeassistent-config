@@ -157,12 +157,23 @@ jobs:
         run: |
           pytest tests/ -v 2>&1 | tee /tmp/pytest_output.txt
           exit_code=${PIPESTATUS[0]}
-          echo "output<<EOF"       >> "$GITHUB_OUTPUT"
-          cat /tmp/pytest_output.txt >> "$GITHUB_OUTPUT"
-          echo "EOF"               >> "$GITHUB_OUTPUT"
           exit $exit_code
 
-      # ── 9. Post a PR comment on failure ─────────────────────────────────────
+      # ── 9. Write test output to Job Summary (always visible in Actions UI) ──
+      - name: Write test results to Job Summary
+        if: always()
+        run: |
+          echo "## Home Assistant CI Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/pytest_output.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pytest_output.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No pytest output found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 10. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
         if: steps.run_tests.outcome == 'failure'
         uses: actions/github-script@v8
@@ -173,26 +184,21 @@ jobs:
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              head: `${context.repo.owner}:${branch}`,
+              head: context.repo.owner + ':' + branch,
               state: 'open',
             });
-            const prNumber = prs[0]?.number ?? context.issue?.number;
+            const prNumber = (prs[0] && prs[0].number) || (context.issue && context.issue.number);
             if (!prNumber) { console.log('No PR found for branch', branch); return; }
+            const output = require('fs').readFileSync('/tmp/pytest_output.txt', 'utf8');
+            const truncated = output.length > 60000 ? output.slice(-60000) : output;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              body: [
-                '## ❌ Home Assistant CI failed',
-                '',
-                '### ❌ Template validation + automation scenario tests',
-                '```',
-                `${{ steps.run_tests.outputs.output }}`,
-                '```',
-              ].join('\n'),
+              body: '## ❌ Home Assistant CI failed\n\n### Test output\n```\n' + truncated + '\n```',
             });
 
-      # ── 10. Re-fail the job after the comment step ───────────────────────────
+      # ── 11. Re-fail the job after the comment step ───────────────────────────
       - name: Fail if any check failed
         if: steps.run_tests.outcome == 'failure'
         run: exit 1
