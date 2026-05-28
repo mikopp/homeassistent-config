@@ -311,8 +311,6 @@ template:
           }}
         delay_on:
           minutes: 10
-        delay_off:
-          minutes: 10
 
 # Intermediate computed binary sensors excluded — not worth archiving
 recorder:
