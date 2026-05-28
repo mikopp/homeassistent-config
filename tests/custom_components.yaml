@@ -3,6 +3,13 @@
 #
 # This file is read by the CI workflow (.github/workflows/ha_check_frenk.yaml)
 # to install dependencies before running the config check.
+#
+# Two sections:
+#   dependencies   — HACS/GitHub custom components (downloaded and placed in custom_components/).
+#   ha_yaml_config — Built-in HA integrations that need explicit YAML configuration.
+#                    CI writes these snippets to packages/ha_ci_fixtures.yaml so both
+#                    check_config (step 6) and the test harness (step 8) can load them.
+#                    In production, configure these integrations via the HA UI.
 
 dependencies:
   - name: Template Climate
@@ -12,3 +19,27 @@ dependencies:
     description: >
       Provides the climate_template platform used in packages/climate_airflow.yaml
       to create a virtual climate entity driven by Jinja2 templates.
+
+ha_yaml_config:
+  - name: Workday
+    description: >
+      Built-in Home Assistant workday integration. Provides binary_sensor.workday,
+      used by the airflow humidity drying boost schedule check in
+      packages/airflow_cooling.yaml. Configure via the HA UI in production;
+      this snippet is used by CI to create the entity in the test harness.
+    yaml: |
+      binary_sensor:
+        - platform: workday
+          country: AT
+
+  - name: Airflow Boost Schedules
+    description: >
+      Schedule helper entities for the drying boost time windows.
+      Configure actual time windows via the HA UI in production.
+      These stubs ensure the entities exist in CI for template rendering and tests.
+    yaml: |
+      schedule:
+        airflow_boost_workday:
+          name: "Airflow Boost Workday"
+        airflow_boost_non_workday:
+          name: "Airflow Boost Non-Workday"
