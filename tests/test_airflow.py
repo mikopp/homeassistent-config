@@ -400,18 +400,28 @@ def test_drying_hvac_action_not_drying_without_free_cooling(home_assistant: Home
 
 
 def test_drying_schedule_off_sensor_not_triggered(home_assistant: HomeAssistant) -> None:
-    """Workday=on, workday schedule=off → drying binary sensor turns off when conditions are false.
+    """Workday=on, workday schedule=off → drying binary sensor stays off.
 
-    Template evaluates to false (in_schedule=false). With no delay_off the sensor transitions
-    to 'off' immediately once the template clears, regardless of prior state.
+    Phase 1: set outdoor_t > target_t, a plain numeric sensor dependency that HA always
+    tracks, to guarantee template=false and the sensor drops to 'off' regardless of
+    its prior state.
+    Phase 2: restore outdoor_t to cool value; only in_schedule=false (schedule off) keeps
+    the template false — the sensor must not transition to 'on'.
     """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
+
+    # Phase 1: force template false and sensor to 'off' via a reliable numeric condition.
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "25.0", temp_attrs)
+    home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
+                                       "off", timeout=5)
+
+    # Phase 2: set conditions with schedule=off (in_schedule=false) → template stays false.
     home_assistant.set_state("binary_sensor.workday", "on", {})
     home_assistant.set_state("schedule.airflow_boost_workday", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
-    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0",
-                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
 
@@ -419,43 +429,53 @@ def test_drying_schedule_off_sensor_not_triggered(home_assistant: HomeAssistant)
 def test_drying_non_workday_schedule_applies_on_holiday(home_assistant: HomeAssistant) -> None:
     """workday=off (holiday) + non-workday schedule on → in_schedule=true path reached.
 
-    Phase 1: with both schedules off the template evaluates false; no delay_off means the
-    sensor immediately settles to 'off' regardless of its prior state.
+    Phase 1: set outdoor_t > target_t to guarantee template=false and sensor settles to
+    'off' regardless of its prior state (bypasses Schmitt-trigger and schedule dependencies).
     Phase 2: set holiday conditions; template evaluates true but delay_on=10min keeps
     sensor 'off' within the 3-second assertion window.
     """
-    # Phase 1: ensure sensor is off (template false when both schedules are off).
-    home_assistant.set_state("schedule.airflow_boost_workday", "off", {})
-    home_assistant.set_state("schedule.airflow_boost_non_workday", "off", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
-    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0",
-                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
+
+    # Phase 1: force template false and sensor to 'off' via reliable numeric condition.
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "25.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
 
     # Phase 2: holiday conditions; delay_on prevents immediate activation.
     home_assistant.set_state("binary_sensor.workday", "off", {})
     home_assistant.set_state("schedule.airflow_boost_non_workday", "on", {})
-    # Template now evaluates true (non-workday branch reachable), but delay_on=10min
-    # keeps sensor 'off' within the 3-second assertion window.
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
+    # Template now evaluates true (non-workday branch), but delay_on=10min keeps sensor 'off'.
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=3)
 
 
 def test_drying_low_moisture_guard_prevents_boost(home_assistant: HomeAssistant) -> None:
-    """airflow_moisture_ventilation_low_needed=on → drying binary sensor turns off immediately.
+    """airflow_moisture_ventilation_low_needed=on → drying binary sensor stays off.
 
     Mutually exclusive by design: low_needed means outdoor air is too humid,
     which precludes airflow_free_cooling_available=on. Guard is belt-and-suspenders.
-    With low_active=true the template evaluates to false; no delay_off means the
-    sensor transitions to 'off' immediately.
+    With low_active=true the template evaluates to false regardless of other conditions.
+
+    Phase 1: set outdoor_t > target_t to guarantee sensor is 'off' before testing the guard.
+    Phase 2: restore cool outdoor_t with all other conditions true except guard active.
     """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
+
+    # Phase 1: force sensor to 'off' via reliable numeric condition.
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "25.0", temp_attrs)
+    home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
+                                       "off", timeout=5)
+
+    # Phase 2: guard active (low_active=on) blocks template → sensor stays off.
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
 
