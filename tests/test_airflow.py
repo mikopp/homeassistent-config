@@ -9,7 +9,7 @@ silently ignored by HA's service registry. Only the trace-error absence (no exce
 from trigger) and idempotent "comfort" assertions are possible for most scenarios.
 """
 
-from ha_integration_test_harness import HomeAssistant
+from ha_integration_test_harness import HomeAssistant, TimeMachine
 
 _AIRFLOW_AUTO = "automation.airflow_cooling_set_temperature_profile"
 _MOISTURE_PRESET_AUTO = "automation.airflow_moisture_ventilation_preset"
@@ -399,11 +399,13 @@ def test_drying_hvac_action_not_drying_without_free_cooling(home_assistant: Home
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
 
 
-def test_drying_schedule_off_sensor_not_triggered(home_assistant: HomeAssistant) -> None:
+def test_drying_schedule_off_sensor_not_triggered(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
     """Workday=on, workday schedule=off → drying binary sensor stays off even if conditions met.
 
-    Sensor is seeded off (baseline). With in_schedule=false the template evaluates to false,
-    so the sensor will not transition to on within the CI window (delay_on aside).
+    With in_schedule=false the template evaluates to false. Jumps forward in HA time to
+    expire any pending delay_off so the sensor can settle to 'off' within the timeout.
     """
     home_assistant.set_state("binary_sensor.workday", "on", {})
     home_assistant.set_state("schedule.airflow_boost_workday", "off", {})
@@ -412,17 +414,30 @@ def test_drying_schedule_off_sensor_not_triggered(home_assistant: HomeAssistant)
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0",
                              {"unit_of_measurement": "°C", "device_class": "temperature"})
+    # Template evaluates false (in_schedule=false). Jump forward so delay_off (10 min) fires.
+    time_machine.jump_to_next(month="Dec", day_of_month=1, hour=2, minute=0, second=0)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
-                                       "off", timeout=5)
+                                       "off", timeout=10)
 
 
-def test_drying_non_workday_schedule_applies_on_holiday(home_assistant: HomeAssistant) -> None:
+def test_drying_non_workday_schedule_applies_on_holiday(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
     """workday=off (holiday) + non-workday schedule on → in_schedule=true path reached.
 
-    We can only assert the sensor stays off here (it starts off and delay_on is 10 min)
-    but confirm no trace error and that the non-workday schedule branch is reachable.
-    The automation trigger test (test_drying_boost_starts_when_needed) covers the branch execution.
+    Phase 1: reset the sensor to 'off' by making the template false (both schedules off)
+    and jumping forward to expire any pending delay_off.
+    Phase 2: set holiday conditions; template evaluates true but delay_on=10min keeps
+    sensor 'off' within the 3-second assertion window.
     """
+    # Phase 1: ensure sensor is off before testing the non-workday branch.
+    home_assistant.set_state("schedule.airflow_boost_workday", "off", {})
+    home_assistant.set_state("schedule.airflow_boost_non_workday", "off", {})
+    time_machine.jump_to_next(month="Dec", day_of_month=2, hour=2, minute=0, second=0)
+    home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
+                                       "off", timeout=10)
+
+    # Phase 2: set holiday conditions; delay_on prevents immediate activation.
     home_assistant.set_state("binary_sensor.workday", "off", {})
     home_assistant.set_state("schedule.airflow_boost_non_workday", "on", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
@@ -430,25 +445,30 @@ def test_drying_non_workday_schedule_applies_on_holiday(home_assistant: HomeAssi
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0",
                              {"unit_of_measurement": "°C", "device_class": "temperature"})
-    # Sensor starts off; even though template would evaluate to true, delay_on prevents
-    # immediate transition. Just verify no error occurs.
+    # Template now evaluates true (non-workday branch reachable), but delay_on=10min
+    # keeps sensor 'off' within the assertion window.
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=3)
 
 
-def test_drying_low_moisture_guard_prevents_boost(home_assistant: HomeAssistant) -> None:
+def test_drying_low_moisture_guard_prevents_boost(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
     """airflow_moisture_ventilation_low_needed=on → drying binary sensor must not activate.
 
     Mutually exclusive by design: low_needed means outdoor air is too humid,
     which precludes airflow_free_cooling_available=on. Guard is belt-and-suspenders.
-    Sensor seeded off; with low_active=true the template evaluates to false.
+    With low_active=true the template evaluates to false; jump forward to expire
+    any pending delay_off so sensor can settle to 'off'.
     """
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
+    # Template evaluates false (low_active=true). Jump forward to expire delay_off (10 min).
+    time_machine.jump_to_next(month="Dec", day_of_month=3, hour=2, minute=0, second=0)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
-                                       "off", timeout=5)
+                                       "off", timeout=10)
 
 
 def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
