@@ -402,12 +402,12 @@ climate:
 
     # Standard climate property: user-set target humidity, backed by input_number for persistence.
     # input_numbers are never unavailable — no float/int defaults needed here.
-    # climate_template requires static integers for min/max_humidity; use extreme bounds of
-    # airflow_min_humidity (30–50) and airflow_max_humidity (50–70) input_numbers.
+    # Slider bounds track the min/max humidity helpers so target can't be set outside the band.
+    # input_numbers are never unavailable — no float/int defaults needed here.
     target_humidity_template: >
       {{ states('input_number.airflow_target_humidity') | float }}
-    min_humidity: 30
-    max_humidity: 70
+    min_humidity: "{{ states('input_number.airflow_min_humidity') | int }}"
+    max_humidity: "{{ states('input_number.airflow_max_humidity') | int }}"
 
     set_humidity:
       - action: input_number.set_value
@@ -528,8 +528,7 @@ climate:
           value: "{{ temperature }}"
 
     # Extra attributes: expose related sensors/inputs not covered by standard climate properties
-    # needs https://github.com/jcwillox/hass-template-climate/pull/134/changes
-    # TODO: we will fork and fix it.
+    # requires mikopp/hass-template-climate (fork of jcwillox with attributes support added)
  #   attributes:
  #     outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
  #     outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
