@@ -138,7 +138,8 @@ template:
           {% if indoor_hums | count > 0 %}
             {{ (indoor_hums | sum / indoor_hums | count) | round(1) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_humidity') | float(0) | round(1) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_humidity') | float | round(1) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Humidity')
@@ -157,7 +158,8 @@ template:
           {% if indoor_dews | count > 0 %}
             {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float(0) | round(2) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Dewpoint')
@@ -176,7 +178,8 @@ template:
           {% if indoor_temps | count > 0 %}
             {{ (indoor_temps | sum / indoor_temps | count) | round(2) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float(0) | round(2) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Temperature')
@@ -204,8 +207,8 @@ template:
           {% set RH_sa = states('sensor.airflow_supply_air_humidity_5min') | float %}
           {% set T_ra  = states('sensor.airflow_extract_air_temp_5min') | float %}
           {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
-          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float(0.85) %}
-          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float(0.05) %}
+          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float %}  {# input_number: never unavailable, no default needed #}
+          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float %}  {# input_number: never unavailable, no default needed #}
           {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
           {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
           {# OA enthalpy #}
@@ -241,15 +244,25 @@ template:
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
+        # Availability guard: all four ComfoConnect filter sensors must be live.
+        # Without this, bare | float in state: would silently return 0 on unavailable sensors,
+        # producing false free-cooling decisions. input_numbers are always available — no guard needed for those.
+        availability: >
+          {{ states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_min_indoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_avg_indoor_temp_5min') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
-          {% set outdoor_temp = states('sensor.airflow_outdoor_temp_5min') | float(0) %}
-          {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
-          {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
-          {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
-          {% set min_dew_diff = states('input_number.airflow_min_dew_diff') | float(2.0) %}
-          {% set min_temp_diff = states('input_number.airflow_min_temp_diff') | float(1.5) %}
-          {% set temp_threshold = (target_temp - 0.5) if this.state == 'on' else target_temp %}
+          {# Sensors: availability guard above guarantees live values — no defaults needed. #}
+          {# input_numbers: never unavailable — no defaults needed. #}
+          {% set outdoor_dew     = states('sensor.airflow_outdoor_dew_5min') | float %}
+          {% set outdoor_temp    = states('sensor.airflow_outdoor_temp_5min') | float %}
+          {% set min_indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
+          {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float %}
+          {% set target_temp     = states('input_number.airflow_cooling_target_temperature') | float %}
+          {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
+          {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
+          {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
             outdoor_temp < (target_temp - min_temp_diff) and
@@ -389,10 +402,11 @@ climate:
 
     # Standard climate property: user-set target humidity, backed by input_number for persistence.
     # Slider bounds track the min/max humidity helpers so target can't be set outside the band.
+    # input_numbers are never unavailable — no float/int defaults needed here.
     target_humidity_template: >
-      {{ states('input_number.airflow_target_humidity') | float(50) }}
-    min_humidity: "{{ states('input_number.airflow_min_humidity') | int(20) }}"
-    max_humidity: "{{ states('input_number.airflow_max_humidity') | int(80) }}"
+      {{ states('input_number.airflow_target_humidity') | float }}
+    min_humidity: "{{ states('input_number.airflow_min_humidity') | int }}"
+    max_humidity: "{{ states('input_number.airflow_max_humidity') | int }}"
 
     set_humidity:
       - action: input_number.set_value
@@ -402,8 +416,9 @@ climate:
           value: "{{ humidity }}"
 
     # Standard climate property: user-set target temperature, backed by input_number for persistence
+    # input_number: never unavailable — no default needed.
     target_temperature_template: >
-      {{ states('input_number.airflow_cooling_target_temperature') | float(21.5) }}
+      {{ states('input_number.airflow_cooling_target_temperature') | float }}
     min_temp: 18
     max_temp: 26
     temp_step: 0.5
