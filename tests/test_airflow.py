@@ -222,38 +222,36 @@ def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistan
 def test_verification_step6_low_humidity_warm_profile_overrides_season(home_assistant: HomeAssistant) -> None:
     """Verification step 6: humidity below min → Block 1 Case A fires (warm), non-cooling season.
 
-    min=53, hum=50 < 53, neutral season → Block 1 Case A fires.
+    min=50 (max allowed), hum=44 < 50, neutral season → Block 1 Case A fires.
     The warming priority exists to protect wood/instruments from excessively dry air.
     CI: stub ignores select_option — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.call_action("input_number", "set_value",
-                               {"entity_id": "input_number.airflow_min_humidity", "value": 53})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+                               {"entity_id": "input_number.airflow_min_humidity", "value": 50})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
     _trigger(home_assistant)
-    # Block 1 Case A: 50 < 53 (min) AND not cooling season → fires. Profile → warm.
+    # Block 1 Case A: 44 < 50 (min) AND not cooling season → fires. Profile → warm.
 
 
 # ── Temperature profile moisture tests ──────────────────────────────────────────────────
 
 
 def test_airflow_low_humidity_warm_profile(home_assistant: HomeAssistant) -> None:
-    """Low humidity (50% < min 53%) + neutral season → Block 1 Case A fires (trace only)."""
+    """Low humidity (44% < min 45%) + neutral season → Block 1 Case A fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.call_action("input_number", "set_value",
-                               {"entity_id": "input_number.airflow_min_humidity", "value": 53})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 1 Case A: 50 < 53 (min), not cooling season → fires. Stub ignores select_option.
+    # Block 1 Case A: 44 < 45 (baseline min), not cooling season → fires. Stub ignores select_option.
 
 
 def test_airflow_high_humidity_free_cooling_cool_profile(home_assistant: HomeAssistant) -> None:
