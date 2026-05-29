@@ -11,6 +11,16 @@ from datetime import timedelta
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
 
+# Run pergola tests before airflow tests to prevent event-loop load from airflow
+# automations (mode:restart + humidity trigger) causing sun-integration race
+# conditions that overwrite sensor.pergola_effective_slat_angle with the
+# script's float(90) default before the test assertion fires.
+def pytest_collection_modifyitems(items: list) -> None:
+    def sort_key(item):
+        return (0 if "test_pergola" in item.nodeid else 1, item.nodeid)
+    items.sort(key=sort_key)
+
+
 # ── Per-test baseline fixtures ───────────────────────────────────────────────────────────
 
 
@@ -37,7 +47,8 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.airflow_min_dew_diff": 2.0,
         "input_number.airflow_min_temp_diff": 1.5,
         "input_number.airflow_target_humidity": 55,
-        "input_number.airflow_humidity_hysteresis": 2.0,
+        "input_number.airflow_min_humidity": 45,
+        "input_number.airflow_max_humidity": 55,
         "input_number.pergola_max_tilt_angle": 122,
         "input_number.pergola_wall_azimuth": 204,
         "input_number.pergola_slat_width": 22,
@@ -127,6 +138,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
                  {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.comfoconnect_pro_extract_air_dew_point", "12.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_temperature", "16.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_dewpoint", "8.5",
