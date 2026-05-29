@@ -405,8 +405,8 @@ climate:
     # input_numbers are never unavailable — no float/int defaults needed here.
     target_humidity_template: >
       {{ states('input_number.airflow_target_humidity') | float }}
-    min_humidity: "{{ states('input_number.airflow_min_humidity') | int }}"
-    max_humidity: "{{ states('input_number.airflow_max_humidity') | int }}"
+    min_humidity: 30
+    max_humidity: 70
 
     set_humidity:
       - action: input_number.set_value
@@ -429,7 +429,7 @@ climate:
     #   heat_cool — manual comfort profile - will in the future also be used for spring times to heat with sun, but don't let it heat up as much as in winter.
     #   cool      — manual cool profile
     #   auto      — automation enabled (profile auto-selected) - uses heating-cooling indicator
-    modes:
+    hvac_modes:
       - "off"
       - "heat"
       - "heat_cool"
