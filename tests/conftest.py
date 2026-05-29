@@ -128,6 +128,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
                  {"unit_of_measurement": "%", "device_class": "humidity"})
+    ha.set_state("sensor.comfoconnect_pro_extract_air_dew_point", "12.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_temperature", "16.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_outdoor_air_dewpoint", "8.5",
