@@ -741,7 +741,7 @@ automation:
                   entity_id: switch.comfoconnect_pro_auto_mode
               - action: select.select_option
                 target:
-                  entity_id: select.comfoconnect_pro_ventilation_level
+                  entity_id: select.comfoconnect_pro_ventilation_preset
                 data:
                   option: "low"
               - action: notify.mobile_app_greywinds_iphone
