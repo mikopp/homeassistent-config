@@ -589,7 +589,8 @@ automation:
                     conditions:
                       - condition: template
                         value_template: >
-                          {{ states('sensor.airflow_avg_indoor_humidity_5min') | float <
+                          {{ states('sensor.airflow_avg_indoor_humidity_5min') | is_number and
+                             states('sensor.airflow_avg_indoor_humidity_5min') | float <
                              states('input_number.airflow_min_humidity') | float }}
                       - condition: not
                         conditions:
@@ -622,10 +623,10 @@ automation:
                 data:
                   title: "Ventilation: Warm Profile"
                   message: >
-                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                     {% set min = states('input_number.airflow_min_humidity') | float %}
-                    {% if hum < min %}
-                      Indoor humidity {{ hum }}% below minimum {{ min }}% (non-cooling season)
+                    {% if hum | is_number and hum | float < min %}
+                      Indoor humidity {{ hum | float }}% below minimum {{ min }}% (non-cooling season)
                       — profile set to Warm to retain moisture.
                     {% else %}
                       Active heating, free cooling unavailable — profile set to Warm.
@@ -648,7 +649,8 @@ automation:
                     state: "active_cooling"
                   - condition: template
                     value_template: >
-                      {{ states('sensor.airflow_avg_indoor_humidity_5min') | float >
+                      {{ states('sensor.airflow_avg_indoor_humidity_5min') | is_number and
+                         states('sensor.airflow_avg_indoor_humidity_5min') | float >
                          states('input_number.airflow_max_humidity') | float }}
               - condition: not
                 conditions:
@@ -665,10 +667,10 @@ automation:
                 data:
                   title: "Ventilation: Cool Profile"
                   message: >
-                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                     {% set max = states('input_number.airflow_max_humidity') | float %}
-                    {% if hum > max %}
-                      High indoor humidity {{ hum }}% above max {{ max }}% + free cooling active
+                    {% if hum | is_number and hum | float > max %}
+                      High indoor humidity {{ hum | float }}% above max {{ max }}% + free cooling active
                       — profile set to Cool to flush humid air.
                     {% else %}
                       Free cooling active (cooling season) — profile set to Cool.
@@ -697,10 +699,10 @@ automation:
                         state: "off"
               - condition: template
                 value_template: >
-                  {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                  {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                   {% set min = states('input_number.airflow_min_humidity') | float %}
                   {% set max = states('input_number.airflow_max_humidity') | float %}
-                  {{ min <= hum <= max }}
+                  {{ hum | is_number and min <= hum | float <= max }}
               - condition: not
                 conditions:
                   - condition: state
