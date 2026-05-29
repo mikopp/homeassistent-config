@@ -51,12 +51,13 @@ def test_airflow_free_cooling_inactive(home_assistant: HomeAssistant) -> None:
 
 
 def test_airflow_active_heating(home_assistant: HomeAssistant) -> None:
-    """Auto enabled + active_heating → automation runs (trace only)."""
+    """Auto enabled + active_heating + free_cooling=off → Block 1 Case B fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Same CI stub limitation.
+    # Block 1 Case B: active_heating + free_cooling=off → warm. Stub ignores select_option.
 
 
 def test_airflow_neutral(home_assistant: HomeAssistant) -> None:
@@ -138,43 +139,45 @@ def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> Non
 
 
 def test_verification_step3_high_humidity_free_cooling_triggers_cool(home_assistant: HomeAssistant) -> None:
-    """Verification step 3: target lowered below current humidity + free_cooling=on → Block 2 → cool profile.
+    """Verification step 3: humidity above max + free_cooling=on → Block 2 → cool profile.
 
-    target=52, hum=55 (from baseline) → 55 > 52+2=54 (threshold). Free cooling available.
-    Block 2 condition: free_cooling=on AND hum > target+hyst → fires, sets cool.
+    max=54, hum=55 → 55 > 54. Free cooling available. Neutral season.
+    Block 2 condition: free_cooling=on AND hum > max → fires, sets cool.
     CI: stub ignores select_option — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.call_action("input_number", "set_value",
-                               {"entity_id": "input_number.airflow_target_humidity", "value": 52})
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 54})
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     _trigger(home_assistant)
-    # Block 2 fires: 55 > 54, free_cooling=on. Profile would switch to cool in production.
+    # Block 2 fires: 55 > 54 (max), free_cooling=on. Profile would switch to cool in production.
 
 
 def test_verification_step3_high_humidity_no_free_cooling_profile_unchanged(home_assistant: HomeAssistant) -> None:
     """Verification step 3 (negative path): high humidity but free_cooling=off → no profile change.
 
-    target=52, hum=55 → 55 > 54 (above dead band). Block 2 misses (free_cooling=off).
-    Block 4's dead-band guard also prevents comfort override (hum outside dead band [50,54]).
+    min=45, max=54, hum=55 → above dead band [45,54]. Block 1 misses (hum not < min).
+    Block 2 misses (free_cooling=off). Block 3's dead-band guard: 55∉[45,54] → miss.
     Profile seeded to "comfort" — stays comfort because no block fires.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.call_action("input_number", "set_value",
-                               {"entity_id": "input_number.airflow_target_humidity", "value": 52})
+                               {"entity_id": "input_number.airflow_min_humidity", "value": 45})
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 54})
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 2: free_cooling=off → miss. Block 4: neutral=yes, dead_band: 55∉[50,54] → miss.
-    # Default logs warning. Profile unchanged.
+    # Block 1: hum(55) ≥ min(45) → miss. Block 2: free_cooling=off → miss.
+    # Block 3: neutral, but dead-band 55∉[45,54] → miss. Default no-op.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
@@ -218,39 +221,42 @@ def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistan
 
 
 def test_verification_step6_low_humidity_warm_profile_overrides_season(home_assistant: HomeAssistant) -> None:
-    """Verification step 6: humidity below target−hyst → Block 1 fires (warm), any season or free cooling state.
+    """Verification step 6: humidity below min → Block 1 Case A fires (warm), non-cooling season.
 
-    hum=50% < target(55)−hyst(2)=53% → Block 1 fires even during active_cooling+free_cooling=on.
+    min=50 (max allowed), hum=44 < 50, neutral season → Block 1 Case A fires.
     The warming priority exists to protect wood/instruments from excessively dry air.
     CI: stub ignores select_option — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_min_humidity", "value": 50})
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
     _trigger(home_assistant)
-    # Block 1: 50 < 53 → fires. In production: profile switches to warm despite cooling season.
+    # Block 1 Case A: 44 < 50 (min) AND not cooling season → fires. Profile → warm.
 
 
 # ── Temperature profile moisture tests ──────────────────────────────────────────────────
 
 
 def test_airflow_low_humidity_warm_profile(home_assistant: HomeAssistant) -> None:
-    """Low humidity (50% < target 55 − hyst 2 = 53%) → Block 1 fires (trace only)."""
+    """Low humidity (44% < min 45%) + neutral season → Block 1 Case A fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "50.0",
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 1 fires; select.select_option silently ignored on bare stub — assert trace absence only.
+    # Block 1 Case A: 44 < 45 (baseline min), not cooling season → fires. Stub ignores select_option.
 
 
 def test_airflow_high_humidity_free_cooling_cool_profile(home_assistant: HomeAssistant) -> None:
-    """High humidity (60% > target 55 + hyst 2 = 57%) + free_cooling=on → Block 2 fires (trace only)."""
+    """High humidity (60% > max 55%) + free_cooling=on → Block 2 Case B fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
@@ -259,11 +265,11 @@ def test_airflow_high_humidity_free_cooling_cool_profile(home_assistant: HomeAss
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     _trigger(home_assistant)
-    # Block 2: free_cooling=on AND high_hum — stub ignores service call, assert trace absence only.
+    # Block 2 Case B: free_cooling=on AND hum(60) > max(55) → cool. Stub ignores service call.
 
 
 def test_airflow_high_humidity_free_cooling_off_stays_comfort(home_assistant: HomeAssistant) -> None:
-    """High humidity but free_cooling=off + neutral → Blocks 1–3 miss, Block 4 (neutral→comfort)."""
+    """High humidity (60% > max 55%) but free_cooling=off + neutral → all blocks miss → no-op."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
@@ -271,20 +277,29 @@ def test_airflow_high_humidity_free_cooling_off_stays_comfort(home_assistant: Ho
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 2 skipped (free_cooling=off). Block 4: neutral → comfort.
-    # Seeded value is already "comfort" so the idempotent guard suppresses the call.
+    # Block 1: hum(60) ≥ min(45). Block 2: free_cooling=off.
+    # Block 3: neutral=yes but dead-band 60∉[45,55] → miss. Default no-op.
+    # Profile stays seeded "comfort".
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
 
-def test_airflow_humidity_in_dead_band_no_moisture_override(home_assistant: HomeAssistant) -> None:
-    """Humidity in dead band (55%) + active_heating → Block 1/2 miss, Block 3 fires (trace only)."""
+def test_airflow_humidity_in_dead_band_neutral_comfort(home_assistant: HomeAssistant) -> None:
+    """Humidity in dead band (55% in [45,55]) + neutral + free_cooling=off → Block 3 fires → comfort.
+
+    Block 1 Case A misses (hum ≥ min). Block 1 Case B misses (not active_heating).
+    Block 2 misses (free_cooling=off). Block 3: neutral + dead-band satisfied → comfort.
+    Seeded profile is already "comfort" → idempotent guard suppresses service call.
+    """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # Baseline seeds 55% which is exactly at target — neither low (< 53) nor high (> 57).
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    # Baseline seeds hum=55%, min=45, max=55 — humidity exactly at max (in band).
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 3: active_heating → warm; stub ignores service call, assert trace absence only.
+    # Block 3: neutral, 45 <= 55 <= 55 → fires; already comfort → guard suppresses call.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "comfort", timeout=3)
 
 
 # ── Ventilation preset automation tests ─────────────────────────────────────────────────

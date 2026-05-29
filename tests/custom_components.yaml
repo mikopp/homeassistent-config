@@ -14,8 +14,8 @@
 dependencies:
   - name: Template Climate
     domain: climate_template
-    repository: https://github.com/jcwillox/hass-template-climate
-    hacs: jcwillox/hass-template-climate
+    repository: https://github.com/mikopp/hass-template-climate
+    hacs: mikopp/hass-template-climate
     description: >
       Provides the climate_template platform used in packages/climate_airflow.yaml
       to create a virtual climate entity driven by Jinja2 templates.

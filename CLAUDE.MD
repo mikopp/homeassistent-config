@@ -45,3 +45,19 @@ the global automations/scripts files.
 
 Current packages:
 - `packages/pergola.yaml` — pergola roof automation (helpers, template sensors, automations, scripts)
+
+## HA template / helper rules
+
+### `input_number` / `input_boolean` / `input_select` / `input_datetime`
+- **Never add `| float(default)` or any fallback default** — helpers are always available once HA starts; defaults mask config errors.
+- **Never set `initial:` values** — HA resets to `initial` on every restart, overwriting any user change. Set desired values once in the UI after deploy.
+
+### Template sensors and binary sensors
+- **Always add an `availability:` template** to any template sensor/binary sensor that reads from non-guaranteed sensors (e.g. device sensors, integrations that can go unavailable). Pattern:
+  ```yaml
+  availability: >
+    {{ states('sensor.foo') not in ['unavailable', 'unknown'] and
+       states('sensor.bar') not in ['unavailable', 'unknown'] }}
+  ```
+- **Never add `| float(default)` on sensor reads inside a `state:` template** when an `availability:` guard is already in place — if availability passes, the sensor is guaranteed numeric; the default hides real errors.
+- When a sensor has no `availability:` guard (e.g. it is a computed template sensor itself), add the guard before removing defaults.

@@ -16,7 +16,7 @@ views:
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
           - entity: binary_sensor.airflow_moisture_ventilation_low_needed
-          - entity: select.comfoconnect_pro_ventilation_level
+          - entity: select.comfoconnect_pro_ventilation_preset
           - entity: switch.comfoconnect_pro_auto_mode
           - entity: sensor.comfoconnect_pro_supply_fan_volume
 
@@ -39,6 +39,11 @@ views:
           - entity: sensor.airflow_outdoor_temp_5min
           - entity: sensor.airflow_outdoor_dew_5min
           - type: section
+            label: Indoor Average
+          - entity: sensor.airflow_avg_indoor_temp_5min
+          - entity: sensor.airflow_min_indoor_dew_5min
+          - entity: sensor.airflow_avg_indoor_humidity_5min
+          - type: section
             label: Supply Air
           - entity: sensor.airflow_supply_air_temp_5min
           - entity: sensor.airflow_supply_air_humidity_5min
@@ -46,10 +51,6 @@ views:
             label: Extract Air
           - entity: sensor.airflow_extract_air_temp_5min
           - entity: sensor.airflow_extract_air_humidity_5min
-          - type: section
-            label: Indoor Average
-          - entity: sensor.airflow_avg_indoor_temp_5min
-          - entity: sensor.airflow_avg_indoor_humidity_5min
 
       - type: entities
         title: Settings

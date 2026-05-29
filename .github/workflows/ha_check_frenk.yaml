@@ -126,7 +126,7 @@ jobs:
             ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
             python -m homeassistant --config /config --script check_config 2>&1)
           echo "$output"
-          if echo "$output" | grep -qiE "invalid slug|Setup of package.*failed|ERROR"; then
+          if echo "$output" | grep -qiE "invalid config|invalid slug|Setup of package.*failed|ERROR"; then
             echo "::error::check_config reported errors — see output above"
             exit 1
           fi
