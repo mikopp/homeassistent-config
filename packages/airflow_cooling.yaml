@@ -138,7 +138,8 @@ template:
           {% if indoor_hums | count > 0 %}
             {{ (indoor_hums | sum / indoor_hums | count) | round(1) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_humidity') | float(0) | round(1) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_humidity') | float | round(1) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Humidity')
@@ -157,7 +158,8 @@ template:
           {% if indoor_dews | count > 0 %}
             {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float(0) | round(2) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Dewpoint')
@@ -176,7 +178,8 @@ template:
           {% if indoor_temps | count > 0 %}
             {{ (indoor_temps | sum / indoor_temps | count) | round(2) }}
           {% else %}
-            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float(0) | round(2) }}
+            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
+            {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float | round(2) }}
           {% endif %}
         availability: >
           {% set label_count = label_entities('Indoor.Temperature')
@@ -204,8 +207,8 @@ template:
           {% set RH_sa = states('sensor.airflow_supply_air_humidity_5min') | float %}
           {% set T_ra  = states('sensor.airflow_extract_air_temp_5min') | float %}
           {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
-          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float(0.85) %}
-          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float(0.05) %}
+          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float %}  {# input_number: never unavailable, no default needed #}
+          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float %}  {# input_number: never unavailable, no default needed #}
           {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
           {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
           {# OA enthalpy #}
@@ -241,15 +244,25 @@ template:
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
+        # Availability guard: all four ComfoConnect filter sensors must be live.
+        # Without this, bare | float in state: would silently return 0 on unavailable sensors,
+        # producing false free-cooling decisions. input_numbers are always available — no guard needed for those.
+        availability: >
+          {{ states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_min_indoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_avg_indoor_temp_5min') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
-          {% set outdoor_temp = states('sensor.airflow_outdoor_temp_5min') | float(0) %}
-          {% set min_indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float(100) %}
-          {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float(0) %}
-          {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
-          {% set min_dew_diff = states('input_number.airflow_min_dew_diff') | float(2.0) %}
-          {% set min_temp_diff = states('input_number.airflow_min_temp_diff') | float(1.5) %}
-          {% set temp_threshold = (target_temp - 0.5) if this.state == 'on' else target_temp %}
+          {# Sensors: availability guard above guarantees live values — no defaults needed. #}
+          {# input_numbers: never unavailable — no defaults needed. #}
+          {% set outdoor_dew     = states('sensor.airflow_outdoor_dew_5min') | float %}
+          {% set outdoor_temp    = states('sensor.airflow_outdoor_temp_5min') | float %}
+          {% set min_indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
+          {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float %}
+          {% set target_temp     = states('input_number.airflow_cooling_target_temperature') | float %}
+          {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
+          {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
+          {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
             outdoor_temp < (target_temp - min_temp_diff) and
@@ -261,19 +274,23 @@ template:
           minutes: 10
 
       # True when ventilation must be reduced to avoid importing humid outdoor air.
-      # Turns ON at (target + hyst), stays ON until hum < target. Mutually exclusive with
+      # Schmitt trigger: turns ON at max, stays ON until hum < target. Mutually exclusive with
       # airflow_free_cooling_available (opposite dew conditions when min_dew_diff > 0).
       - unique_id: airflow_moisture_ventilation_low_needed
         name: "Airflow Moisture Ventilation Low Needed"
         device_class: moisture
+        availability: >
+          {{ states('sensor.airflow_avg_indoor_humidity_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
+             states('sensor.airflow_min_indoor_dew_5min') not in ['unavailable', 'unknown'] }}
         state: >
-          {% set indoor_hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
-          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float(100) %}
-          {% set indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float(0) %}
-          {% set target      = states('input_number.airflow_target_humidity') | float(55) %}
-          {% set hysteresis  = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-          {% set threshold   = target if this.state == 'on' else (target + hysteresis) %}
-          {{ indoor_hum >= threshold and outdoor_dew >= indoor_dew }}
+          {% set hum         = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+          {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float %}
+          {% set indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
+          {% set tgt         = states('input_number.airflow_target_humidity') | float %}
+          {% set max         = states('input_number.airflow_max_humidity') | float %}
+          {% set threshold   = tgt if this.state == 'on' else max %}
+          {{ hum >= threshold and outdoor_dew >= indoor_dew }}
         delay_on:
           minutes: 10
         delay_off:
@@ -322,23 +339,34 @@ input_number:
     unit_of_measurement: "°C"
     icon: mdi:thermometer-chevron-up
 
-  # Target indoor humidity. Dead band [target−hyst, target+hyst] → no moisture action.
+  # Target indoor humidity — shown as set-point on the climate entity.
   airflow_target_humidity:
     name: "Airflow Target Humidity"
-    min: 30
+    min: 40
     max: 60
     step: 1
     unit_of_measurement: "%"
     icon: mdi:water-percent
 
-  # Hysteresis half-band for all moisture triggers.
-  airflow_humidity_hysteresis:
-    name: "Airflow Humidity Hysteresis"
-    min: 0.5
-    max: 5
-    step: 0.5
+  # Minimum acceptable humidity. Below this (outside cooling season) → warm profile to retain moisture.
+  # Free cooling (cool profile) only activates once humidity recovers to target.
+  airflow_min_humidity:
+    name: "Airflow Min Humidity"
+    min: 30
+    max: 50
+    step: 1
     unit_of_measurement: "%"
-    icon: mdi:water-sync
+    icon: mdi:water-minus
+
+  # Maximum acceptable humidity. Above this (with free cooling) → cool profile to flush moisture.
+  # Also used as ON-threshold for moisture ventilation low preset (Schmitt trigger: OFF at target).
+  airflow_max_humidity:
+    name: "Airflow Max Humidity"
+    min: 50
+    max: 70
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:water-plus
 
   # Calibration: expected enthalpy efficiency when bypass is fully closed (maximum heat recovery)
   airflow_bypass_efficiency_max:
@@ -357,8 +385,8 @@ input_number:
     icon: mdi:valve-open
 
 # --- CLIMATE ENTITY ---
-# Requires HACS custom component: jcwillox/hass-template-climate
-# https://github.com/jcwillox/hass-template-climate
+# Requires HACS custom component: mikopp/hass-template-climate
+# https://github.com/mikopp/hass-template-climate
 climate:
   - platform: climate_template
     name: "Airflow Climate"
@@ -372,11 +400,13 @@ climate:
     current_humidity_template: >
       {{ states('sensor.airflow_avg_indoor_humidity_5min') | float(50) }}
 
-    # Standard climate property: user-set target humidity, backed by input_number for persistence
+    # Standard climate property: user-set target humidity, backed by input_number for persistence.
+    # Slider bounds track the min/max humidity helpers so target can't be set outside the band.
+    # input_numbers are never unavailable — no float/int defaults needed here.
     target_humidity_template: >
-      {{ states('input_number.airflow_target_humidity') | float(55) }}
-    min_humidity: 30
-    max_humidity: 80
+      {{ states('input_number.airflow_target_humidity') | float }}
+    min_humidity: "{{ states('input_number.airflow_min_humidity') | int }}"
+    max_humidity: "{{ states('input_number.airflow_max_humidity') | int }}"
 
     set_humidity:
       - action: input_number.set_value
@@ -386,8 +416,9 @@ climate:
           value: "{{ humidity }}"
 
     # Standard climate property: user-set target temperature, backed by input_number for persistence
+    # input_number: never unavailable — no default needed.
     target_temperature_template: >
-      {{ states('input_number.airflow_cooling_target_temperature') | float(21.5) }}
+      {{ states('input_number.airflow_cooling_target_temperature') | float }}
     min_temp: 18
     max_temp: 26
     temp_step: 0.5
@@ -496,8 +527,7 @@ climate:
           value: "{{ temperature }}"
 
     # Extra attributes: expose related sensors/inputs not covered by standard climate properties
-    # needs https://github.com/jcwillox/hass-template-climate/pull/134/changes
-    # TODO: we will fork and fix it.
+    # requires mikopp/hass-template-climate (fork of jcwillox with attributes support added)
  #   attributes:
  #     outdoor_dew: "{{ states('sensor.airflow_outdoor_dew_5min') | float(none) }}"
  #     outdoor_temp: "{{ states('sensor.airflow_outdoor_temp_5min') | float(none) }}"
@@ -548,14 +578,35 @@ automation:
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
-          # Block 1: Low moisture — warm profile to retain humidity (any season)
+          # Block 1: Moisture protect OR active heating without free cooling → warm profile.
+          # Case A: humidity below min AND not cooling season — dry air, retain moisture.
+          #         Cooling season is exempt: humidity naturally dips below min in summer.
+          # Case B: active heating + free cooling unavailable — heating season, no free exchange.
           - conditions:
-              - condition: template
-                value_template: >
-                  {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
-                  {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
-                  {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-                  {{ hum < (tgt - hyst) }}
+              - condition: or
+                conditions:
+                  - condition: and
+                    conditions:
+                      - condition: template
+                        value_template: >
+                          {{ states('sensor.airflow_avg_indoor_humidity_5min') | float <
+                             states('input_number.airflow_min_humidity') | float }}
+                      - condition: not
+                        conditions:
+                          - condition: state
+                            entity_id: sensor.heating_cooling_indicator
+                            state: "passive_cooling"
+                          - condition: state
+                            entity_id: sensor.heating_cooling_indicator
+                            state: "active_cooling"
+                  - condition: and
+                    conditions:
+                      - condition: state
+                        entity_id: sensor.heating_cooling_indicator
+                        state: "active_heating"
+                      - condition: state
+                        entity_id: binary_sensor.airflow_free_cooling_available
+                        state: "off"
               - condition: not
                 conditions:
                   - condition: state
@@ -571,30 +622,34 @@ automation:
                 data:
                   title: "Ventilation: Warm Profile"
                   message: >
-                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
-                    below target {{ states('input_number.airflow_target_humidity') }}%
-                    — profile set to Warm to retain moisture.
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                    {% set min = states('input_number.airflow_min_humidity') | float %}
+                    {% if hum < min %}
+                      Indoor humidity {{ hum }}% below minimum {{ min }}% (non-cooling season)
+                      — profile set to Warm to retain moisture.
+                    {% else %}
+                      Active heating, free cooling unavailable — profile set to Warm.
+                    {% endif %}
 
-          # Block 2: Free cooling available + (high moisture OR cooling season) — cool profile.
-          # Merges original cooling-season branch with new moisture-driven branch.
+          # Block 2: Free cooling available → cool profile.
+          # Case A: cooling season — always cool to maximise free cooling benefit.
+          # Case B: humidity above max (any season) — flush humid air via free cooling.
           - conditions:
               - condition: state
                 entity_id: binary_sensor.airflow_free_cooling_available
                 state: "on"
               - condition: or
                 conditions:
-                  - condition: template
-                    value_template: >
-                      {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
-                      {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
-                      {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-                      {{ hum > (tgt + hyst) }}
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
                     state: "passive_cooling"
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
                     state: "active_cooling"
+                  - condition: template
+                    value_template: >
+                      {{ states('sensor.airflow_avg_indoor_humidity_5min') | float >
+                         states('input_number.airflow_max_humidity') | float }}
               - condition: not
                 conditions:
                   - condition: state
@@ -610,40 +665,17 @@ automation:
                 data:
                   title: "Ventilation: Cool Profile"
                   message: >
-                    {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
-                    {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
-                    {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-                    {% if hum > (tgt + hyst) %}
-                      High indoor humidity {{ hum }}% + free cooling active — profile set to Cool to flush humid air.
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                    {% set max = states('input_number.airflow_max_humidity') | float %}
+                    {% if hum > max %}
+                      High indoor humidity {{ hum }}% above max {{ max }}% + free cooling active
+                      — profile set to Cool to flush humid air.
                     {% else %}
-                      Free cooling active — profile set to Cool.
+                      Free cooling active (cooling season) — profile set to Cool.
                     {% endif %}
 
-          # Block 3: Active heating — warm profile
-          - conditions:
-              - condition: state
-                entity_id: sensor.heating_cooling_indicator
-                state: "active_heating"
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: select.comfoconnect_pro_temperature_profile
-                    state: "warm"
-            sequence:
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "warm"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Warm Profile"
-                  message: "Outdoor ≤5°C — profile set to Warm."
-
-          # Block 4: Neutral season or cooling season without free cooling — comfort profile.
-          # Merges original neutral and cooling+no-free-cooling branches.
-          # Dead-band guard required: without it, Block 4 would override Block 1's warm profile
-          # whenever a second trigger fires after Block 1's idempotent guard prevents re-assertion.
+          # Block 3: Neutral season or cooling season without free cooling → comfort profile.
+          # Dead-band guard [min, max] prevents overriding Block 1's warm profile on re-triggers.
           - conditions:
               - condition: or
                 conditions:
@@ -665,10 +697,10 @@ automation:
                         state: "off"
               - condition: template
                 value_template: >
-                  {% set hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(50) %}
-                  {% set tgt  = states('input_number.airflow_target_humidity') | float(55) %}
-                  {% set hyst = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-                  {{ (tgt - hyst) <= hum <= (tgt + hyst) }}
+                  {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+                  {% set min = states('input_number.airflow_min_humidity') | float %}
+                  {% set max = states('input_number.airflow_max_humidity') | float %}
+                  {{ min <= hum <= max }}
               - condition: not
                 conditions:
                   - condition: state
@@ -685,17 +717,15 @@ automation:
                   title: "Ventilation: Comfort Profile"
                   message: >
                     {% if is_state('sensor.heating_cooling_indicator', 'neutral') %}
-                      Outdoor 5–10°C — profile set to Comfort.
+                      Neutral season — profile set to Comfort.
                     {% else %}
                       Cooling season, free cooling inactive — profile set to Comfort.
                     {% endif %}
 
-        # Fallback: indicator unavailable and no humidity override — skip profile change
-        default:
-          - action: system_log.write
-            data:
-              message: "Airflow: heating_cooling_indicator unavailable — skipping profile change"
-              level: warning
+        # Fallback: no rule matched (recovery zone, already-correct profile, or edge case) → no-op.
+        # Comfort is set explicitly by Block 3; forcing it here would oscillate against Block 1's
+        # idempotent guard when humidity is below min and profile is already warm.
+        default: []
 
   # Reduces ventilation to low when humidity is high AND outdoor air is too humid to help.
   # Restores auto mode when resolved. Auto mode is disabled first to prevent ComfoConnect
@@ -703,8 +733,8 @@ automation:
   - id: airflow_moisture_ventilation_preset
     alias: "Airflow: Moisture Ventilation Preset"
     description: >
-      Reduces ventilation to low when humidity exceeds (target + hysteresis) AND outdoor air
-      is too humid to help. Restores auto mode when resolved.
+      Reduces ventilation to low when humidity exceeds max AND outdoor air is too humid to help.
+      Schmitt trigger: turns on at max, off at target. Restores auto mode when resolved.
     mode: single
     trigger:
       - platform: state
@@ -789,7 +819,8 @@ group:
       - sensor.airflow_avg_indoor_humidity_5min
       # Humidity helpers + binary sensor
       - input_number.airflow_target_humidity
-      - input_number.airflow_humidity_hysteresis
+      - input_number.airflow_min_humidity
+      - input_number.airflow_max_humidity
       - binary_sensor.airflow_moisture_ventilation_low_needed
       # Automations
       - automation.airflow_cooling_set_temperature_profile
