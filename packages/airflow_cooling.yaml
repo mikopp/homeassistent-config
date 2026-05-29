@@ -401,12 +401,13 @@ climate:
       {{ states('sensor.airflow_avg_indoor_humidity_5min') | float(50) }}
 
     # Standard climate property: user-set target humidity, backed by input_number for persistence.
-    # Slider bounds track the min/max humidity helpers so target can't be set outside the band.
     # input_numbers are never unavailable — no float/int defaults needed here.
+    # climate_template requires static integers for min/max_humidity; use extreme bounds of
+    # airflow_min_humidity (30–50) and airflow_max_humidity (50–70) input_numbers.
     target_humidity_template: >
       {{ states('input_number.airflow_target_humidity') | float }}
-    min_humidity: "{{ states('input_number.airflow_min_humidity') | int }}"
-    max_humidity: "{{ states('input_number.airflow_max_humidity') | int }}"
+    min_humidity: 30
+    max_humidity: 70
 
     set_humidity:
       - action: input_number.set_value
