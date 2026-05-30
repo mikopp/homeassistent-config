@@ -542,15 +542,23 @@ climate:
     # Standard climate property: reflects actual ComfoConnect profile state (read-only).
     # DRYING action: free cooling is open AND boost is running → flushing indoor humidity.
     hvac_action_template: >
-      {% if is_state('binary_sensor.airflow_free_cooling_available', 'on')
-            and is_state('switch.comfoconnect_pro_boost', 'on') %}
+      {% set profile   = states('select.comfoconnect_pro_temperature_profile') %}
+      {% set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
+      {% set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') %}
+      {% set hum       = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
+      {% set max_hum   = states('input_number.airflow_max_humidity') | float(60) %}
+      {% if free_cool and boost_on %}
         drying
+      {% elif profile == 'cool' and free_cool and hum > max_hum %}
+        drying
+      {% elif profile == 'cool' %}
+        cooling
+      {% elif profile == 'warm' %}
+        heating
+      {% elif profile == 'comfort' %}
+        fan
       {% else %}
-        {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
-        {% if profile == 'warm' %}heating
-        {% elif profile == 'cool' %}cooling
-        {% elif profile == 'comfort' %}fan
-        {% else %}idle{% endif %}
+        idle
       {% endif %}
 
     # Standard climate setter: persists new target temperature to input_number
@@ -700,12 +708,19 @@ automation:
                   option: "cool"
               - action: notify.mobile_app_greywinds_iphone
                 data:
-                  title: "Ventilation: Cool Profile"
+                  title: >
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
+                    {% set max = states('input_number.airflow_max_humidity') | float %}
+                    {% if hum | is_number and hum | float > max %}
+                      Ventilation: Humidity Cooling
+                    {% else %}
+                      Ventilation: Free Cooling
+                    {% endif %}
                   message: >
                     {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                     {% set max = states('input_number.airflow_max_humidity') | float %}
                     {% if hum | is_number and hum | float > max %}
-                      High indoor humidity {{ hum | float }}% above max {{ max }}% + free cooling active
+                      Indoor humidity {{ hum | float }}% above max {{ max }}% + free cooling active
                       — profile set to Cool to flush humid air.
                     {% else %}
                       Free cooling active (cooling season) — profile set to Cool.
