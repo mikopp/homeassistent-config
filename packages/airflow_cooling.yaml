@@ -1006,6 +1006,9 @@ automation:
       - condition: state
         entity_id: switch.comfoconnect_pro_away_function
         state: "off"
+      - condition: state
+        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        state: "off"
     action:
       - if:
           - condition: trigger
@@ -1030,9 +1033,6 @@ automation:
                 state: "low"
               - condition: state
                 entity_id: switch.comfoconnect_pro_boost
-                state: "off"
-              - condition: state
-                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
                 state: "off"
             sequence:
               - action: switch.turn_off
