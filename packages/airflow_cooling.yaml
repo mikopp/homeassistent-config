@@ -241,6 +241,9 @@ template:
       # Indoor temperature uses a 0.5°C hysteresis band (Schmitt trigger): turns ON at target_temp,
       # stays ON until indoor temp drops 0.5°C below target. This prevents the feedback loop where
       # the cool profile itself cools the room just enough to disable free cooling and vice versa.
+      # Absolute humidity gate: outdoor dew point must not exceed dew_max — the dew point that
+      # corresponds to (target_temp, target_hum). Ensures outdoor air warmed to target temperature
+      # does not push indoor humidity above target, even when indoor and outdoor dew points rise together.
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
@@ -260,11 +263,17 @@ template:
           {% set min_indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float %}
           {% set target_temp     = states('input_number.airflow_cooling_target_temperature') | float %}
+          {% set target_hum      = states('input_number.airflow_target_humidity') | float %}
           {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
           {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
           {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
+          {# Maximum outdoor dew: outdoor air at target_temp must not exceed target_hum. #}
+          {% set ps_target = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) %}
+          {% set pv_target = ps_target * target_hum / 100 %}
+          {% set dew_max   = 237.3 * (pv_target / 0.61078) | log / (17.27 - (pv_target / 0.61078) | log) %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
+            outdoor_dew <= dew_max and
             outdoor_temp < (target_temp - min_temp_diff) and
             avg_indoor_temp >= temp_threshold
           }}
