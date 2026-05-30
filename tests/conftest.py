@@ -132,7 +132,6 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("cover.dach_rechts", "open", {"current_tilt_position": 50})
     # ComfoConnect (absent in CI)
     ha.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
-    ha.set_state("select.comfoconnect_pro_ventilation_level", "medium", {})
     ha.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
     ha.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     ha.set_state("switch.comfoconnect_pro_away_function", "off", {})
