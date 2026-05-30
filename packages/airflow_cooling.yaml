@@ -944,6 +944,107 @@ automation:
               message: "Airflow drying boost: unexpected trigger/state combination — no action"
               level: warning
 
+  # Bumps ventilation from Low to Medium when free cooling is available but the ComfoConnect
+  # auto schedule is at Low. Auto mode is turned off (same pattern as Moisture Protect) so the
+  # ComfoConnect does not immediately override the manually-set Medium preset.
+  - id: airflow_medium_ventilation_preset
+    alias: "Airflow: Medium Ventilation Preset"
+    description: >
+      Bumps preset to Medium when free cooling is available and ComfoConnect auto schedule is at
+      Low — covering both schedule-blocked humidity drying and temperature free-cooling hours.
+      Restores auto mode when free cooling ends.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.airflow_free_cooling_available
+        id: free_cooling_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_auto_mode
+        to: "on"
+        id: auto_mode_on
+      - platform: state
+        entity_id: select.comfoconnect_pro_ventilation_preset
+        to: "low"
+        id: preset_set_low
+      - platform: state
+        entity_id: switch.comfoconnect_pro_boost
+        id: boost_changed
+      - platform: homeassistant
+        event: start
+        id: ha_start
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
+        state: "on"
+    action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_free_cooling_available')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
+      - choose:
+          # Enable medium: free cooling available, auto schedule at low, no boost running
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "on"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_auto_mode
+                state: "on"
+              - condition: state
+                entity_id: select.comfoconnect_pro_ventilation_preset
+                state: "low"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_boost
+                state: "off"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_ventilation_preset
+                data:
+                  option: "medium"
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Medium Preset"
+                  message: >
+                    Free cooling available, auto schedule at Low
+                    — preset bumped to Medium for faster air exchange.
+
+          # Restore auto mode: free cooling gone and we set medium (not Moisture Protect)
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_auto_mode
+                state: "off"
+              - condition: state
+                entity_id: select.comfoconnect_pro_ventilation_preset
+                state: "medium"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Auto Mode Restored"
+                  message: >
+                    Free cooling no longer available
+                    — ComfoConnect auto mode restored from Medium preset.
+
+        default:
+          - action: system_log.write
+            data:
+              message: "Airflow medium preset: no matching condition — no action"
+              level: warning
+
 # --- GROUP ---
 # All entities belonging to the airflow feature
 group:
@@ -992,3 +1093,4 @@ group:
       - automation.airflow_cooling_set_temperature_profile
       - automation.airflow_moisture_ventilation_preset
       - automation.airflow_humidity_drying_boost
+      - automation.airflow_medium_ventilation_preset
