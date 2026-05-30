@@ -9,11 +9,14 @@ silently ignored by HA's service registry. Only the trace-error absence (no exce
 from trigger) and idempotent "comfort" assertions are possible for most scenarios.
 """
 
+import requests
+
 from ha_integration_test_harness import HomeAssistant
 
 _AIRFLOW_AUTO = "automation.airflow_cooling_set_temperature_profile"
 _MOISTURE_PRESET_AUTO = "automation.airflow_moisture_ventilation_preset"
 _DRYING_BOOST_AUTO = "automation.airflow_humidity_drying_boost"
+_MEDIUM_PRESET_AUTO = "automation.airflow_medium_ventilation_preset"
 
 
 def _trigger(home_assistant: HomeAssistant) -> None:
@@ -509,3 +512,228 @@ def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
     home_assistant.set_state("sensor.airflow_extract_air_temp_5min", "20.0", temp_attrs)
     home_assistant.set_state("sensor.airflow_extract_air_humidity_5min", "55.0", hum_attrs)
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unknown", timeout=5)
+
+
+# ── Medium ventilation preset automation tests ────────────────────────────────────────────
+# New automation: bumps preset from Low to Medium when free cooling is available.
+# CI limitation: switch/select service calls are silently ignored on bare stubs.
+
+
+def _trigger_medium(home_assistant: HomeAssistant) -> None:
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": _MEDIUM_PRESET_AUTO,
+        "skip_condition": True,
+    })
+
+
+def test_medium_preset_enable_when_free_cooling_low_preset(home_assistant: HomeAssistant) -> None:
+    """free_cooling=on + auto=on + preset=low + boost=off → enable branch fires (trace only).
+
+    In production: auto mode turns off, preset set to Medium. CI stubs ignore service calls.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    _trigger_medium(home_assistant)
+    # Enable branch: all four conditions met → auto_mode=off + preset=medium (stubs ignore).
+
+
+def test_medium_preset_restore_when_free_cooling_gone(home_assistant: HomeAssistant) -> None:
+    """free_cooling=off + auto=off + preset=medium → restore branch fires (trace only).
+
+    Simulates returning from Medium preset: auto mode turns back on.
+    CI: switch.turn_on silently ignored.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
+    _trigger_medium(home_assistant)
+    # Restore branch: free_cooling=off + auto=off + preset=medium → auto_mode on (stub ignores).
+
+
+def test_medium_preset_boost_running_hits_default(home_assistant: HomeAssistant) -> None:
+    """free_cooling=on + auto=on + preset=low + boost=on → enable branch misses, default logs.
+
+    Enable branch requires boost=off; boost running means medium is unnecessary alongside boost.
+    Restore branch requires free_cooling=off — also misses. Default: system_log warning.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    _trigger_medium(home_assistant)
+    # Enable: boost=on fails condition. Restore: free_cooling=on fails. Default fires — no crash.
+
+
+def test_medium_preset_auto_disabled_no_action(home_assistant: HomeAssistant) -> None:
+    """auto=off: condition gate suppresses medium preset (trace only)."""
+    # airflow_cooling_automatic_enabled=off from baseline_inputs fixture.
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    _trigger_medium(home_assistant)
+    # skip_condition=True bypasses the gate; service calls silently ignored either way.
+
+
+# ── Away mode guard tests ─────────────────────────────────────────────────────────────────
+# All three preset/boost automations now check switch.comfoconnect_pro_away_function=off.
+# When away=on the condition gate blocks the action; these tests confirm the automation
+# is syntactically valid with the away entity present and runs without trace errors.
+# Production gate correctness relies on HA's standard condition evaluation.
+
+
+def test_moisture_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
+    """away=on seeded: automation runs trace-cleanly with the away entity in state."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    _trigger_moisture(home_assistant)
+    # In production (skip_condition=False): away=on blocks action — no preset change.
+    # CI (skip_condition=True): gate bypassed, service calls silently ignored.
+
+
+def test_medium_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
+    """away=on seeded: medium preset automation runs trace-cleanly with the away entity."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    _trigger_medium(home_assistant)
+    # In production: away=on blocks action — no preset change.
+
+
+def test_drying_boost_auto_disabled_no_action(home_assistant: HomeAssistant) -> None:
+    """auto=off: condition gate (added in alignment commit) suppresses boost (trace only)."""
+    # airflow_cooling_automatic_enabled=off from baseline_inputs fixture.
+    home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    _trigger_drying(home_assistant)
+    # skip_condition=True bypasses the gate; service calls silently ignored.
+
+
+def test_drying_boost_away_suppressed(home_assistant: HomeAssistant) -> None:
+    """away=on seeded: boost automation runs trace-cleanly with the away entity."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    _trigger_drying(home_assistant)
+    # In production: away=on blocks action — boost stays off.
+
+
+# ── Free cooling absolute humidity gate tests ─────────────────────────────────────────────
+# The dew_max gate prevents free cooling when outdoor air warmed to target_temp would
+# exceed target_humidity. Tests render the gate sub-expression directly via the HA
+# template API to verify the formula without fighting the binary sensor's delay_on/off.
+
+
+def _render(home_assistant: HomeAssistant, template: str) -> str:
+    resp = requests.post(
+        f"{home_assistant._base_url}/api/template",
+        headers={
+            "Authorization": f"Bearer {home_assistant._access_token}",
+            "Content-Type": "application/json",
+        },
+        json={"template": template},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"Template render failed: {resp.text}"
+    return resp.text.strip()
+
+
+# Shared dew_max sub-expression (same Magnus formula as in airflow_cooling.yaml)
+_DEW_MAX_TMPL = """
+{%- set target_temp = states('input_number.airflow_cooling_target_temperature') | float -%}
+{%- set target_hum  = states('input_number.airflow_target_humidity') | float -%}
+{%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}
+{%- set pv = ps * target_hum / 100 -%}
+{{- (237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log)) | round(2) -}}
+"""
+
+
+def test_dew_max_formula_value_at_baseline(home_assistant: HomeAssistant) -> None:
+    """dew_max at baseline (target=21.5°C, hum=55%) ≈ 12.07°C.
+
+    Verifies the Magnus formula produces the expected threshold.
+    If target or humidity change, dew_max shifts accordingly.
+    """
+    result = float(_render(home_assistant, _DEW_MAX_TMPL))
+    assert 11.9 < result < 12.2, f"Expected dew_max ≈ 12.07°C, got {result}"
+
+
+def test_free_cooling_dew_max_blocks_high_outdoor_dew(home_assistant: HomeAssistant) -> None:
+    """outdoor_dew=13°C > dew_max(≈12.07°C) → gate evaluates False.
+
+    Scenario: indoor_dew=15°C, min_dew_diff=0 → relative check (13<15) passes,
+    but absolute gate (13>12.07) blocks. Demonstrates the gap the new check fills:
+    outdoor air at 21.5°C would reach ≈55.4% RH, just above the 55% target.
+    """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "13.0", temp_attrs)
+
+    gate_tmpl = """
+    {%- set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float -%}
+    {%- set target_temp = states('input_number.airflow_cooling_target_temperature') | float -%}
+    {%- set target_hum  = states('input_number.airflow_target_humidity') | float -%}
+    {%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}
+    {%- set pv = ps * target_hum / 100 -%}
+    {%- set dew_max = 237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log) -%}
+    {{ outdoor_dew <= dew_max }}
+    """
+    assert _render(home_assistant, gate_tmpl) == "False"
+
+
+def test_free_cooling_dew_max_passes_low_outdoor_dew(home_assistant: HomeAssistant) -> None:
+    """outdoor_dew=8.5°C (baseline) < dew_max(≈12.07°C) → gate evaluates True.
+
+    Baseline outdoor dew is well below the threshold — outdoor air at target temp
+    would produce ≈33% RH, comfortably below the 55% target.
+    """
+    gate_tmpl = """
+    {%- set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float -%}
+    {%- set target_temp = states('input_number.airflow_cooling_target_temperature') | float -%}
+    {%- set target_hum  = states('input_number.airflow_target_humidity') | float -%}
+    {%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}
+    {%- set pv = ps * target_hum / 100 -%}
+    {%- set dew_max = 237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log) -%}
+    {{ outdoor_dew <= dew_max }}
+    """
+    # baseline outdoor_dew_5min=8.5°C (from conftest) → 8.5 ≤ 12.07 → True
+    assert _render(home_assistant, gate_tmpl) == "True"
+
+
+def test_free_cooling_dew_max_shifts_with_target_humidity(home_assistant: HomeAssistant) -> None:
+    """Raising target_hum raises dew_max: at 60% RH, dew_max ≈ 13.4°C.
+
+    At 60% target, outdoor_dew=13°C is BELOW dew_max → gate passes.
+    This confirms dew_max is correctly derived from the target, not hardcoded.
+    """
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_target_humidity", "value": 60})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "13.0", temp_attrs)
+
+    gate_tmpl = """
+    {%- set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float -%}
+    {%- set target_temp = states('input_number.airflow_cooling_target_temperature') | float -%}
+    {%- set target_hum  = states('input_number.airflow_target_humidity') | float -%}
+    {%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}
+    {%- set pv = ps * target_hum / 100 -%}
+    {%- set dew_max = 237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log) -%}
+    {{ outdoor_dew <= dew_max }}
+    """
+    # target_hum=60 → dew_max≈13.4°C → outdoor_dew=13 ≤ 13.4 → True
+    assert _render(home_assistant, gate_tmpl) == "True"

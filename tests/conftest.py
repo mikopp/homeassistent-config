@@ -133,7 +133,9 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # ComfoConnect (absent in CI)
     ha.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     ha.set_state("select.comfoconnect_pro_ventilation_level", "medium", {})
+    ha.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
     ha.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    ha.set_state("switch.comfoconnect_pro_away_function", "off", {})
     ha.set_state("switch.comfoconnect_pro_boost", "off", {})
     ha.set_state("number.comfoconnect_pro_boost_time", "0",
                  {"unit_of_measurement": "min", "min": 0, "max": 1092, "step": 1})
