@@ -801,6 +801,10 @@ automation:
       - platform: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
         id: sensor_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
       - platform: homeassistant
         event: start
         id: ha_start
@@ -808,6 +812,9 @@ automation:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
+      - condition: state
+        entity_id: switch.comfoconnect_pro_away_function
+        state: "off"
     action:
       - if:
           - condition: trigger
@@ -978,6 +985,10 @@ automation:
       - platform: state
         entity_id: switch.comfoconnect_pro_boost
         id: boost_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
       - platform: homeassistant
         event: start
         id: ha_start
@@ -985,6 +996,9 @@ automation:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
+      - condition: state
+        entity_id: switch.comfoconnect_pro_away_function
+        state: "off"
     action:
       - if:
           - condition: trigger
