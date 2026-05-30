@@ -721,7 +721,7 @@ automation:
                     {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                     {% set max = states('input_number.airflow_max_humidity') | float %}
                     {% if hum | is_number and hum | float > max %}
-                      Ventilation: Humidity Cooling
+                      Ventilation: Humidity flushing
                     {% else %}
                       Ventilation: Free Cooling
                     {% endif %}
