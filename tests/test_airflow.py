@@ -332,7 +332,7 @@ def test_moisture_ventilation_disabled_no_action(home_assistant: HomeAssistant) 
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
     _trigger_moisture(home_assistant)
     # Guard condition (airflow_cooling_automatic_enabled=on) is not met → no action taken.
-    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_level",
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
                                        "medium", timeout=3)
 
 
