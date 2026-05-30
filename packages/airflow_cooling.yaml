@@ -643,7 +643,7 @@ automation:
                         value_template: >
                           {{ states('sensor.airflow_avg_indoor_humidity_5min') | is_number and
                              states('sensor.airflow_avg_indoor_humidity_5min') | float <
-                             states('input_number.airflow_min_humidity') | float }}
+                             states('input_number.airflow_min_humidity') | float - 0.5 }}
                       - condition: not
                         conditions:
                           - condition: state
@@ -703,7 +703,7 @@ automation:
                     value_template: >
                       {{ states('sensor.airflow_avg_indoor_humidity_5min') | is_number and
                          states('sensor.airflow_avg_indoor_humidity_5min') | float >
-                         states('input_number.airflow_max_humidity') | float }}
+                         states('input_number.airflow_max_humidity') | float + 0.5 }}
               - condition: not
                 conditions:
                   - condition: state
@@ -863,7 +863,7 @@ automation:
           - action: system_log.write
             data:
               message: "Airflow moisture preset: unexpected binary sensor state — no action"
-              level: warning
+              level: debug
 
   # Manages boost when outdoor air is dry enough to flush indoor humidity.
   # Trigger IDs separate the three entry points so boost_expired can only reach Branch 1
@@ -1031,6 +1031,9 @@ automation:
               - condition: state
                 entity_id: switch.comfoconnect_pro_boost
                 state: "off"
+              - condition: state
+                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                state: "off"
             sequence:
               - action: switch.turn_off
                 target:
@@ -1073,7 +1076,7 @@ automation:
           - action: system_log.write
             data:
               message: "Airflow medium preset: no matching condition — no action"
-              level: warning
+              level: debug
 
 # --- GROUP ---
 # All entities belonging to the airflow feature
