@@ -299,7 +299,7 @@ template:
       # True when conditions are right to flush indoor humidity via boost.
       # Requires: high indoor humidity, free cooling available, outdoor temp below target,
       # within the user-configured schedule window, and moisture-low guard not active.
-      # Turns ON at (target + hyst), stays ON until hum < target (Schmitt trigger).
+      # Schmitt trigger: turns ON at max_humidity, stays ON until hum < target_humidity.
       # Schedule selects workday or non-workday window based on binary_sensor.workday;
       # non-workday covers both weekends and public holidays detected by the Workday integration.
       - unique_id: airflow_humidity_drying_needed
@@ -308,8 +308,8 @@ template:
         state: >
           {% set indoor_hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
           {% set target      = states('input_number.airflow_target_humidity') | float(55) %}
-          {% set hysteresis  = states('input_number.airflow_humidity_hysteresis') | float(2) %}
-          {% set threshold   = target if this.state == 'on' else (target + hysteresis) %}
+          {% set max         = states('input_number.airflow_max_humidity') | float(60) %}
+          {% set threshold   = target if this.state == 'on' else max %}
           {% set free_cool   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
           {% set low_active  = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
           {% set outdoor_t   = states('sensor.wheatherstation_outdoor_temperature') | float(99) %}
@@ -776,11 +776,24 @@ automation:
     trigger:
       - platform: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        id: sensor_changed
+      - platform: homeassistant
+        event: start
+        id: ha_start
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
     action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_moisture_ventilation_low_needed')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
       - choose:
           - conditions:
               - condition: state
@@ -822,26 +835,54 @@ automation:
               level: warning
 
   # Manages boost when outdoor air is dry enough to flush indoor humidity.
-  # Three triggers share one choose block using state conditions so the re-enable
-  # case (hardware timer expires while drying is still needed) is handled automatically:
-  # when boost turns off and binary_sensor is still on, the first branch re-enables.
+  # Trigger IDs separate the three entry points so boost_expired can only reach Branch 1
+  # (re-enable), preventing a double disable+notify when the hardware timer fires after
+  # drying_needed already went off.
   - id: airflow_humidity_drying_boost
-    alias: "Airflow Humidity Drying Boost"
+    alias: "Airflow: Humidity Drying Boost"
+    description: >
+      Runs a 30-minute ventilation boost when outdoor air is dry enough to flush indoor humidity.
+      Re-enables automatically if boost expires while drying is still needed.
+      Stops and notifies when conditions are no longer met.
     mode: single
     trigger:
       - platform: state
         entity_id: binary_sensor.airflow_humidity_drying_needed
         to: "on"
+        id: drying_needed_on
       - platform: state
         entity_id: binary_sensor.airflow_humidity_drying_needed
         to: "off"
+        id: drying_needed_off
       - platform: state
         entity_id: switch.comfoconnect_pro_boost
         to: "off"
+        id: boost_expired
+      - platform: homeassistant
+        event: start
+        id: ha_start
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
+        state: "on"
     action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_humidity_drying_needed')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
       - choose:
           # Enable boost: drying needed and boost not already running
           - conditions:
+              - condition: trigger
+                id:
+                  - drying_needed_on
+                  - boost_expired
+                  - ha_start
               - condition: state
                 entity_id: binary_sensor.airflow_humidity_drying_needed
                 state: "on"
@@ -868,6 +909,8 @@ automation:
 
           # Disable boost: drying no longer needed
           - conditions:
+              - condition: trigger
+                id: drying_needed_off
               - condition: state
                 entity_id: binary_sensor.airflow_humidity_drying_needed
                 state: "off"
@@ -879,6 +922,12 @@ automation:
                 data:
                   title: "Ventilation: Drying Boost Stopped"
                   message: "Humidity drying conditions no longer met — boost stopped."
+
+        default:
+          - action: system_log.write
+            data:
+              message: "Airflow drying boost: unexpected trigger/state combination — no action"
+              level: warning
 
 # --- GROUP ---
 # All entities belonging to the airflow feature
