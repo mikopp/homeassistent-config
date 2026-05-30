@@ -250,20 +250,31 @@ def test_sun_down_state(home_assistant: HomeAssistant) -> None:
         "entity_id": "input_select.pergola_automation_state",
         "option": "not_enough_sun",
     })
-    # Seed a non-default slat angle so we can confirm no movement occurs.
-    home_assistant.call_action("input_number", "set_value", {
-        "entity_id": "input_number.pergola_last_set_slat_angle",
-        "value": 45,
-    })
     home_assistant.set_state("sensor.solar_yield_watts", "0", {"unit_of_measurement": "W"})
     home_assistant.set_state("sensor.wheatherstation_solar_radiation", "0",
                              {"unit_of_measurement": "W/m²"})
+    # Wait for the template sensor to propagate solar_yield_watts=0 before triggering the
+    # state manager. Without this, evaluate_state may read stale PV (1500 W) on a loaded
+    # event loop, causing Rule 5 to fail and Rule 6 to enter no_sun_behind_house, which
+    # calls script.pergola_set_slat_angle(90) and overwrites the seeded angle.
+    home_assistant.assert_entity_state("sensor.pergola_pv_power",
+                                       lambda s: float(s) == 0.0, timeout=5)
     home_assistant.call_action("automation", "trigger", {
         "entity_id": "automation.pergola_state_manager",
         "skip_condition": True,
     })
     home_assistant.assert_entity_state("input_select.pergola_automation_state",
                                        "sun_down", timeout=5)
+    # Seed the non-default slat angle AFTER state=sun_down is confirmed. Any cover_response
+    # run that entered the sun_automatik_cooling branch before this transition (queued from
+    # the baseline lock-originator reset) has a 500 ms internal delay; by the time
+    # assert_entity_state above resolves, that delay has long since elapsed and the run has
+    # completed. State is now sun_down, so no subsequent cover_response run can write to
+    # the angle — the sun_down branch is sequence: [].
+    home_assistant.call_action("input_number", "set_value", {
+        "entity_id": "input_number.pergola_last_set_slat_angle",
+        "value": 45,
+    })
     # cover_response must not move covers when state=sun_down.
     home_assistant.call_action("automation", "trigger", {
         "entity_id": "automation.pergola_cover_response",

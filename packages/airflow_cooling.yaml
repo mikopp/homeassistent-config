@@ -241,6 +241,9 @@ template:
       # Indoor temperature uses a 0.5°C hysteresis band (Schmitt trigger): turns ON at target_temp,
       # stays ON until indoor temp drops 0.5°C below target. This prevents the feedback loop where
       # the cool profile itself cools the room just enough to disable free cooling and vice versa.
+      # Absolute humidity gate: outdoor dew point must not exceed dew_max — the dew point that
+      # corresponds to (target_temp, target_hum). Ensures outdoor air warmed to target temperature
+      # does not push indoor humidity above target, even when indoor and outdoor dew points rise together.
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
@@ -260,11 +263,17 @@ template:
           {% set min_indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float %}
           {% set target_temp     = states('input_number.airflow_cooling_target_temperature') | float %}
+          {% set target_hum      = states('input_number.airflow_target_humidity') | float %}
           {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
           {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
           {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
+          {# Maximum outdoor dew: outdoor air at target_temp must not exceed target_hum. #}
+          {% set ps_target = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) %}
+          {% set pv_target = ps_target * target_hum / 100 %}
+          {% set dew_max   = 237.3 * (pv_target / 0.61078) | log / (17.27 - (pv_target / 0.61078) | log) %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
+            outdoor_dew <= dew_max and
             outdoor_temp < (target_temp - min_temp_diff) and
             avg_indoor_temp >= temp_threshold
           }}
@@ -296,12 +305,46 @@ template:
         delay_off:
           minutes: 10
 
-# binary_sensor.airflow_free_cooling_available excluded — intermediate computed state, not worth archiving
+      # True when conditions are right to flush indoor humidity via boost.
+      # Requires: high indoor humidity, free cooling available, outdoor temp below target,
+      # within the user-configured schedule window, and moisture-low guard not active.
+      # Schmitt trigger: turns ON at max_humidity, stays ON until hum < target_humidity.
+      # Schedule selects workday or non-workday window based on binary_sensor.workday;
+      # non-workday covers both weekends and public holidays detected by the Workday integration.
+      - unique_id: airflow_humidity_drying_needed
+        name: "Airflow Humidity Drying Needed"
+        device_class: running
+        state: >
+          {% set indoor_hum  = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
+          {% set target      = states('input_number.airflow_target_humidity') | float(55) %}
+          {% set max         = states('input_number.airflow_max_humidity') | float(60) %}
+          {% set threshold   = target if this.state == 'on' else max %}
+          {% set free_cool   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
+          {% set low_active  = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+          {% set outdoor_t   = states('sensor.wheatherstation_outdoor_temperature') | float(99) %}
+          {% set target_t    = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
+          {% set in_schedule = (is_state('binary_sensor.workday', 'on')
+                                and is_state('schedule.airflow_boost_workday', 'on'))
+                               or
+                               (is_state('binary_sensor.workday', 'off')
+                                and is_state('schedule.airflow_boost_non_workday', 'on')) %}
+          {{
+            indoor_hum >= threshold and
+            free_cool and
+            not low_active and
+            outdoor_t < target_t and
+            in_schedule
+          }}
+        delay_on:
+          minutes: 10
+
+# Intermediate computed binary sensors excluded — not worth archiving
 recorder:
   exclude:
     entities:
       - binary_sensor.airflow_free_cooling_available
       - binary_sensor.airflow_moisture_ventilation_low_needed
+      - binary_sensor.airflow_humidity_drying_needed
 
 # --- HELPERS ---
 # Enable/disable automatic ventilation profile switching from the UI or other automations
@@ -505,13 +548,22 @@ climate:
                 data:
                   option: cool
 
-    # Standard climate property: reflects actual ComfoConnect profile state (read-only)
+    # Standard climate property: reflects actual ComfoConnect profile state (read-only).
+    # DRYING action: free cooling is open AND boost is running → flushing indoor humidity.
     hvac_action_template: >
-      {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
-      {% if profile == 'warm' %}
-        heating
+      {% set profile   = states('select.comfoconnect_pro_temperature_profile') %}
+      {% set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
+      {% set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') %}
+      {% set hum       = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
+      {% set max_hum   = states('input_number.airflow_max_humidity') | float(60) %}
+      {% if free_cool and boost_on %}
+        drying
+      {% elif profile == 'cool' and free_cool and hum > max_hum %}
+        drying
       {% elif profile == 'cool' %}
         cooling
+      {% elif profile == 'warm' %}
+        heating
       {% elif profile == 'comfort' %}
         fan
       {% else %}
@@ -665,12 +717,19 @@ automation:
                   option: "cool"
               - action: notify.mobile_app_greywinds_iphone
                 data:
-                  title: "Ventilation: Cool Profile"
+                  title: >
+                    {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
+                    {% set max = states('input_number.airflow_max_humidity') | float %}
+                    {% if hum | is_number and hum | float > max %}
+                      Ventilation: Humidity flushing
+                    {% else %}
+                      Ventilation: Free Cooling
+                    {% endif %}
                   message: >
                     {% set hum = states('sensor.airflow_avg_indoor_humidity_5min') %}
                     {% set max = states('input_number.airflow_max_humidity') | float %}
                     {% if hum | is_number and hum | float > max %}
-                      High indoor humidity {{ hum | float }}% above max {{ max }}% + free cooling active
+                      Indoor humidity {{ hum | float }}% above max {{ max }}% + free cooling active
                       — profile set to Cool to flush humid air.
                     {% else %}
                       Free cooling active (cooling season) — profile set to Cool.
@@ -741,11 +800,31 @@ automation:
     trigger:
       - platform: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        id: sensor_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
+      - platform: homeassistant
+        event: start
+        id: ha_start
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
+      - condition: state
+        entity_id: switch.comfoconnect_pro_away_function
+        state: "off"
     action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_moisture_ventilation_low_needed')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
       - choose:
           - conditions:
               - condition: state
@@ -786,6 +865,216 @@ automation:
               message: "Airflow moisture preset: unexpected binary sensor state — no action"
               level: warning
 
+  # Manages boost when outdoor air is dry enough to flush indoor humidity.
+  # Trigger IDs separate the three entry points so boost_expired can only reach Branch 1
+  # (re-enable), preventing a double disable+notify when the hardware timer fires after
+  # drying_needed already went off.
+  - id: airflow_humidity_drying_boost
+    alias: "Airflow: Humidity Drying Boost"
+    description: >
+      Runs a 30-minute ventilation boost when outdoor air is dry enough to flush indoor humidity.
+      Re-enables automatically if boost expires while drying is still needed.
+      Stops and notifies when conditions are no longer met.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.airflow_humidity_drying_needed
+        to: "on"
+        id: drying_needed_on
+      - platform: state
+        entity_id: binary_sensor.airflow_humidity_drying_needed
+        to: "off"
+        id: drying_needed_off
+      - platform: state
+        entity_id: switch.comfoconnect_pro_boost
+        to: "off"
+        id: boost_expired
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
+      - platform: homeassistant
+        event: start
+        id: ha_start
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
+        state: "on"
+      - condition: state
+        entity_id: switch.comfoconnect_pro_away_function
+        state: "off"
+    action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_humidity_drying_needed')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
+      - choose:
+          # Enable boost: drying needed and boost not already running
+          - conditions:
+              - condition: trigger
+                id:
+                  - drying_needed_on
+                  - boost_expired
+                  - ha_start
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_drying_needed
+                state: "on"
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_boost
+                    state: "on"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.comfoconnect_pro_boost_time
+                data:
+                  value: 30
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.comfoconnect_pro_boost
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Humidity Drying Boost"
+                  message: >
+                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
+                    — boost started to flush humid air via free cooling.
+
+          # Disable boost: drying no longer needed
+          - conditions:
+              - condition: trigger
+                id: drying_needed_off
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_drying_needed
+                state: "off"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.comfoconnect_pro_boost
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Drying Boost Stopped"
+                  message: "Humidity drying conditions no longer met — boost stopped."
+
+        default:
+          - action: system_log.write
+            data:
+              message: "Airflow drying boost: unexpected trigger/state combination — no action"
+              level: warning
+
+  # Bumps ventilation from Low to Medium when free cooling is available but the ComfoConnect
+  # auto schedule is at Low. Auto mode is turned off (same pattern as Moisture Protect) so the
+  # ComfoConnect does not immediately override the manually-set Medium preset.
+  - id: airflow_medium_ventilation_preset
+    alias: "Airflow: Medium Ventilation Preset"
+    description: >
+      Bumps preset to Medium when free cooling is available and ComfoConnect auto schedule is at
+      Low — covering both schedule-blocked humidity drying and temperature free-cooling hours.
+      Restores auto mode when free cooling ends.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.airflow_free_cooling_available
+        id: free_cooling_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_auto_mode
+        to: "on"
+        id: auto_mode_on
+      - platform: state
+        entity_id: select.comfoconnect_pro_ventilation_preset
+        to: "low"
+        id: preset_set_low
+      - platform: state
+        entity_id: switch.comfoconnect_pro_boost
+        id: boost_changed
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
+      - platform: homeassistant
+        event: start
+        id: ha_start
+    condition:
+      - condition: state
+        entity_id: input_boolean.airflow_cooling_automatic_enabled
+        state: "on"
+      - condition: state
+        entity_id: switch.comfoconnect_pro_away_function
+        state: "off"
+    action:
+      - if:
+          - condition: trigger
+            id: ha_start
+        then:
+          - wait_template: >
+              {{ states('binary_sensor.airflow_free_cooling_available')
+                 not in ['unavailable', 'unknown'] }}
+            timeout: "00:05:00"
+            continue_on_timeout: false
+      - choose:
+          # Enable medium: free cooling available, auto schedule at low, no boost running
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "on"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_auto_mode
+                state: "on"
+              - condition: state
+                entity_id: select.comfoconnect_pro_ventilation_preset
+                state: "low"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_boost
+                state: "off"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_ventilation_preset
+                data:
+                  option: "medium"
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Medium Preset"
+                  message: >
+                    Free cooling available, auto schedule at Low
+                    — preset bumped to Medium for faster air exchange.
+
+          # Restore auto mode: free cooling gone and we set medium (not Moisture Protect)
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_auto_mode
+                state: "off"
+              - condition: state
+                entity_id: select.comfoconnect_pro_ventilation_preset
+                state: "medium"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.comfoconnect_pro_auto_mode
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Auto Mode Restored"
+                  message: >
+                    Free cooling no longer available
+                    — ComfoConnect auto mode restored from Medium preset.
+
+        default:
+          - action: system_log.write
+            data:
+              message: "Airflow medium preset: no matching condition — no action"
+              level: warning
+
 # --- GROUP ---
 # All entities belonging to the airflow feature
 group:
@@ -819,11 +1108,19 @@ group:
       - climate.airflow_climate
       - sensor.airflow_avg_indoor_humidity
       - sensor.airflow_avg_indoor_humidity_5min
-      # Humidity helpers + binary sensor
+      # Humidity helpers + binary sensors
       - input_number.airflow_target_humidity
       - input_number.airflow_min_humidity
       - input_number.airflow_max_humidity
       - binary_sensor.airflow_moisture_ventilation_low_needed
+      # Drying boost
+      - binary_sensor.airflow_humidity_drying_needed
+      - schedule.airflow_boost_workday
+      - schedule.airflow_boost_non_workday
+      - switch.comfoconnect_pro_boost
+      - number.comfoconnect_pro_boost_time
       # Automations
       - automation.airflow_cooling_set_temperature_profile
       - automation.airflow_moisture_ventilation_preset
+      - automation.airflow_humidity_drying_boost
+      - automation.airflow_medium_ventilation_preset
