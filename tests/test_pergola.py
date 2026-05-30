@@ -258,6 +258,12 @@ def test_sun_down_state(home_assistant: HomeAssistant) -> None:
     home_assistant.set_state("sensor.solar_yield_watts", "0", {"unit_of_measurement": "W"})
     home_assistant.set_state("sensor.wheatherstation_solar_radiation", "0",
                              {"unit_of_measurement": "W/m²"})
+    # Wait for the template sensor to propagate solar_yield_watts=0 before triggering the
+    # state manager. Without this, evaluate_state may read stale PV (1500 W) on a loaded
+    # event loop, causing Rule 5 to fail and Rule 6 to enter no_sun_behind_house, which
+    # calls script.pergola_set_slat_angle(90) and overwrites the seeded angle=45.
+    home_assistant.assert_entity_state("sensor.pergola_pv_power",
+                                       lambda s: float(s) == 0.0, timeout=5)
     home_assistant.call_action("automation", "trigger", {
         "entity_id": "automation.pergola_state_manager",
         "skip_condition": True,
