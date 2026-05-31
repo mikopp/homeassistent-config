@@ -249,30 +249,30 @@ template:
           {% elif s in ['heating', 'moisture_retention'] %}mdi:fire
           {% else %}mdi:fan{% endif %}
         availability: >
-          {{ states('select.comfoconnect_pro_temperature_profile') not in ['unavailable', 'unknown'] and
+          {{ states('climate.airflow_climate') not in ['unavailable', 'unknown'] and
              states('binary_sensor.airflow_free_cooling_available') not in ['unavailable', 'unknown'] and
              states('binary_sensor.airflow_moisture_ventilation_low_needed') not in ['unavailable', 'unknown'] and
              states('switch.comfoconnect_pro_boost') not in ['unavailable', 'unknown'] and
              states('sensor.airflow_avg_indoor_humidity_5min') not in ['unavailable', 'unknown'] }}
         state: >
-          {# Sensors/select/switch: availability guard above guarantees live values — no defaults needed. #}
+          {# action: reads hvac_action from climate.airflow_climate, which already
+             centralises the profile + max_humidity logic (see hvac_action_template). #}
           {# input_boolean/input_number: never unavailable — no defaults needed. #}
-          {% set auto    = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
-          {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
-          {% set free    = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
-          {% set low     = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
-          {% set boost   = is_state('switch.comfoconnect_pro_boost', 'on') %}
-          {% set hum     = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
-          {% set max_h   = states('input_number.airflow_max_humidity') | float %}
-          {% set min_h   = states('input_number.airflow_min_humidity') | float %}
+          {% set auto   = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
+          {% set free   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
+          {% set low    = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+          {% set boost  = is_state('switch.comfoconnect_pro_boost', 'on') %}
+          {% set action = state_attr('climate.airflow_climate', 'hvac_action') %}
+          {% set hum    = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
+          {% set min_h  = states('input_number.airflow_min_humidity') | float %}
           {% if not auto %}off
           {% elif boost and free %}moisture_flush_boost
           {% elif low %}moisture_protection
-          {% elif profile == 'cool' and free and hum > max_h %}moisture_flush_cooling
-          {% elif profile == 'cool' and free %}free_cooling
-          {% elif profile == 'cool' %}cooling
-          {% elif profile == 'warm' and hum < min_h %}moisture_retention
-          {% elif profile == 'warm' %}heating
+          {% elif action == 'drying' %}moisture_flush_cooling
+          {% elif action == 'cooling' and free %}free_cooling
+          {% elif action == 'cooling' %}cooling
+          {% elif action == 'heating' and hum < min_h %}moisture_retention
+          {% elif action == 'heating' %}heating
           {% else %}comfort{% endif %}
 
     binary_sensor:
