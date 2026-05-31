@@ -134,6 +134,14 @@ def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> Non
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
 
 
+def test_bypass_unavailable_when_input_missing(home_assistant: HomeAssistant) -> None:
+    """has_value guard: a missing filter input → sensor.airflow_bypass_estimation unavailable."""
+    # Baseline seeds all six inputs → bypass computes 75 (see test_bypass_baseline).
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "75", timeout=5)
+    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unavailable", timeout=5)
+
+
 # ── Verification scenario tests ─────────────────────────────────────────────────────────
 # These mirror the manual verification steps from the implementation plan.
 # CI limitation note: select.select_option and switch.turn_on/off are silently ignored
@@ -850,3 +858,15 @@ def test_cooling_state_comfort(home_assistant: HomeAssistant) -> None:
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     _seed_cooling_state_deps(home_assistant, hvac_action="fan")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state", "comfort", timeout=5)
+
+
+def test_cooling_state_unavailable_when_dependency_missing(home_assistant: HomeAssistant) -> None:
+    """has_value guard: a missing availability dependency → sensor.airflow_cooling_state unavailable."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # All five availability deps present → sensor resolves to a real state.
+    _seed_cooling_state_deps(home_assistant, hvac_action="fan")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "comfort", timeout=5)
+    # Drop one dependency → has_value() is False → availability False → entity unavailable.
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "unavailable", timeout=5)
