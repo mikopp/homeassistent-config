@@ -737,3 +737,110 @@ def test_free_cooling_dew_max_shifts_with_target_humidity(home_assistant: HomeAs
     """
     # target_hum=60 → dew_max≈13.4°C → outdoor_dew=13 ≤ 13.4 → True
     assert _render(home_assistant, gate_tmpl) == "True"
+
+
+# ── Airflow cooling state sensor tests ────────────────────────────────────────────────────
+# sensor.airflow_cooling_state is a read-only template sensor that derives a reason-based
+# status of the ventilation automation. Priority order (first match wins):
+#   off → moisture_flush_boost → moisture_protection → moisture_flush_cooling →
+#   free_cooling → cooling → moisture_retention → heating → comfort.
+# All dependency entities are seeded directly so the derived state is deterministic
+# (the upstream binary sensors have delay_on/off that would otherwise make timing flaky).
+
+
+def _seed_cooling_state_deps(
+    home_assistant: HomeAssistant,
+    *,
+    profile: str = "comfort",
+    free_cooling: str = "off",
+    low_needed: str = "off",
+    boost: str = "off",
+) -> None:
+    """Seed the entities the airflow_cooling_state template sensor reads."""
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", profile, {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", free_cooling, {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", low_needed, {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", boost, {})
+
+
+def test_cooling_state_off_when_auto_disabled(home_assistant: HomeAssistant) -> None:
+    """auto disabled (baseline) → 'off' regardless of other conditions."""
+    _seed_cooling_state_deps(home_assistant, profile="cool", free_cooling="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "off", timeout=5)
+
+
+def test_cooling_state_moisture_flush_boost(home_assistant: HomeAssistant) -> None:
+    """auto on + boost on + free cooling on → 'moisture_flush_boost' (highest active priority)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    _seed_cooling_state_deps(home_assistant, profile="cool", free_cooling="on", boost="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
+                                       "moisture_flush_boost", timeout=5)
+
+
+def test_cooling_state_moisture_protection(home_assistant: HomeAssistant) -> None:
+    """auto on + moisture-low needed (no boost) → 'moisture_protection'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    _seed_cooling_state_deps(home_assistant, profile="comfort", low_needed="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
+                                       "moisture_protection", timeout=5)
+
+
+def test_cooling_state_moisture_flush_cooling(home_assistant: HomeAssistant) -> None:
+    """auto on + cool profile + free cooling + humidity above max → 'moisture_flush_cooling'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # max=55 baseline; 60 > 55 selects the humidity-flush branch over plain free_cooling.
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    _seed_cooling_state_deps(home_assistant, profile="cool", free_cooling="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
+                                       "moisture_flush_cooling", timeout=5)
+
+
+def test_cooling_state_free_cooling(home_assistant: HomeAssistant) -> None:
+    """auto on + cool profile + free cooling + humidity in band → 'free_cooling'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # baseline humidity=55 == max → not above max → plain free cooling.
+    _seed_cooling_state_deps(home_assistant, profile="cool", free_cooling="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
+                                       "free_cooling", timeout=5)
+
+
+def test_cooling_state_cooling_without_free_cooling(home_assistant: HomeAssistant) -> None:
+    """auto on + cool profile + free cooling off → 'cooling' (e.g. manual cool)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    _seed_cooling_state_deps(home_assistant, profile="cool", free_cooling="off")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "cooling", timeout=5)
+
+
+def test_cooling_state_moisture_retention(home_assistant: HomeAssistant) -> None:
+    """auto on + warm profile + humidity below min → 'moisture_retention'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # min=45 baseline; 40 < 45 → retaining moisture via warm profile.
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "40.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    _seed_cooling_state_deps(home_assistant, profile="warm")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
+                                       "moisture_retention", timeout=5)
+
+
+def test_cooling_state_heating(home_assistant: HomeAssistant) -> None:
+    """auto on + warm profile + humidity at/above min → 'heating'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # baseline humidity=55 ≥ min(45) → active heating, not moisture retention.
+    _seed_cooling_state_deps(home_assistant, profile="warm")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "heating", timeout=5)
+
+
+def test_cooling_state_comfort(home_assistant: HomeAssistant) -> None:
+    """auto on + comfort profile + no overrides → 'comfort'."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    _seed_cooling_state_deps(home_assistant, profile="comfort", free_cooling="off")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "comfort", timeout=5)
