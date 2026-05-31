@@ -3,24 +3,26 @@
 # Template sensors (airflow_min_indoor_dew, airflow_avg_indoor_temp) are NOT excluded
 # from recorder because the filter sensors below seed their moving average from history.
 sensor:
-  # Smooth avg indoor humidity — source is template sensor aggregating all indoor humidity sensors
+  # Smooth avg indoor humidity — source is template sensor aggregating all indoor humidity sensors.
+  # Defines the shared humidity filter chain (precision 1); reused by the other humidity sensors.
   - platform: filter
     unique_id: airflow_avg_indoor_humidity_5min
     name: "Airflow Avg Indoor Humidity 5min"
     entity_id: sensor.airflow_avg_indoor_humidity
-    filters:
+    filters: &humidity_filters
       - filter: time_simple_moving_average
         window_size: "00:05"
         precision: 1
       - filter: time_throttle
         window_size: "00:05"
 
-  # Smooth avg indoor dew point — source is template sensor aggregating all indoor dew sensors
+  # Smooth avg indoor dew point — source is template sensor aggregating all indoor dew sensors.
+  # Defines the shared temperature/dew filter chain (precision 2); reused by the other temp/dew sensors.
   - platform: filter
     unique_id: airflow_min_indoor_dew_5min
     name: "Airflow Avg Indoor Dew 5min"
     entity_id: sensor.airflow_min_indoor_dew
-    filters:
+    filters: &temperature_filters
       - filter: time_simple_moving_average
         window_size: "00:05"
         precision: 2
@@ -32,96 +34,56 @@ sensor:
     unique_id: airflow_avg_indoor_temp_5min
     name: "Airflow Avg Indoor Temp 5min"
     entity_id: sensor.airflow_avg_indoor_temp
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 2
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *temperature_filters
 
   # Smooth outdoor dew point from ComfoConnect
   - platform: filter
     unique_id: airflow_outdoor_dew_5min
     name: "Airflow Outdoor Dew 5min"
     entity_id: sensor.comfoconnect_pro_outdoor_air_dew_point
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 2
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *temperature_filters
 
   # Smooth outdoor temperature from ComfoConnect
   - platform: filter
     unique_id: airflow_outdoor_temp_5min
     name: "Airflow Outdoor Temp 5min"
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 2
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *temperature_filters
 
   # Smooth outdoor humidity from ComfoConnect
   - platform: filter
     unique_id: airflow_outdoor_air_humidity_5min
     name: "Airflow Outdoor Air Humidity 5min"
     entity_id: sensor.comfoconnect_pro_outdoor_air_humidity
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 1
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *humidity_filters
 
   # Smooth supply air temperature from ComfoConnect
   - platform: filter
     unique_id: airflow_supply_air_temp_5min
     name: "Airflow Supply Air Temp 5min"
     entity_id: sensor.comfoconnect_pro_supply_air_temperature
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 2
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *temperature_filters
 
   # Smooth supply air humidity from ComfoConnect
   - platform: filter
     unique_id: airflow_supply_air_humidity_5min
     name: "Airflow Supply Air Humidity 5min"
     entity_id: sensor.comfoconnect_pro_supply_air_humidity
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 1
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *humidity_filters
 
   # Smooth extract air temperature from ComfoConnect
   - platform: filter
     unique_id: airflow_extract_air_temp_5min
     name: "Airflow Extract Air Temp 5min"
     entity_id: sensor.comfoconnect_pro_extract_air_temperature
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 2
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *temperature_filters
 
   # Smooth extract air humidity from ComfoConnect
   - platform: filter
     unique_id: airflow_extract_air_humidity_5min
     name: "Airflow Extract Air Humidity 5min"
     entity_id: sensor.comfoconnect_pro_extract_air_humidity
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:05"
-        precision: 1
-      - filter: time_throttle
-        window_size: "00:05"
+    filters: *humidity_filters
 
 # --- TEMPLATE SENSORS & BINARY SENSOR ---
 template:
@@ -144,7 +106,7 @@ template:
         availability: >
           {% set label_count = label_entities('Indoor.Humidity')
              | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_humidity') not in ['unavailable', 'unknown'] }}
+          {{ label_count > 0 or has_value('sensor.comfoconnect_pro_extract_air_humidity') }}
 
       # Average dewpoint across all monitored indoor areas; falls back to ComfoConnect extract air dew point when no labeled entities exist
       - unique_id: airflow_min_indoor_dew
@@ -164,7 +126,7 @@ template:
         availability: >
           {% set label_count = label_entities('Indoor.Dewpoint')
              | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_dew_point') not in ['unavailable', 'unknown'] }}
+          {{ label_count > 0 or has_value('sensor.comfoconnect_pro_extract_air_dew_point') }}
 
       # Average temperature across all monitored indoor areas; falls back to ComfoConnect extract air temperature when no labeled entities exist
       - unique_id: airflow_avg_indoor_temp
@@ -184,7 +146,7 @@ template:
         availability: >
           {% set label_count = label_entities('Indoor.Temperature')
              | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or states('sensor.comfoconnect_pro_extract_air_temperature') not in ['unavailable', 'unknown'] }}
+          {{ label_count > 0 or has_value('sensor.comfoconnect_pro_extract_air_temperature') }}
 
       # Bypass percentage estimated from enthalpy efficiency, expressed in 15% steps.
       # Returns unavailable when the indoor/outdoor enthalpy delta is too small to be meaningful.
@@ -194,12 +156,12 @@ template:
         state_class: measurement
         icon: mdi:valve
         availability: >
-          {{ states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_outdoor_air_humidity_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_supply_air_temp_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_supply_air_humidity_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_extract_air_temp_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_extract_air_humidity_5min') not in ['unavailable', 'unknown'] }}
+          {{ has_value('sensor.airflow_outdoor_temp_5min') and
+             has_value('sensor.airflow_outdoor_air_humidity_5min') and
+             has_value('sensor.airflow_supply_air_temp_5min') and
+             has_value('sensor.airflow_supply_air_humidity_5min') and
+             has_value('sensor.airflow_extract_air_temp_5min') and
+             has_value('sensor.airflow_extract_air_humidity_5min') }}
         state: >
           {% set T_oa  = states('sensor.airflow_outdoor_temp_5min') | float %}
           {% set RH_oa = states('sensor.airflow_outdoor_air_humidity_5min') | float %}
@@ -211,21 +173,16 @@ template:
           {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float %}  {# input_number: never unavailable, no default needed #}
           {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
           {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
-          {# OA enthalpy #}
-          {% set ps_oa = 0.61078 * e ** (17.27 * T_oa / (T_oa + 237.3)) %}
-          {% set pv_oa = ps_oa * RH_oa / 100 %}
-          {% set w_oa  = 0.622 * pv_oa / (P_kpa - pv_oa) %}
-          {% set h_oa  = 1.006 * T_oa + w_oa * (2501 + 1.86 * T_oa) %}
-          {# SA enthalpy — identical structure #}
-          {% set ps_sa = 0.61078 * e ** (17.27 * T_sa / (T_sa + 237.3)) %}
-          {% set pv_sa = ps_sa * RH_sa / 100 %}
-          {% set w_sa  = 0.622 * pv_sa / (P_kpa - pv_sa) %}
-          {% set h_sa  = 1.006 * T_sa + w_sa * (2501 + 1.86 * T_sa) %}
-          {# RA enthalpy — identical structure #}
-          {% set ps_ra = 0.61078 * e ** (17.27 * T_ra / (T_ra + 237.3)) %}
-          {% set pv_ra = ps_ra * RH_ra / 100 %}
-          {% set w_ra  = 0.622 * pv_ra / (P_kpa - pv_ra) %}
-          {% set h_ra  = 1.006 * T_ra + w_ra * (2501 + 1.86 * T_ra) %}
+          {# Moist-air enthalpy (kJ/kg) via Magnus saturation pressure + humidity ratio. #}
+          {% macro enthalpy(T, RH, P) %}
+            {% set ps = 0.61078 * e ** (17.27 * T / (T + 237.3)) %}
+            {% set pv = ps * RH / 100 %}
+            {% set w  = 0.622 * pv / (P - pv) %}
+            {{ 1.006 * T + w * (2501 + 1.86 * T) }}
+          {% endmacro %}
+          {% set h_oa = enthalpy(T_oa, RH_oa, P_kpa) | float %}
+          {% set h_sa = enthalpy(T_sa, RH_sa, P_kpa) | float %}
+          {% set h_ra = enthalpy(T_ra, RH_ra, P_kpa) | float %}
           {% if (h_ra - h_oa) | abs < 0.5 %}
             {{ none }}
           {% else %}
@@ -249,11 +206,11 @@ template:
           {% elif s in ['heating', 'moisture_retention'] %}mdi:fire
           {% else %}mdi:fan{% endif %}
         availability: >
-          {{ states('climate.airflow_climate') not in ['unavailable', 'unknown'] and
-             states('binary_sensor.airflow_free_cooling_available') not in ['unavailable', 'unknown'] and
-             states('binary_sensor.airflow_moisture_ventilation_low_needed') not in ['unavailable', 'unknown'] and
-             states('switch.comfoconnect_pro_boost') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_avg_indoor_humidity_5min') not in ['unavailable', 'unknown'] }}
+          {{ has_value('climate.airflow_climate') and
+             has_value('binary_sensor.airflow_free_cooling_available') and
+             has_value('binary_sensor.airflow_moisture_ventilation_low_needed') and
+             has_value('switch.comfoconnect_pro_boost') and
+             has_value('sensor.airflow_avg_indoor_humidity_5min') }}
         state: >
           {# action: reads hvac_action from climate.airflow_climate, which already
              centralises the profile + max_humidity logic (see hvac_action_template). #}
@@ -291,10 +248,10 @@ template:
         # Without this, bare | float in state: would silently return 0 on unavailable sensors,
         # producing false free-cooling decisions. input_numbers are always available — no guard needed for those.
         availability: >
-          {{ states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_outdoor_temp_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_min_indoor_dew_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_avg_indoor_temp_5min') not in ['unavailable', 'unknown'] }}
+          {{ has_value('sensor.airflow_outdoor_dew_5min') and
+             has_value('sensor.airflow_outdoor_temp_5min') and
+             has_value('sensor.airflow_min_indoor_dew_5min') and
+             has_value('sensor.airflow_avg_indoor_temp_5min') }}
         state: >
           {# Sensors: availability guard above guarantees live values — no defaults needed. #}
           {# input_numbers: never unavailable — no defaults needed. #}
@@ -329,9 +286,9 @@ template:
         name: "Airflow Moisture Ventilation Low Needed"
         device_class: moisture
         availability: >
-          {{ states('sensor.airflow_avg_indoor_humidity_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_outdoor_dew_5min') not in ['unavailable', 'unknown'] and
-             states('sensor.airflow_min_indoor_dew_5min') not in ['unavailable', 'unknown'] }}
+          {{ has_value('sensor.airflow_avg_indoor_humidity_5min') and
+             has_value('sensor.airflow_outdoor_dew_5min') and
+             has_value('sensor.airflow_min_indoor_dew_5min') }}
         state: >
           {% set hum         = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
           {% set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float %}
@@ -665,8 +622,8 @@ automation:
             id: ha_start
         then:
           - wait_template: >
-              {{ states('sensor.heating_cooling_indicator') not in ['unavailable', 'unknown'] and
-                 states('binary_sensor.airflow_free_cooling_available') not in ['unavailable', 'unknown'] }}
+              {{ has_value('sensor.heating_cooling_indicator') and
+                 has_value('binary_sensor.airflow_free_cooling_available') }}
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
@@ -861,8 +818,7 @@ automation:
             id: ha_start
         then:
           - wait_template: >
-              {{ states('binary_sensor.airflow_moisture_ventilation_low_needed')
-                 not in ['unavailable', 'unknown'] }}
+              {{ has_value('binary_sensor.airflow_moisture_ventilation_low_needed') }}
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
@@ -949,8 +905,7 @@ automation:
             id: ha_start
         then:
           - wait_template: >
-              {{ states('binary_sensor.airflow_humidity_drying_needed')
-                 not in ['unavailable', 'unknown'] }}
+              {{ has_value('binary_sensor.airflow_humidity_drying_needed') }}
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
@@ -1055,8 +1010,7 @@ automation:
             id: ha_start
         then:
           - wait_template: >
-              {{ states('binary_sensor.airflow_free_cooling_available')
-                 not in ['unavailable', 'unknown'] }}
+              {{ has_value('binary_sensor.airflow_free_cooling_available') }}
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
