@@ -63,7 +63,10 @@ views:
           - entity: input_number.airflow_min_dew_diff
           - entity: input_number.airflow_min_temp_diff
           - entity: input_number.airflow_target_humidity
-          - entity: input_number.airflow_humidity_hysteresis
+          - entity: input_number.airflow_min_humidity
+          - entity: input_number.airflow_max_humidity
+          - entity: schedule.airflow_boost_workday
+          - entity: schedule.airflow_boost_non_workday
 
       - type: tile
         entity: automation.airflow_cooling_set_temperature_profile
