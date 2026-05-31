@@ -787,7 +787,8 @@ def test_cooling_state_moisture_flush_boost(home_assistant: HomeAssistant) -> No
     """auto on + boost on + free cooling on → 'moisture_flush_boost' (highest active priority)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    _seed_cooling_state_deps(home_assistant, hvac_action="drying", free_cooling="on", boost="on")
+    # Boost+free wins regardless of hvac_action (cool profile while flushing).
+    _seed_cooling_state_deps(home_assistant, hvac_action="cooling", free_cooling="on", boost="on")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_flush_boost", timeout=5)
 
@@ -802,14 +803,16 @@ def test_cooling_state_moisture_protection(home_assistant: HomeAssistant) -> Non
 
 
 def test_cooling_state_moisture_flush_cooling(home_assistant: HomeAssistant) -> None:
-    """auto on + drying action (cool+free+hum>max) + no boost → 'moisture_flush_cooling'.
+    """auto on + cooling action + free cooling + humidity above max → 'moisture_flush_cooling'.
 
-    hvac_action='drying' encodes the cool+free+hum>max condition from hvac_action_template,
-    so the state sensor no longer needs to re-read max_humidity to distinguish this case.
+    The unit has no 'drying' hvac_action; the moisture-flush case is distinguished from plain
+    free cooling by indoor humidity exceeding max (max=55 baseline; 60 > 55).
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    _seed_cooling_state_deps(home_assistant, hvac_action="drying", free_cooling="on")
+    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
+                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    _seed_cooling_state_deps(home_assistant, hvac_action="cooling", free_cooling="on")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_flush_cooling", timeout=5)
 
