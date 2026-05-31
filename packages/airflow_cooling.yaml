@@ -212,9 +212,8 @@ template:
              has_value('switch.comfoconnect_pro_boost') and
              has_value('sensor.airflow_avg_indoor_humidity_5min') }}
         state: >
-          {# action: hvac_action from climate.airflow_climate maps the ComfoConnect profile
-             (cool→cooling, warm→heating, comfort→fan). The moisture-flush distinction is
-             derived here from free cooling + humidity, since the unit has no 'drying' action. #}
+          {# action: reads hvac_action from climate.airflow_climate, where 'drying' already
+             reflects moisture flushing (cool + free cooling + humidity above max). #}
           {# input_boolean/input_number: never unavailable — no defaults needed. #}
           {% set auto   = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
           {% set free   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
@@ -223,11 +222,10 @@ template:
           {% set action = state_attr('climate.airflow_climate', 'hvac_action') %}
           {% set hum    = states('sensor.airflow_avg_indoor_humidity_5min') | float %}
           {% set min_h  = states('input_number.airflow_min_humidity') | float %}
-          {% set max_h  = states('input_number.airflow_max_humidity') | float %}
           {% if not auto %}off
           {% elif boost and free %}moisture_flush_boost
           {% elif low %}moisture_protection
-          {% elif action == 'cooling' and free and hum > max_h %}moisture_flush_cooling
+          {% elif action == 'drying' %}moisture_flush_cooling
           {% elif action == 'cooling' and free %}free_cooling
           {% elif action == 'cooling' %}cooling
           {% elif action == 'heating' and hum < min_h %}moisture_retention
@@ -547,15 +545,28 @@ climate:
                 data:
                   option: cool
 
-    # Standard climate property: reflects the active ComfoConnect temperature profile (read-only).
-    # The unit has no real "drying" action — free-cooling humidity flushing is still 'cooling';
-    # the moisture-flush distinction lives in sensor.airflow_cooling_state, not here.
+    # Standard climate property: reflects actual ComfoConnect profile state (read-only).
+    # 'drying' reflects moisture flushing — free cooling is active while either a boost is
+    # running or the cool profile is flushing indoor humidity above max.
     hvac_action_template: >
-      {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
-      {% if profile == 'cool' %}cooling
-      {% elif profile == 'warm' %}heating
-      {% elif profile == 'comfort' %}fan
-      {% else %}idle{% endif %}
+      {% set profile   = states('select.comfoconnect_pro_temperature_profile') %}
+      {% set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
+      {% set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') %}
+      {% set hum       = states('sensor.airflow_avg_indoor_humidity_5min') | float(0) %}
+      {% set max_hum   = states('input_number.airflow_max_humidity') | float(60) %}
+      {% if free_cool and boost_on %}
+        drying
+      {% elif profile == 'cool' and free_cool and hum > max_hum %}
+        drying
+      {% elif profile == 'cool' %}
+        cooling
+      {% elif profile == 'warm' %}
+        heating
+      {% elif profile == 'comfort' %}
+        fan
+      {% else %}
+        idle
+      {% endif %}
 
     # Standard climate setter: persists new target temperature to input_number
     set_temperature:
