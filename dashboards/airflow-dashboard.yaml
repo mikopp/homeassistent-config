@@ -12,6 +12,8 @@ views:
       - type: entities
         title: Mode
         entities:
+          - entity: sensor.airflow_cooling_state
+            name: Automation State
           - entity: select.comfoconnect_pro_temperature_profile
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
@@ -73,6 +75,7 @@ views:
         target:
           label_id: ventilation  # Use the ID of your label here
         entities:
+          - sensor.airflow_cooling_state
           - sensor.airflow_bypass_estimation
           - select.comfoconnect_pro_temperature_profile
           - sensor.heating_cooling_indicator
