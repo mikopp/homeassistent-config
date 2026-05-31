@@ -31,15 +31,3 @@ ha_yaml_config:
       binary_sensor:
         - platform: workday
           country: AT
-
-  - name: Airflow Boost Schedules
-    description: >
-      Schedule helper entities for the drying boost time windows.
-      Configure actual time windows via the HA UI in production.
-      These stubs ensure the entities exist in CI for template rendering and tests.
-    yaml: |
-      schedule:
-        airflow_boost_workday:
-          name: "Airflow Boost Workday"
-        airflow_boost_non_workday:
-          name: "Airflow Boost Non-Workday"
