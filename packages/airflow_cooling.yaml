@@ -467,6 +467,52 @@ input_number:
     step: 0.01
     icon: mdi:valve-open
 
+# --- SCHEDULES ---
+# Gate windows for the humidity drying boost automation.
+# Workday schedule selected by binary_sensor.workday; non-workday covers weekends and public holidays.
+schedule:
+  airflow_boost_workday:
+    name: "Airflow Boost Workday"
+    monday:
+      - from: "07:00:00"
+        to: "21:00:00"
+    tuesday:
+      - from: "07:00:00"
+        to: "21:00:00"
+    wednesday:
+      - from: "07:00:00"
+        to: "21:00:00"
+    thursday:
+      - from: "07:00:00"
+        to: "21:00:00"
+    friday:
+      - from: "07:00:00"
+        to: "21:00:00"
+
+  airflow_boost_non_workday:
+    name: "Airflow Boost Non-Workday"
+    monday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    tuesday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    wednesday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    thursday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    friday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    saturday:
+      - from: "09:00:00"
+        to: "21:00:00"
+    sunday:
+      - from: "09:00:00"
+        to: "21:00:00"
+
 # --- CLIMATE ENTITY ---
 # Requires HACS custom component: mikopp/hass-template-climate
 # https://github.com/mikopp/hass-template-climate
