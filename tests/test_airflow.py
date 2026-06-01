@@ -134,6 +134,14 @@ def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> Non
     home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
 
 
+def test_bypass_unavailable_when_input_missing(home_assistant: HomeAssistant) -> None:
+    """has_value guard: a missing filter input → sensor.airflow_bypass_estimation unavailable."""
+    # Baseline seeds all six inputs → bypass computes 75 (see test_bypass_baseline).
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "75", timeout=5)
+    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unavailable", timeout=5)
+
+
 # ── Verification scenario tests ─────────────────────────────────────────────────────────
 # These mirror the manual verification steps from the implementation plan.
 # CI limitation note: select.select_option and switch.turn_on/off are silently ignored
@@ -739,6 +747,102 @@ def test_free_cooling_dew_max_shifts_with_target_humidity(home_assistant: HomeAs
     assert _render(home_assistant, gate_tmpl) == "True"
 
 
+# ── Ventilation-low dew-point boundary tests ──────────────────────────────────────────────
+# binary_sensor.airflow_moisture_ventilation_low_needed's dew condition mirrors free cooling's
+# dew_max: it turns ON when outdoor_dew clears a humidity-derived dew point and stays ON until
+# outdoor_dew drops below the target-humidity-derived dew point (Schmitt), OR — as a fallback —
+# when outdoor_dew >= indoor_dew. Tests render the dew sub-expression directly via the template
+# API to verify the formula without fighting the binary sensor's delay_on/off and `this.state`.
+# `this.state` is unavailable in the render API, so each Schmitt threshold is exercised by
+# substituting the corresponding humidity (max for the OFF→ON edge, target for the ON→OFF edge).
+
+
+def _low_needed_dew_gate(threshold_hum: str) -> str:
+    """Render template for the dew condition with `threshold_hum` driving the dew threshold.
+
+    threshold_hum is the input_number that selects the active Schmitt edge:
+      'airflow_max_humidity'    → OFF-state turn-ON boundary (dew_from_max)
+      'airflow_target_humidity' → ON-state disengage boundary (dew_from_tgt)
+    """
+    return f"""
+    {{%- set outdoor_dew = states('sensor.airflow_outdoor_dew_5min') | float -%}}
+    {{%- set indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float -%}}
+    {{%- set target_temp = states('input_number.airflow_cooling_target_temperature') | float -%}}
+    {{%- set hum         = states('input_number.{threshold_hum}') | float -%}}
+    {{%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}}
+    {{%- set pv = ps * hum / 100 -%}}
+    {{%- set dew_threshold = 237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log) -%}}
+    {{{{ outdoor_dew >= dew_threshold or outdoor_dew >= indoor_dew }}}}
+    """
+
+
+def test_low_needed_turn_on_boundary_fires_above_max_dew(home_assistant: HomeAssistant) -> None:
+    """OFF→ON: outdoor_dew above max-derived dew (≈14.65°C) turns ON even when below indoor_dew.
+
+    max=65% at target_temp=21.5°C → dew_from_max≈14.65°C. outdoor_dew=15 ≥ 14.65 fires the new
+    absolute boundary, although the legacy relative check (15 ≥ indoor_dew 16) is False — this is
+    exactly the gap the new boundary fills.
+    """
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 65})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "15.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "16.0", temp_attrs)
+    assert _render(home_assistant, _low_needed_dew_gate("airflow_max_humidity")) == "True"
+
+
+def test_low_needed_turn_on_boundary_below_max_dew_and_indoor(home_assistant: HomeAssistant) -> None:
+    """OFF→ON negative: outdoor_dew below both max-derived dew and indoor_dew → stays OFF.
+
+    max=65% → dew_from_max≈14.65°C. outdoor_dew=14 < 14.65 and 14 < indoor_dew 16 → neither path.
+    """
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 65})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "14.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "16.0", temp_attrs)
+    assert _render(home_assistant, _low_needed_dew_gate("airflow_max_humidity")) == "False"
+
+
+def test_low_needed_stays_on_above_target_dew(home_assistant: HomeAssistant) -> None:
+    """ON→OFF hysteresis: while ON, outdoor_dew above target-derived dew (≈12.09°C) stays ON.
+
+    target=55% at target_temp=21.5°C → dew_from_tgt≈12.09°C. outdoor_dew=13 ≥ 12.09 → still ON,
+    even though it sits below the higher OFF→ON threshold (dew_from_max). indoor_dew=16 keeps the
+    relative fallback out of the picture so only the dew Schmitt is exercised.
+    """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "13.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "16.0", temp_attrs)
+    assert _render(home_assistant, _low_needed_dew_gate("airflow_target_humidity")) == "True"
+
+
+def test_low_needed_disengages_below_target_dew(home_assistant: HomeAssistant) -> None:
+    """ON→OFF: outdoor_dew below target-derived dew (≈12.09°C) and below indoor_dew → disengages.
+
+    target=55% → dew_from_tgt≈12.09°C. outdoor_dew=11 < 12.09 and 11 < indoor_dew 16 → OFF.
+    """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "11.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "16.0", temp_attrs)
+    assert _render(home_assistant, _low_needed_dew_gate("airflow_target_humidity")) == "False"
+
+
+def test_low_needed_relative_fallback_fires_below_dew_threshold(home_assistant: HomeAssistant) -> None:
+    """Fallback OR: outdoor_dew below the dew threshold but ≥ indoor_dew still turns ON.
+
+    max=65% → dew_from_max≈14.65°C. outdoor_dew=13 < 14.65 (dew boundary False) but
+    13 ≥ indoor_dew 10 → the legacy relative check carries the decision. Confirms the OR fallback
+    only kicks in when the humidity-derived boundary is not met.
+    """
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 65})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "13.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "10.0", temp_attrs)
+    assert _render(home_assistant, _low_needed_dew_gate("airflow_max_humidity")) == "True"
+
+
 # ── Airflow cooling state sensor tests ────────────────────────────────────────────────────
 # sensor.airflow_cooling_state is a read-only template sensor that derives a reason-based
 # status of the ventilation automation. Priority order (first match wins):
@@ -779,6 +883,7 @@ def test_cooling_state_moisture_flush_boost(home_assistant: HomeAssistant) -> No
     """auto on + boost on + free cooling on → 'moisture_flush_boost' (highest active priority)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # Boost+free wins before the action check; hvac_action is 'drying' while flushing.
     _seed_cooling_state_deps(home_assistant, hvac_action="drying", free_cooling="on", boost="on")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_flush_boost", timeout=5)
@@ -794,10 +899,10 @@ def test_cooling_state_moisture_protection(home_assistant: HomeAssistant) -> Non
 
 
 def test_cooling_state_moisture_flush_cooling(home_assistant: HomeAssistant) -> None:
-    """auto on + drying action (cool+free+hum>max) + no boost → 'moisture_flush_cooling'.
+    """auto on + drying action (no boost) → 'moisture_flush_cooling'.
 
-    hvac_action='drying' encodes the cool+free+hum>max condition from hvac_action_template,
-    so the state sensor no longer needs to re-read max_humidity to distinguish this case.
+    hvac_action='drying' reflects moisture flushing (cool + free cooling + humidity above max);
+    with boost off it maps to moisture_flush_cooling.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
@@ -850,3 +955,15 @@ def test_cooling_state_comfort(home_assistant: HomeAssistant) -> None:
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     _seed_cooling_state_deps(home_assistant, hvac_action="fan")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state", "comfort", timeout=5)
+
+
+def test_cooling_state_unavailable_when_dependency_missing(home_assistant: HomeAssistant) -> None:
+    """has_value guard: a missing availability dependency → sensor.airflow_cooling_state unavailable."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    # All five availability deps present → sensor resolves to a real state.
+    _seed_cooling_state_deps(home_assistant, hvac_action="fan")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "comfort", timeout=5)
+    # Drop one dependency → has_value() is False → availability False → entity unavailable.
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "unavailable", timeout=5)
