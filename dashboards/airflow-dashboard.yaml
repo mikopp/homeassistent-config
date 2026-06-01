@@ -55,6 +55,20 @@ views:
           - entity: sensor.airflow_extract_air_humidity_5min
 
       - type: entities
+        title: Dew Point Thresholds
+        entities:
+          - entity: sensor.airflow_min_indoor_dew_5min
+            name: Measured Indoor Dew
+          - entity: sensor.airflow_dew_point_min
+            name: Min Threshold (dew @ target)
+          - entity: sensor.airflow_dew_point_target
+            name: Target Threshold (dew @ target)
+          - entity: sensor.airflow_dew_point_max
+            name: Max Threshold (dew @ target)
+          - entity: sensor.airflow_outdoor_dew_5min
+            name: Outdoor Dew
+
+      - type: entities
         title: Settings
         entities:
           - entity: input_number.airflow_bypass_efficiency_max
