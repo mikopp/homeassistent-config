@@ -280,8 +280,15 @@ template:
           minutes: 10
 
       # True when ventilation must be reduced to avoid importing humid outdoor air.
-      # Schmitt trigger: turns ON at max, stays ON until hum < target. Mutually exclusive with
-      # airflow_free_cooling_available (opposite dew conditions when min_dew_diff > 0).
+      # An indoor-humidity Schmitt trigger (turns ON at max, stays ON until hum < target) gates
+      # the decision. The dew condition is the flip side of airflow_free_cooling_available's
+      # dew_max gate: incoming air is too humid in absolute terms when outdoor_dew clears a
+      # humidity-derived dew point. Dew Schmitt: turns ON at the max-humidity-derived dew point,
+      # stays ON until outdoor_dew drops below the target-humidity-derived dew point (both at
+      # target_temp, via the same Magnus formula as free cooling). The legacy relative check
+      # (outdoor_dew >= indoor_dew) is OR'd as a fallback — it only kicks in when neither
+      # humidity-derived boundary is met. Broadly opposite to airflow_free_cooling_available,
+      # though the absolute-dew path can overlap when indoor air is drier than incoming air.
       - unique_id: airflow_moisture_ventilation_low_needed
         name: "Airflow Moisture Ventilation Low Needed"
         device_class: moisture
@@ -295,8 +302,20 @@ template:
           {% set indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set tgt         = states('input_number.airflow_target_humidity') | float %}
           {% set max         = states('input_number.airflow_max_humidity') | float %}
+          {% set target_temp = states('input_number.airflow_cooling_target_temperature') | float %}
           {% set threshold   = tgt if this.state == 'on' else max %}
-          {{ hum >= threshold and outdoor_dew >= indoor_dew }}
+          {# Humidity-derived dew points at target_temp (Magnus), mirroring free cooling's dew_max. #}
+          {% set ps          = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) %}
+          {% set pv_tgt      = ps * tgt / 100 %}
+          {% set pv_max      = ps * max / 100 %}
+          {% set dew_from_tgt = 237.3 * (pv_tgt / 0.61078) | log / (17.27 - (pv_tgt / 0.61078) | log) %}
+          {% set dew_from_max = 237.3 * (pv_max / 0.61078) | log / (17.27 - (pv_max / 0.61078) | log) %}
+          {# Dew Schmitt: turn ON above max-derived dew, stay ON until below target-derived dew. #}
+          {% set dew_threshold = dew_from_tgt if this.state == 'on' else dew_from_max %}
+          {{ hum >= threshold and (
+               outdoor_dew >= dew_threshold or
+               outdoor_dew >= indoor_dew
+          ) }}
         delay_on:
           minutes: 10
         delay_off:
