@@ -144,9 +144,12 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # Schedule helpers (UI-only, absent in CI) — workday schedule on, non-workday off by default
     ha.set_state("schedule.airflow_boost_workday", "on", {})
     ha.set_state("schedule.airflow_boost_non_workday", "off", {})
-    # Drying binary sensor — reset to 'off' so tests start with a clean state machine.
-    # REST-setting it to 'on' in automation tests decouples the state machine from the
+    # Flush + drying binary sensors — reset to 'off' so tests start with a clean state machine.
+    # REST-setting them to 'on' in automation tests decouples the state machine from the
     # template engine's internal _state; this reset re-syncs them before each test.
+    # NOTE: baseline max_humidity==target_humidity==55 → dew_point_max==dew_point_target, so the
+    # flush sensor's Branch 1 and Branch 2 collapse; branch-distinguishing tests set max_humidity=60.
+    ha.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     ha.set_state("binary_sensor.airflow_humidity_drying_needed", "off", {})
     ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})

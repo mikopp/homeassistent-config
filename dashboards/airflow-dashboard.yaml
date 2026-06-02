@@ -17,6 +17,7 @@ views:
           - entity: select.comfoconnect_pro_temperature_profile
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
+          - entity: binary_sensor.airflow_humidity_flush_needed
           - entity: binary_sensor.airflow_moisture_ventilation_low_needed
           - entity: select.comfoconnect_pro_ventilation_preset
           - entity: switch.comfoconnect_pro_auto_mode
