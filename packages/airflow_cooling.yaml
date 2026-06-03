@@ -252,18 +252,17 @@ template:
         availability: >
           {{ has_value('climate.airflow_climate') and
              has_value('binary_sensor.airflow_free_cooling_available') and
-             has_value('binary_sensor.airflow_humidity_flush_needed') and
              has_value('binary_sensor.airflow_moisture_ventilation_low_needed') and
              has_value('switch.comfoconnect_pro_boost') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_min') }}
         state: >
           {# action: reads hvac_action from climate.airflow_climate, where 'drying' already
-             reflects moisture flushing (cool profile + humidity flush needed). #}
+             reflects moisture flushing (a boost during free cooling, or the cool profile
+             flushing humid air). moisture_flush_boost = a boost while that drying is active. #}
           {# input_boolean/input_number: never unavailable — no defaults needed. #}
           {% set auto   = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
           {% set free   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
-          {% set flush  = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
           {% set low    = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
           {% set boost  = is_state('switch.comfoconnect_pro_boost', 'on') %}
           {% set action = state_attr('climate.airflow_climate', 'hvac_action') %}
@@ -271,7 +270,7 @@ template:
           {% set indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set dew_min    = states('sensor.airflow_dew_point_min') | float %}
           {% if not auto %}off
-          {% elif boost and flush %}moisture_flush_boost
+          {% elif boost and action == 'drying' %}moisture_flush_boost
           {% elif low %}moisture_protection
           {% elif action == 'drying' %}moisture_flush_cooling
           {% elif action == 'cooling' and free %}free_cooling

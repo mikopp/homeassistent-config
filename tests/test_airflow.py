@@ -898,7 +898,6 @@ def _seed_cooling_state_deps(
     *,
     hvac_action: str,
     free_cooling: str = "off",
-    flush: str = "off",
     low_needed: str = "off",
     boost: str = "off",
 ) -> None:
@@ -911,7 +910,6 @@ def _seed_cooling_state_deps(
     home_assistant.set_state("climate.airflow_climate", "auto",
                              {"hvac_action": hvac_action})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", free_cooling, {})
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", flush, {})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", low_needed, {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", boost, {})
 
@@ -923,27 +921,32 @@ def test_cooling_state_off_when_auto_disabled(home_assistant: HomeAssistant) -> 
 
 
 def test_cooling_state_moisture_flush_boost(home_assistant: HomeAssistant) -> None:
-    """auto on + boost on + humidity flush needed → 'moisture_flush_boost' (highest active priority)."""
+    """auto on + boost on + hvac_action drying → 'moisture_flush_boost' (highest active priority).
+
+    hvac_action 'drying' means a flush is active (boost during free cooling, or cool-profile
+    flush). A boost on top of that is the noisy flush boost.
+    """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # Boost+flush wins before the action check; hvac_action is 'drying' while flushing.
-    _seed_cooling_state_deps(home_assistant, hvac_action="drying", flush="on", boost="on")
+    # free + boost both on → hvac_action_template itself also yields 'drying', so the seeded
+    # attribute and any climate re-render agree (race-proof).
+    _seed_cooling_state_deps(home_assistant, hvac_action="drying", free_cooling="on", boost="on")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_flush_boost", timeout=5)
 
 
-def test_cooling_state_boost_without_flush_not_flush_boost(home_assistant: HomeAssistant) -> None:
-    """auto on + boost on + free cooling on but flush off → NOT moisture_flush_boost.
+def test_cooling_state_boost_without_drying_not_flush_boost(home_assistant: HomeAssistant) -> None:
+    """auto on + boost on but hvac_action cooling (not drying) → NOT moisture_flush_boost.
 
-    The flush-boost label now requires binary_sensor.airflow_humidity_flush_needed=on, so a
-    boost running during plain temperature free cooling maps to 'free_cooling', not flush.
+    moisture_flush_boost requires the drying action; a boost while merely cooling (cool profile,
+    free cooling off) maps to 'cooling', confirming the boost label is gated on the drying context.
+    Profile=cool + free off → hvac_action_template also yields 'cooling' (seed/render agree).
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    _seed_cooling_state_deps(home_assistant, hvac_action="cooling",
-                             free_cooling="on", flush="off", boost="on")
-    home_assistant.assert_entity_state("sensor.airflow_cooling_state",
-                                       "free_cooling", timeout=5)
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    _seed_cooling_state_deps(home_assistant, hvac_action="cooling", free_cooling="off", boost="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "cooling", timeout=5)
 
 
 def test_cooling_state_moisture_protection(home_assistant: HomeAssistant) -> None:
@@ -1209,84 +1212,91 @@ def test_flush_unavailable_when_dependency_missing(home_assistant: HomeAssistant
 # AND in_schedule AND not low_active. Rendered directly to bypass the sensor's delay_on/off.
 
 
-def _drying_state() -> str:
-    """Render template mirroring binary_sensor.airflow_humidity_drying_needed's state body."""
-    return """
-    {%- set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') -%}
-    {%- set low_active   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}
-    {%- set outdoor_t    = states('sensor.wheatherstation_outdoor_temperature') | float(99) -%}
-    {%- set target_t     = states('input_number.airflow_cooling_target_temperature') | float(21.5) -%}
-    {%- set in_schedule  = (is_state('binary_sensor.workday', 'on')
+def _drying_state(flush: bool) -> str:
+    """Render template mirroring binary_sensor.airflow_humidity_drying_needed's state body.
+
+    `flush` is injected as a literal (binary_sensor.airflow_humidity_flush_needed is a delayed
+    template sensor whose REST-set 'on' does not reliably stick in CI) so the boost-only gates
+    (weather station, schedule, low-vent) are exercised deterministically.
+    """
+    flush_lit = "true" if flush else "false"
+    return f"""
+    {{%- set flush_needed = {flush_lit} -%}}
+    {{%- set low_active   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}}
+    {{%- set outdoor_t    = states('sensor.wheatherstation_outdoor_temperature') | float(99) -%}}
+    {{%- set target_t     = states('input_number.airflow_cooling_target_temperature') | float(21.5) -%}}
+    {{%- set in_schedule  = (is_state('binary_sensor.workday', 'on')
                             and is_state('schedule.airflow_boost_workday', 'on'))
                            or
                            (is_state('binary_sensor.workday', 'off')
-                            and is_state('schedule.airflow_boost_non_workday', 'on')) -%}
-    {{ flush_needed and not low_active and outdoor_t < target_t and in_schedule }}
+                            and is_state('schedule.airflow_boost_non_workday', 'on')) -%}}
+    {{{{ flush_needed and not low_active and outdoor_t < target_t and in_schedule }}}}
     """
 
 
 def test_drying_requires_flush_needed(home_assistant: HomeAssistant) -> None:
     """No flush needed → boost never fires even with cool weather and schedule on."""
     temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
-    assert _render(home_assistant, _drying_state()) == "False"
+    assert _render(home_assistant, _drying_state(flush=False)) == "False"
 
 
 def test_drying_blocked_by_warm_weatherstation(home_assistant: HomeAssistant) -> None:
     """Flush needed but weather-station temp >= target → boost blocked (weather gate)."""
     temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "22.0", temp_attrs)
     # 22.0 not < target 21.5 → boost False even though flush is needed.
-    assert _render(home_assistant, _drying_state()) == "False"
+    assert _render(home_assistant, _drying_state(flush=True)) == "False"
 
 
 def test_drying_fires_with_flush_and_cool_weatherstation(home_assistant: HomeAssistant) -> None:
     """Flush needed + weather-station cool + workday schedule on + low off → boost template True."""
     temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     # baseline: workday=on, schedule.airflow_boost_workday=on → in_schedule True.
-    assert _render(home_assistant, _drying_state()) == "True"
+    assert _render(home_assistant, _drying_state(flush=True)) == "True"
 
 
 # ── hvac_action drying-from-flush tests ───────────────────────────────────────────────────
 
 
-def _hvac_action_state() -> str:
-    """Render template mirroring climate.airflow_climate's hvac_action_template."""
-    return """
-    {%- set profile   = states('select.comfoconnect_pro_temperature_profile') -%}
-    {%- set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') -%}
-    {%- set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') -%}
-    {%- set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') -%}
-    {%- if free_cool and boost_on -%}drying
-    {%- elif profile == 'cool' and flush_needed -%}drying
-    {%- elif profile == 'cool' -%}cooling
-    {%- elif profile == 'warm' -%}heating
-    {%- elif profile == 'comfort' -%}fan
-    {%- else -%}idle{%- endif -%}
+def _hvac_action_state(flush: bool) -> str:
+    """Render template mirroring climate.airflow_climate's hvac_action_template.
+
+    `flush` is injected as a literal (rather than reading binary_sensor.airflow_humidity_flush_needed,
+    a delayed template sensor whose REST-set 'on' does not reliably stick in CI) so the branch
+    logic is exercised deterministically.
+    """
+    flush_lit = "true" if flush else "false"
+    return f"""
+    {{%- set profile   = states('select.comfoconnect_pro_temperature_profile') -%}}
+    {{%- set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') -%}}
+    {{%- set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') -%}}
+    {{%- set flush_needed = {flush_lit} -%}}
+    {{%- if free_cool and boost_on -%}}drying
+    {{%- elif profile == 'cool' and flush_needed -%}}drying
+    {{%- elif profile == 'cool' -%}}cooling
+    {{%- elif profile == 'warm' -%}}heating
+    {{%- elif profile == 'comfort' -%}}fan
+    {{%- else -%}}idle{{%- endif -%}}
     """
 
 
 def test_hvac_action_drying_from_flush(home_assistant: HomeAssistant) -> None:
     """cool profile + flush needed (no boost, no free cooling) → hvac_action 'drying'."""
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
-    assert _render(home_assistant, _hvac_action_state()) == "drying"
+    assert _render(home_assistant, _hvac_action_state(flush=True)) == "drying"
 
 
 def test_hvac_action_cooling_without_flush(home_assistant: HomeAssistant) -> None:
     """cool profile + no flush → hvac_action 'cooling' (plain temperature cooling)."""
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
-    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
-    assert _render(home_assistant, _hvac_action_state()) == "cooling"
+    assert _render(home_assistant, _hvac_action_state(flush=False)) == "cooling"
 
 
 # ── Profile block precedence tests ────────────────────────────────────────────────────────
