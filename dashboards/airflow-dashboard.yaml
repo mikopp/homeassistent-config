@@ -17,6 +17,7 @@ views:
           - entity: select.comfoconnect_pro_temperature_profile
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
+          - entity: binary_sensor.airflow_humidity_flush_needed
           - entity: binary_sensor.airflow_moisture_ventilation_low_needed
           - entity: select.comfoconnect_pro_ventilation_preset
           - entity: switch.comfoconnect_pro_auto_mode
@@ -53,6 +54,20 @@ views:
             label: Extract Air
           - entity: sensor.airflow_extract_air_temp_5min
           - entity: sensor.airflow_extract_air_humidity_5min
+
+      - type: entities
+        title: Dew Point Thresholds
+        entities:
+          - entity: sensor.airflow_min_indoor_dew_5min
+            name: Measured Indoor Dew
+          - entity: sensor.airflow_dew_point_min
+            name: Min Threshold (dew @ target)
+          - entity: sensor.airflow_dew_point_target
+            name: Target Threshold (dew @ target)
+          - entity: sensor.airflow_dew_point_max
+            name: Max Threshold (dew @ target)
+          - entity: sensor.airflow_outdoor_dew_5min
+            name: Outdoor Dew
 
       - type: entities
         title: Settings

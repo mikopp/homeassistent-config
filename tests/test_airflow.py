@@ -149,32 +149,31 @@ def test_bypass_unavailable_when_input_missing(home_assistant: HomeAssistant) ->
 # Production correctness (service calls actually applied) must be verified in HA directly.
 
 
-def test_verification_step3_high_humidity_free_cooling_triggers_cool(home_assistant: HomeAssistant) -> None:
-    """Verification step 3: humidity above max + free_cooling=on → Block 2 → cool profile.
+def test_verification_step3_high_humidity_flush_triggers_cool(home_assistant: HomeAssistant) -> None:
+    """Verification step 3: humidity flush needed → Block 2 Case B → cool profile.
 
-    max=54, hum=55 → 55 > 54. Free cooling available. Neutral season.
-    Block 2 condition: free_cooling=on AND hum > max → fires, sets cool.
+    Block 2 Case B now keys on binary_sensor.airflow_humidity_flush_needed (which itself
+    encodes the dew branches + ComfoConnect temp gate). Seeded ON here; neutral season, free
+    cooling off — so only the flush path can fire the cool profile.
     CI: stub ignores select_option — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.call_action("input_number", "set_value",
-                               {"entity_id": "input_number.airflow_max_humidity", "value": 54})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     _trigger(home_assistant)
-    # Block 2 fires: 55 > 54 (max), free_cooling=on. Profile would switch to cool in production.
+    # Block 2 Case B fires: flush_needed=on → cool in production (stub ignores select_option).
 
 
-def test_verification_step3_high_humidity_no_free_cooling_profile_unchanged(home_assistant: HomeAssistant) -> None:
-    """Verification step 3 (negative path): high humidity but free_cooling=off → no profile change.
+def test_verification_step3_high_humidity_no_flush_profile_unchanged(home_assistant: HomeAssistant) -> None:
+    """Verification step 3 (negative path): high moisture but no flush + free_cooling=off → no change.
 
-    min=45, max=54, hum=55 → above dead band [45,54]. Block 1 misses (hum not < min).
-    Block 2 misses (free_cooling=off). Block 3's dead-band guard: 55∉[45,54] → miss.
-    Profile seeded to "comfort" — stays comfort because no block fires.
+    min=45, max=54 → dew band [9.08, 11.81]°C. indoor_dew=12.5 above band. With the flush sensor
+    pinned OFF (e.g. outdoor not dry enough), no block fires: Block 1 misses (dew not < dew_min),
+    Block 2 misses (free_cooling off AND flush off), Block 3's dead-band excludes 12.5. Profile
+    stays "comfort". (When flush IS needed, Block 2 Case B would cool — see the flush sensor tests.)
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
@@ -182,13 +181,14 @@ def test_verification_step3_high_humidity_no_free_cooling_profile_unchanged(home
                                {"entity_id": "input_number.airflow_min_humidity", "value": 45})
     home_assistant.call_action("input_number", "set_value",
                                {"entity_id": "input_number.airflow_max_humidity", "value": 54})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.5",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     _trigger(home_assistant)
-    # Block 1: hum(55) ≥ min(45) → miss. Block 2: free_cooling=off → miss.
-    # Block 3: neutral, but dead-band 55∉[45,54] → miss. Default no-op.
+    # Block 1: indoor_dew(12.5) ≥ dew_min(9.08) → miss. Block 2: free_cooling=off AND flush=off → miss.
+    # Block 3: neutral, but dead-band 12.5∉[9.08,11.81] → miss. Default no-op.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
@@ -232,83 +232,87 @@ def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistan
 
 
 def test_verification_step6_low_humidity_warm_profile_overrides_season(home_assistant: HomeAssistant) -> None:
-    """Verification step 6: humidity below min → Block 1 Case A fires (warm), non-cooling season.
+    """Verification step 6: indoor dew below min-dew → Block 1 Case A fires (warm), non-cooling season.
 
-    min=50 (max allowed), hum=44 < 50, neutral season → Block 1 Case A fires.
-    The warming priority exists to protect wood/instruments from excessively dry air.
+    min=50 → dew_min≈10.65°C at target 21.5°C. indoor_dew=9.0 < 10.65−0.1, neutral season →
+    Block 1 Case A fires. Warming priority protects wood/instruments from excessively dry air.
     CI: stub ignores select_option — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.call_action("input_number", "set_value",
                                {"entity_id": "input_number.airflow_min_humidity", "value": 50})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "9.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
     _trigger(home_assistant)
-    # Block 1 Case A: 44 < 50 (min) AND not cooling season → fires. Profile → warm.
+    # Block 1 Case A: indoor_dew 9.0 < dew_min(10.65)−0.1 AND not cooling season → fires. Profile → warm.
 
 
 # ── Temperature profile moisture tests ──────────────────────────────────────────────────
 
 
 def test_airflow_low_humidity_warm_profile(home_assistant: HomeAssistant) -> None:
-    """Low humidity (44% < min 45%) + neutral season → Block 1 Case A fires (trace only)."""
+    """Low moisture (dew 8.0 < dew_min 9.08) + neutral season → Block 1 Case A fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "44.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "8.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 1 Case A: 44 < 45 (baseline min), not cooling season → fires. Stub ignores select_option.
+    # Block 1 Case A: dew 8.0 < dew_min(9.08, baseline min 45%)−0.1, not cooling season → fires.
 
 
-def test_airflow_high_humidity_free_cooling_cool_profile(home_assistant: HomeAssistant) -> None:
-    """High humidity (60% > max 55%) + free_cooling=on → Block 2 Case B fires (trace only)."""
+def test_airflow_humidity_flush_cool_profile(home_assistant: HomeAssistant) -> None:
+    """Humidity flush needed (neutral season, free_cooling off) → Block 2 Case B fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     _trigger(home_assistant)
-    # Block 2 Case B: free_cooling=on AND hum(60) > max(55) → cool. Stub ignores service call.
+    # Block 2 Case B: flush_needed=on → cool, independent of free cooling / cooling season.
 
 
-def test_airflow_high_humidity_free_cooling_off_stays_comfort(home_assistant: HomeAssistant) -> None:
-    """High humidity (60% > max 55%) but free_cooling=off + neutral → all blocks miss → no-op."""
+def test_airflow_high_humidity_no_flush_stays_comfort(home_assistant: HomeAssistant) -> None:
+    """High moisture (dew 13.0) but flush not needed + free_cooling off + neutral → no-op.
+
+    With the flush sensor pinned OFF (outdoor not dry enough to help), high indoor dew alone
+    does not change the profile: Block 2 needs free cooling (cooling season) or flush. When
+    flush IS needed, Block 2 Case B cools — covered by the flush sensor tests.
+    """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "13.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     _trigger(home_assistant)
-    # Block 1: hum(60) ≥ min(45). Block 2: free_cooling=off.
-    # Block 3: neutral=yes but dead-band 60∉[45,55] → miss. Default no-op.
-    # Profile stays seeded "comfort".
+    # Block 1: dew(13.0) ≥ dew_min(9.08). Block 2: free_cooling=off AND flush=off.
+    # Block 3: neutral=yes but dead-band 13.0∉[9.08,12.09] → miss. Default no-op.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
 
 def test_airflow_humidity_in_dead_band_neutral_comfort(home_assistant: HomeAssistant) -> None:
-    """Humidity in dead band (55% in [45,55]) + neutral + free_cooling=off → Block 3 fires → comfort.
+    """Moisture in dead band (dew 12.0 in [9.08,12.09]) + neutral + free_cooling=off → Block 3 → comfort.
 
-    Block 1 Case A misses (hum ≥ min). Block 1 Case B misses (not active_heating).
+    Block 1 Case A misses (dew ≥ dew_min). Block 1 Case B misses (not active_heating).
     Block 2 misses (free_cooling=off). Block 3: neutral + dead-band satisfied → comfort.
     Seeded profile is already "comfort" → idempotent guard suppresses service call.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # Baseline seeds hum=55%, min=45, max=55 — humidity exactly at max (in band).
+    # Baseline seeds indoor_dew=12.0, min=45→dew_min 9.08, max=55→dew_max 12.09 — dew just inside band.
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     _trigger(home_assistant)
-    # Block 3: neutral, 45 <= 55 <= 55 → fires; already comfort → guard suppresses call.
+    # Block 3: neutral, 9.08 <= 12.0 <= 12.09 → fires; already comfort → guard suppresses call.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
@@ -445,8 +449,7 @@ def test_drying_schedule_off_sensor_not_triggered(home_assistant: HomeAssistant)
     # Phase 2: set conditions with schedule=off (in_schedule=false) → template stays false.
     home_assistant.set_state("binary_sensor.workday", "on", {})
     home_assistant.set_state("schedule.airflow_boost_workday", "off", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
@@ -471,8 +474,7 @@ def test_drying_non_workday_schedule_applies_on_holiday(home_assistant: HomeAssi
     # Phase 2: holiday conditions; delay_on prevents immediate activation.
     home_assistant.set_state("binary_sensor.workday", "off", {})
     home_assistant.set_state("schedule.airflow_boost_non_workday", "on", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     # Template now evaluates true (non-workday branch), but delay_on=10min keeps sensor 'off'.
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
@@ -499,8 +501,7 @@ def test_drying_low_moisture_guard_prevents_boost(home_assistant: HomeAssistant)
 
     # Phase 2: guard active (low_active=on) blocks template → sensor stays off.
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "60.0", hum_attrs)
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
@@ -747,6 +748,46 @@ def test_free_cooling_dew_max_shifts_with_target_humidity(home_assistant: HomeAs
     assert _render(home_assistant, gate_tmpl) == "True"
 
 
+# ── Dew-point threshold sensor tests ──────────────────────────────────────────────────────
+# sensor.airflow_dew_point_{min,target,max} centralise the Magnus dew-point formula: each
+# humidity helper expressed as the dew point it implies at the target temperature. The
+# refactored humidity logic references these sensors instead of recomputing the formula.
+
+
+def test_dew_point_threshold_sensors_match_inline_formula(home_assistant: HomeAssistant) -> None:
+    """Each dew-point threshold sensor reproduces the inline Magnus formula for its helper.
+
+    Centralisation check: the sensors must match the formula the old inline computations used,
+    so decisions referencing them behave identically to the previous inline code.
+    """
+    for sensor, helper in (
+        ("sensor.airflow_dew_point_min", "airflow_min_humidity"),
+        ("sensor.airflow_dew_point_target", "airflow_target_humidity"),
+        ("sensor.airflow_dew_point_max", "airflow_max_humidity"),
+    ):
+        tmpl = (
+            "{%- set T  = states('input_number.airflow_cooling_target_temperature') | float -%}"
+            "{%- set RH = states('input_number." + helper + "') | float -%}"
+            "{%- set ps = 0.61078 * e ** (17.27 * T / (T + 237.3)) -%}"
+            "{%- set pv = ps * RH / 100 -%}"
+            "{%- set expected = (237.3 * (pv / 0.61078) | log"
+            " / (17.27 - (pv / 0.61078) | log)) | round(2) -%}"
+            "{{ (states('" + sensor + "') | float - expected) | abs < 0.01 }}"
+        )
+        assert _render(home_assistant, tmpl) == "True", f"{sensor} does not match inline formula"
+
+
+def test_dew_point_target_sensor_matches_free_cooling_dew_max(home_assistant: HomeAssistant) -> None:
+    """sensor.airflow_dew_point_target equals the free-cooling dew_max threshold (≈12.09°C baseline).
+
+    Ties the centralised sensor to the already-tested free-cooling absolute-humidity gate.
+    """
+    expected = float(_render(home_assistant, _DEW_MAX_TMPL))
+    tmpl = ("{{ (states('sensor.airflow_dew_point_target') | float - "
+            + repr(expected) + ") | abs < 0.01 }}")
+    assert _render(home_assistant, tmpl) == "True"
+
+
 # ── Ventilation-low dew-point boundary tests ──────────────────────────────────────────────
 # binary_sensor.airflow_moisture_ventilation_low_needed's dew condition mirrors free cooling's
 # dew_max: it turns ON when outdoor_dew clears a humidity-derived dew point and stays ON until
@@ -880,13 +921,32 @@ def test_cooling_state_off_when_auto_disabled(home_assistant: HomeAssistant) -> 
 
 
 def test_cooling_state_moisture_flush_boost(home_assistant: HomeAssistant) -> None:
-    """auto on + boost on + free cooling on → 'moisture_flush_boost' (highest active priority)."""
+    """auto on + boost on + hvac_action drying → 'moisture_flush_boost' (highest active priority).
+
+    hvac_action 'drying' means a flush is active (boost during free cooling, or cool-profile
+    flush). A boost on top of that is the noisy flush boost.
+    """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # Boost+free wins before the action check; hvac_action is 'drying' while flushing.
+    # free + boost both on → hvac_action_template itself also yields 'drying', so the seeded
+    # attribute and any climate re-render agree (race-proof).
     _seed_cooling_state_deps(home_assistant, hvac_action="drying", free_cooling="on", boost="on")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_flush_boost", timeout=5)
+
+
+def test_cooling_state_boost_without_drying_not_flush_boost(home_assistant: HomeAssistant) -> None:
+    """auto on + boost on but hvac_action cooling (not drying) → NOT moisture_flush_boost.
+
+    moisture_flush_boost requires the drying action; a boost while merely cooling (cool profile,
+    free cooling off) maps to 'cooling', confirming the boost label is gated on the drying context.
+    Profile=cool + free off → hvac_action_template also yields 'cooling' (seed/render agree).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    _seed_cooling_state_deps(home_assistant, hvac_action="cooling", free_cooling="off", boost="on")
+    home_assistant.assert_entity_state("sensor.airflow_cooling_state", "cooling", timeout=5)
 
 
 def test_cooling_state_moisture_protection(home_assistant: HomeAssistant) -> None:
@@ -929,22 +989,22 @@ def test_cooling_state_cooling_without_free_cooling(home_assistant: HomeAssistan
 
 
 def test_cooling_state_moisture_retention(home_assistant: HomeAssistant) -> None:
-    """auto on + heating action + humidity below min → 'moisture_retention'."""
+    """auto on + heating action + indoor dew below min-dew → 'moisture_retention'."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # min=45 baseline; 40 < 45 → retaining moisture via warm profile.
-    home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "40.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
+    # baseline min=45 → dew_min≈9.08°C; indoor_dew=8.0 < 9.08 → retaining moisture via warm profile.
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "8.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
     _seed_cooling_state_deps(home_assistant, hvac_action="heating")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state",
                                        "moisture_retention", timeout=5)
 
 
 def test_cooling_state_heating(home_assistant: HomeAssistant) -> None:
-    """auto on + heating action + humidity at/above min → 'heating'."""
+    """auto on + heating action + indoor dew at/above min-dew → 'heating'."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    # baseline humidity=55 ≥ min(45) → active heating, not moisture retention.
+    # baseline indoor_dew=12.0 ≥ dew_min(9.08) → active heating, not moisture retention.
     _seed_cooling_state_deps(home_assistant, hvac_action="heating")
     home_assistant.assert_entity_state("sensor.airflow_cooling_state", "heating", timeout=5)
 
@@ -967,3 +1027,305 @@ def test_cooling_state_unavailable_when_dependency_missing(home_assistant: HomeA
     # Drop one dependency → has_value() is False → availability False → entity unavailable.
     home_assistant.set_state("switch.comfoconnect_pro_boost", "unavailable", {})
     home_assistant.assert_entity_state("sensor.airflow_cooling_state", "unavailable", timeout=5)
+
+
+# ── Humidity flush sensor tests ───────────────────────────────────────────────────────────
+# binary_sensor.airflow_humidity_flush_needed drives the cool-profile flush. Two OR branches:
+#   Branch 1 (indoor dew above max): flushes REGARDLESS of temperature.
+#   Branch 2 (indoor dew above target only): flushes ONLY if the ComfoConnect temp gate holds.
+# In active_heating only Branch 1 applies. ~0.3°C this.state hysteresis on every dew boundary.
+# Tests render the state template directly via the template API (the binary sensor itself has
+# delay_on/off=10min and a `this.state` Schmitt that CI cannot drive). `this.state` is supplied
+# by the `state_on` flag, which fixes the hysteresis offset (h) and indoor temp threshold.
+# NOTE: baseline max==target humidity collapses both branches, so branch tests set max=60.
+
+
+def _flush_state(state_on: bool) -> str:
+    """Render template mirroring binary_sensor.airflow_humidity_flush_needed's state body.
+
+    state_on simulates `this.state == 'on'`: relaxes every dew boundary by 0.3°C and drops
+    the indoor temp threshold to target-0.5 (matches the sensor's Schmitt/hysteresis).
+    """
+    h = "0.3" if state_on else "0.0"
+    thr = "(target_temp - 0.5)" if state_on else "target_temp"
+    # Dew points are computed inline from the humidity helpers (same Magnus formula as the
+    # sensors) to avoid a race with sensor.airflow_dew_point_* recomputing after a humidity
+    # change — the sensors are verified to match this formula elsewhere.
+    return f"""
+    {{%- set outdoor_dew     = states('sensor.airflow_outdoor_dew_5min') | float -%}}
+    {{%- set indoor_dew      = states('sensor.airflow_min_indoor_dew_5min') | float -%}}
+    {{%- set outdoor_temp    = states('sensor.airflow_outdoor_temp_5min') | float -%}}
+    {{%- set avg_indoor_temp = states('sensor.airflow_avg_indoor_temp_5min') | float -%}}
+    {{%- set target_temp     = states('input_number.airflow_cooling_target_temperature') | float -%}}
+    {{%- set target_hum      = states('input_number.airflow_target_humidity') | float -%}}
+    {{%- set max_hum         = states('input_number.airflow_max_humidity') | float -%}}
+    {{%- set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float -%}}
+    {{%- set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float -%}}
+    {{%- set season          = states('sensor.heating_cooling_indicator') -%}}
+    {{%- set ps = 0.61078 * e ** (17.27 * target_temp / (target_temp + 237.3)) -%}}
+    {{%- set pv_t = ps * target_hum / 100 -%}}
+    {{%- set dew_target = 237.3 * (pv_t / 0.61078) | log / (17.27 - (pv_t / 0.61078) | log) -%}}
+    {{%- set pv_m = ps * max_hum / 100 -%}}
+    {{%- set dew_max = 237.3 * (pv_m / 0.61078) | log / (17.27 - (pv_m / 0.61078) | log) -%}}
+    {{%- set h = {h} -%}}
+    {{%- set temp_threshold = {thr} -%}}
+    {{%- set margin_ok = (outdoor_dew + min_dew_diff - h) < indoor_dew -%}}
+    {{%- set branch1 = outdoor_dew < (dew_max + h) and indoor_dew > (dew_max - h) and margin_ok -%}}
+    {{%- set branch2 = outdoor_dew <= (dew_target + h) and indoor_dew > (dew_target - h) and margin_ok -%}}
+    {{%- set temp_gate = outdoor_temp < (target_temp - min_temp_diff) and avg_indoor_temp >= temp_threshold -%}}
+    {{%- set branch2_ok = branch2 and temp_gate -%}}
+    {{{{ branch1 if season == 'active_heating' else (branch1 or branch2_ok) }}}}
+    """
+
+
+def _set_max_humidity_60(home_assistant: HomeAssistant) -> None:
+    """Raise max_humidity to 60 so dew_max (~13.41°C) separates from dew_target (~12.09°C)."""
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_max_humidity", "value": 60})
+
+
+def test_flush_branch1_above_max_fires(home_assistant: HomeAssistant) -> None:
+    """Branch 1: indoor dew above max-dew, outdoor drier by margin → flush ON (any temp)."""
+    _set_max_humidity_60(home_assistant)  # dew_max≈13.41
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0", temp_attrs)
+    # 9<13.41, 14>13.41, 9+2=11<14 → Branch 1 True.
+    assert _render(home_assistant, _flush_state(False)) == "True"
+
+
+def test_flush_branch1_margin_fails(home_assistant: HomeAssistant) -> None:
+    """Branch 1 negative: indoor above max but outdoor not drier by min_dew_diff → flush OFF."""
+    _set_max_humidity_60(home_assistant)  # dew_max≈13.41
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "12.5", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0", temp_attrs)
+    # margin: 12.5+2=14.5 not < 14.0 → Branch 1 fails; Branch 2: 12.5 not <= 12.09 → fails.
+    assert _render(home_assistant, _flush_state(False)) == "False"
+
+
+def test_flush_branch1_ignores_temperature_gate(home_assistant: HomeAssistant) -> None:
+    """Branch 1 (moisture problem) flushes even when the temp gate would block Branch 2.
+
+    Hot intake (25°C > target-min_temp_diff) and cool room (19°C < target) fail the temp gate,
+    but the above-max moisture problem flushes regardless.
+    """
+    _set_max_humidity_60(home_assistant)
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "25.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_avg_indoor_temp_5min", "19.0", temp_attrs)
+    assert _render(home_assistant, _flush_state(False)) == "True"
+
+
+def test_flush_branch1_ignores_weatherstation_temp(home_assistant: HomeAssistant) -> None:
+    """The flush sensor never reads the weather station — a hot weather station is irrelevant."""
+    _set_max_humidity_60(home_assistant)
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "30.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0", temp_attrs)
+    assert _render(home_assistant, _flush_state(False)) == "True"
+
+
+def test_flush_branch2_fires_with_temp_gate(home_assistant: HomeAssistant) -> None:
+    """Branch 2: indoor above target (but below max), outdoor below target dew, temp gate holds → ON."""
+    _set_max_humidity_60(home_assistant)  # dew_target≈12.09, dew_max≈13.41
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.5", temp_attrs)
+    # Branch 1 misses (12.5<13.41); Branch 2: 9<=12.09, 12.5>12.09, 9+2<12.5 → True.
+    # Temp gate: outdoor 16<20 and indoor 22>=21.5 → True. baseline temps suffice.
+    assert _render(home_assistant, _flush_state(False)) == "True"
+
+
+def test_flush_branch2_blocked_when_temp_gate_fails(home_assistant: HomeAssistant) -> None:
+    """Branch 2 negative: dew condition met but ComfoConnect intake too warm → flush OFF.
+
+    Confirms the temp gate (Branch 2 only) uses the ComfoConnect intake sensor, not the
+    weather station: intake at 21°C exceeds target-min_temp_diff (20°C) → gate fails.
+    """
+    _set_max_humidity_60(home_assistant)
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.5", temp_attrs)
+    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "21.0", temp_attrs)
+    assert _render(home_assistant, _flush_state(False)) == "False"
+
+
+def test_flush_branch2_blocked_when_indoor_below_target(home_assistant: HomeAssistant) -> None:
+    """Branch 2 negative: room already below target temp → temp gate fails → flush OFF."""
+    _set_max_humidity_60(home_assistant)
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.5", temp_attrs)
+    # OFF-state threshold is target (21.5); indoor 21.0 < 21.5 → gate fails.
+    home_assistant.set_state("sensor.airflow_avg_indoor_temp_5min", "21.0", temp_attrs)
+    assert _render(home_assistant, _flush_state(False)) == "False"
+
+
+def test_flush_season_guard_heating_branch1_only(home_assistant: HomeAssistant) -> None:
+    """active_heating allows Branch 1 only: a Branch-2 scenario flushes in neutral but not heating."""
+    _set_max_humidity_60(home_assistant)
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "9.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "12.5", temp_attrs)
+    # Branch 2 scenario (indoor between target and max), temp gate holds at baseline.
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    assert _render(home_assistant, _flush_state(False)) == "True"
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    assert _render(home_assistant, _flush_state(False)) == "False"
+
+
+def test_flush_hysteresis_deadband_branch1(home_assistant: HomeAssistant) -> None:
+    """0.3°C hysteresis on Branch 1: indoor dew between dew_max-0.3 and dew_max flips with this.state.
+
+    min_dew_diff lowered to 0.5 and outdoor_dew set above dew_target so only Branch 1 is in play.
+    indoor_dew=13.2 sits between dew_max-0.3 (13.11) and dew_max (13.41): OFF→stays off,
+    ON→stays on. Confirms the deadband.
+    """
+    _set_max_humidity_60(home_assistant)  # dew_max≈13.41
+    home_assistant.call_action("input_number", "set_value",
+                               {"entity_id": "input_number.airflow_min_dew_diff", "value": 0.5})
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "12.5", temp_attrs)
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "13.2", temp_attrs)
+    # OFF-state: 13.2 > 13.41 is False → Branch 1 off; Branch 2 outdoor 12.5<=12.09 False → off.
+    assert _render(home_assistant, _flush_state(False)) == "False"
+    # ON-state: relaxed indoor>dew_max-0.3 (13.2>13.11) True; margin 12.5+0.5-0.3=12.7<13.2 True.
+    assert _render(home_assistant, _flush_state(True)) == "True"
+
+
+def test_flush_unavailable_when_dependency_missing(home_assistant: HomeAssistant) -> None:
+    """has_value guard: a missing input → binary_sensor.airflow_humidity_flush_needed unavailable."""
+    # Baseline seeds all inputs → sensor resolves (off in baseline, see conftest).
+    home_assistant.assert_entity_state("binary_sensor.airflow_humidity_flush_needed",
+                                       "off", timeout=5)
+    home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "unavailable", {})
+    home_assistant.assert_entity_state("binary_sensor.airflow_humidity_flush_needed",
+                                       "unavailable", timeout=5)
+
+
+# ── Boost-flush (drying needed) gating tests ──────────────────────────────────────────────
+# binary_sensor.airflow_humidity_drying_needed = flush_needed AND weather-station temp < target
+# AND in_schedule AND not low_active. Rendered directly to bypass the sensor's delay_on/off.
+
+
+def _drying_state(flush: bool) -> str:
+    """Render template mirroring binary_sensor.airflow_humidity_drying_needed's state body.
+
+    `flush` is injected as a literal (binary_sensor.airflow_humidity_flush_needed is a delayed
+    template sensor whose REST-set 'on' does not reliably stick in CI) so the boost-only gates
+    (weather station, schedule, low-vent) are exercised deterministically.
+    """
+    flush_lit = "true" if flush else "false"
+    return f"""
+    {{%- set flush_needed = {flush_lit} -%}}
+    {{%- set low_active   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}}
+    {{%- set outdoor_t    = states('sensor.wheatherstation_outdoor_temperature') | float(99) -%}}
+    {{%- set target_t     = states('input_number.airflow_cooling_target_temperature') | float(21.5) -%}}
+    {{%- set in_schedule  = (is_state('binary_sensor.workday', 'on')
+                            and is_state('schedule.airflow_boost_workday', 'on'))
+                           or
+                           (is_state('binary_sensor.workday', 'off')
+                            and is_state('schedule.airflow_boost_non_workday', 'on')) -%}}
+    {{{{ flush_needed and not low_active and outdoor_t < target_t and in_schedule }}}}
+    """
+
+
+def test_drying_requires_flush_needed(home_assistant: HomeAssistant) -> None:
+    """No flush needed → boost never fires even with cool weather and schedule on."""
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
+    assert _render(home_assistant, _drying_state(flush=False)) == "False"
+
+
+def test_drying_blocked_by_warm_weatherstation(home_assistant: HomeAssistant) -> None:
+    """Flush needed but weather-station temp >= target → boost blocked (weather gate)."""
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "22.0", temp_attrs)
+    # 22.0 not < target 21.5 → boost False even though flush is needed.
+    assert _render(home_assistant, _drying_state(flush=True)) == "False"
+
+
+def test_drying_fires_with_flush_and_cool_weatherstation(home_assistant: HomeAssistant) -> None:
+    """Flush needed + weather-station cool + workday schedule on + low off → boost template True."""
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
+    # baseline: workday=on, schedule.airflow_boost_workday=on → in_schedule True.
+    assert _render(home_assistant, _drying_state(flush=True)) == "True"
+
+
+# ── hvac_action drying-from-flush tests ───────────────────────────────────────────────────
+
+
+def _hvac_action_state(flush: bool) -> str:
+    """Render template mirroring climate.airflow_climate's hvac_action_template.
+
+    `flush` is injected as a literal (rather than reading binary_sensor.airflow_humidity_flush_needed,
+    a delayed template sensor whose REST-set 'on' does not reliably stick in CI) so the branch
+    logic is exercised deterministically.
+    """
+    flush_lit = "true" if flush else "false"
+    return f"""
+    {{%- set profile   = states('select.comfoconnect_pro_temperature_profile') -%}}
+    {{%- set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') -%}}
+    {{%- set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') -%}}
+    {{%- set flush_needed = {flush_lit} -%}}
+    {{%- if free_cool and boost_on -%}}drying
+    {{%- elif profile == 'cool' and flush_needed -%}}drying
+    {{%- elif profile == 'cool' -%}}cooling
+    {{%- elif profile == 'warm' -%}}heating
+    {{%- elif profile == 'comfort' -%}}fan
+    {{%- else -%}}idle{{%- endif -%}}
+    """
+
+
+def test_hvac_action_drying_from_flush(home_assistant: HomeAssistant) -> None:
+    """cool profile + flush needed (no boost, no free cooling) → hvac_action 'drying'."""
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    assert _render(home_assistant, _hvac_action_state(flush=True)) == "drying"
+
+
+def test_hvac_action_cooling_without_flush(home_assistant: HomeAssistant) -> None:
+    """cool profile + no flush → hvac_action 'cooling' (plain temperature cooling)."""
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    assert _render(home_assistant, _hvac_action_state(flush=False)) == "cooling"
+
+
+# ── Profile block precedence tests ────────────────────────────────────────────────────────
+
+
+def test_profile_flush_triggers_cool_without_free_cooling(home_assistant: HomeAssistant) -> None:
+    """flush needed, free cooling off, neutral season → Block 2 Case B fires (trace only)."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    _trigger(home_assistant)
+    # Block 2 Case B fires (cool in production); CI stub ignores select_option.
+
+
+def test_profile_heating_flush_overrides_warm(home_assistant: HomeAssistant) -> None:
+    """active_heating + free cooling off + flush needed → Block 1 Case B yields, Block 2 cools.
+
+    The Block 1 Case B `not flush_needed` guard means a heating-season moisture problem flushes
+    (cool) instead of holding warm. Trace-only: CI stub ignores select_option, but the automation
+    must reach Block 2 without firing Block 1's warm action.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    _trigger(home_assistant)
+    # Block 1 Case B guarded off by flush_needed; Block 2 Case B fires → cool in production.
