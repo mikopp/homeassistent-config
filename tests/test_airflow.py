@@ -339,6 +339,143 @@ def test_airflow_humidity_in_dead_band_neutral_comfort(home_assistant: HomeAssis
                                        "comfort", timeout=3)
 
 
+# ── Block 4 bypass-close recovery tests ─────────────────────────────────────────────────
+# Block 4 closes the bypass (cool → comfort) when profile is stuck at `cool` with no active
+# owner (free cooling off, flush off) and not in heating season.
+#
+# CI limitation: select.select_option is silently ignored on the bare REST stub, so the
+# cool → comfort write is NOT observable here. Tests 1/2/3 are trace-only (no exception =
+# Block 4 path executed cleanly). Tests 4/5 are observable regressions: profile seeded to
+# `cool` stays `cool` because Block 4 is suppressed by an active owner.
+
+
+def test_controller_cool_recovery_dry_cooling_season_trace(home_assistant: HomeAssistant) -> None:
+    """C7 trap: profile=cool + active_cooling + free–/flush– + DRY indoor dew → Block 4 fires (trace only).
+
+    Block 1A excluded (cooling season). Block 1B misses (not active_heating).
+    Block 2: free=off AND flush=off → misses. Block 3: dew 7.0 < dew_min 9.08 → out-of-band miss.
+    Block 4: profile==cool + free– + flush– + season≠HEAT → fires; select.select_option ignored on stub.
+    Post-deploy: profile transitions cool → comfort (bypass closed, overcooling stopped).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "7.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 4 fires: cool + no owner + active_cooling ≠ active_heating. Write ignored on stub.
+    # Post-deploy → comfort (bypass closed).
+
+
+def test_controller_cool_recovery_humid_neutral_trace(home_assistant: HomeAssistant) -> None:
+    """N3 trap: profile=cool + neutral + free–/flush– + HUM indoor dew + low=on → Block 4 fires (trace only).
+
+    Block 1A misses (dew 14.0 ≥ dew_min 9.08). Block 1B misses (not active_heating).
+    Block 2: free=off AND flush=off → misses. Block 3: dew 14.0 > dew_max 12.09 → out-of-band miss.
+    Block 4: profile==cool + free– + flush– + season neutral ≠ HEAT → fires; write ignored on stub.
+    Post-deploy: cool → comfort + low preset = closed bypass + reduced rate (correct moisture protection).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 4 fires: cool + no owner + neutral ≠ active_heating. Write ignored on stub.
+    # Post-deploy → comfort + low preset (bypass closed + reduced ventilation rate).
+
+
+def test_controller_cool_recovery_humid_cooling_trace(home_assistant: HomeAssistant) -> None:
+    """C8 trap: profile=cool + active_cooling + free–/flush– + HUM indoor dew → Block 4 fires (trace only).
+
+    Same as N3 (test above) but season is active_cooling instead of neutral.
+    Block 1A excluded (cooling season). Block 2 misses (free=off AND flush=off).
+    Block 3: dew 14.0 > dew_max 12.09 → out-of-band miss. Block 4 fires.
+    Post-deploy: cool → comfort (bypass closed; humid outdoor air no longer imported).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 4 fires: cool + no owner + active_cooling ≠ active_heating. Write ignored on stub.
+    # Post-deploy → comfort + low preset (bypass closed + reduced ventilation rate).
+
+
+def test_controller_no_recovery_when_flush_on(home_assistant: HomeAssistant) -> None:
+    """Regression: flush=on → Block 2B holds cool; Block 4 suppressed (flush guard).
+
+    Block 2 Case B: flush_needed=on → cool (fires if profile ≠ cool). Profile seeded to `cool`
+    → Block 2 idempotent guard suppresses the write but Block 4's flush condition is `off`,
+    so Block 4 is also inert. Profile stays `cool` — observable because cool→cool is idempotent
+    and the stub preserves the seeded state.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
+    _trigger(home_assistant)
+    # Block 2B fires (flush=on → cool); Block 4 suppressed by flush=on condition.
+    # Profile stays cool — Block 4 must not override a legitimate flush owner.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "cool", timeout=3)
+
+
+def test_controller_no_recovery_when_free_on(home_assistant: HomeAssistant) -> None:
+    """Regression: free=on + cooling season → Block 2A holds cool; Block 4 suppressed (free guard).
+
+    Block 2 Case A: free_cooling=on + cooling season → cool (fires if profile ≠ cool). Profile
+    seeded to `cool` → Block 2 idempotent guard suppresses write, but Block 4's free condition
+    is `off`, so Block 4 is also inert. Profile stays `cool`.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    _trigger(home_assistant)
+    # Block 2A fires (free=on + cooling season → cool); Block 4 suppressed by free=on condition.
+    # Profile stays cool — Block 4 must not override a legitimate free-cooling owner.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "cool", timeout=3)
+
+
+def test_controller_no_recovery_in_heating(home_assistant: HomeAssistant) -> None:
+    """Regression: active_heating season → Block 1B owns this; Block 4 season-guarded off (trace only).
+
+    Block 1 Case B: active_heating + free=off + flush=off → warm. Profile seeded to `cool`
+    → Block 1B fires, writing `warm` (ignored on stub). Block 4 is never reached because
+    Block 1B matched and the choose: exits. Even if it were reached, the season guard
+    (season ≠ active_heating) would suppress Block 4.
+    Post-deploy: profile transitions cool → warm (Block 1B owns heating season, not Block 4).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    _trigger(home_assistant)
+    # Block 1B matches first (active_heating + free– + flush– → warm); write ignored on stub.
+    # Block 4 season guard (≠ active_heating) also suppresses it — belt-and-suspenders.
+    # Post-deploy → warm (Block 1B owns heating season).
+
+
 # ── Ventilation preset automation tests ─────────────────────────────────────────────────
 
 
