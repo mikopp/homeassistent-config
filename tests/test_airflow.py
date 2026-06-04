@@ -476,6 +476,98 @@ def test_controller_no_recovery_in_heating(home_assistant: HomeAssistant) -> Non
     # Post-deploy → warm (Block 1B owns heating season).
 
 
+# ── Block 5 warm-stuck recovery tests ───────────────────────────────────────────────────
+# Block 5 closes the bypass (warm → comfort) when profile is stuck at `warm` in cooling
+# season with no active owner (free off, flush off).
+#
+# CI limitation: select.select_option ignored on stub → warm→comfort write unobservable.
+# Tests 1/2 are trace-only. Test 3 (regression) is observable: warm stays warm in heating.
+# Test 4 (regression) is observable: warm stays warm in neutral (season guard blocks Block 5).
+
+
+def test_controller_warm_recovery_dry_cooling_trace(home_assistant: HomeAssistant) -> None:
+    """W1 trap: profile=warm + active_cooling + free–/flush– + DRY dew → Block 5 fires (trace only).
+
+    Block 1A excluded (cooling season). Block 1B misses (not active_heating).
+    Block 2 misses (free=off AND flush=off). Block 3: dew 7.0 < dew_min 9.08 → out-of-band miss.
+    Block 4: profile != cool → misses. Block 5: profile==warm + cooling + free– + flush– → fires.
+    Post-deploy: profile transitions warm → comfort (ERV stops over-recovering in summer).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "warm", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "7.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 5 fires: warm + cooling season + no owner. Write ignored on stub.
+    # Post-deploy → comfort.
+
+
+def test_controller_warm_recovery_humid_cooling_trace(home_assistant: HomeAssistant) -> None:
+    """W2 trap: profile=warm + active_cooling + free–/flush– + HUM dew → Block 5 fires (trace only).
+
+    Same as W1 but dew is HUM (above dew_max) instead of DRY. Block 3: 14.0 > dew_max 12.09 → miss.
+    Block 4: profile != cool → misses. Block 5 fires.
+    Post-deploy: warm → comfort (season mismatch resolved, cooling season takes effect).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "warm", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 5 fires: warm + cooling season + no owner. Write ignored on stub.
+    # Post-deploy → comfort.
+
+
+def test_controller_no_warm_recovery_in_heating(home_assistant: HomeAssistant) -> None:
+    """Regression: active_heating + warm → Block 1B idempotent (no-op); Block 5 season-guarded off.
+
+    Profile seeded to `warm`. Block 1B: active_heating + free– + flush– → warm. Idempotency guard
+    (NOT profile==warm) fails → no write. Block 5 not reached (choose: exhausted). Even if
+    reached, season guard (passive/active_cooling only) suppresses it. Profile stays warm.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "warm", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    _trigger(home_assistant)
+    # Block 1B idempotent (already warm); Block 5 season-guarded. Profile stays warm.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "warm", timeout=3)
+
+
+def test_controller_no_warm_recovery_in_neutral(home_assistant: HomeAssistant) -> None:
+    """Regression: neutral + warm + HUM → Block 5 season-guarded; default no-op; profile stays warm.
+
+    Neutral season — Block 5 requires passive/active_cooling, so it is suppressed. Block 1A
+    misses (dew 14.0 ≥ dew_min 9.08). Block 1B misses (not active_heating). Block 2 misses.
+    Block 3: dew 14.0 > dew_max 12.09 → band-fail miss. Block 4: profile != cool → miss.
+    Block 5: neutral ≠ cooling → miss. Default no-op. Profile stays warm.
+    Warm in neutral + high dew is self-healing: flush fires when outdoor is dry enough.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "warm", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    _trigger(home_assistant)
+    # Block 5 season guard fires: neutral ≠ cooling. Default no-op. Profile stays warm.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "warm", timeout=3)
+
+
 # ── Ventilation preset automation tests ─────────────────────────────────────────────────
 
 

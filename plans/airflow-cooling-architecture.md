@@ -417,6 +417,7 @@ flushing (`profile == cool AND flush_needed`); `cooling` for plain cool profile;
 | idempotent `choose` + dead-band | profile automation | no redundant profile writes |
 | `flush OFF` guard on Block 1B | profile automation | deterministic heating-season cool-vs-warm |
 | Block 4 bypass-close recovery | profile automation | drains stuck-`cool` when no owner; gated `profile==cool` so it can't oscillate vs Block 1 |
+| Block 5 warm-stuck recovery | profile automation | drains stuck-`warm` in cooling season when no owner; gated `profile==warm + cooling season` — inert in neutral/heating |
 
 ---
 
@@ -473,11 +474,12 @@ auto on + away off).
 | 2B | **cool** | `flush` ✓ (any season) |
 | 3  | **comfort** | (season = NEUT OR (season = COOL AND `free` –)) AND `dew_min ≤ indoor_dew ≤ dew_max` |
 | 4  | **comfort** | `profile == cool` AND `free` – AND `flush` – AND season ≠ HEAT (bypass-close recovery) |
-| –  | **keep** | none of the above (recovery zone / already-correct / edge) |
+| 5  | **comfort** | `profile == warm` AND `free` – AND `flush` – AND season = COOL (warm-stuck recovery) |
+| –  | **keep** | none of the above — only H6 (HEAT+free✓, near-impossible) reaches here |
 
 > Runs even during Away. Each block is idempotent (skips the write if profile already correct).
-> Precedence: 1A→1B→2A→2B→3→4. Heating-season moisture problem: 1B yields (its `flush –` guard) so
-> 2B (cool flush) wins over warm. Block 4 drains the stuck-cool trap (out-of-band DRY/HUM with no owner).
+> Precedence: 1A→1B→2A→2B→3→4→5. Heating-season moisture problem: 1B yields (its `flush –` guard) so
+> 2B (cool flush) wins over warm. Block 4 drains stuck-`cool`; Block 5 drains stuck-`warm` in cooling season.
 
 ### 11.4 Preset / auto_mode (Section 2 `choose`) — only when `away` off
 
@@ -525,16 +527,23 @@ When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
 | C6 | COOL | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
 | C7 | COOL | – | – | – | – | DRY | comfort (4) | auto on | off | fan | **comfort** |
 | C8 | COOL | – | – | ✓ | – | HUM | comfort (4) | low | off | fan | **moisture_protection** |
+| W1 | COOL | – | – | – | – | DRY | comfort (5)⁴ | auto on | off | fan | **comfort** |
+| W2 | COOL | – | – | ✓ | – | HUM | comfort (5)⁴ | low | off | fan | **moisture_protection** |
 | S1 | any | * | * | * | * | * | (controller idle, auto off) | (idle) | off | per-actual | **off** |
 | S2 | any | – | ✓ | – | n/a³ | HUM | cool (2B) | (untouched) | off³ | drying | **moisture_flush_cooling** |
 
 **Notes:**
 1. `keep` — no profile block matches; previous profile is retained. State/action follow whatever
    profile persists (`per-keep`). Remaining case: HEAT+free (H6, neither 1B nor 2A apply).
-   Former `keep` traps C7/N3/C8 are now resolved by Block 4 (bypass-close recovery).
+   Former `keep` traps C7/N3/C8 resolved by Block 4; W1/W2 resolved by Block 5.
 2. **N4** — free cooling is *available* in NEUT but profile stays comfort (2A needs cooling season),
    so action=`fan` ⇒ state `comfort` even though preset is bumped to medium. Free air exchange
    happens at the fan level, not via the cool profile.
 3. **S2 (Away on)** — Section 1 still sets the profile; Section 2 is skipped so preset/auto_mode are
    left untouched; the boost automation's `away off` condition fails so boost is never started
    (`dry` is moot). State still derives from live actuators.
+4. **W1/W2** — `warm` profile stuck when season transitions HEAT→COOL and dew is out-of-band. Block 5
+   catches this: `profile==warm + COOL season + free– + flush–` → comfort. W1=DRY (overcool prevented,
+   ERV stops over-recovering in summer). W2=HUM with `low` on (closed bypass + reduced rate = correct
+   moisture protection). Block 5 is inert in neutral/heating; `profile==warm` self-guards so it
+   becomes a no-op the moment comfort is set.
