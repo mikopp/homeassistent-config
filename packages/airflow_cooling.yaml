@@ -269,10 +269,14 @@ template:
           {# Indoor moisture vs the min-humidity-derived dew point at target_temp (stable threshold). #}
           {% set indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set dew_min    = states('sensor.airflow_dew_point_min') | float %}
+          {# Flush (action == 'drying') is checked BEFORE low: when air is actively being flushed,
+             that is the operative mode — never report moisture_protection. With the new mutual
+             exclusivity low can't be ON during a flush anyway, but action can also be 'drying' via
+             free_cool + boost (independent of flush_needed), so the ordering still matters. #}
           {% if not auto %}off
           {% elif boost and action == 'drying' %}moisture_flush_boost
-          {% elif low %}moisture_protection
           {% elif action == 'drying' %}moisture_flush_cooling
+          {% elif low %}moisture_protection
           {% elif action == 'cooling' and free %}free_cooling
           {% elif action == 'cooling' %}cooling
           {% elif action == 'heating' and indoor_dew < dew_min %}moisture_retention
@@ -344,7 +348,8 @@ template:
           {{ has_value('sensor.airflow_outdoor_dew_5min') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_target') and
-             has_value('sensor.airflow_dew_point_max') }}
+             has_value('sensor.airflow_dew_point_max') and
+             has_value('binary_sensor.airflow_humidity_flush_needed') }}
         state: >
           {% set outdoor_dew  = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set indoor_dew   = states('sensor.airflow_min_indoor_dew_5min') | float %}
@@ -357,10 +362,17 @@ template:
                                else indoor_dew >= dew_from_max %}
           {# Outdoor Schmitt: turn ON above max-derived dew, stay ON until below target-derived dew. #}
           {% set dew_threshold = dew_from_tgt if this.state == 'on' else dew_from_max %}
+          {# Mutual exclusivity: low (reduce ventilation) and flush/boost (increase air exchange)
+             are opposite actions and must never be ON together. Gate low OFF whenever the cool-profile
+             flush or the scheduled drying boost is active. flush_needed already subsumes drying_needed
+             (drying ⊂ flush); the drying_needed term is kept explicit for clarity. No cycle: neither
+             flush_needed nor drying_needed reads low_needed (the latter's old low_active gate removed). #}
           {{ indoor_gate and (
                outdoor_dew >= dew_threshold or
                outdoor_dew >= indoor_dew
-          ) }}
+             )
+             and not is_state('binary_sensor.airflow_humidity_flush_needed', 'on')
+             and not is_state('binary_sensor.airflow_humidity_drying_needed', 'on') }}
         delay_on:
           minutes: 10
         delay_off:
@@ -429,10 +441,10 @@ template:
 
       # True when the noisy ventilation boost should run to flush moisture. This is the
       # BOOST half of humidity flushing: the cool-profile flush condition
-      # (binary_sensor.airflow_humidity_flush_needed) PLUS three boost-only gates:
+      # (binary_sensor.airflow_humidity_flush_needed) PLUS two boost-only gates:
       #   * weather-station outdoor temp below target (real outdoor, NOT the ComfoConnect intake);
-      #   * within the user-configured boost schedule (workday / non-workday);
-      #   * moisture-low guard not active (outdoor air not too humid to help).
+      #   * within the user-configured boost schedule (workday / non-workday).
+      # (The former moisture-low guard is gone — low_needed is now mutually exclusive with flush.)
       # The cool-profile flush deliberately ignores the schedule and the weather station —
       # only the boost is schedule- and weather-gated. Schedule selects workday or non-workday
       # window via binary_sensor.workday; non-workday covers weekends and public holidays.
@@ -441,9 +453,11 @@ template:
         device_class: running
         state: >
           {# flush sensor carries all dew/temp/season logic + its own hysteresis.
-             Defaults fail safe: a missing flush sensor / outdoor temp must not start a boost. #}
+             Defaults fail safe: a missing flush sensor / outdoor temp must not start a boost.
+             NOTE: no longer self-gates on moisture_ventilation_low_needed — low_needed is now gated
+             OFF whenever flush_needed (and thus drying_needed) is ON, so the old `not low_active`
+             guard was redundant AND would have formed a low_needed → drying_needed → low_needed cycle. #}
           {% set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-          {% set low_active   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
           {% set outdoor_t    = states('sensor.wheatherstation_outdoor_temperature') | float(99) %}
           {% set target_t     = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
           {% set in_schedule  = (is_state('binary_sensor.workday', 'on')
@@ -453,7 +467,6 @@ template:
                                  and is_state('schedule.airflow_boost_non_workday', 'on')) %}
           {{
             flush_needed and
-            not low_active and
             outdoor_t < target_t and
             in_schedule
           }}
@@ -1048,9 +1061,22 @@ automation:
                     {{ states('sensor.airflow_dew_point_target') }}°C
                     (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
                     too humid — ventilation set to Low.
+          # Restore auto mode only when ALL owners are clear: low no longer needed AND no medium
+          # owner (free cooling / flush) has taken over auto_mode. If a flush took over (which is
+          # exactly why low_needed went off — they are mutually exclusive), the medium automation
+          # owns auto_mode and will restore it later; restoring here would fight it.
           - conditions:
               - condition: state
                 entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                state: "off"
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_flush_needed
+                state: "off"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_auto_mode
                 state: "off"
             sequence:
               - action: switch.turn_on
@@ -1184,6 +1210,14 @@ automation:
       - platform: state
         entity_id: binary_sensor.airflow_free_cooling_available
         id: free_cooling_changed
+      # Flush (cool-profile drying) is now a medium driver alongside free cooling
+      - platform: state
+        entity_id: binary_sensor.airflow_humidity_flush_needed
+        id: flush_changed
+      # Boost (scheduled drying) owns air exchange when on — re-evaluate on its edges
+      - platform: state
+        entity_id: binary_sensor.airflow_humidity_drying_needed
+        id: drying_changed
       - platform: state
         entity_id: switch.comfoconnect_pro_auto_mode
         to: "on"
@@ -1218,18 +1252,29 @@ automation:
             id: ha_start
         then:
           - wait_template: >
-              {{ has_value('binary_sensor.airflow_free_cooling_available') }}
+              {{ has_value('binary_sensor.airflow_free_cooling_available') and
+                 has_value('binary_sensor.airflow_humidity_flush_needed') }}
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
-          # Enable medium: free cooling available, auto schedule at low, no boost running
+          # Enable medium: free cooling OR humidity flush wants more air exchange, ComfoConnect
+          # schedule is sitting at Low, no boost running, and the scheduled boost is NOT active
+          # (when drying_needed is on the boost owns air exchange — leave the preset alone).
+          # preset == low covers both entry paths: pure free-cooling start (auto on, preset low)
+          # and the low→medium hand-off from the moisture-low automation (auto already off, preset
+          # still low), so the old `auto_mode == on` condition is no longer needed.
           - conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: binary_sensor.airflow_free_cooling_available
+                    state: "on"
+                  - condition: state
+                    entity_id: binary_sensor.airflow_humidity_flush_needed
+                    state: "on"
               - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "on"
-              - condition: state
-                entity_id: switch.comfoconnect_pro_auto_mode
-                state: "on"
+                entity_id: binary_sensor.airflow_humidity_drying_needed
+                state: "off"
               - condition: state
                 entity_id: select.comfoconnect_pro_ventilation_preset
                 state: "low"
@@ -1249,13 +1294,27 @@ automation:
                 data:
                   title: "Ventilation: Medium Preset"
                   message: >
-                    Free cooling available, auto schedule at Low
-                    — preset bumped to Medium for faster air exchange.
+                    {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
+                      Humidity flush active, auto schedule at Low
+                      — preset bumped to Medium for faster moisture exchange.
+                    {% else %}
+                      Free cooling available, auto schedule at Low
+                      — preset bumped to Medium for faster air exchange.
+                    {% endif %}
 
-          # Restore auto mode: free cooling gone and we set medium (not Moisture Protect)
+          # Restore auto mode: all medium owners cleared (no free cooling AND no flush), low not
+          # taking over, and we are the ones holding Medium with auto off. The matching all-clear
+          # guard lives in the moisture-low automation's restore branch, so whichever automation
+          # sees the LAST owner clear restores auto; the other is a harmless no-op.
           - conditions:
               - condition: state
                 entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_flush_needed
+                state: "off"
+              - condition: state
+                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
                 state: "off"
               - condition: state
                 entity_id: switch.comfoconnect_pro_auto_mode
@@ -1271,7 +1330,7 @@ automation:
                 data:
                   title: "Ventilation: Auto Mode Restored"
                   message: >
-                    Free cooling no longer available
+                    Free cooling and humidity flush no longer needed
                     — ComfoConnect auto mode restored from Medium preset.
 
         default:
