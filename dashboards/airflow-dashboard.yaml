@@ -18,6 +18,8 @@ views:
           - entity: input_boolean.airflow_cooling_automatic_enabled
           - entity: binary_sensor.airflow_free_cooling_available
           - entity: binary_sensor.airflow_humidity_flush_needed
+          - entity: binary_sensor.airflow_humidity_drying_needed
+          - entity: switch.comfoconnect_pro_boost
           - entity: binary_sensor.airflow_moisture_ventilation_low_needed
           - entity: select.comfoconnect_pro_ventilation_preset
           - entity: switch.comfoconnect_pro_auto_mode
@@ -41,6 +43,8 @@ views:
             label: Outdoor Air
           - entity: sensor.airflow_outdoor_temp_5min
           - entity: sensor.airflow_outdoor_dew_5min
+          - entity: sensor.airflow_wheatherstation_outdoor_temp_5min
+            name: Weatherstation Outdoor Temp (5min)
           - type: section
             label: Indoor Average
           - entity: sensor.airflow_avg_indoor_temp_5min
@@ -84,9 +88,9 @@ views:
           - entity: schedule.airflow_boost_non_workday
 
       - type: tile
-        entity: automation.airflow_cooling_set_temperature_profile
+        entity: automation.airflow_ventilation_controller
       - type: tile
-        entity: automation.airflow_moisture_ventilation_preset
+        entity: automation.airflow_humidity_drying_boost
       - type: logbook
         title: Airflow Activity
         hours_to_show: 24
@@ -98,3 +102,5 @@ views:
           - select.comfoconnect_pro_temperature_profile
           - sensor.heating_cooling_indicator
           - binary_sensor.airflow_moisture_ventilation_low_needed
+          - binary_sensor.airflow_humidity_drying_needed
+          - switch.comfoconnect_pro_boost

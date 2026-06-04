@@ -50,6 +50,15 @@ sensor:
     entity_id: sensor.comfoconnect_pro_outdoor_air_temperature
     filters: *temperature_filters
 
+  # Smooth weatherstation outdoor temperature — same filter chain as ComfoConnect outdoor temp.
+  # Used by airflow_humidity_drying_needed to gate the boost; smoothed to prevent short noise
+  # spikes from prematurely starting or stopping a boost run.
+  - platform: filter
+    unique_id: airflow_wheatherstation_outdoor_temp_5min
+    name: "Airflow Weatherstation Outdoor Temp 5min"
+    entity_id: sensor.wheatherstation_outdoor_temperature
+    filters: *temperature_filters
+
   # Smooth outdoor humidity from ComfoConnect
   - platform: filter
     unique_id: airflow_outdoor_air_humidity_5min
@@ -269,10 +278,14 @@ template:
           {# Indoor moisture vs the min-humidity-derived dew point at target_temp (stable threshold). #}
           {% set indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set dew_min    = states('sensor.airflow_dew_point_min') | float %}
+          {# Flush (action == 'drying') is checked BEFORE low: when air is actively being flushed,
+             that is the operative mode — never report moisture_protection. With the new mutual
+             exclusivity low can't be ON during a flush anyway, but action can also be 'drying' via
+             free_cool + boost (independent of flush_needed), so the ordering still matters. #}
           {% if not auto %}off
           {% elif boost and action == 'drying' %}moisture_flush_boost
-          {% elif low %}moisture_protection
           {% elif action == 'drying' %}moisture_flush_cooling
+          {% elif low %}moisture_protection
           {% elif action == 'cooling' and free %}free_cooling
           {% elif action == 'cooling' %}cooling
           {% elif action == 'heating' and indoor_dew < dew_min %}moisture_retention
@@ -344,7 +357,8 @@ template:
           {{ has_value('sensor.airflow_outdoor_dew_5min') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_target') and
-             has_value('sensor.airflow_dew_point_max') }}
+             has_value('sensor.airflow_dew_point_max') and
+             has_value('binary_sensor.airflow_humidity_flush_needed') }}
         state: >
           {% set outdoor_dew  = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set indoor_dew   = states('sensor.airflow_min_indoor_dew_5min') | float %}
@@ -357,10 +371,17 @@ template:
                                else indoor_dew >= dew_from_max %}
           {# Outdoor Schmitt: turn ON above max-derived dew, stay ON until below target-derived dew. #}
           {% set dew_threshold = dew_from_tgt if this.state == 'on' else dew_from_max %}
+          {# Mutual exclusivity: low (reduce ventilation) and flush/boost (increase air exchange)
+             are opposite actions and must never be ON together. Gate low OFF whenever the cool-profile
+             flush or the scheduled drying boost is active. flush_needed already subsumes drying_needed
+             (drying ⊂ flush); the drying_needed term is kept explicit for clarity. No cycle: neither
+             flush_needed nor drying_needed reads low_needed (the latter's old low_active gate removed). #}
           {{ indoor_gate and (
                outdoor_dew >= dew_threshold or
                outdoor_dew >= indoor_dew
-          ) }}
+             )
+             and not is_state('binary_sensor.airflow_humidity_flush_needed', 'on')
+             and not is_state('binary_sensor.airflow_humidity_drying_needed', 'on') }}
         delay_on:
           minutes: 10
         delay_off:
@@ -429,10 +450,10 @@ template:
 
       # True when the noisy ventilation boost should run to flush moisture. This is the
       # BOOST half of humidity flushing: the cool-profile flush condition
-      # (binary_sensor.airflow_humidity_flush_needed) PLUS three boost-only gates:
+      # (binary_sensor.airflow_humidity_flush_needed) PLUS two boost-only gates:
       #   * weather-station outdoor temp below target (real outdoor, NOT the ComfoConnect intake);
-      #   * within the user-configured boost schedule (workday / non-workday);
-      #   * moisture-low guard not active (outdoor air not too humid to help).
+      #   * within the user-configured boost schedule (workday / non-workday).
+      # (The former moisture-low guard is gone — low_needed is now mutually exclusive with flush.)
       # The cool-profile flush deliberately ignores the schedule and the weather station —
       # only the boost is schedule- and weather-gated. Schedule selects workday or non-workday
       # window via binary_sensor.workday; non-workday covers weekends and public holidays.
@@ -441,10 +462,13 @@ template:
         device_class: running
         state: >
           {# flush sensor carries all dew/temp/season logic + its own hysteresis.
-             Defaults fail safe: a missing flush sensor / outdoor temp must not start a boost. #}
+             Defaults fail safe: a missing flush sensor / outdoor temp must not start a boost.
+             NOTE: no longer self-gates on moisture_ventilation_low_needed — low_needed is now gated
+             OFF whenever flush_needed (and thus drying_needed) is ON, so the old `not low_active`
+             guard was redundant AND would have formed a low_needed → drying_needed → low_needed cycle. #}
           {% set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-          {% set low_active   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
-          {% set outdoor_t    = states('sensor.wheatherstation_outdoor_temperature') | float(99) %}
+          {# Use smoothed weatherstation temp to prevent noise spikes from falsely gating the boost. #}
+          {% set outdoor_t    = states('sensor.airflow_wheatherstation_outdoor_temp_5min') | float(99) %}
           {% set target_t     = states('input_number.airflow_cooling_target_temperature') | float(21.5) %}
           {% set in_schedule  = (is_state('binary_sensor.workday', 'on')
                                  and is_state('schedule.airflow_boost_workday', 'on'))
@@ -453,12 +477,9 @@ template:
                                  and is_state('schedule.airflow_boost_non_workday', 'on')) %}
           {{
             flush_needed and
-            not low_active and
             outdoor_t < target_t and
             in_schedule
           }}
-        delay_on:
-          minutes: 10
         delay_off:
           minutes: 10
 
@@ -772,11 +793,25 @@ climate:
 
 # --- AUTOMATION ---
 automation:
-  # Sets ComfoConnect temperature profile based on heating/cooling indicator and free cooling state
-  - id: airflow_cooling_set_temperature_profile
-    alias: "Airflow: Set Temperature Profile"
-    description: "Profile warm/comfort/cool driven by heating-cooling indicator, free cooling state, and indoor humidity"
-    mode: restart
+  # UNIFIED VENTILATION CONTROLLER — single source of truth for all ComfoConnect outputs that the
+  # automation owns: temperature profile (warm/comfort/cool), ventilation preset (low/medium) and
+  # auto_mode. On every relevant input change it recomputes the COMPLETE desired state from the
+  # decision sensors and applies it idempotently, so no two automations ever fight over auto_mode or
+  # the preset. The boost (binary_sensor.airflow_humidity_drying_needed → switch boost) is the only
+  # output left to a separate automation; this controller never touches it.
+  #   Section 1 — Temperature profile: runs whenever automatic control is on, even during Away.
+  #   Section 2 — Preset / auto_mode: runs only when Away is off (Away owns ventilation level).
+  - id: airflow_ventilation_controller
+    alias: "Airflow: Ventilation Controller"
+    description: >
+      Single deterministic controller for ComfoConnect profile + ventilation preset + auto_mode.
+      Profile follows heating/cooling indicator, free cooling, flush and indoor dew. Preset/auto_mode
+      derive from low_needed (→ low), free/flush (→ medium), else auto restored. Idempotent: only
+      writes an output when it differs from the desired state. Boost is handled separately.
+    # queued (not restart): a rapid second trigger must never abort a partial apply mid-sequence
+    # (auto_mode off → preset). Each run is short and idempotent, so stacked already-satisfied runs
+    # are cheap no-ops.
+    mode: queued
     trigger:
       - platform: state
         entity_id: sensor.heating_cooling_indicator
@@ -790,11 +825,31 @@ automation:
       - platform: state
         entity_id: sensor.airflow_avg_indoor_humidity_5min
         id: humidity_changed
+      # Preset/auto_mode drivers (Section 2)
+      - platform: state
+        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        id: low_changed
+      # Schedule flipped auto_mode back on while an owner is active → re-assert manual preset
+      - platform: state
+        entity_id: switch.comfoconnect_pro_auto_mode
+        to: "on"
+        id: auto_mode_on
+      # Schedule dropped the preset to low while an owner wants medium → re-bump
+      - platform: state
+        entity_id: select.comfoconnect_pro_ventilation_preset
+        to: "low"
+        id: preset_set_low
+      # Away ended → re-evaluate preset/auto_mode now that Section 2 may act again
+      - platform: state
+        entity_id: switch.comfoconnect_pro_away_function
+        to: "off"
+        id: away_ended
       # Re-evaluate once on startup after sensors leave unavailable
       - platform: homeassistant
         event: start
         id: ha_start
-    # Guard: skip all profile changes when automatic control is disabled
+    # Guard: skip everything when automatic control is disabled. Away is NOT a top-level condition —
+    # the profile (Section 1) must still follow the season during Away; Section 2 guards Away itself.
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
@@ -810,9 +865,12 @@ automation:
           - wait_template: >
               {{ has_value('sensor.heating_cooling_indicator') and
                  has_value('binary_sensor.airflow_free_cooling_available') and
-                 has_value('binary_sensor.airflow_humidity_flush_needed') }}
+                 has_value('binary_sensor.airflow_humidity_flush_needed') and
+                 has_value('binary_sensor.airflow_moisture_ventilation_low_needed') }}
             timeout: "00:05:00"
             continue_on_timeout: false
+
+      # ===== SECTION 1: TEMPERATURE PROFILE (runs even during Away) =====
       - choose:
           # Block 1: Moisture protect OR active heating without free cooling → warm profile.
           # Case A: indoor dew below the min-humidity-derived dew (at target_temp) AND not cooling
@@ -990,83 +1048,117 @@ automation:
         # idempotent guard when humidity is below min and profile is already warm.
         default: []
 
-  # Reduces ventilation to low when humidity is high AND outdoor air is too humid to help.
-  # Restores auto mode when resolved. Auto mode is disabled first to prevent ComfoConnect
-  # from overriding the manual level.
-  - id: airflow_moisture_ventilation_preset
-    alias: "Airflow: Moisture Ventilation Preset"
-    description: >
-      Reduces ventilation to low when humidity exceeds max AND outdoor air is too humid to help.
-      Schmitt trigger: turns on at max, off at target. Restores auto mode when resolved.
-    mode: single
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
-        id: sensor_changed
-      - platform: state
-        entity_id: switch.comfoconnect_pro_away_function
-        to: "off"
-        id: away_ended
-      - platform: homeassistant
-        event: start
-        id: ha_start
-    condition:
-      - condition: state
-        entity_id: input_boolean.airflow_cooling_automatic_enabled
-        state: "on"
-      - condition: state
-        entity_id: switch.comfoconnect_pro_away_function
-        state: "off"
-    action:
+      # ===== SECTION 2: VENTILATION PRESET / AUTO_MODE (skipped during Away) =====
+      # Away owns the ventilation level, so we only touch preset/auto_mode when Away is off.
+      # Desired state is a priority function of the decision sensors:
+      #   low_needed        → auto_mode OFF, preset low
+      #   free OR flush     → auto_mode OFF, preset medium   (boost rides on top in hardware)
+      #   otherwise         → auto_mode ON  (hand control back to the ComfoConnect schedule)
+      # Each branch carries an idempotent "needs change" guard, so a notify fires only on a real
+      # transition. auto_mode is turned OFF before the preset is written so the schedule can't
+      # momentarily override the manual level. low and flush are already mutually exclusive in the
+      # sensors; the low-before-medium ordering is belt-and-suspenders.
       - if:
-          - condition: trigger
-            id: ha_start
+          - condition: state
+            entity_id: switch.comfoconnect_pro_away_function
+            state: "off"
         then:
-          - wait_template: >
-              {{ has_value('binary_sensor.airflow_moisture_ventilation_low_needed') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
-                state: "on"
-            sequence:
-              - action: switch.turn_off
-                target:
-                  entity_id: switch.comfoconnect_pro_auto_mode
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_ventilation_preset
-                data:
-                  option: "low"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Low Level"
-                  message: >
-                    Indoor dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C above target-dew
-                    {{ states('sensor.airflow_dew_point_target') }}°C
-                    (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
-                    too humid — ventilation set to Low.
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
-                state: "off"
-            sequence:
-              - action: switch.turn_on
-                target:
-                  entity_id: switch.comfoconnect_pro_auto_mode
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Auto Mode Restored"
-                  message: >
-                    Indoor humidity normalized or outdoor air now drier
-                    — ComfoConnect auto mode restored.
-        default:
-          - action: system_log.write
-            data:
-              message: "Airflow moisture preset: unexpected binary sensor state — no action"
-              level: debug
+          - choose:
+              # Low: reduce ventilation. Act unless we are already at (auto off, preset low).
+              - conditions:
+                  - condition: state
+                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    state: "on"
+                  - condition: template
+                    value_template: >
+                      {{ not (is_state('switch.comfoconnect_pro_auto_mode', 'off') and
+                              is_state('select.comfoconnect_pro_ventilation_preset', 'low')) }}
+                sequence:
+                  - action: switch.turn_off
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+                  - action: select.select_option
+                    target:
+                      entity_id: select.comfoconnect_pro_ventilation_preset
+                    data:
+                      option: "low"
+                  - action: notify.mobile_app_greywinds_iphone
+                    data:
+                      title: "Ventilation: Low Level"
+                      message: >
+                        Indoor dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C above target-dew
+                        {{ states('sensor.airflow_dew_point_target') }}°C
+                        (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
+                        too humid — ventilation set to Low.
+
+              # Medium: free cooling or humidity flush wants more air exchange. Act unless we are
+              # already at (auto off, preset medium). A running boost overrides the level in hardware
+              # anyway; medium is the correct fallback for when the boost expires while flush continues.
+              - conditions:
+                  - condition: state
+                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    state: "off"
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: binary_sensor.airflow_free_cooling_available
+                        state: "on"
+                      - condition: state
+                        entity_id: binary_sensor.airflow_humidity_flush_needed
+                        state: "on"
+                  - condition: template
+                    value_template: >
+                      {{ not (is_state('switch.comfoconnect_pro_auto_mode', 'off') and
+                              is_state('select.comfoconnect_pro_ventilation_preset', 'medium')) }}
+                sequence:
+                  - action: switch.turn_off
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+                  - action: select.select_option
+                    target:
+                      entity_id: select.comfoconnect_pro_ventilation_preset
+                    data:
+                      option: "medium"
+                  - action: notify.mobile_app_greywinds_iphone
+                    data:
+                      title: "Ventilation: Medium Preset"
+                      message: >
+                        {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
+                          Humidity flush active, auto schedule at Low
+                          — preset bumped to Medium for faster moisture exchange.
+                        {% else %}
+                          Free cooling available, auto schedule at Low
+                          — preset bumped to Medium for faster air exchange.
+                        {% endif %}
+
+              # Restore: no owner active (low off, free off, flush off). Hand control back to the
+              # ComfoConnect schedule, but only if WE had taken it (auto_mode currently off).
+              - conditions:
+                  - condition: state
+                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    state: "off"
+                  - condition: state
+                    entity_id: binary_sensor.airflow_free_cooling_available
+                    state: "off"
+                  - condition: state
+                    entity_id: binary_sensor.airflow_humidity_flush_needed
+                    state: "off"
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_auto_mode
+                    state: "off"
+                sequence:
+                  - action: switch.turn_on
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+                  - action: notify.mobile_app_greywinds_iphone
+                    data:
+                      title: "Ventilation: Auto Mode Restored"
+                      message: >
+                        Indoor humidity normalized, free cooling and humidity flush no longer needed
+                        — ComfoConnect auto mode restored.
+
+            # No branch matched: desired state already satisfied → no-op (avoids log spam).
+            default: []
 
   # Manages boost when outdoor air is dry enough to flush indoor humidity.
   # Trigger IDs separate the three entry points so boost_expired can only reach Branch 1
@@ -1170,116 +1262,6 @@ automation:
               message: "Airflow drying boost: unexpected trigger/state combination — no action"
               level: warning
 
-  # Bumps ventilation from Low to Medium when free cooling is available but the ComfoConnect
-  # auto schedule is at Low. Auto mode is turned off (same pattern as Moisture Protect) so the
-  # ComfoConnect does not immediately override the manually-set Medium preset.
-  - id: airflow_medium_ventilation_preset
-    alias: "Airflow: Medium Ventilation Preset"
-    description: >
-      Bumps preset to Medium when free cooling is available and ComfoConnect auto schedule is at
-      Low — covering both schedule-blocked humidity drying and temperature free-cooling hours.
-      Restores auto mode when free cooling ends.
-    mode: single
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.airflow_free_cooling_available
-        id: free_cooling_changed
-      - platform: state
-        entity_id: switch.comfoconnect_pro_auto_mode
-        to: "on"
-        id: auto_mode_on
-      - platform: state
-        entity_id: select.comfoconnect_pro_ventilation_preset
-        to: "low"
-        id: preset_set_low
-      - platform: state
-        entity_id: switch.comfoconnect_pro_boost
-        id: boost_changed
-      - platform: state
-        entity_id: switch.comfoconnect_pro_away_function
-        to: "off"
-        id: away_ended
-      - platform: homeassistant
-        event: start
-        id: ha_start
-    condition:
-      - condition: state
-        entity_id: input_boolean.airflow_cooling_automatic_enabled
-        state: "on"
-      - condition: state
-        entity_id: switch.comfoconnect_pro_away_function
-        state: "off"
-      - condition: state
-        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
-        state: "off"
-    action:
-      - if:
-          - condition: trigger
-            id: ha_start
-        then:
-          - wait_template: >
-              {{ has_value('binary_sensor.airflow_free_cooling_available') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
-      - choose:
-          # Enable medium: free cooling available, auto schedule at low, no boost running
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "on"
-              - condition: state
-                entity_id: switch.comfoconnect_pro_auto_mode
-                state: "on"
-              - condition: state
-                entity_id: select.comfoconnect_pro_ventilation_preset
-                state: "low"
-              - condition: state
-                entity_id: switch.comfoconnect_pro_boost
-                state: "off"
-            sequence:
-              - action: switch.turn_off
-                target:
-                  entity_id: switch.comfoconnect_pro_auto_mode
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_ventilation_preset
-                data:
-                  option: "medium"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Medium Preset"
-                  message: >
-                    Free cooling available, auto schedule at Low
-                    — preset bumped to Medium for faster air exchange.
-
-          # Restore auto mode: free cooling gone and we set medium (not Moisture Protect)
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "off"
-              - condition: state
-                entity_id: switch.comfoconnect_pro_auto_mode
-                state: "off"
-              - condition: state
-                entity_id: select.comfoconnect_pro_ventilation_preset
-                state: "medium"
-            sequence:
-              - action: switch.turn_on
-                target:
-                  entity_id: switch.comfoconnect_pro_auto_mode
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Auto Mode Restored"
-                  message: >
-                    Free cooling no longer available
-                    — ComfoConnect auto mode restored from Medium preset.
-
-        default:
-          - action: system_log.write
-            data:
-              message: "Airflow medium preset: no matching condition — no action"
-              level: debug
-
 # --- GROUP ---
 # All entities belonging to the airflow feature
 group:
@@ -1291,6 +1273,7 @@ group:
       - sensor.airflow_avg_indoor_temp_5min
       - sensor.airflow_outdoor_dew_5min
       - sensor.airflow_outdoor_temp_5min
+      - sensor.airflow_wheatherstation_outdoor_temp_5min
       - sensor.airflow_outdoor_air_humidity_5min
       - sensor.airflow_supply_air_temp_5min
       - sensor.airflow_supply_air_humidity_5min
@@ -1333,7 +1316,5 @@ group:
       - switch.comfoconnect_pro_boost
       - number.comfoconnect_pro_boost_time
       # Automations
-      - automation.airflow_cooling_set_temperature_profile
-      - automation.airflow_moisture_ventilation_preset
+      - automation.airflow_ventilation_controller
       - automation.airflow_humidity_drying_boost
-      - automation.airflow_medium_ventilation_preset

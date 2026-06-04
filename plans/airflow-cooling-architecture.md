@@ -38,11 +38,13 @@ computed at the **target temperature** via the Magnus formula.
 | `sensor.airflow_avg_indoor_humidity_5min` | indoor RH aggregate | indoor RH (display) |
 | `sensor.airflow_outdoor_dew_5min` | ComfoConnect intake | **outdoor moisture** |
 | `sensor.airflow_outdoor_temp_5min` | ComfoConnect intake | **ComfoConnect outdoor temp** |
-| `sensor.wheatherstation_outdoor_temperature` | weather station | **real outdoor temp** |
+| `sensor.airflow_wheatherstation_outdoor_temp_5min` | weather station (filtered) | **real outdoor temp, smoothed** |
 | supply/extract air temp+humidity | ComfoConnect | bypass estimation |
 
 > **Two outdoor temperatures:** the ComfoConnect intake temp (`airflow_outdoor_temp_5min`) gates
-> the *cool-profile* logic; the real weather-station temp gates only the *noisy boost*.
+> the *cool-profile* logic; the smoothed weather-station temp (`airflow_wheatherstation_outdoor_temp_5min`,
+> same 5-min filter chain) gates only the *boost*. Smoothing replaces the boost sensor's old
+> `delay_on` debounce — noise spikes can no longer falsely start/stop a boost.
 
 ### Derived thresholds — dew point at target temp (Magnus)
 
@@ -52,14 +54,19 @@ computed at the **target temperature** via the Magnus formula.
 | `sensor.airflow_dew_point_target` | `airflow_target_humidity` | comfort target / free-cooling ceiling |
 | `sensor.airflow_dew_point_max` | `airflow_max_humidity` | moisture-problem ceiling |
 
-### Decision binary sensors (each debounced `delay_on`/`delay_off` = 10 min)
+### Decision binary sensors
 
-| Entity | Fires when |
-|---|---|
-| `binary_sensor.airflow_free_cooling_available` | outdoor cool **and** dry enough to free-cool |
-| `binary_sensor.airflow_humidity_flush_needed` | indoor too humid **and** outdoor drier (cool-profile flush) |
-| `binary_sensor.airflow_moisture_ventilation_low_needed` | outdoor too humid to import |
-| `binary_sensor.airflow_humidity_drying_needed` | flush **and** weather-gated **and** scheduled (boost) |
+| Entity | Fires when | Debounce |
+|---|---|---|
+| `binary_sensor.airflow_free_cooling_available` | outdoor cool **and** dry enough to free-cool | `delay_on`/`delay_off` 10 min |
+| `binary_sensor.airflow_humidity_flush_needed` | indoor too humid **and** outdoor drier (cool-profile flush) | `delay_on`/`delay_off` 10 min |
+| `binary_sensor.airflow_moisture_ventilation_low_needed` | outdoor too humid to import | `delay_on`/`delay_off` 10 min |
+| `binary_sensor.airflow_humidity_drying_needed` | flush **and** weather-gated (smoothed) **and** scheduled (boost) | `delay_off` 10 min only |
+
+> **`drying_needed` has no `delay_on`.** Its temp input is now the smoothed
+> `airflow_wheatherstation_outdoor_temp_5min`, so the 5-min filter absorbs noise that `delay_on`
+> used to guard against. Dropping `delay_on` cuts boost start latency by 10 min (was flush 10 +
+> drying 10 = 20 min; now ~10 min). `delay_off` kept to avoid premature boost stop.
 
 ### Actuators (ComfoConnect)
 
@@ -89,6 +96,7 @@ flowchart LR
         F1["outdoor_temp_5min"]
         F2["outdoor_dew_5min"]
         F3["indoor dew / temp / RH 5min"]
+        F4["wheatherstation_outdoor_temp_5min"]
     end
 
     subgraph HELP["input_number helpers"]
@@ -111,10 +119,8 @@ flowchart LR
     end
 
     subgraph AUT["automations"]
-        A1["set_temperature_profile"]
-        A2["moisture_ventilation_preset"]
-        A3["humidity_drying_boost"]
-        A4["medium_ventilation_preset"]
+        A1["ventilation_controller<br/>(profile + preset + auto_mode)"]
+        A3["humidity_drying_boost<br/>(boost only)"]
     end
 
     subgraph ACT["ComfoConnect actuators"]
@@ -129,10 +135,11 @@ flowchart LR
     OAT --> F1
     OAD --> F2
     IND --> F3
+    WS --> F4
     HELP --> THR
     FILT --> DEC
     THR --> DEC
-    WS --> DR
+    F4 --> DR
     SEASON --> A1
     FL --> DR
     LO --> DR
@@ -142,9 +149,8 @@ flowchart LR
     SEASON --> FL
     DEC --> AUT
     A1 --> P
+    A1 --> VP
     A3 --> BO
-    A2 --> VP
-    A4 --> VP
     P --> CLIM["climate.airflow_climate<br/>hvac_action"]
     BO --> CLIM
     CLIM --> CS["sensor.airflow_cooling_state"]
@@ -227,21 +233,25 @@ cooling: outdoor air is too humid to bring in.
 ```
 flush_needed
 AND NOT low_active
-AND wheatherstation_outdoor_temperature < target_temp   # REAL outdoor, not intake
-AND in_schedule                                          # workday / non-workday window
+AND airflow_wheatherstation_outdoor_temp_5min < target_temp  # smoothed REAL outdoor, not intake
+AND in_schedule                                              # workday / non-workday window
 ```
 
 The cool-profile flush deliberately **ignores** the schedule and weather station; only the boost
-is schedule- and weather-gated.
+is schedule- and weather-gated. The temp input is the **smoothed** weather-station sensor
+(`| float(99)` fail-safe kept: unavailable → 99 °C → gate fails → no boost). `delay_on` removed;
+`delay_off` 10 min kept (see §2 decision-sensor note).
 
 ---
 
 ## 6. Temperature profile selection — the core decision
 
-`automation.airflow_cooling_set_temperature_profile` (mode: restart). Triggers: season change,
-`free_cooling_available`, `humidity_flush_needed`, indoor-humidity change, HA start. Gated by
-`input_boolean.airflow_cooling_automatic_enabled`. It is a `choose:` — **first matching block wins**,
-and each block is idempotent (skips if the profile is already correct).
+Profile is **Section 1** of the unified `automation.airflow_ventilation_controller` (mode: queued,
+see §7). Triggers: season change, `free_cooling_available`, `humidity_flush_needed`,
+`moisture_ventilation_low_needed`, indoor-humidity change, HA start, plus actuator re-assert
+triggers. Gated by `input_boolean.airflow_cooling_automatic_enabled`. The profile `choose:` runs
+**regardless of Away** — **first matching block wins**, each block idempotent (skips if profile
+already correct).
 
 ```mermaid
 flowchart TD
@@ -292,33 +302,57 @@ stateDiagram-v2
 
 ## 7. Actuator automations
 
-Besides the profile, three automations drive ventilation level. All are gated by
-`automatic_enabled` and `away_function = off`.
+Two automations drive the actuators. The **controller** owns profile + preset + auto_mode
+deterministically; **boost** is isolated with its own hardware-timer mechanics.
+
+### 7.1 `airflow_ventilation_controller` (mode: queued)
+
+One automation computes the *complete desired* ComfoConnect state from the decision sensors and
+applies it **idempotently** — no two automations fight over preset/auto_mode. `queued` (not
+restart) so a rapid second trigger never aborts a partial auto-off→preset apply.
+
+Gated at automation level by `automatic_enabled == on`. Away handled **inside**: profile runs
+always, preset/auto_mode only when `away == off`.
 
 ```mermaid
 flowchart TD
-    subgraph BOOST["humidity_drying_boost (single)"]
-        DRon{"drying_needed ON<br/>and boost OFF?"} -- yes --> SB["boost_time = 30 min<br/>boost = ON"]
-        DRoff{"drying_needed OFF?"} -- yes --> CB["boost = OFF"]
-        EXP["boost timer expired<br/>while still needed"] --> SB
-    end
-
-    subgraph LOW["moisture_ventilation_preset (single)"]
-        LOon{"low_needed ON?"} -- yes --> SL["auto_mode OFF<br/>preset = low"]
-        LOoff{"low_needed OFF?"} -- yes --> RA["auto_mode ON (restore)"]
-    end
-
-    subgraph MED["medium_ventilation_preset (single)"]
-        MEon{"free_cooling ON<br/>auto schedule at low<br/>boost OFF?"} -- yes --> SM["auto_mode OFF<br/>preset = medium"]
-        MEoff{"free_cooling OFF<br/>and we set medium?"} -- yes --> RM["auto_mode ON (restore)"]
-    end
+    T(["trigger"]) --> AUTO{"automatic enabled?"}
+    AUTO -- no --> NOOP["no action"]
+    AUTO -- yes --> S1["SECTION 1 — PROFILE choose<br/>(Blocks 1/2/3, runs even during Away)"]
+    S1 --> AWAY{"away == off?"}
+    AWAY -- no --> END["done (profile only)"]
+    AWAY -- yes --> S2["SECTION 2 — PRESET / auto_mode choose"]
+    S2 --> LO{"low ON?"}
+    LO -- yes --> SL["auto OFF, preset low<br/>(guard: skip if already)"]
+    LO -- no --> FF{"free OR flush ON?"}
+    FF -- yes --> SM["auto OFF, preset medium<br/>(guard: skip if already)"]
+    FF -- no --> RST{"auto == off?"}
+    RST -- yes --> RA["auto ON (restore)"]
+    RST -- no --> NO2["no-op (already correct)"]
 ```
 
-- **Boost** is the high-volume flush; it re-arms itself if the ComfoConnect's 30-min hardware
-  timer expires while drying is still needed.
-- **Low preset** reduces ventilation when outdoor air is too humid to help.
-- **Medium preset** bumps a low auto-schedule up to medium while free cooling is available
-  (covers both temperature free cooling and schedule-blocked drying hours).
+Preset priority (first match wins): **low → (free or flush) medium → restore auto on**. Service
+order in low/medium: **auto_mode off first, then preset** (schedule can't override the manual
+preset mid-apply).
+
+Preset is computed **independent of `drying`/boost**. Since `drying ⊂ flush`, whenever a boost
+runs the preset rule already yields medium, set *before* the boost starts; idempotent apply means
+no preset write disturbs the running boost, and medium fallback is already in place when it expires.
+That's why `drying_needed` is **not** a controller trigger.
+
+### 7.2 `airflow_humidity_drying_boost` (mode: single)
+
+```mermaid
+flowchart TD
+    DRon{"drying_needed ON<br/>and boost OFF?"} -- yes --> SB["boost_time = 30 min<br/>boost = ON"]
+    DRoff{"drying_needed OFF?"} -- yes --> CB["boost = OFF"]
+    EXP["boost timer expired<br/>while still needed"] --> SB
+```
+
+Boost is the high-volume flush; re-arms itself if the ComfoConnect 30-min hardware timer expires
+while drying still needed. Gated `automatic_enabled == on` + `away == off` — identical guards to
+the controller, so combined state stays consistent. Boost never touches profile/preset/auto_mode;
+controller never touches boost.
 
 ---
 
@@ -372,7 +406,9 @@ flushing (`profile == cool AND flush_needed`); `cooling` for plain cool profile;
 
 | Mechanism | Where | Effect |
 |---|---|---|
-| 10-min `delay_on`/`delay_off` | all four decision sensors | caps decision rate at ~10 min |
+| 10-min `delay_on`/`delay_off` | free/flush/low sensors (`drying`: `delay_off` only) | caps decision rate at ~10 min |
+| 5-min filter on weather temp | `wheatherstation_outdoor_temp_5min` | replaces boost `delay_on`; absorbs noise spikes |
+| idempotent unified controller | preset + auto_mode | single owner, no cross-automation hand-off race |
 | 0.3 °C dew hysteresis (`this.state`) | flush sensor branches | damps the flush feedback loop |
 | 0.5 °C indoor-temp Schmitt | free cooling + flush temp gate | cooling can't disable its own trigger |
 | dew Schmitt (target↔max) | low-vent sensor | stable humid-import boundary |
@@ -380,3 +416,123 @@ flushing (`profile == cool AND flush_needed`); `cooling` for plain cool profile;
 | wide-band 48h-mean state machine | season indicator | season changes over days, not hours |
 | idempotent `choose` + dead-band | profile automation | no redundant profile writes |
 | `flush OFF` guard on Block 1B | profile automation | deterministic heating-season cool-vs-warm |
+
+---
+
+## 11. Complete state transition reference
+
+Every actuator output (profile · preset/auto_mode · boost) and the derived `cooling_state`,
+with the exact input conditions that produce each. Outputs decompose into four independent
+sub-functions (§11.1–11.4); §11.5 is the master matrix of realistic end-to-end combinations.
+
+**Legend.** `auto` = `automatic_enabled` · `away` = `away_function` · season ∈
+{`HEAT`=active_heating, `NEUT`=neutral, `COOL`=passive/active_cooling} · `free`/`flush`/`low`/`dry`
+= the four decision binary_sensors (✓ on / – off) · dew band of `indoor_dew` vs
+`dew_min`/`dew_max`: `DRY`(<min) · `BAND`([min,max]) · `HUM`(>max). `keep` = no profile block
+matches → previous profile retained. `(untouched)` = Section 2 skipped (Away on).
+
+**Mutual-exclusivity invariants** (enforced in the sensors — impossible combos omitted):
+`low ✓ ⇒ flush – and dry –` · `dry ⊂ flush ⇒ dry ✓ ⇒ flush ✓` · `dry ✓ ⇒ boost on` (only when
+auto on + away off).
+
+### 11.1 `hvac_action` (template climate) — first match wins
+
+| # | profile | free | flush | boost | → action |
+|---|---------|------|-------|-------|----------|
+| 1 | any | ✓ | * | on | **drying** |
+| 2 | cool | * | ✓ | off | **drying** |
+| 3 | cool | – | – | off | **cooling** |
+| 4 | warm | * | * | (not free+boost) | **heating** |
+| 5 | comfort | * | * | (not free+boost) | **fan** |
+| 6 | unknown/none | – | – | off | **idle** |
+
+> Row 1 fires regardless of profile: `free + boost` ⇒ drying even under warm/comfort (rare edge).
+
+### 11.2 `cooling_state` (derived view) — priority ladder, first match wins
+
+| Priority | Condition | → state |
+|---|---|---|
+| 0 | `auto` off | **off** |
+| 1 | `boost` on AND action=`drying` | **moisture_flush_boost** |
+| 2 | action=`drying` | **moisture_flush_cooling** |
+| 3 | `low` on | **moisture_protection** |
+| 4 | action=`cooling` AND `free` on | **free_cooling** |
+| 5 | action=`cooling` | **cooling** |
+| 6 | action=`heating` AND `indoor_dew < dew_min` | **moisture_retention** |
+| 7 | action=`heating` | **heating** |
+| 8 | else (action=`fan`/`idle`) | **comfort** |
+
+### 11.3 Profile (Section 1 `choose`) — first matching block wins, else `keep`
+
+| Block | → profile | Conditions (all must hold) |
+|---|---|---|
+| 1A | **warm** | `indoor_dew < dew_min − 0.1` AND season ≠ COOL |
+| 1B | **warm** | season = HEAT AND `free` – AND `flush` – |
+| 2A | **cool** | `free` ✓ AND season = COOL |
+| 2B | **cool** | `flush` ✓ (any season) |
+| 3  | **comfort** | (season = NEUT OR (season = COOL AND `free` –)) AND `dew_min ≤ indoor_dew ≤ dew_max` |
+| –  | **keep** | none of the above (recovery zone / already-correct / edge) |
+
+> Runs even during Away. Each block is idempotent (skips the write if profile already correct).
+> Precedence: 1A→1B→2A→2B→3. Heating-season moisture problem: 1B yields (its `flush –` guard) so
+> 2B (cool flush) wins over warm.
+
+### 11.4 Preset / auto_mode (Section 2 `choose`) — only when `away` off
+
+| Branch | → output | Conditions |
+|---|---|---|
+| low | auto **off** + preset **low** | `low` ✓ |
+| medium | auto **off** + preset **medium** | `low` – AND (`free` ✓ OR `flush` ✓) |
+| restore | auto **on** | `low` – AND `free` – AND `flush` – (acts only if auto currently off) |
+| no-op | (unchanged) | desired already satisfied |
+
+When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
+
+### 11.4b Boost (`airflow_humidity_drying_boost`) — needs `auto` on AND `away` off
+
+| `drying` | boost switch | → action |
+|---|---|---|
+| ✓ | off | set boost_time 30 min, boost **on** |
+| ✓ | on (timer expired) | re-arm boost **on** |
+| – | on | boost **off** |
+| – | off | no-op |
+
+`drying = flush ✓ AND wheatherstation_temp_5min < target AND in_schedule`. So boost ⊂ flush ⊂ cool profile.
+
+### 11.5 Master scenario matrix (auto on, away off unless noted)
+
+| # | season | free | flush | low | dry | dew | → Profile | Preset/auto | Boost | action | **cooling_state** |
+|---|--------|------|-------|-----|-----|-----|-----------|-------------|-------|--------|-------------------|
+| H1 | HEAT | – | – | – | – | DRY | warm (1B) | auto on | off | heating | **moisture_retention** |
+| H2 | HEAT | – | – | – | – | BAND | warm (1B) | auto on | off | heating | **heating** |
+| H3 | HEAT | – | – | ✓ | – | HUM | warm (1B) | low | off | heating | **moisture_protection** |
+| H4 | HEAT | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| H5 | HEAT | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| H6 | HEAT | ✓ | – | – | – | BAND | keep¹ | medium | off | per-keep | per-keep |
+| N1 | NEUT | – | – | – | – | DRY | warm (1A) | auto on | off | heating | **moisture_retention** |
+| N2 | NEUT | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
+| N3 | NEUT | – | – | ✓ | – | HUM | keep¹ | low | off | per-keep | **moisture_protection** |
+| N4 | NEUT | ✓ | – | – | – | BAND | comfort (3) | medium | off | fan | **comfort**² |
+| N5 | NEUT | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| N6 | NEUT | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| C1 | COOL | ✓ | – | – | – | BAND | cool (2A) | medium | off | cooling | **free_cooling** |
+| C2 | COOL | ✓ | ✓ | – | – | HUM | cool (2A/2B) | medium | off | drying | **moisture_flush_cooling** |
+| C3 | COOL | ✓ | ✓ | – | ✓ | HUM | cool | medium | on | drying | **moisture_flush_boost** |
+| C4 | COOL | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| C5 | COOL | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| C6 | COOL | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
+| C7 | COOL | – | – | – | – | DRY | keep¹ | auto on | off | per-keep | per-keep |
+| C8 | COOL | – | – | ✓ | – | HUM | keep¹ | low | off | per-keep | **moisture_protection** |
+| S1 | any | * | * | * | * | * | (controller idle, auto off) | (idle) | off | per-actual | **off** |
+| S2 | any | – | ✓ | – | n/a³ | HUM | cool (2B) | (untouched) | off³ | drying | **moisture_flush_cooling** |
+
+**Notes:**
+1. `keep` — no profile block matches; previous profile is retained. State/action follow whatever
+   profile persists (`per-keep`). Cases: HEAT+free (H6, neither 1B nor 2A apply); NEUT/COOL+HUM with
+   no flush (N3, C8 — band guard fails); COOL+DRY (C7 — 1A excluded in cooling season, band fails).
+2. **N4** — free cooling is *available* in NEUT but profile stays comfort (2A needs cooling season),
+   so action=`fan` ⇒ state `comfort` even though preset is bumped to medium. Free air exchange
+   happens at the fan level, not via the cool profile.
+3. **S2 (Away on)** — Section 1 still sets the profile; Section 2 is skipped so preset/auto_mode are
+   left untouched; the boost automation's `away off` condition fails so boost is never started
+   (`dry` is moot). State still derives from live actuators.
