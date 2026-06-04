@@ -416,3 +416,123 @@ flushing (`profile == cool AND flush_needed`); `cooling` for plain cool profile;
 | wide-band 48h-mean state machine | season indicator | season changes over days, not hours |
 | idempotent `choose` + dead-band | profile automation | no redundant profile writes |
 | `flush OFF` guard on Block 1B | profile automation | deterministic heating-season cool-vs-warm |
+
+---
+
+## 11. Complete state transition reference
+
+Every actuator output (profile · preset/auto_mode · boost) and the derived `cooling_state`,
+with the exact input conditions that produce each. Outputs decompose into four independent
+sub-functions (§11.1–11.4); §11.5 is the master matrix of realistic end-to-end combinations.
+
+**Legend.** `auto` = `automatic_enabled` · `away` = `away_function` · season ∈
+{`HEAT`=active_heating, `NEUT`=neutral, `COOL`=passive/active_cooling} · `free`/`flush`/`low`/`dry`
+= the four decision binary_sensors (✓ on / – off) · dew band of `indoor_dew` vs
+`dew_min`/`dew_max`: `DRY`(<min) · `BAND`([min,max]) · `HUM`(>max). `keep` = no profile block
+matches → previous profile retained. `(untouched)` = Section 2 skipped (Away on).
+
+**Mutual-exclusivity invariants** (enforced in the sensors — impossible combos omitted):
+`low ✓ ⇒ flush – and dry –` · `dry ⊂ flush ⇒ dry ✓ ⇒ flush ✓` · `dry ✓ ⇒ boost on` (only when
+auto on + away off).
+
+### 11.1 `hvac_action` (template climate) — first match wins
+
+| # | profile | free | flush | boost | → action |
+|---|---------|------|-------|-------|----------|
+| 1 | any | ✓ | * | on | **drying** |
+| 2 | cool | * | ✓ | off | **drying** |
+| 3 | cool | – | – | off | **cooling** |
+| 4 | warm | * | * | (not free+boost) | **heating** |
+| 5 | comfort | * | * | (not free+boost) | **fan** |
+| 6 | unknown/none | – | – | off | **idle** |
+
+> Row 1 fires regardless of profile: `free + boost` ⇒ drying even under warm/comfort (rare edge).
+
+### 11.2 `cooling_state` (derived view) — priority ladder, first match wins
+
+| Priority | Condition | → state |
+|---|---|---|
+| 0 | `auto` off | **off** |
+| 1 | `boost` on AND action=`drying` | **moisture_flush_boost** |
+| 2 | action=`drying` | **moisture_flush_cooling** |
+| 3 | `low` on | **moisture_protection** |
+| 4 | action=`cooling` AND `free` on | **free_cooling** |
+| 5 | action=`cooling` | **cooling** |
+| 6 | action=`heating` AND `indoor_dew < dew_min` | **moisture_retention** |
+| 7 | action=`heating` | **heating** |
+| 8 | else (action=`fan`/`idle`) | **comfort** |
+
+### 11.3 Profile (Section 1 `choose`) — first matching block wins, else `keep`
+
+| Block | → profile | Conditions (all must hold) |
+|---|---|---|
+| 1A | **warm** | `indoor_dew < dew_min − 0.1` AND season ≠ COOL |
+| 1B | **warm** | season = HEAT AND `free` – AND `flush` – |
+| 2A | **cool** | `free` ✓ AND season = COOL |
+| 2B | **cool** | `flush` ✓ (any season) |
+| 3  | **comfort** | (season = NEUT OR (season = COOL AND `free` –)) AND `dew_min ≤ indoor_dew ≤ dew_max` |
+| –  | **keep** | none of the above (recovery zone / already-correct / edge) |
+
+> Runs even during Away. Each block is idempotent (skips the write if profile already correct).
+> Precedence: 1A→1B→2A→2B→3. Heating-season moisture problem: 1B yields (its `flush –` guard) so
+> 2B (cool flush) wins over warm.
+
+### 11.4 Preset / auto_mode (Section 2 `choose`) — only when `away` off
+
+| Branch | → output | Conditions |
+|---|---|---|
+| low | auto **off** + preset **low** | `low` ✓ |
+| medium | auto **off** + preset **medium** | `low` – AND (`free` ✓ OR `flush` ✓) |
+| restore | auto **on** | `low` – AND `free` – AND `flush` – (acts only if auto currently off) |
+| no-op | (unchanged) | desired already satisfied |
+
+When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
+
+### 11.4b Boost (`airflow_humidity_drying_boost`) — needs `auto` on AND `away` off
+
+| `drying` | boost switch | → action |
+|---|---|---|
+| ✓ | off | set boost_time 30 min, boost **on** |
+| ✓ | on (timer expired) | re-arm boost **on** |
+| – | on | boost **off** |
+| – | off | no-op |
+
+`drying = flush ✓ AND wheatherstation_temp_5min < target AND in_schedule`. So boost ⊂ flush ⊂ cool profile.
+
+### 11.5 Master scenario matrix (auto on, away off unless noted)
+
+| # | season | free | flush | low | dry | dew | → Profile | Preset/auto | Boost | action | **cooling_state** |
+|---|--------|------|-------|-----|-----|-----|-----------|-------------|-------|--------|-------------------|
+| H1 | HEAT | – | – | – | – | DRY | warm (1B) | auto on | off | heating | **moisture_retention** |
+| H2 | HEAT | – | – | – | – | BAND | warm (1B) | auto on | off | heating | **heating** |
+| H3 | HEAT | – | – | ✓ | – | HUM | warm (1B) | low | off | heating | **moisture_protection** |
+| H4 | HEAT | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| H5 | HEAT | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| H6 | HEAT | ✓ | – | – | – | BAND | keep¹ | medium | off | per-keep | per-keep |
+| N1 | NEUT | – | – | – | – | DRY | warm (1A) | auto on | off | heating | **moisture_retention** |
+| N2 | NEUT | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
+| N3 | NEUT | – | – | ✓ | – | HUM | keep¹ | low | off | per-keep | **moisture_protection** |
+| N4 | NEUT | ✓ | – | – | – | BAND | comfort (3) | medium | off | fan | **comfort**² |
+| N5 | NEUT | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| N6 | NEUT | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| C1 | COOL | ✓ | – | – | – | BAND | cool (2A) | medium | off | cooling | **free_cooling** |
+| C2 | COOL | ✓ | ✓ | – | – | HUM | cool (2A/2B) | medium | off | drying | **moisture_flush_cooling** |
+| C3 | COOL | ✓ | ✓ | – | ✓ | HUM | cool | medium | on | drying | **moisture_flush_boost** |
+| C4 | COOL | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
+| C5 | COOL | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
+| C6 | COOL | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
+| C7 | COOL | – | – | – | – | DRY | keep¹ | auto on | off | per-keep | per-keep |
+| C8 | COOL | – | – | ✓ | – | HUM | keep¹ | low | off | per-keep | **moisture_protection** |
+| S1 | any | * | * | * | * | * | (controller idle, auto off) | (idle) | off | per-actual | **off** |
+| S2 | any | – | ✓ | – | n/a³ | HUM | cool (2B) | (untouched) | off³ | drying | **moisture_flush_cooling** |
+
+**Notes:**
+1. `keep` — no profile block matches; previous profile is retained. State/action follow whatever
+   profile persists (`per-keep`). Cases: HEAT+free (H6, neither 1B nor 2A apply); NEUT/COOL+HUM with
+   no flush (N3, C8 — band guard fails); COOL+DRY (C7 — 1A excluded in cooling season, band fails).
+2. **N4** — free cooling is *available* in NEUT but profile stays comfort (2A needs cooling season),
+   so action=`fan` ⇒ state `comfort` even though preset is bumped to medium. Free air exchange
+   happens at the fan level, not via the cool profile.
+3. **S2 (Away on)** — Section 1 still sets the profile; Section 2 is skipped so preset/auto_mode are
+   left untouched; the boost automation's `away off` condition fails so boost is never started
+   (`dry` is moot). State still derives from live actuators.
