@@ -1,34 +1,53 @@
 """Airflow cooling automation tests.
 
-Tests verify that the airflow_cooling_set_temperature_profile automation runs without
-trace errors and, where possible, that observable state matches expectations.
+The three former automations (airflow_cooling_set_temperature_profile,
+airflow_moisture_ventilation_preset, airflow_medium_ventilation_preset) were unified into
+a single deterministic controller, automation.airflow_ventilation_controller. On every
+relevant input change it recomputes the COMPLETE desired ComfoConnect state — temperature
+profile (Section 1, runs even during Away) plus ventilation preset / auto_mode (Section 2,
+skipped while Away) — and applies it idempotently, so no two automations fight. The boost
+(airflow_humidity_drying_boost) stays a separate automation.
 
-Known CI limitation: select.comfoconnect_pro_temperature_profile is a bare REST stub —
-the ComfoConnect integration is absent in CI so select.select_option service calls are
-silently ignored by HA's service registry. Only the trace-error absence (no exception
-from trigger) and idempotent "comfort" assertions are possible for most scenarios.
+Tests verify the controller runs without trace errors and, where possible, that observable
+state matches expectations.
+
+Known CI limitation: select.comfoconnect_pro_temperature_profile,
+select.comfoconnect_pro_ventilation_preset and switch.comfoconnect_pro_auto_mode are bare
+REST stubs — the ComfoConnect integration is absent in CI, so select.select_option and
+switch.turn_on/off service calls are silently ignored by HA's service registry. Only
+trace-error absence (no exception from trigger) and idempotent no-op assertions (where the
+seeded state already equals the desired state, or a guard/gate suppresses the branch) are
+possible for the active-write scenarios. Note: triggering with skip_condition=True bypasses
+the automation-level "automatic enabled" gate, but NOT the in-action `if away == off` guard
+or the per-branch idempotency templates — so Away gating and branch selection ARE testable.
 """
 
 import requests
 
 from ha_integration_test_harness import HomeAssistant
 
-_AIRFLOW_AUTO = "automation.airflow_cooling_set_temperature_profile"
-_MOISTURE_PRESET_AUTO = "automation.airflow_moisture_ventilation_preset"
+# Unified controller — single source of truth for profile + preset + auto_mode.
+_CONTROLLER = "automation.airflow_ventilation_controller"
 _DRYING_BOOST_AUTO = "automation.airflow_humidity_drying_boost"
-_MEDIUM_PRESET_AUTO = "automation.airflow_medium_ventilation_preset"
+
+# Back-compat aliases: the former profile / moisture-preset / medium-preset automations all
+# collapsed into _CONTROLLER. Triggering the controller runs both sections in one pass.
+_AIRFLOW_AUTO = _CONTROLLER
+_MOISTURE_PRESET_AUTO = _CONTROLLER
+_MEDIUM_PRESET_AUTO = _CONTROLLER
 
 
 def _trigger(home_assistant: HomeAssistant) -> None:
     home_assistant.call_action("automation", "trigger", {
-        "entity_id": _AIRFLOW_AUTO,
+        "entity_id": _CONTROLLER,
         "skip_condition": True,
     })
 
 
 def _trigger_moisture(home_assistant: HomeAssistant) -> None:
+    # Section 2 (preset/auto_mode) now lives in the unified controller.
     home_assistant.call_action("automation", "trigger", {
-        "entity_id": _MOISTURE_PRESET_AUTO,
+        "entity_id": _CONTROLLER,
         "skip_condition": True,
     })
 
@@ -217,9 +236,10 @@ def test_verification_step4_high_humidity_outdoor_humid_preset_fires(home_assist
 
 
 def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistant: HomeAssistant) -> None:
-    """Verification step 5: humidity drops below target → binary_sensor turns off → auto mode restored.
+    """Verification step 5: humidity drops below target → no owner active → auto mode restored.
 
-    binary_sensor seeded OFF to bypass the 10-min delay_off. Preset automation restores auto mode.
+    Restore branch needs every owner clear (low off, free off, flush off) AND auto_mode currently
+    off (i.e. WE had taken control). Seed auto_mode off so the branch actually fires.
     CI: switch.turn_on silently ignored — assert trace-error absence only.
     """
     home_assistant.call_action("input_boolean", "turn_on",
@@ -227,8 +247,10 @@ def test_verification_step5_humidity_normalized_auto_mode_restored(home_assistan
     home_assistant.set_state("sensor.airflow_avg_indoor_humidity_5min", "54.0",
                              {"unit_of_measurement": "%", "device_class": "humidity"})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
     _trigger_moisture(home_assistant)
-    # In production: switch.comfoconnect_pro_auto_mode turns back on.
+    # Restore branch: low/free/flush all off + auto_mode off → switch.turn_on (stub ignores).
 
 
 def test_verification_step6_low_humidity_warm_profile_overrides_season(home_assistant: HomeAssistant) -> None:
@@ -330,10 +352,12 @@ def test_moisture_ventilation_low_when_needed(home_assistant: HomeAssistant) -> 
 
 
 def test_moisture_ventilation_restore_auto(home_assistant: HomeAssistant) -> None:
-    """auto=on + binary_sensor=off → auto mode restored (trace only)."""
+    """Owners clear (low/free/flush off) + auto_mode off → restore branch turns auto on (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
     _trigger_moisture(home_assistant)
     # switch.turn_on silently ignored — assert trace absence only.
 
@@ -529,8 +553,9 @@ def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
 
 
 def _trigger_medium(home_assistant: HomeAssistant) -> None:
+    # The medium-preset bump folded into the unified controller's Section 2 medium branch.
     home_assistant.call_action("automation", "trigger", {
-        "entity_id": _MEDIUM_PRESET_AUTO,
+        "entity_id": _CONTROLLER,
         "skip_condition": True,
     })
 
@@ -542,12 +567,13 @@ def test_medium_preset_enable_when_free_cooling_low_preset(home_assistant: HomeA
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
     _trigger_medium(home_assistant)
-    # Enable branch: all four conditions met → auto_mode=off + preset=medium (stubs ignore).
+    # Medium branch: low off, free on, NOT(auto off & preset medium) → auto_mode=off + preset=medium.
 
 
 def test_medium_preset_restore_when_free_cooling_gone(home_assistant: HomeAssistant) -> None:
@@ -558,32 +584,38 @@ def test_medium_preset_restore_when_free_cooling_gone(home_assistant: HomeAssist
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
     _trigger_medium(home_assistant)
-    # Restore branch: free_cooling=off + auto=off + preset=medium → auto_mode on (stub ignores).
+    # Restore branch: low/free/flush off + auto=off → auto_mode on (stub ignores).
 
 
-def test_medium_preset_boost_running_hits_default(home_assistant: HomeAssistant) -> None:
-    """free_cooling=on + auto=on + preset=low + boost=on → enable branch misses, default logs.
+def test_medium_preset_independent_of_boost(home_assistant: HomeAssistant) -> None:
+    """free_cooling=on + auto=on + preset=low + boost=on → medium branch STILL fires (trace only).
 
-    Enable branch requires boost=off; boost running means medium is unnecessary alongside boost.
-    Restore branch requires free_cooling=off — also misses. Default: system_log warning.
+    Premise change vs the old medium-preset automation: the unified controller computes the
+    preset independent of the boost (the boost rides on top in hardware). So a running boost no
+    longer suppresses the medium bump — the medium branch's only gates are low-off, free/flush-on
+    and the idempotency guard, none of which read the boost. Medium is the correct fallback for
+    when the boost expires while free cooling / flush continues.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
     _trigger_medium(home_assistant)
-    # Enable: boost=on fails condition. Restore: free_cooling=on fails. Default fires — no crash.
+    # Medium branch: low off, free on, NOT(auto off & preset medium) → fires regardless of boost.
 
 
 def test_medium_preset_auto_disabled_no_action(home_assistant: HomeAssistant) -> None:
     """auto=off: condition gate suppresses medium preset (trace only)."""
     # airflow_cooling_automatic_enabled=off from baseline_inputs fixture.
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
@@ -593,34 +625,48 @@ def test_medium_preset_auto_disabled_no_action(home_assistant: HomeAssistant) ->
 
 
 # ── Away mode guard tests ─────────────────────────────────────────────────────────────────
-# All three preset/boost automations now check switch.comfoconnect_pro_away_function=off.
-# When away=on the condition gate blocks the action; these tests confirm the automation
-# is syntactically valid with the away entity present and runs without trace errors.
-# Production gate correctness relies on HA's standard condition evaluation.
+# The controller's Section 2 (preset/auto_mode) is wrapped in an in-action `if away==off` guard,
+# and the boost automation gates on away=off via a top-level condition. The Away split is
+# deliberate: the temperature profile (Section 1) still follows the season during Away, but the
+# ventilation level is left to the Away function. Because the Section 2 guard is INSIDE the action
+# (not a top-level condition), skip_condition=True does not bypass it — so the preset/auto_mode
+# no-change is directly observable in CI.
 
 
 def test_moisture_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
-    """away=on seeded: automation runs trace-cleanly with the away entity in state."""
+    """away=on: Section 2's in-action `if away==off` guard skips preset/auto even with low_needed=on.
+
+    skip_condition=True bypasses the automation-level gate but NOT the inner Away guard, so this
+    is observable: the low branch must not run, leaving auto_mode and preset at their seeded values.
+    """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("switch.comfoconnect_pro_away_function", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
     _trigger_moisture(home_assistant)
-    # In production (skip_condition=False): away=on blocks action — no preset change.
-    # CI (skip_condition=True): gate bypassed, service calls silently ignored.
+    # Away guard skips Section 2 → no low branch → auto_mode stays on, preset stays medium.
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "on", timeout=3)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "medium", timeout=3)
 
 
 def test_medium_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
-    """away=on seeded: medium preset automation runs trace-cleanly with the away entity."""
+    """away=on: the Away guard skips Section 2 even with free_cooling=on (observable no-change)."""
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("switch.comfoconnect_pro_away_function", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
     _trigger_medium(home_assistant)
-    # In production: away=on blocks action — no preset change.
+    # Away guard skips Section 2 → medium branch never runs → auto_mode/preset unchanged.
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "on", timeout=3)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "low", timeout=3)
 
 
 def test_drying_boost_auto_disabled_no_action(home_assistant: HomeAssistant) -> None:
@@ -1329,3 +1375,112 @@ def test_profile_heating_flush_overrides_warm(home_assistant: HomeAssistant) -> 
     home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
     _trigger(home_assistant)
     # Block 1 Case B guarded off by flush_needed; Block 2 Case B fires → cool in production.
+
+
+# ── Unified controller consistency tests ──────────────────────────────────────────────────
+# The controller recomputes the COMPLETE desired ComfoConnect state on every run and applies it
+# idempotently. These tests pin the cases that ARE observable despite the CI service-call stubs:
+# each per-branch idempotency guard and the restore gate suppress a write when the seeded state
+# already equals the desired state, so auto_mode / preset must stay put (no thrash, no notify).
+# This is the core invariant of the refactor: the outputs are a pure function of the inputs and
+# the controller never fights itself.
+
+
+def test_controller_low_idempotent_no_write(home_assistant: HomeAssistant) -> None:
+    """low_needed=on but already (auto off, preset low) → low branch guard False → no write.
+
+    The low branch acts only when NOT(auto off AND preset low); seeded already at the desired
+    state, it must leave auto_mode/preset untouched (idempotent — no redundant write or notify).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    _trigger(home_assistant)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "off", timeout=3)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "low", timeout=3)
+
+
+def test_controller_medium_idempotent_no_write(home_assistant: HomeAssistant) -> None:
+    """flush=on but already (auto off, preset medium) → medium branch guard False → no write."""
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
+    # Indoor dew above the dead-band (consistent with flush on) + profile already cool so Section 1
+    # is also a no-op: Block 2 guard (not cool) suppresses, Block 3 misses (dew out of band).
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
+    _trigger(home_assistant)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "off", timeout=3)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "medium", timeout=3)
+
+
+def test_controller_restore_no_thrash_when_auto_already_on(home_assistant: HomeAssistant) -> None:
+    """All owners clear but auto_mode already ON → restore branch gate False → auto stays on.
+
+    The restore branch turns auto_mode on only when WE had taken control (auto_mode currently
+    off). With auto already on there is nothing to hand back — the controller must not re-toggle.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    _trigger(home_assistant)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "on", timeout=3)
+
+
+def test_controller_low_priority_over_medium(home_assistant: HomeAssistant) -> None:
+    """low_needed=on wins over flush: even with flush on, preset is NOT bumped to medium.
+
+    low and flush are mutually exclusive in the sensors, but the low-before-medium ordering is
+    belt-and-suspenders. Seeded already at (auto off, preset low): the low branch is a no-op
+    (guard satisfied) and the medium branch is unreachable (requires low off). Preset stays low —
+    proving the medium branch never overrides an active low owner.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
+    # Indoor dew above the dead-band keeps Section 1 from spuriously firing Block 3.
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",
+                             {"unit_of_measurement": "°C", "device_class": "temperature"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    _trigger(home_assistant)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "low", timeout=3)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "off", timeout=3)
+
+
+def test_controller_full_rest_state_is_total_no_op(home_assistant: HomeAssistant) -> None:
+    """No owner active, neutral season, dew in band, already at rest → both sections no-op.
+
+    Baseline (neutral, indoor_dew 12.0 in [dew_min≈9.08, dew_max≈12.09], profile comfort,
+    auto on, preset medium) is the steady-state target: Section 1 Block 3 finds comfort already
+    set, Section 2's restore gate finds auto already on. Nothing is written on either output.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
+    _trigger(home_assistant)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "comfort", timeout=3)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "on", timeout=3)
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "medium", timeout=3)
