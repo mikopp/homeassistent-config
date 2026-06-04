@@ -1110,9 +1110,73 @@ automation:
                     Indoor dew {{ dew }}°C (≈{{ rh }}% RH) outside comfort band
                     [{{ dew_min }}–{{ dew_max }}°C] — profile restored to Comfort.
 
+          # Block 5: Warm-stuck recovery — profile is stuck at `warm` in cooling season with no owner.
+          #
+          # WHY THIS BLOCK EXISTS ("stuck-warm trap"):
+          #   Symmetric twin of Block 4. When season transitions HEAT→COOL while profile is `warm`,
+          #   and indoor dew sits outside [dew_min, dew_max], no earlier block matches:
+          #     • W1 (overcool, DRY in cooling season): 1A excluded (cooling season); 3 band-fails (DRY).
+          #     • W2 (humid,    HUM in cooling season): 1A needs DRY; 3 band-fails (HUM).
+          #   Result: bypass stays CLOSED in summer — ERV runs full heat-recovery when it should cool.
+          #   Less harmful than the cool-stuck trap (no overcool or open-bypass humidity import), but
+          #   costs cooling efficiency until dew drifts into the dead-band or an owner fires.
+          #
+          # FIX LOGIC:
+          #   Restore `comfort` when profile is `warm` AND cooling season is active AND no owner
+          #   (free–, flush–). Cooling season check (passive or active) is explicit so this block
+          #   is completely inert in neutral and heating seasons.
+          #
+          # WHY THIS CANNOT OSCILLATE:
+          #   • Heating season: Block 1B fires first → re-asserts `warm`; Block 5 season-guarded off.
+          #   • Neutral + DRY: Block 1A fires first (dew < dew_min, not cooling) → `warm`; Block 5
+          #     inert (season ≠ cooling). Correct behaviour: dry neutral air should retain moisture.
+          #   • Cooling + in-band: Block 3 fires first → `comfort`; Block 5 never reached by `choose:`.
+          #   • Once Block 5 sets `comfort`, `profile != warm` makes Block 5 inert on next trigger.
+          - conditions:
+              # Profile must already be `warm` — only the stuck trap value in cooling season.
+              - condition: state
+                entity_id: select.comfoconnect_pro_temperature_profile
+                state: "warm"
+              # No active free-cooling owner (Block 2A would legitimately hold cool, not warm, anyway).
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              # No active humidity-flush owner.
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_flush_needed
+                state: "off"
+              # Cooling season only (passive or active) — neutral/heating seasons are handled by other blocks.
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "passive_cooling"
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "active_cooling"
+            sequence:
+              # Restore comfort profile — bypass opens to normal heat-exchange mode for cooling season.
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "comfort"
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Comfort Profile"
+                  message: >
+                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
+                    {% set dew_min = states('sensor.airflow_dew_point_min') %}
+                    {% set dew_max = states('sensor.airflow_dew_point_max') %}
+                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
+                    Cooling season — Warm profile no longer warranted (free cooling and flush both off).
+                    Indoor dew {{ dew }}°C (≈{{ rh }}% RH) outside comfort band
+                    [{{ dew_min }}–{{ dew_max }}°C] — profile restored to Comfort.
+
         # Fallback: no rule matched (recovery zone, already-correct profile, or edge case) → no-op.
-        # Comfort is set explicitly by Block 3; forcing it here would oscillate against Block 1's
-        # idempotent guard when humidity is below min and profile is already warm.
+        # After Blocks 4 and 5 drain the stuck-cool and stuck-warm traps, the only remaining
+        # default path is an already-correct profile (idempotency guard fired above) or H6
+        # (heating season + free cooling active — vanishingly rare, self-heals on next trigger).
         default: []
 
       # ===== SECTION 2: VENTILATION PRESET / AUTO_MODE (skipped during Away) =====
