@@ -1043,6 +1043,73 @@ automation:
                       Cooling season, free cooling inactive — profile set to Comfort.
                     {% endif %}
 
+          # Block 4: Bypass-close recovery — profile is stuck at `cool` with no legitimate owner.
+          #
+          # WHY THIS BLOCK EXISTS ("stuck-cool trap"):
+          #   Block 3 can only close the bypass (cool → comfort) when indoor dew is already inside
+          #   the [dew_min, dew_max] dead-band. In two trap scenarios no earlier block matches:
+          #     • C7 (overcool, DRY in cooling season):  1A excluded in cooling; 3 band-fails (DRY).
+          #     • C8 (humid,    HUM in cooling season):  1A needs DRY; 3 band-fails (HUM).
+          #     • N3 (humid,    HUM in neutral season):  1A needs DRY; 3 band-fails (HUM).
+          #   All three leave the `choose:` falling through to `default: []`, freezing the profile
+          #   at `cool`. The humid traps are especially harmful: an open bypass during a humid spell
+          #   keeps importing humid outdoor air even while `low` preset reduces the rate — the open
+          #   bypass defeats heat-recovery mode.
+          #
+          # FIX LOGIC:
+          #   Close the bypass back to `comfort` whenever `cool` is the current profile AND there is
+          #   no active owner (free cooling off, humidity flush off) AND it is not heating season.
+          #   Heating season is excluded because Block 1B (active_heating → warm) takes priority and
+          #   will have already set `warm`, making Block 4 inert.
+          #
+          # WHY THIS CANNOT OSCILLATE:
+          #   Block 4 requires `profile == cool`. Any earlier block that fires first will flip the
+          #   profile away from `cool`, making Block 4 inert on the very next re-trigger:
+          #     • NEUT + DRY + cool → Block 1A fires first → warm → Block 4 sees profile ≠ cool.
+          #     • HEAT + cool + free–/flush– → Block 1B fires first → warm → same.
+          #     • In-band + cool → Block 3 fires first → comfort → Block 4 sees profile ≠ cool.
+          #   The `free– AND flush–` guard suppresses Block 4 for any legitimate `cool` (Block 2
+          #   holds cool while an owner is active, and Block 4 is never reached by the `choose:`).
+          #   Block 4 uniquely drains the out-of-band DRY/HUM stuck-cool trap.
+          - conditions:
+              # Profile must already be `cool` — only the stuck trap value, never warm/comfort.
+              - condition: state
+                entity_id: select.comfoconnect_pro_temperature_profile
+                state: "cool"
+              # No active free-cooling owner — if free cooling is on, Block 2A should hold `cool`.
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
+              # No active humidity-flush owner — if flush is on, Block 2B should hold `cool`.
+              - condition: state
+                entity_id: binary_sensor.airflow_humidity_flush_needed
+                state: "off"
+              # Not heating season — Block 1B owns heating season (sets warm first); belt-and-suspenders.
+              - condition: not
+                conditions:
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "active_heating"
+            sequence:
+              # Close the bypass by restoring the comfort profile.
+              - action: select.select_option
+                target:
+                  entity_id: select.comfoconnect_pro_temperature_profile
+                data:
+                  option: "comfort"
+              # Notify: bypass closed because cool is no longer warranted.
+              - action: notify.mobile_app_greywinds_iphone
+                data:
+                  title: "Ventilation: Comfort Profile"
+                  message: >
+                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
+                    {% set dew_min = states('sensor.airflow_dew_point_min') %}
+                    {% set dew_max = states('sensor.airflow_dew_point_max') %}
+                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
+                    Bypass closed — Cool no longer warranted (free cooling and flush both cleared).
+                    Indoor dew {{ dew }}°C (≈{{ rh }}% RH) outside comfort band
+                    [{{ dew_min }}–{{ dew_max }}°C] — profile restored to Comfort.
+
         # Fallback: no rule matched (recovery zone, already-correct profile, or edge case) → no-op.
         # Comfort is set explicitly by Block 3; forcing it here would oscillate against Block 1's
         # idempotent guard when humidity is below min and profile is already warm.
