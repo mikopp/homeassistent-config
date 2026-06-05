@@ -292,15 +292,37 @@ template:
           {% elif action == 'heating' %}heating
           {% else %}comfort{% endif %}
 
+
+  # --- Trigger-based binary sensors ---
+  # These are trigger-based (not state-based) so their last on/off is RESTORED on YAML reload /
+  # HA restart instead of coming up `unknown` for the 10-min delay window. State-based template
+  # binary sensors with delay_on/delay_off do not restore across reload: they start `unknown` and
+  # the delay timer holds that for the full 10 min before committing. Trigger-based sensors restore
+  # immediately, which also preserves this.state hysteresis memory across reloads.
+  # Triggers list dependencies explicitly — trigger-based templates do not auto-detect them.
+
+  # True when outdoor air is suitable for free cooling; debounced 10min each way to prevent flip-flop.
+  # min_dew_diff and min_temp_diff are user-settable via input_number helpers.
+  # Indoor temperature uses a 0.5°C hysteresis band (Schmitt trigger): turns ON at target_temp,
+  # stays ON until indoor temp drops 0.5°C below target. This prevents the feedback loop where
+  # the cool profile itself cools the room just enough to disable free cooling and vice versa.
+  # Absolute humidity gate: outdoor dew point must not exceed dew_max — the dew point that
+  # corresponds to (target_temp, target_hum). Ensures outdoor air warmed to target temperature
+  # does not push indoor humidity above target, even when indoor and outdoor dew points rise together.
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.airflow_outdoor_dew_5min
+          - sensor.airflow_outdoor_temp_5min
+          - sensor.airflow_min_indoor_dew_5min
+          - sensor.airflow_avg_indoor_temp_5min
+          - sensor.airflow_dew_point_target
+          - input_number.airflow_cooling_target_temperature
+          - input_number.airflow_min_dew_diff
+          - input_number.airflow_min_temp_diff
+      - trigger: homeassistant
+        event: start
     binary_sensor:
-      # True when outdoor air is suitable for free cooling; debounced 10min each way to prevent flip-flop.
-      # min_dew_diff and min_temp_diff are user-settable via input_number helpers.
-      # Indoor temperature uses a 0.5°C hysteresis band (Schmitt trigger): turns ON at target_temp,
-      # stays ON until indoor temp drops 0.5°C below target. This prevents the feedback loop where
-      # the cool profile itself cools the room just enough to disable free cooling and vice versa.
-      # Absolute humidity gate: outdoor dew point must not exceed dew_max — the dew point that
-      # corresponds to (target_temp, target_hum). Ensures outdoor air warmed to target temperature
-      # does not push indoor humidity above target, even when indoor and outdoor dew points rise together.
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
         device_class: running
@@ -338,18 +360,30 @@ template:
         delay_off:
           minutes: 10
 
-      # True when ventilation must be reduced to avoid importing humid outdoor air.
-      # An indoor-dew Schmitt trigger (turns ON when indoor dew clears the max-derived dew,
-      # stays ON until it falls below the target-derived dew) gates the decision — a stable,
-      # temperature-independent moisture threshold. The dew condition is the flip side of
-      # airflow_free_cooling_available's
-      # dew_max gate: incoming air is too humid in absolute terms when outdoor_dew clears a
-      # humidity-derived dew point. Dew Schmitt: turns ON at the max-humidity-derived dew point,
-      # stays ON until outdoor_dew drops below the target-humidity-derived dew point (both at
-      # target_temp, via the same Magnus formula as free cooling). The legacy relative check
-      # (outdoor_dew >= indoor_dew) is OR'd as a fallback — it only kicks in when neither
-      # humidity-derived boundary is met. Broadly opposite to airflow_free_cooling_available,
-      # though the absolute-dew path can overlap when indoor air is drier than incoming air.
+  # True when ventilation must be reduced to avoid importing humid outdoor air.
+  # An indoor-dew Schmitt trigger (turns ON when indoor dew clears the max-derived dew,
+  # stays ON until it falls below the target-derived dew) gates the decision — a stable,
+  # temperature-independent moisture threshold. The dew condition is the flip side of
+  # airflow_free_cooling_available's
+  # dew_max gate: incoming air is too humid in absolute terms when outdoor_dew clears a
+  # humidity-derived dew point. Dew Schmitt: turns ON at the max-humidity-derived dew point,
+  # stays ON until outdoor_dew drops below the target-humidity-derived dew point (both at
+  # target_temp, via the same Magnus formula as free cooling). The legacy relative check
+  # (outdoor_dew >= indoor_dew) is OR'd as a fallback — it only kicks in when neither
+  # humidity-derived boundary is met. Broadly opposite to airflow_free_cooling_available,
+  # though the absolute-dew path can overlap when indoor air is drier than incoming air.
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.airflow_outdoor_dew_5min
+          - sensor.airflow_min_indoor_dew_5min
+          - sensor.airflow_dew_point_target
+          - sensor.airflow_dew_point_max
+          - binary_sensor.airflow_humidity_flush_needed
+          - binary_sensor.airflow_humidity_drying_needed
+      - trigger: homeassistant
+        event: start
+    binary_sensor:
       - unique_id: airflow_moisture_ventilation_low_needed
         name: "Airflow Moisture Ventilation Low Needed"
         device_class: moisture
@@ -387,25 +421,41 @@ template:
         delay_off:
           minutes: 10
 
-      # True when conditions favour flushing indoor moisture toward (and below) the
-      # max-humidity-derived dew point by opening the cool profile / bypass — even when
-      # target humidity is unreachable. Two OR branches, both requiring a real moisture
-      # *difference* (outdoor distinctly drier than indoor):
-      #   Branch 1 (REAL moisture problem — indoor above MAX): outdoor_dew < dew_max
-      #            AND indoor_dew > dew_max AND (outdoor_dew + min_dew_diff) < indoor_dew.
-      #            Flushes REGARDLESS of temperature — mould/condensation safety wins.
-      #   Branch 2 (no real problem — above TARGET only): outdoor_dew <= dew_target
-      #            AND indoor_dew > dew_target AND (outdoor_dew + min_dew_diff) < indoor_dew.
-      #            Flushes ONLY when the ComfoConnect temperature gate holds, so a
-      #            non-urgent flush never overcools a cool room.
-      # ComfoConnect temperature gate (Branch 2 only) = the temperature half of
-      # airflow_free_cooling_available: intake temp (airflow_outdoor_temp_5min) below
-      # target by min_temp_diff AND indoor temp at/above target (same 0.5°C Schmitt).
-      # The weather-station temp is ignored here (it gates the boost only).
-      # Season guard: in active_heating only Branch 1 applies (heating-season flushing
-      # only relieves dangerously high moisture). ~0.3°C this.state hysteresis on every
-      # dew boundary damps the feedback loop where flushing lowers indoor_dew toward the
-      # OFF edge; layered on top of the 10-min delay_on/off.
+  # True when conditions favour flushing indoor moisture toward (and below) the
+  # max-humidity-derived dew point by opening the cool profile / bypass — even when
+  # target humidity is unreachable. Two OR branches, both requiring a real moisture
+  # *difference* (outdoor distinctly drier than indoor):
+  #   Branch 1 (REAL moisture problem — indoor above MAX): outdoor_dew < dew_max
+  #            AND indoor_dew > dew_max AND (outdoor_dew + min_dew_diff) < indoor_dew.
+  #            Flushes REGARDLESS of temperature — mould/condensation safety wins.
+  #   Branch 2 (no real problem — above TARGET only): outdoor_dew <= dew_target
+  #            AND indoor_dew > dew_target AND (outdoor_dew + min_dew_diff) < indoor_dew.
+  #            Flushes ONLY when the ComfoConnect temperature gate holds, so a
+  #            non-urgent flush never overcools a cool room.
+  # ComfoConnect temperature gate (Branch 2 only) = the temperature half of
+  # airflow_free_cooling_available: intake temp (airflow_outdoor_temp_5min) below
+  # target by min_temp_diff AND indoor temp at/above target (same 0.5°C Schmitt).
+  # The weather-station temp is ignored here (it gates the boost only).
+  # Season guard: in active_heating only Branch 1 applies (heating-season flushing
+  # only relieves dangerously high moisture). ~0.3°C this.state hysteresis on every
+  # dew boundary damps the feedback loop where flushing lowers indoor_dew toward the
+  # OFF edge; layered on top of the 10-min delay_on/off.
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.airflow_outdoor_dew_5min
+          - sensor.airflow_min_indoor_dew_5min
+          - sensor.airflow_outdoor_temp_5min
+          - sensor.airflow_avg_indoor_temp_5min
+          - sensor.airflow_dew_point_target
+          - sensor.airflow_dew_point_max
+          - sensor.heating_cooling_indicator
+          - input_number.airflow_cooling_target_temperature
+          - input_number.airflow_min_dew_diff
+          - input_number.airflow_min_temp_diff
+      - trigger: homeassistant
+        event: start
+    binary_sensor:
       - unique_id: airflow_humidity_flush_needed
         name: "Airflow Humidity Flush Needed"
         device_class: running
@@ -448,15 +498,27 @@ template:
         delay_off:
           minutes: 10
 
-      # True when the noisy ventilation boost should run to flush moisture. This is the
-      # BOOST half of humidity flushing: the cool-profile flush condition
-      # (binary_sensor.airflow_humidity_flush_needed) PLUS two boost-only gates:
-      #   * weather-station outdoor temp below target (real outdoor, NOT the ComfoConnect intake);
-      #   * within the user-configured boost schedule (workday / non-workday).
-      # (The former moisture-low guard is gone — low_needed is now mutually exclusive with flush.)
-      # The cool-profile flush deliberately ignores the schedule and the weather station —
-      # only the boost is schedule- and weather-gated. Schedule selects workday or non-workday
-      # window via binary_sensor.workday; non-workday covers weekends and public holidays.
+  # True when the noisy ventilation boost should run to flush moisture. This is the
+  # BOOST half of humidity flushing: the cool-profile flush condition
+  # (binary_sensor.airflow_humidity_flush_needed) PLUS two boost-only gates:
+  #   * weather-station outdoor temp below target (real outdoor, NOT the ComfoConnect intake);
+  #   * within the user-configured boost schedule (workday / non-workday).
+  # (The former moisture-low guard is gone — low_needed is now mutually exclusive with flush.)
+  # The cool-profile flush deliberately ignores the schedule and the weather station —
+  # only the boost is schedule- and weather-gated. Schedule selects workday or non-workday
+  # window via binary_sensor.workday; non-workday covers weekends and public holidays.
+  - trigger:
+      - trigger: state
+        entity_id:
+          - binary_sensor.airflow_humidity_flush_needed
+          - sensor.airflow_wheatherstation_outdoor_temp_5min
+          - input_number.airflow_cooling_target_temperature
+          - binary_sensor.workday
+          - schedule.airflow_boost_workday
+          - schedule.airflow_boost_non_workday
+      - trigger: homeassistant
+        event: start
+    binary_sensor:
       - unique_id: airflow_humidity_drying_needed
         name: "Airflow Humidity Drying Needed"
         device_class: running
