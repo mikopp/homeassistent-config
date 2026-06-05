@@ -84,6 +84,7 @@ views:
           - entity: input_number.airflow_target_humidity
           - entity: input_number.airflow_min_humidity
           - entity: input_number.airflow_max_humidity
+          - entity: binary_sensor.workday #this comes from the workday integration which must be installed for the boost scheduler to work
           - entity: schedule.airflow_boost_workday
           - entity: schedule.airflow_boost_non_workday
 
