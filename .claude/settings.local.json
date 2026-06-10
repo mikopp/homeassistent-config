@@ -20,7 +20,8 @@
       "mcp__ha-mcp__ha_config_get_category",
       "mcp__ha-mcp__ha_eval_template",
       "Bash(gh api *)",
-      "Bash(Get-Content *)"
+      "Bash(Get-Content *)",
+      "mcp__ha-mcp__ha_get_history"
     ]
   }
 }
