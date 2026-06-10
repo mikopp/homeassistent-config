@@ -901,6 +901,13 @@ automation:
         entity_id: select.comfoconnect_pro_ventilation_preset
         to: "low"
         id: preset_set_low
+      # Boost ended: re-evaluate preset so medium/auto is correctly asserted while flush/free
+      # is still active. Boost owns 'high'; on hardware expiry the preset drops — controller
+      # must re-assert the right level without waiting for the next humidity tick.
+      - platform: state
+        entity_id: switch.comfoconnect_pro_boost
+        to: "off"
+        id: boost_ended
       # Away ended → re-evaluate preset/auto_mode now that Section 2 may act again
       - platform: state
         entity_id: switch.comfoconnect_pro_away_function
@@ -1257,6 +1264,23 @@ automation:
             state: "off"
         then:
           - choose:
+              # Boost active: boost owns the 'high' preset; selecting any other preset cancels it
+              # immediately (ComfoConnect hardware behaviour). Only ensure auto_mode is off so the
+              # ComfoConnect schedule cannot fight the boost. Never write a preset in this branch.
+              - conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_boost
+                    state: "on"
+                  - condition: not
+                    conditions:
+                      - condition: state
+                        entity_id: switch.comfoconnect_pro_auto_mode
+                        state: "off"
+                sequence:
+                  - action: switch.turn_off
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+
               # Low: reduce ventilation. Act unless we are already at (auto off, preset low).
               - conditions:
                   - condition: state
@@ -1284,9 +1308,12 @@ automation:
                         (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
                         too humid — ventilation set to Low.
 
-              # Medium: free cooling or humidity flush wants more air exchange. Act unless we are
-              # already at (auto off, preset medium). A running boost overrides the level in hardware
-              # anyway; medium is the correct fallback for when the boost expires while flush continues.
+              # Medium: free cooling or humidity flush wants more air exchange. Act unless already
+              # at (auto off, preset medium). Boost-gated: while boost runs the boost-active branch
+              # above fires first; this branch's boost==off guard prevents a preset write from
+              # cancelling the boost (selecting any preset cancels ComfoConnect boost immediately).
+              # On boost expiry the boost_ended trigger re-fires the controller so this branch
+              # re-asserts medium without waiting for the next humidity tick.
               - conditions:
                   - condition: state
                     entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
@@ -1299,6 +1326,9 @@ automation:
                       - condition: state
                         entity_id: binary_sensor.airflow_humidity_flush_needed
                         state: "on"
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_boost
+                    state: "off"
                   - condition: template
                     value_template: >
                       {{ not (is_state('switch.comfoconnect_pro_auto_mode', 'off') and
