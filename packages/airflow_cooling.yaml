@@ -381,8 +381,12 @@ template:
           - sensor.airflow_dew_point_max
           - binary_sensor.airflow_humidity_flush_needed
           - binary_sensor.airflow_humidity_drying_needed
-      - trigger: homeassistant
-        event: start
+      # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
+      - trigger: state
+        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        to: ~
+      # No homeassistant:start trigger — restore last state at boot instead of restarting
+      # the 10-min delay timers from unknown (same reasoning as flush_needed below).
     binary_sensor:
       - unique_id: airflow_moisture_ventilation_low_needed
         name: "Airflow Moisture Ventilation Low Needed"
@@ -453,8 +457,14 @@ template:
           - input_number.airflow_cooling_target_temperature
           - input_number.airflow_min_dew_diff
           - input_number.airflow_min_temp_diff
-      - trigger: homeassistant
-        event: start
+      # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
+      - trigger: state
+        entity_id: binary_sensor.airflow_humidity_flush_needed
+        to: ~
+      # No homeassistant:start trigger: a start trigger would re-evaluate at boot and
+      # restart the 10-min delay_on from unknown, blocking the sensor for 10 min after
+      # every restart. Omitting it lets the trigger-based entity RESTORE its last state
+      # instantly; runtime state changes still get the 10-min debounce below.
     binary_sensor:
       - unique_id: airflow_humidity_flush_needed
         name: "Airflow Humidity Flush Needed"
