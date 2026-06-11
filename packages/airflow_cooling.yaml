@@ -387,7 +387,7 @@ template:
       # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
       - trigger: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
-        to: ~
+        to: "unknown"
       # No homeassistant:start trigger — restore last state at boot instead of restarting
       # the 10-min delay timers from unknown (same reasoning as flush_needed below).
     binary_sensor:
@@ -465,7 +465,7 @@ template:
       # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
       - trigger: state
         entity_id: binary_sensor.airflow_humidity_flush_needed
-        to: ~
+        to: "unknown"
       # No homeassistant:start trigger: a start trigger would re-evaluate at boot and
       # restart the 10-min delay_on from unknown, blocking the sensor for 10 min after
       # every restart. Omitting it lets the trigger-based entity RESTORE its last state
