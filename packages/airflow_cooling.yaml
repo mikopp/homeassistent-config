@@ -258,10 +258,11 @@ template:
           {% elif s in ['free_cooling', 'moisture_flush_cooling', 'cooling'] %}mdi:snowflake
           {% elif s in ['heating', 'moisture_retention'] %}mdi:fire
           {% else %}mdi:fan{% endif %}
+        # low_needed and free_cooling_available are NOT has_value gates: the state template
+        # reads both only via is_state(..., 'on'), False for unknown/unavailable — fail-safe.
+        # Gating on them would cascade their boot-unknown into this sensor (→ unavailable).
         availability: >
           {{ has_value('climate.airflow_climate') and
-             has_value('binary_sensor.airflow_free_cooling_available') and
-             has_value('binary_sensor.airflow_moisture_ventilation_low_needed') and
              has_value('switch.comfoconnect_pro_boost') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_min') }}
@@ -320,8 +321,10 @@ template:
           - input_number.airflow_cooling_target_temperature
           - input_number.airflow_min_dew_diff
           - input_number.airflow_min_temp_diff
-      - trigger: homeassistant
-        event: start
+      # No homeassistant:start trigger — a start trigger re-evaluates at boot and restarts
+      # the 10-min delay_on/delay_off from unknown, holding the sensor unavailable for 10 min
+      # after every restart. Omitting it lets the trigger-based entity RESTORE its last state
+      # (and this.state hysteresis memory) instantly; runtime changes still get the debounce.
     binary_sensor:
       - unique_id: airflow_free_cooling_available
         name: "Airflow Free Cooling Available"
@@ -381,18 +384,20 @@ template:
           - sensor.airflow_dew_point_max
           - binary_sensor.airflow_humidity_flush_needed
           - binary_sensor.airflow_humidity_drying_needed
-      - trigger: homeassistant
-        event: start
+      # No homeassistant:start trigger — restore last state at boot instead of restarting
+      # the 10-min delay timers from unknown (same reasoning as flush_needed below).
     binary_sensor:
       - unique_id: airflow_moisture_ventilation_low_needed
         name: "Airflow Moisture Ventilation Low Needed"
         device_class: moisture
+        # flush_needed is NOT a has_value gate: the state template reads it only via
+        # is_state(..., 'on'), which is False for unknown/unavailable — fail-safe. Gating
+        # availability on it would cascade flush_needed's boot-unknown into this sensor.
         availability: >
           {{ has_value('sensor.airflow_outdoor_dew_5min') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_target') and
-             has_value('sensor.airflow_dew_point_max') and
-             has_value('binary_sensor.airflow_humidity_flush_needed') }}
+             has_value('sensor.airflow_dew_point_max') }}
         state: >
           {% set outdoor_dew  = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set indoor_dew   = states('sensor.airflow_min_indoor_dew_5min') | float %}
@@ -453,8 +458,10 @@ template:
           - input_number.airflow_cooling_target_temperature
           - input_number.airflow_min_dew_diff
           - input_number.airflow_min_temp_diff
-      - trigger: homeassistant
-        event: start
+      # No homeassistant:start trigger: a start trigger would re-evaluate at boot and
+      # restart the 10-min delay_on from unknown, blocking the sensor for 10 min after
+      # every restart. Omitting it lets the trigger-based entity RESTORE its last state
+      # instantly; runtime state changes still get the 10-min debounce below.
     binary_sensor:
       - unique_id: airflow_humidity_flush_needed
         name: "Airflow Humidity Flush Needed"
@@ -516,8 +523,9 @@ template:
           - binary_sensor.workday
           - schedule.airflow_boost_workday
           - schedule.airflow_boost_non_workday
-      - trigger: homeassistant
-        event: start
+      # No homeassistant:start trigger — restore last state at boot instead of letting the
+      # delay_off hold the sensor unknown for 10 min when it should settle off (same reasoning
+      # as the other decision sensors). Runtime off-transitions still get the 10-min debounce.
     binary_sensor:
       - unique_id: airflow_humidity_drying_needed
         name: "Airflow Humidity Drying Needed"
@@ -1312,13 +1320,53 @@ automation:
                         (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
                         too humid — ventilation set to Low.
 
-              # Medium: free cooling or humidity flush wants more air exchange. Act unless already
-              # at (auto off, preset medium). Boost-gated: while boost runs the boost-active branch
-              # above fires first; this branch's boost==off guard prevents a preset write from
+              # Transient route-to-auto: we are in MANUAL LOW (auto off, preset low), the low owner
+              # has cleared, and a medium owner (free cooling or humidity flush) is now active. The
+              # medium force is an override of the auto SCHEDULE, so hand control back to auto rather
+              # than jump manual-low → manual-medium directly. Turning auto_mode ON re-fires this
+              # controller via the auto_mode_on trigger; on that re-run the Medium branch (now
+              # auto==on) forces medium with a truthful message. No notify — internal routing step.
+              # Requires (free OR flush) ON so the all-clear case is left to the Restore branch below.
+              # Boost-gated for symmetry so it never flips auto while boost owns the level.
+              - conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_auto_mode
+                    state: "off"
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_ventilation_preset
+                    state: "low"
+                  - condition: state
+                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    state: "off"
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_boost
+                    state: "off"
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: binary_sensor.airflow_free_cooling_available
+                        state: "on"
+                      - condition: state
+                        entity_id: binary_sensor.airflow_humidity_flush_needed
+                        state: "on"
+                sequence:
+                  - action: switch.turn_on
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+
+              # Medium: free cooling or humidity flush wants more air exchange. Fires ONLY from the
+              # auto state (auto_mode on) — it overrides the ComfoConnect schedule. Reaching this from
+              # manual low is routed via the transient route-to-auto branch above (manual-low → auto →
+              # medium), so the "from auto schedule" framing below is always truthful. Act unless
+              # already at (auto off, preset medium). Boost-gated: while boost runs the boost-active
+              # branch above fires first; this branch's boost==off guard prevents a preset write from
               # cancelling the boost (selecting any preset cancels ComfoConnect boost immediately).
               # On boost expiry the boost_ended trigger re-fires the controller so this branch
               # re-asserts medium without waiting for the next humidity tick.
               - conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_auto_mode
+                    state: "on"
                   - condition: state
                     entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
                     state: "off"
@@ -1351,11 +1399,11 @@ automation:
                       title: "Ventilation: Medium Preset"
                       message: >
                         {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-                          Humidity flush active, auto schedule at Low
-                          — preset bumped to Medium for faster moisture exchange.
+                          Humidity flush active — preset bumped from auto schedule to Medium
+                          for faster moisture exchange.
                         {% else %}
-                          Free cooling available, auto schedule at Low
-                          — preset bumped to Medium for faster air exchange.
+                          Free cooling available — preset bumped from auto schedule to Medium
+                          for faster air exchange.
                         {% endif %}
 
               # Restore: no owner active (low off, free off, flush off). Hand control back to the
