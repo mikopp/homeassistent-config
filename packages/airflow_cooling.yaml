@@ -1320,13 +1320,53 @@ automation:
                         (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
                         too humid — ventilation set to Low.
 
-              # Medium: free cooling or humidity flush wants more air exchange. Act unless already
-              # at (auto off, preset medium). Boost-gated: while boost runs the boost-active branch
-              # above fires first; this branch's boost==off guard prevents a preset write from
+              # Transient route-to-auto: we are in MANUAL LOW (auto off, preset low), the low owner
+              # has cleared, and a medium owner (free cooling or humidity flush) is now active. The
+              # medium force is an override of the auto SCHEDULE, so hand control back to auto rather
+              # than jump manual-low → manual-medium directly. Turning auto_mode ON re-fires this
+              # controller via the auto_mode_on trigger; on that re-run the Medium branch (now
+              # auto==on) forces medium with a truthful message. No notify — internal routing step.
+              # Requires (free OR flush) ON so the all-clear case is left to the Restore branch below.
+              # Boost-gated for symmetry so it never flips auto while boost owns the level.
+              - conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_auto_mode
+                    state: "off"
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_ventilation_preset
+                    state: "low"
+                  - condition: state
+                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    state: "off"
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_boost
+                    state: "off"
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: binary_sensor.airflow_free_cooling_available
+                        state: "on"
+                      - condition: state
+                        entity_id: binary_sensor.airflow_humidity_flush_needed
+                        state: "on"
+                sequence:
+                  - action: switch.turn_on
+                    target:
+                      entity_id: switch.comfoconnect_pro_auto_mode
+
+              # Medium: free cooling or humidity flush wants more air exchange. Fires ONLY from the
+              # auto state (auto_mode on) — it overrides the ComfoConnect schedule. Reaching this from
+              # manual low is routed via the transient route-to-auto branch above (manual-low → auto →
+              # medium), so the "from auto schedule" framing below is always truthful. Act unless
+              # already at (auto off, preset medium). Boost-gated: while boost runs the boost-active
+              # branch above fires first; this branch's boost==off guard prevents a preset write from
               # cancelling the boost (selecting any preset cancels ComfoConnect boost immediately).
               # On boost expiry the boost_ended trigger re-fires the controller so this branch
               # re-asserts medium without waiting for the next humidity tick.
               - conditions:
+                  - condition: state
+                    entity_id: switch.comfoconnect_pro_auto_mode
+                    state: "on"
                   - condition: state
                     entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
                     state: "off"
@@ -1359,11 +1399,11 @@ automation:
                       title: "Ventilation: Medium Preset"
                       message: >
                         {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-                          Humidity flush active, auto schedule at Low
-                          — preset bumped to Medium for faster moisture exchange.
+                          Humidity flush active — preset bumped from auto schedule to Medium
+                          for faster moisture exchange.
                         {% else %}
-                          Free cooling available, auto schedule at Low
-                          — preset bumped to Medium for faster air exchange.
+                          Free cooling available — preset bumped from auto schedule to Medium
+                          for faster air exchange.
                         {% endif %}
 
               # Restore: no owner active (low off, free off, flush off). Hand control back to the
