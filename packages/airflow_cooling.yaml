@@ -384,7 +384,10 @@ template:
           - sensor.airflow_dew_point_max
           - binary_sensor.airflow_humidity_flush_needed
           - binary_sensor.airflow_humidity_drying_needed
-      # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
+      # Self-trigger on unknown: a YAML reload re-creates this entity as 'unknown' (unlike a full
+      # restart, reload does not restore state). This re-evaluates the template the moment that
+      # happens, instead of waiting for the next input trigger. Use to: "unknown" (not to: ~, which
+      # HA treats as a match-any wildcard); the recomputed result still passes through delay_on/off.
       - trigger: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
         to: "unknown"
@@ -462,7 +465,10 @@ template:
           - input_number.airflow_cooling_target_temperature
           - input_number.airflow_min_dew_diff
           - input_number.airflow_min_temp_diff
-      # Self-trigger on unknown: re-evaluate immediately after a YAML reload (no delay for off).
+      # Self-trigger on unknown: a YAML reload re-creates this entity as 'unknown' (unlike a full
+      # restart, reload does not restore state). This re-evaluates the template the moment that
+      # happens, instead of waiting for the next input trigger. Use to: "unknown" (not to: ~, which
+      # HA treats as a match-any wildcard); the recomputed result still passes through delay_on/off.
       - trigger: state
         entity_id: binary_sensor.airflow_humidity_flush_needed
         to: "unknown"

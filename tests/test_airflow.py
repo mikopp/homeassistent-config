@@ -24,7 +24,7 @@ or the per-branch idempotency templates — so Away gating and branch selection 
 
 import requests
 
-from ha_integration_test_harness import HomeAssistant
+from ha_integration_test_harness import HomeAssistant, TimeMachine
 
 # Unified controller — single source of truth for profile + preset + auto_mode.
 _CONTROLLER = "automation.airflow_ventilation_controller"
@@ -1480,6 +1480,51 @@ def test_flush_unavailable_when_dependency_missing(home_assistant: HomeAssistant
     home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "unavailable", {})
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_flush_needed",
                                        "unavailable", timeout=5)
+
+
+# ── YAML-reload recovery tests ────────────────────────────────────────────────────────────
+# A YAML reload re-creates trigger-based template binary sensors fresh as 'unknown' — unlike a
+# full HA restart, a reload does NOT restore last state. Both moisture sensors omit a
+# homeassistant:start trigger (to avoid restarting their 10-min delay at boot), so without a
+# recovery path they would sit at 'unknown' until one of their normal input triggers next fired.
+# Each sensor therefore has a self state-trigger (to: "unknown") that re-evaluates the template
+# the moment the entity goes unknown. These tests simulate the reload by forcing the entity to
+# 'unknown' and assert it recomputes to a definite state once the delay window is crossed.
+
+
+def _assert_recomputes_after_reload(
+    ha: HomeAssistant, tm: TimeMachine, entity_id: str
+) -> None:
+    """Force `entity_id` to 'unknown' (reload simulation) → assert it recomputes to on/off."""
+    tm.jump_to_next(hour=10, minute=0, second=0)
+    # Baseline deps are available, so the sensor holds a definite state before the "reload".
+    ha.assert_entity_state(entity_id, lambda s: s in ("on", "off"), timeout=5)
+    # Simulate the reload: the entity is re-created as 'unknown'. The self-trigger (to: "unknown")
+    # fires on this transition and re-evaluates the state template.
+    ha.set_state(entity_id, "unknown", {})
+    # The recomputed result must pass the 10-min delay_on/delay_off before it lands; jump past it.
+    tm.jump_to_next(hour=10, minute=11, second=0)
+    # Without the self-trigger the entity would stay 'unknown' (no input changed) — reaching a
+    # definite on/off proves the self-trigger fired and recomputed the template.
+    ha.assert_entity_state(entity_id, lambda s: s in ("on", "off"), timeout=5)
+
+
+def test_flush_needed_recomputes_after_reload_unknown(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """binary_sensor.airflow_humidity_flush_needed recovers from 'unknown' after a YAML reload."""
+    _assert_recomputes_after_reload(
+        home_assistant, time_machine, "binary_sensor.airflow_humidity_flush_needed"
+    )
+
+
+def test_low_needed_recomputes_after_reload_unknown(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """binary_sensor.airflow_moisture_ventilation_low_needed recovers from 'unknown' after reload."""
+    _assert_recomputes_after_reload(
+        home_assistant, time_machine, "binary_sensor.airflow_moisture_ventilation_low_needed"
+    )
 
 
 # ── Boost-flush (drying needed) gating tests ──────────────────────────────────────────────
