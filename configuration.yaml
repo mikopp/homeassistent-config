@@ -31,9 +31,13 @@ lovelace:
 
 rest_command:
   update_loxone:
-    url: "http://homeassist:home@192.168.1.92/jdev/sps/io/{{ parameter }}"
+    url: "http://192.168.1.92/jdev/sps/io/{{ parameter }}"
+    username: !secret loxone_user
+    password: !secret loxone_pwd
     method: GET
   send_to_loxone:
     # Replace with your Miniserver IP, Username, and Password
-    url: "http://homeassist:home@192.168.1.92/jdev/sps/io/{{ input_name }}/{{ value }}"
+    url: "http://192.168.1.92/jdev/sps/io/{{ input_name }}/{{ value }}"
     method: GET
+    username: !secret loxone_user
+    password: !secret loxone_pwd
