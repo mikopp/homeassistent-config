@@ -655,6 +655,28 @@ def test_drying_boost_already_running_no_double_enable(home_assistant: HomeAssis
     # Second branch: drying≠off → skip. No action taken; automation runs without error.
 
 
+def test_drying_boost_rearm_keeps_switch_on(home_assistant: HomeAssistant) -> None:
+    """Countdown drops below 2 while drying still needed + boost on → seamless re-arm.
+
+    The re-arm branch only re-writes number.comfoconnect_pro_boost_time (ignored by the CI stub)
+    and deliberately never toggles switch.comfoconnect_pro_boost, so the switch must stay 'on'.
+    This is exactly what removes the ~30-min off→on flip-flop on the boost switch and on
+    sensor.airflow_cooling_state. The number.set_value cannot be observed on bare stubs, so the
+    assertable guarantee is that the switch is not dropped.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    # Seed the countdown above the threshold, then drop it below 2 to fire the numeric_state
+    # re-arm trigger (rearm_due).
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "5", {})
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "1", {})
+    # Switch was never turned off by the re-arm branch → stays on (no flip-flop).
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_boost", "on", timeout=3)
+
+
 def test_drying_hvac_action_shows_drying(home_assistant: HomeAssistant) -> None:
     """free_cooling=on AND boost=on → automation runs without error (trace only).
 
@@ -1581,20 +1603,26 @@ def test_drying_fires_with_flush_and_cool_weatherstation(home_assistant: HomeAss
 # ── hvac_action drying-from-flush tests ───────────────────────────────────────────────────
 
 
-def _hvac_action_state(flush: bool) -> str:
+def _hvac_action_state(flush: bool, drying_wanted: bool = False) -> str:
     """Render template mirroring climate.airflow_climate's hvac_action_template.
 
-    `flush` is injected as a literal (rather than reading binary_sensor.airflow_humidity_flush_needed,
-    a delayed template sensor whose REST-set 'on' does not reliably stick in CI) so the branch
+    `flush` and `drying_wanted` are injected as literals (rather than reading the delayed
+    template binary sensors, whose REST-set 'on' does not reliably stick in CI) so the branch
     logic is exercised deterministically.
+
+    NOTE: the free-cooling drying branch reads the drying INTENT
+    (binary_sensor.airflow_humidity_drying_needed), NOT switch.comfoconnect_pro_boost — the
+    switch drops for a few seconds on every boost re-arm and would otherwise flip the action.
+    This mirror must match that.
     """
     flush_lit = "true" if flush else "false"
+    drying_lit = "true" if drying_wanted else "false"
     return f"""
     {{%- set profile   = states('select.comfoconnect_pro_temperature_profile') -%}}
     {{%- set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') -%}}
-    {{%- set boost_on  = is_state('switch.comfoconnect_pro_boost', 'on') -%}}
+    {{%- set drying_wanted = {drying_lit} -%}}
     {{%- set flush_needed = {flush_lit} -%}}
-    {{%- if free_cool and boost_on -%}}drying
+    {{%- if free_cool and drying_wanted -%}}drying
     {{%- elif profile == 'cool' and flush_needed -%}}drying
     {{%- elif profile == 'cool' -%}}cooling
     {{%- elif profile == 'warm' -%}}heating
@@ -1617,6 +1645,34 @@ def test_hvac_action_cooling_without_flush(home_assistant: HomeAssistant) -> Non
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
     assert _render(home_assistant, _hvac_action_state(flush=False)) == "cooling"
+
+
+def test_hvac_action_drying_survives_boost_blip(home_assistant: HomeAssistant) -> None:
+    """free cooling on + drying still wanted but boost momentarily OFF → action stays 'drying'.
+
+    Regression for the 30-min flip-flop: hvac_action keys off the drying INTENT, not the raw
+    boost switch, so the few-second switch drop on each boost re-arm no longer flips the action
+    (and thus sensor.airflow_cooling_state) between drying and cooling/fan. Under the old
+    `free_cool and boost_on` logic this same input rendered 'fan'/'cooling'.
+    """
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})  # the re-arm blip
+    assert _render(home_assistant,
+                   _hvac_action_state(flush=False, drying_wanted=True)) == "drying"
+
+
+def test_hvac_action_not_drying_when_intent_cleared(home_assistant: HomeAssistant) -> None:
+    """free cooling on, boost on, but drying intent OFF → action is NOT 'drying'.
+
+    Confirms the free-cooling drying branch now gates on intent: a stale boost switch with no
+    drying intent must not report drying. profile=cool + no flush → 'cooling'.
+    """
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    assert _render(home_assistant,
+                   _hvac_action_state(flush=False, drying_wanted=False)) == "cooling"
 
 
 # ── Profile block precedence tests ────────────────────────────────────────────────────────
