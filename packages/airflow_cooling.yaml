@@ -1296,22 +1296,38 @@ automation:
             state: "off"
         then:
           - choose:
-              # Boost active: boost owns the 'high' preset; selecting any other preset cancels it
-              # immediately (ComfoConnect hardware behaviour). Only ensure auto_mode is off so the
-              # ComfoConnect schedule cannot fight the boost. Never write a preset in this branch.
+              # Boost owner: boost delivers HIGH airflow in hardware. TWO actions cancel a running
+              # boost — writing ANY preset (low/medium), and turning auto_mode OFF (airflow lingers high
+              # a few minutes then reverts to the prior preset). Turning auto_mode ON does NOT cancel it
+              # (auto + boost coexist). Detect a boost by its INTENT (drying_needed, which subsumes
+              # flush_needed) OR the switch — never by preset==high (boost merely *reports* high).
+              # While a boost is intended/running we only do SAFE things: keep auto_mode ON (turn on if
+              # off) and write NO preset. The schedule then supplies a sensible underlying preset for
+              # when the boost ends; meanwhile boost gives HIGH so the underlying level is moot.
+              # CRUCIAL: this is the FIRST branch and matches on the boost intent, so the `choose` EXITS
+              # here for the whole boost-owned window — INCLUDING the brief switch-off during a boost
+              # expiry/re-enable. That blocks the Low/Medium branches below (which turn auto OFF / write
+              # a preset) from ever running while a boost is intended, so they can never cancel it. This
+              # is the fix for both observed flip-flops (low clobber + expiry cascade).
               - conditions:
-                  - condition: state
-                    entity_id: switch.comfoconnect_pro_boost
-                    state: "on"
-                  - condition: not
+                  - condition: or
                     conditions:
+                      - condition: state
+                        entity_id: binary_sensor.airflow_humidity_drying_needed
+                        state: "on"
+                      - condition: state
+                        entity_id: switch.comfoconnect_pro_boost
+                        state: "on"
+                sequence:
+                  # Only ever turn auto_mode ON (safe; never write a preset, never turn auto off here).
+                  - if:
                       - condition: state
                         entity_id: switch.comfoconnect_pro_auto_mode
                         state: "off"
-                sequence:
-                  - action: switch.turn_off
-                    target:
-                      entity_id: switch.comfoconnect_pro_auto_mode
+                    then:
+                      - action: switch.turn_on
+                        target:
+                          entity_id: switch.comfoconnect_pro_auto_mode
 
               # Low: reduce ventilation. Act unless we are already at (auto off, preset low).
               - conditions:
@@ -1377,12 +1393,14 @@ automation:
               # Medium: free cooling or humidity flush wants more air exchange. Fires ONLY from the
               # auto state (auto_mode on) — it overrides the ComfoConnect schedule. Reaching this from
               # manual low is routed via the transient route-to-auto branch above (manual-low → auto →
-              # medium), so the "from auto schedule" framing below is always truthful. Act unless
-              # already at (auto off, preset medium). Boost-gated: while boost runs the boost-active
-              # branch above fires first; this branch's boost==off guard prevents a preset write from
-              # cancelling the boost (selecting any preset cancels ComfoConnect boost immediately).
+              # medium), so the "from auto schedule" framing below is always truthful. Fires ONLY when
+              # the schedule is actively holding the level at LOW (preset==low): auto=on with preset
+              # already medium (or high) is the PREFERRED end state and needs no intervention, so we no
+              # longer re-force (auto off, medium) over it. Boost-gated: while a boost is intended the
+              # boost-owner branch above matches and exits, so this branch never runs during boost;
+              # the boost==off guard is belt-and-suspenders (writing a preset would cancel a boost).
               # On boost expiry the boost_ended trigger re-fires the controller so this branch
-              # re-asserts medium without waiting for the next humidity tick.
+              # re-asserts medium (once drying has cleared) without waiting for the next humidity tick.
               - conditions:
                   - condition: state
                     entity_id: switch.comfoconnect_pro_auto_mode
@@ -1401,10 +1419,10 @@ automation:
                   - condition: state
                     entity_id: switch.comfoconnect_pro_boost
                     state: "off"
-                  - condition: template
-                    value_template: >
-                      {{ not (is_state('switch.comfoconnect_pro_auto_mode', 'off') and
-                              is_state('select.comfoconnect_pro_ventilation_preset', 'medium')) }}
+                  # Only force medium when the schedule is stuck at LOW; medium/high → leave as-is.
+                  - condition: state
+                    entity_id: select.comfoconnect_pro_ventilation_preset
+                    state: "low"
                 sequence:
                   - action: switch.turn_off
                     target:
