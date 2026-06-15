@@ -45,6 +45,7 @@ the global automations/scripts files.
 
 Current packages:
 - `packages/pergola.yaml` — pergola roof automation (helpers, template sensors, automations, scripts)
+- `packages/airflow_cooling.yaml` — ventilation/free-cooling + humidity flush/drying boost (ComfoConnect)
 
 ## HA template / helper rules
 
@@ -61,3 +62,9 @@ Current packages:
   ```
 - **Never add `| float(default)` on sensor reads inside a `state:` template** when an `availability:` guard is already in place — if availability passes, the sensor is guaranteed numeric; the default hides real errors.
 - When a sensor has no `availability:` guard (e.g. it is a computed template sensor itself), add the guard before removing defaults.
+
+### Template `device:` key
+- The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
+  entities to a device via the UI instead.
+
+> Feature-specific notes live in directory-scoped files (e.g. `packages/CLAUDE.md`).
