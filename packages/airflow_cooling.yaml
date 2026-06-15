@@ -571,9 +571,9 @@ template:
 recorder:
   exclude:
     entities:
-      - binary_sensor.airflow_free_cooling_available
-      - binary_sensor.airflow_humidity_flush_needed
-      - binary_sensor.airflow_moisture_ventilation_low_needed
+      #- binary_sensor.airflow_free_cooling_available
+      #- binary_sensor.airflow_humidity_flush_needed
+      #- binary_sensor.airflow_moisture_ventilation_low_needed
       # airflow_humidity_drying_needed is NOT excluded: it drives the boost and is shown on the
       # airflow-dashboard logbook card — keep its history so the boost activity is observable.
       # Dew-point thresholds: deterministic functions of the humidity helpers — not worth archiving
