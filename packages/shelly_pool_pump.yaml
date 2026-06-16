@@ -43,7 +43,7 @@ mqtt:
       expire_after: 120
       icon: mdi:lightning-bolt
       device: *shelly_pool_pump
-      value_template: "{{ (value_json.aenergy.total / 1000) | round(3) }}"
+      value_template: "{% if value_json.aenergy is not none %}{{ (value_json.aenergy.total / 1000) | round(3) }}{% endif %}"
 
     - name: "Pool Pump Voltage"
       unique_id: "shelly_pool_pump_voltage"
