@@ -508,16 +508,51 @@ utility_meter:
 
 
 # ── Automations ───────────────────────────────────────────────────────────────
+# Venus OS keep-alive (dbus-flashmq, Venus OS 3.x+):
+#   The GX only keeps publishing N/<portal>/… topics while it receives a
+#   keep-alive on R/<portal>/keepalive at least every 60 s. Two important
+#   behaviours of the current (flashmq) broker:
+#     1. "Selective" keep-alive (passing a JSON list of topics in the payload)
+#        was REMOVED — flashmq ignores the list and instead treats the request
+#        as a request to re-publish *everything*.
+#     2. Any keep-alive WITHOUT the "suppress-republish" option forces a full
+#        snapshot of ALL topics (settings, alarms, every device path, …).
+#   Sending a topic-list payload once a minute therefore re-dumped the entire
+#   GX topic tree every 60 s — the source of the flood on N/.../settings etc.
 automation:
+
+  # Periodic keep-alive — feeds the 60 s timeout WITHOUT re-publishing all topics.
+  # "suppress-republish" keeps the bridge awake while normal value-change updates
+  # keep flowing, so our sensors stay live without the full-tree dump.
+  # Runs every 30 s to stay comfortably inside the 60 s timeout window.
   - alias: "Victron Bridge Keep-alive"
-    description: "Keep Venus OS MQTT bridge active for all monitored devices"
-    id: victron_keep_alive_60s
+    description: "Keep Venus OS MQTT bridge alive without re-publishing all topics"
+    id: victron_keep_alive_30s
     trigger:
       - platform: time_pattern
-        minutes: "/1"
+        seconds: "/30"
     action:
       - service: mqtt.publish
         data:
           topic: "R/c0619ab4c19e/keepalive"
-          payload: '["solarcharger/279","system/0","pvinverter/20","vebus/276"]'
+          payload: '{"keepalive-options":["suppress-republish"]}'
+    mode: single
+
+  # Initial full publish — an empty keep-alive payload makes the GX publish a
+  # one-off snapshot of every current value, so all sensors populate immediately
+  # on HA start. After this the periodic suppress-republish keep-alive above
+  # holds the bridge open continuously (it never times out mid-session), so the
+  # full-tree dump is never requested again.
+  - alias: "Victron Bridge Initial Full Publish"
+    description: "Request one full topic snapshot on HA start"
+    id: victron_keep_alive_full_publish
+    trigger:
+      # On HA startup, once the MQTT client is up
+      - platform: homeassistant
+        event: start
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "R/c0619ab4c19e/keepalive"
+          payload: ""
     mode: single
