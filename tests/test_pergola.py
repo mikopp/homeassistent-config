@@ -281,3 +281,33 @@ def test_sun_down_state(home_assistant: HomeAssistant) -> None:
         "skip_condition": True,
     })
     home_assistant.assert_entity_state("sensor.pergola_effective_slat_angle", "45.0", timeout=5)
+
+
+def test_pv_power_zero_at_night_when_mppt_stale(home_assistant: HomeAssistant) -> None:
+    """PV wrapper: solar_yield_watts unavailable but Victron alive → pergola_pv_power = 0.
+
+    At night the MPPT Yield/Power topic stops publishing and sensor.solar_yield_watts
+    (expire_after: 120) goes unavailable. As long as Victron is alive
+    (sensor.victron_ac_load_total_power available), sensor.pergola_pv_power must report 0,
+    not unavailable — otherwise the sun_down rule (needs pv == 0) fails and the pergola
+    opens to 90° at night.
+    """
+    # MPPT topic expired → solar_yield_watts unavailable; house load still reporting.
+    home_assistant.set_state("sensor.solar_yield_watts", "unavailable", {})
+    # pergola_pv_power must stay available and read 0 (not -1 / not unavailable).
+    home_assistant.assert_entity_state("sensor.pergola_pv_power",
+                                       lambda s: float(s) == 0.0, timeout=5)
+
+    # And the state machine must reach sun_down (no 90° move) with solar_radiation == 0.
+    home_assistant.call_action("input_select", "select_option", {
+        "entity_id": "input_select.pergola_automation_state",
+        "option": "not_enough_sun",
+    })
+    home_assistant.set_state("sensor.wheatherstation_solar_radiation", "0",
+                             {"unit_of_measurement": "W/m²"})
+    home_assistant.call_action("automation", "trigger", {
+        "entity_id": "automation.pergola_state_manager",
+        "skip_condition": True,
+    })
+    home_assistant.assert_entity_state("input_select.pergola_automation_state",
+                                       "sun_down", timeout=5)

@@ -165,7 +165,7 @@ input_number:
     # sensor.pergola_rain_recovery_step (which returns 0 when state ≠ rain_stopped).
     # Steps:
     #   1 — settling (30 s wait before first move)
-    #   2 — draining at 8° (5 min hold)
+    #   2 — draining at 8° (5 min hold) — skipped when hourly_rain == 0 (counter jumps 1→3)
     #   3 — draining at 15° (5 min hold)
     #   4 — drying (optional 30 min wait when hourly_rain > 0)
     # After the script calls script.pergola_evaluate_state the state exits rain_stopped
@@ -278,9 +278,24 @@ template:
       # ever changes, only this sensor needs updating.
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
-        state: "{{ states('sensor.solar_yield_watts') | float(0) }}"
+        # The MPPT Yield/Power topic stops publishing once it sits at 0 at night, so
+        # sensor.solar_yield_watts (expire_after: 120) goes unavailable — the Victron
+        # keep-alive uses suppress-republish, so constant-value topics are no longer
+        # periodically refreshed. Treat "MPPT topic stale but the rest of the Victron GX
+        # still reporting" as 0 W (night), not unavailable; otherwise the sun_down rule
+        # (needs pv == 0) fails and the pergola opens to 90° at night.
+        # victron_ac_load_total_power tracks live house load, so its availability signals
+        # that Victron is alive. Safe by day: pv only feeds the sun_down rule (which also
+        # requires solar_radiation == 0) and the max() in pergola_sun_shining.
+        state: >
+          {% if states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] %}
+            {{ states('sensor.solar_yield_watts') | float(0) }}
+          {% else %}
+            0
+          {% endif %}
         availability: >
-          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] }}
+          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown']
+             or states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
@@ -529,7 +544,7 @@ template:
       #
       # Steps (only meaningful while state = rain_stopped):
       #   1 — settling      (30 s wait for states to stabilise)
-      #   2 — draining 8°   (covers open to 8°; 5 min hold for initial drainage)
+      #   2 — draining 8°   (covers open to 8°; 5 min hold) — skipped when hourly_rain == 0
       #   3 — draining 15°  (covers open to 15°; 5 min hold for continued drainage)
       #   4 — drying        (optional 30 min extra wait when hourly_rain > 0)
       #   0 — not in recovery (state ≠ rain_stopped)
@@ -1503,25 +1518,34 @@ script:
         entity_id: input_select.pergola_automation_state
         state: rain_stopped
 
-      # ── Step 2: First drain position — 8° ──────────────────────────────────────────
+      # ── Step 2: First drain position — 8° (only when rain fell in the last hour) ─────
       # Slight opening to start water drainage. At 8° the slat is nearly flat so gravity
       # pulls water toward the front edge.
+      # When the Ecowitt "rain in last hour" sensor reads 0, little water pooled, so this
+      # pre-drain step (and its 5 min hold) is skipped — the script jumps straight to the
+      # 15° step. Counter then goes 1 → 3 (step 2 simply not shown).
       # Counter set to 2 before the 5 min hold so the sensor shows the active phase.
-      - action: script.pergola_set_slat_angle
-        data:
-          slat_angle: 8
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.pergola_rain_recovery_step
-        data:
-          value: 2
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.wheatherstation_hourly_rain') | float(0) > 0 }}
+            sequence:
+              - action: script.pergola_set_slat_angle
+                data:
+                  slat_angle: 8
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.pergola_rain_recovery_step
+                data:
+                  value: 2
 
-      # ── Step 3: Wait 5 minutes — initial drainage ──────────────────────────────────
-      - delay: "00:05:00"
-      # Abort if the state was manually changed away from rain_stopped during this delay.
-      - condition: state
-        entity_id: input_select.pergola_automation_state
-        state: rain_stopped
+              # ── Step 3: Wait 5 minutes — initial drainage ────────────────────────────
+              - delay: "00:05:00"
+              # Abort if the state was manually changed away from rain_stopped during this delay.
+              - condition: state
+                entity_id: input_select.pergola_automation_state
+                state: rain_stopped
 
       # ── Step 4: Second drain position — 15° ────────────────────────────────────────
       # Open further so remaining water continues to run off.
