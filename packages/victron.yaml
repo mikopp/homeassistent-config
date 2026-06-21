@@ -69,27 +69,6 @@ mqtt:
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
 
-    # Daily yield — resets each day at midnight; for display/notifications only
-    - name: "Victron Solar Yield Today kWh"
-      unique_id: "victron_solar_yield_today_kwh"
-      state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/User"
-      unit_of_measurement: "kWh"
-      device_class: energy
-      state_class: total_increasing
-      icon: mdi:solar-power
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
-
-    - name: "Victron Solar PV Voltage"
-      unique_id: "victron_solar_pv_voltage"
-      state_topic: "N/c0619ab4c19e/solarcharger/279/Pv/V"
-      unit_of_measurement: "V"
-      device_class: voltage
-      state_class: measurement
-      icon: mdi:sine-wave
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
-
     # ── AC-coupled PV Inverter (pvinverter 20) ────────────────────────────────
     # This inverter generates AC power directly — measured on the AC side.
 
@@ -131,30 +110,6 @@ mqtt:
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
-    # Direct energy counters from the MultiPlus hardware — measure actual kWh
-    # crossing the DC↔AC conversion stage, independent of MPPT yield and battery BMS.
-    # No float(0): a null payload means the device is offline; sensor goes unavailable
-    # so HA Statistics skips the data point and the counter is not reset to 0.
-    - name: "Victron VEBus DC to AC Energy"
-      unique_id: "victron_vebus_dc_to_ac_energy"
-      state_topic: "N/c0619ab4c19e/vebus/276/Energy/InverterToAcOut"
-      unit_of_measurement: "kWh"
-      device_class: energy
-      state_class: total_increasing
-      icon: mdi:lightning-bolt-circle
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
-
-    - name: "Victron VEBus AC to DC Energy"
-      unique_id: "victron_vebus_ac_to_dc_energy"
-      state_topic: "N/c0619ab4c19e/vebus/276/Energy/AcIn1ToInverter"
-      unit_of_measurement: "kWh"
-      device_class: energy
-      state_class: total_increasing
-      icon: mdi:lightning-bolt-circle
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
-
     # Total DC PV power aggregated across all MPPTs connected to the GX
     - name: "Victron DC PV Total Power"
       unique_id: "victron_dc_pv_total_power"
@@ -190,26 +145,6 @@ mqtt:
       icon: mdi:battery-charging
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
-
-    - name: "Victron Battery Voltage"
-      unique_id: "victron_battery_voltage"
-      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Voltage"
-      unit_of_measurement: "V"
-      device_class: voltage
-      state_class: measurement
-      icon: mdi:battery-charging-outline
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(2) }}{% endif %}"
-
-    - name: "Victron Battery Current"
-      unique_id: "victron_battery_current"
-      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Current"
-      unit_of_measurement: "A"
-      device_class: current
-      state_class: measurement
-      icon: mdi:current-dc
-      device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
 
     # ── Grid — 3-phase via MultiPlus AC-in ────────────────────────────────────
     # Per-phase sensors for phase-balance diagnostics.
@@ -315,62 +250,6 @@ template:
       - name: "Victron Grid Power Export"
         unique_id: victron_grid_power_export
         state: "{{ [-(states('sensor.victron_grid_total_power') | float(0)), 0] | max }}"
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      # ── Battery half-waves ────────────────────────────────────────────────────
-      # Measured at DC battery terminals — most accurate point for battery SOC tracking.
-      - name: "Victron Battery Power Charge"
-        unique_id: victron_battery_power_charge
-        state: "{{ [states('sensor.victron_battery_power') | float(0), 0] | max }}"
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      - name: "Victron Battery Power Discharge"
-        unique_id: victron_battery_power_discharge
-        state: "{{ [-(states('sensor.victron_battery_power') | float(0)), 0] | max }}"
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      # ── VEBus conversion direction (DC↔AC via MultiPlus) ─────────────────────
-      # Charger mode: W flowing AC grid → MultiPlus → DC bus
-      - name: "Victron VEBus Charger Power"
-        unique_id: victron_vebus_charger_power
-        state: "{{ [states('sensor.victron_vebus_dc_power') | float(0), 0] | max }}"
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      # Inverter mode: W flowing DC bus → MultiPlus → AC loads
-      - name: "Victron VEBus Inverter Power"
-        unique_id: victron_vebus_inverter_power
-        state: "{{ [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max }}"
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      # Of the DC→AC inverter output, how much originates from MPPT solar panels
-      # (capped: PV contribution cannot exceed total inverter output)
-      - name: "Victron DC PV to AC Power"
-        unique_id: victron_dc_pv_to_ac_power
-        state: >
-          {% set inv = [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max %}
-          {% set pv  = states('sensor.victron_dc_pv_total_power') | float(0) %}
-          {{ [pv, inv] | min }}
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-
-      # Of the DC→AC inverter output, how much originates from battery discharge
-      - name: "Victron Battery to AC Power"
-        unique_id: victron_battery_to_ac_power
-        state: >
-          {% set inv = [-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max %}
-          {% set pv  = states('sensor.victron_dc_pv_total_power') | float(0) %}
-          {{ [inv - pv, 0] | max }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
