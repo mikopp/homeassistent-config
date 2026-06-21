@@ -22,6 +22,18 @@
 mqtt:
   sensor:
 
+    # expire_after policy (see the Venus OS keep-alive automation at the bottom of this file):
+    #   The GX keep-alive uses "suppress-republish", so only value-CHANGE updates arrive —
+    #   constant topics are no longer periodically re-published.
+    #   • Power sensors that fluctuate (grid L1/2/3, AC load L1/2/3, vebus/dc-pv/battery/
+    #     ac-inverter power, solar yield W) KEEP expire_after: 120. They never falsely expire,
+    #     but still flip unavailable on a real GX outage, so the per-minute energy accumulators
+    #     correctly fall back to float(0) and stop integrating a stale value.
+    #   • Energy counters (total_increasing) and slow diagnostics (SOC, voltages, current)
+    #     OMIT expire_after: they legitimately stay constant for hours, so they retain their
+    #     last reading instead of going unavailable. Null payloads are already guarded in each
+    #     value_template, and total_increasing tolerates the gap with no reset artifact.
+
     # ── MPPT Solar DC (solarcharger 279) ─────────────────────────────────────
 
     # Instantaneous DC power from panels — kept as-is for backward compatibility
@@ -53,7 +65,6 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
-      expire_after: 120
       icon: mdi:solar-power
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -65,7 +76,6 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
-      expire_after: 120
       icon: mdi:solar-power
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -76,7 +86,6 @@ mqtt:
       unit_of_measurement: "V"
       device_class: voltage
       state_class: measurement
-      expire_after: 120
       icon: mdi:sine-wave
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
@@ -103,7 +112,6 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
-      expire_after: 120
       icon: mdi:solar-power-variant
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -133,7 +141,6 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
-      expire_after: 120
       icon: mdi:lightning-bolt-circle
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -144,7 +151,6 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
-      expire_after: 120
       icon: mdi:lightning-bolt-circle
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -170,7 +176,6 @@ mqtt:
       unit_of_measurement: "%"
       device_class: battery
       state_class: measurement
-      expire_after: 120
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
 
@@ -192,7 +197,6 @@ mqtt:
       unit_of_measurement: "V"
       device_class: voltage
       state_class: measurement
-      expire_after: 120
       icon: mdi:battery-charging-outline
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(2) }}{% endif %}"
@@ -203,7 +207,6 @@ mqtt:
       unit_of_measurement: "A"
       device_class: current
       state_class: measurement
-      expire_after: 120
       icon: mdi:current-dc
       device: *victron_device
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
