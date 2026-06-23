@@ -174,7 +174,7 @@ jobs:
       # ── 10. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
         if: steps.run_tests.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             // Find the open PR for this branch (works for push events too)
