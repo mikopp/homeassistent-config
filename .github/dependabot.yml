@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Keep GitHub Actions (uses: ...) up to date.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Keep CI Python dependencies up to date, including the git-pinned
+  # Home Assistant test harness in .github/workflows/requirements.txt.
+  - package-ecosystem: pip
+    directory: /.github/workflows
+    schedule:
+      interval: weekly
