@@ -24,9 +24,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install Python dependencies
-        run: |
-          pip install pyyaml requests pytest-github-actions-annotate-failures
-          pip install git+https://github.com/HeadlessTarry/HomeAssistant-Test-Harness.git
+        run: pip install -r .github/workflows/requirements.txt
 
       # ── 3. Pull the HA image (cached by version) ─────────────────────────────
       #    Used by the config-check step. The test harness manages its own
