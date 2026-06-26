@@ -117,25 +117,24 @@ template:
              | map('states') | map('float', none) | reject('none') | list | count %}
           {{ label_count > 0 or has_value('sensor.comfoconnect_pro_extract_air_humidity') }}
 
-      # Average dewpoint across all monitored indoor areas; falls back to ComfoConnect extract air dew point when no labeled entities exist
+      # Magnus dew point of the averaged indoor temperature & humidity (then 5-min smoothed by
+      # the filter sensor airflow_min_indoor_dew_5min). Derived from airflow_avg_indoor_temp and
+      # airflow_avg_indoor_humidity, which already encapsulate per-room averaging with ComfoConnect
+      # extract-air fallback. Using dew(mean T, mean RH) rather than mean(dew_i) ensures that
+      # 22 °C / 74% always yields ~17.15 °C (Jensen's inequality made mean(dew_i) read low).
       - unique_id: airflow_min_indoor_dew
         name: "Airflow Avg Indoor Dew"
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         state: >
-          {% set indoor_dews = label_entities('Indoor.Dewpoint')
-            | map('states') | map('float', none) | reject('none') | list %}
-          {% if indoor_dews | count > 0 %}
-            {{ (indoor_dews | sum / indoor_dews | count) | round(2) }}
-          {% else %}
-            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
-            {{ states('sensor.comfoconnect_pro_extract_air_dew_point') | float | round(2) }}
-          {% endif %}
+          {% set T  = states('sensor.airflow_avg_indoor_temp') | float %}
+          {% set RH = states('sensor.airflow_avg_indoor_humidity') | float %}
+          {% set ps = 0.61078 * e ** (17.27 * T / (T + 237.3)) %}
+          {% set pv = ps * RH / 100 %}
+          {{ (237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log)) | round(2) }}
         availability: >
-          {% set label_count = label_entities('Indoor.Dewpoint')
-             | map('states') | map('float', none) | reject('none') | list | count %}
-          {{ label_count > 0 or has_value('sensor.comfoconnect_pro_extract_air_dew_point') }}
+          {{ has_value('sensor.airflow_avg_indoor_temp') and has_value('sensor.airflow_avg_indoor_humidity') }}
 
       # Average temperature across all monitored indoor areas; falls back to ComfoConnect extract air temperature when no labeled entities exist
       - unique_id: airflow_avg_indoor_temp
