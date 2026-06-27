@@ -1,7 +1,8 @@
 # HRDS Dehumidifier + Airflow Coordination — Implementation Plan
 
-> Status: **PLAN ONLY — not yet implemented.** Target implementation day is later.
-> Stored at `plans/hrds-dehumidifier.md` per repo convention (CLAUDE.MD rule 1).
+> Status: **PLAN ONLY — do not implement yet.** Target implementation day is later.
+> On implementation day this plan should also be copied into the repo at
+> `homeassistent-config/plans/hrds-dehumidifier.md` (repo convention: CLAUDE.MD rule 1).
 
 ## Context
 
@@ -68,6 +69,40 @@ through shared dew-point thresholds and the Comfo's reported supply volume — n
 
 ---
 
+## Interaction analysis: HRDS ↔ airflow (contradictions, races, fights)
+
+Reviewed against `airflow_cooling.yaml` (the unified `airflow_ventilation_controller`, the four decision
+sensors, `airflow_cooling_state`, and the dew band). Verdicts:
+
+**Structurally safe (no fight possible):**
+- **No actuator contention.** The airflow controller is a *single, queued, idempotent* automation that
+  is the sole writer of every Comfo output (profile / preset / auto_mode), and boost is its own
+  automation. The HRDS package writes **only** HRDS entities and never commands the Comfo (Decision 3).
+  So nothing is written by both packages.
+- **"Dry" vs "retain moisture" cannot co-occur.** Dew thresholds are ordered `dew_min < dew_target <
+  dew_max`. HRDS dehumidify needs `indoor_dew > dew_target`; airflow's warm/moisture-retention needs
+  `indoor_dew < dew_min`. They can never both be true → no direct goal contradiction on humidity.
+- **Moisture-protect vs HRDS recirc is complementary, not opposed.** Airflow LOW reduces *outdoor-air
+  intake*; the HRDS recirculates *indoor* air. Different air sources — the designed synergy.
+- **Rule "no Comfo flush/boost when outdoor humid" is guaranteed** by the existing flush branches
+  (`outdoor_dew < dew_max`), independent of the HRDS.
+
+**Genuine issues to mitigate (each maps to a decision/mitigation below):**
+
+| # | Issue | Why it matters | Proposed mitigation |
+|---|-------|----------------|---------------------|
+| I1 | **Heating-season cross-purpose.** In `active_heating` the Comfo holds WARM (heat recovery); the HRDS *opportunistic* branch (above target + free PV) would run the compressor, condensing moisture and shedding the recovered heat. | Not a logic contradiction (humidity > target is real), but it dehumidifies-on-solar *while the house is being heated* — thermally counter-productive. | **✓ RESOLVED:** season-gate the opportunistic branch off during `active_heating`. The above-max branch runs in every season (mould safety). |
+| I2 | **Free-cooling overlap (transient fight + waste).** When `free_cooling_available` is ON the Comfo imports cool dry outdoor air; if the HRDS is still running it recirculates *room* air into the supply duct — diluting the fresh-air fraction and spending compressor energy to do what the free import already does. | A real (if transient) physical + efficiency conflict in the overlap window. | **✓ RESOLVED:** when free cooling is available **and indoor is below max**, the HRDS stops and accepts the free cool dry air (opportunistic branch gated off). When indoor is **above max**, all logic stays unchanged — above-max overrides free cooling and dehumidifies fast (full fan top-up / 250). |
+| I3 | **Shared `climate_min_dew_diff` does double duty.** It would be airflow's free-cooling/flush *margin* and the HRDS stop-hysteresis width. | One knob, two unrelated control goals — tuning for HRDS flip-flop shifts airflow's free-cooling aggressiveness and vice-versa. | **✓ RESOLVED:** give the HRDS its own `hrds_off_dew_diff`; `airflow_min_dew_diff` stays airflow-only (not extracted to the common package). |
+| I4 | **Fan-controller write chatter.** `hrds_required_fan_percent` depends on `comfoconnect_pro_supply_fan_volume`, which the airflow controller actively changes (preset/boost/away). Every Comfo change re-triggers the HRDS fan recompute. | Risk of frequent Modbus writes / fan hunting around boundaries; the ≥5 % deadband bounds amplitude but not frequency. | Add a **throttle / min re-write interval** and **smooth `supply_fan_volume`** with a short filter (reuse the airflow `_5min` filter pattern), on top of the deadband. |
+| I5 | **Combined-flow is an open-loop estimate.** Comfo volume is measured; the HRDS share is *estimated* from fan % × `hrds_max_recirc_airflow` (the unit can't measure flow). | The "≥150/200/250 combined" guarantee is only as good as the calibration constant — silent over/undershoot if wrong. | Calibrate `hrds_max_recirc_airflow` during the hardware checks; treat the targets as best-effort. Documented, not blocking. |
+| I6 | **HRDS OFF-path ordering.** On need-clear, the dehumidify controller writes `unit_on_off=off` (stops fan) while the fan controller (triggered by dehumidify→off) may also write a fan value. | Harmless if the unit is off, but the fan controller must not re-assert a non-zero speed after the unit is commanded off. | Make the fan controller a **no-op when `hrds_dehumidify_needed` is off / unit off**. |
+| I7 | **Coupled single-sensor loop (structural).** Both packages key off the *same* indoor dew; HRDS drying lowers it, which simultaneously relaxes airflow's flush/free/low decisions and the HRDS's own. | Stable today (asymmetric hysteresis + min-runtime + airflow's 10-min debounce), but they are two controllers on one plant sharing one sensor — a parameter change in one can destabilise the other. | Document the coupling; keep HRDS reactions slower-or-equal to airflow's debounce so airflow leads. |
+
+I1, I2, I3 are **resolved with the user** (see table + Decisions 7–9); I4 and I6 are folded into the
+HRDS automation design (fan throttle/smoothing + OFF-path no-op). I5 and I7 are documented risks, not
+blockers.
+
 ## Decisions — all RESOLVED with the user
 
 1. **PV "enough free energy" signal** → a new `packages/energy.yaml` owns `sensor.energy_pv_surplus`
@@ -91,6 +126,14 @@ through shared dew-point thresholds and the Comfo's reported supply volume — n
    Comfo is in away mode — moisture protection does not pause because nobody is home. With Comfo airflow
    low while away, the HRDS recirc fan tops up to the active combined target as usual. (No away-gate on
    the HRDS dehumidify/fan logic.)
+7. **Heating-season gate (I1)** → the opportunistic (above-target + free-PV) branch is **suppressed
+   during `active_heating`**; the above-max branch runs in every season.
+8. **Free-cooling overrides normal dehumidify (I2)** → free cooling is the more efficient way to dry, so
+   it wins: while `binary_sensor.airflow_free_cooling_available` is ON, the HRDS runs **only if indoor is
+   above max**. Below max, the HRDS stays off and accepts the free cool dry air (opportunistic branch
+   gated off). Above max, the unconditional branch still fires and dehumidifies fast (full logic).
+9. **Separate HRDS hysteresis (I3)** → HRDS stop-hysteresis uses its own `hrds_off_dew_diff`;
+   `airflow_min_dew_diff` stays airflow-only (not extracted).
 
 Additional assumptions (flag if wrong):
 - HRDS is used for **dehumidify only** here; `active_cooling` stays OFF (cooling remains the Comfo
@@ -116,9 +159,9 @@ The entities both `airflow_cooling.yaml` and the HRDS package need are extracted
 `climate_*` common package so neither feature "owns" them. Contents (renamed from `airflow_*`):
 
 - **Parameters (`input_number`):** `climate_target_humidity`, `climate_max_humidity`,
-  `climate_target_temperature` (the temp at which dew thresholds are evaluated), and
-  `climate_min_dew_diff` — now shared: airflow's free-cooling/flush margin **and** the HRDS stop
-  hysteresis (see below). `climate_min_humidity` may move here too for cohesion (airflow-only consumer).
+  `climate_target_temperature` (the temp at which dew thresholds are evaluated). `climate_min_humidity`
+  may move here too for cohesion (airflow-only consumer). **Note:** `airflow_min_dew_diff` stays
+  airflow-only (the HRDS now has its own `hrds_off_dew_diff`, per analysis I3) — it is **not** extracted.
 - **Derived humidity thresholds (`template` sensor):** `climate_dew_point_target`,
   `climate_dew_point_max` (Magnus at the target temp), and `climate_dew_point_min` if min moves.
 - **Indoor climate primitives:** `climate_avg_indoor_humidity`, `climate_avg_indoor_temp`,
@@ -178,6 +221,9 @@ Shelly pool pump config.
   (above max) inside the boost schedule (parameter).**
 - `input_number.hrds_max_recirc_airflow` (m³/h) — HRDS fan output at 100% (calibration for %→m³/h map).
 - `input_number.hrds_fan_min_speed` (%, e.g. 20) — minimum fan while HRDS runs.
+- `input_number.hrds_off_dew_diff` (°C) — **HRDS-own stop hysteresis** (decoupled from
+  `climate_min_dew_diff`, per analysis I3): dehumidify stays on until indoor dew falls this far below the
+  on-trigger.
 - `input_number.hrds_min_runtime` (minutes) — **anti-flip-flop:** once dehumidify starts, it may not
   stop until this elapses (compressor protection + stable behaviour).
 - `timer.hrds_min_runtime` — started on dehumidify-on for `hrds_min_runtime` minutes; the controller's
@@ -190,17 +236,21 @@ Shelly pool pump config.
   / delay_off (~3–5 min, tunable) to prevent flip-flop** on this final gate, as requested.
 - `binary_sensor.hrds_indoor_above_max` — **asymmetric Schmitt:** ON when
   `climate_indoor_dew ≥ climate_dew_point_max`; stays ON until
-  `climate_indoor_dew ≤ climate_dew_point_max − climate_min_dew_diff` (start on the trigger, stop only
-  once dew is `min_dew_diff` below it). The "serious moisture" signal; drives unconditional dehumidify
+  `climate_indoor_dew ≤ climate_dew_point_max − hrds_off_dew_diff` (start on the trigger, stop only once
+  dew is `hrds_off_dew_diff` below it). The "serious moisture" signal; drives unconditional dehumidify
   and the 250 target.
 - `binary_sensor.hrds_indoor_above_target` — **asymmetric Schmitt:** ON when
   `climate_indoor_dew > climate_dew_point_target`; stays ON until
-  `climate_indoor_dew ≤ climate_dew_point_target − climate_min_dew_diff`.
+  `climate_indoor_dew ≤ climate_dew_point_target − hrds_off_dew_diff`.
 - `binary_sensor.hrds_dehumidify_needed` — **core decision** (availability-guarded on the dew sensors):
-  - ON if `hrds_indoor_above_max` (unconditional — high humidity), **or**
-  - `hrds_indoor_above_target` **and** `hrds_pv_surplus_available` (free-PV opportunistic).
-  - The asymmetric hysteresis above (per branch, using `climate_min_dew_diff`) is the primary
-    anti-flip-flop; the minimum-runtime gate (below, in the controller) is the second layer.
+  - ON if `hrds_indoor_above_max` (**unconditional — runs in every season and even during free cooling;
+    above-max always wins, dehumidify fast**), **or**
+  - `hrds_indoor_above_target` **and** `hrds_pv_surplus_available` **and not** `active_heating` (I1)
+    **and not** `binary_sensor.airflow_free_cooling_available` (I2) — the gated free-PV opportunistic
+    branch. (When free cooling is available and we're below max, the HRDS stops and accepts the free
+    cool dry air; when above max, the unconditional branch overrides and all logic stays the same.)
+  - The asymmetric hysteresis above (per branch, using `hrds_off_dew_diff`) is the primary anti-flip-flop;
+    the minimum-runtime gate (below, in the controller) is the second layer.
 - `binary_sensor.hrds_boost_airflow_window` — `hrds_indoor_above_max` ON **and**
   `binary_sensor.climate_boost_schedule_active` (the shared boost window). **No outdoor-humidity gate**
   — the 250 target recirculates indoor air through the HRDS. (PV-only opportunistic dehumidify stays at
@@ -233,8 +283,14 @@ Shelly pool pump config.
     acceptable: a restart implies a fresh start anyway.)
 - `automation.hrds_fan_airflow_controller` (gated by `hrds_automatic_enabled`, `mode: queued`): on
   `sensor.hrds_required_fan_percent` change / dehumidify on-off →
+  - **No-op guard (I6):** if `hrds_dehumidify_needed` is off (unit being/already commanded off), do
+    nothing — never re-assert a fan speed after the dehumidify controller stops the unit.
   - Running: write `number.fan_manual_speed` (PM20, reg 1614) = required %, **with a deadband** (only
-    write if it differs from current `sensor.supply_fan_output` by ≥5 %) to limit Modbus chatter.
+    write if it differs from current `sensor.supply_fan_output` by ≥5 %).
+  - **Anti-chatter (I4):** the Comfo supply volume (an input to `hrds_required_fan_percent`) is actively
+    changed by the airflow controller, so smooth it with a short `filter` (reuse the airflow `_5min`
+    pattern) and add a **min re-write interval** (e.g. ≥60 s) on top of the deadband, so HRDS reactions
+    stay slower-or-equal to airflow's debounce (I7 — airflow leads).
   - Off: reset fan to device default/auto.
   - **⚠ MUST be verified on real hardware BEFORE implementation (see "Pre-implementation hardware
     checks" below).** Working hypothesis (to confirm): the **dehumidify fan band**
@@ -273,7 +329,6 @@ Shelly pool pump config.
 `airflow_min_indoor_dew(_5min) → climate_indoor_dew(_5min)` ·
 `airflow_avg_indoor_humidity → climate_avg_indoor_humidity` ·
 `airflow_avg_indoor_temp → climate_avg_indoor_temp` ·
-`airflow_min_dew_diff → climate_min_dew_diff` ·
 `airflow_boost_workday/_non_workday → climate_boost_workday/_non_workday` · **new**
 `binary_sensor.climate_boost_schedule_active`. (Optionally `airflow_min_humidity → climate_min_humidity`
 and `airflow_dew_point_min → climate_dew_point_min`.) Update **every** reference in the four airflow
@@ -347,7 +402,7 @@ server (which can rename entities) is used to migrate state. Two entity classes 
    case: comfo≈100 + HRDS≈150 = 250); the opportunistic tier targets ~200 on above-target + free PV
    (below max); the 150 floor applies above-max off-schedule; HRDS fan stays off when comfo alone
    already exceeds the active target (e.g. comfo=300). **Anti-flip-flop:** assert dehumidify stays ON when indoor dew sits between the
-   trigger and `trigger − climate_min_dew_diff` (only stops once it drops the full diff below), and that
+   trigger and `trigger − hrds_off_dew_diff` (only stops once it drops the full diff below), and that
    it does not stop while `timer.hrds_min_runtime` is active even after need clears. Update the airflow
    tests for the renamed `climate_*` ids and the simplified `airflow_humidity_drying_needed` (now
    consuming `climate_boost_schedule_active`). Run the existing pytest harness as the regression gate.
