@@ -1,0 +1,167 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Energy — shared PV-surplus primitives + Shelly pool pump hardware
+#
+# This package owns two concerns that are deliberately kept together:
+#   1. Shelly Plus Plug S monitoring for the pool pump (MQTT sensors + switch)
+#   2. Canonical PV-surplus / free-energy signals reusable by any load package
+#      (pool pump automations, future HRDS dehumidifier, etc.)
+#
+# Shelly MQTT topics:
+#   Status:  shelly/shellyplusplugs-pool-pump/status/switch:0   (JSON, 15 min or on change)
+#   Command: shelly/shellyplusplugs-pool-pump/command/switch:0  (payload: "on" / "off")
+#
+# PV surplus definition:
+#   sensor.energy_pv_surplus = sensor.victron_grid_power_export
+#   = the non-negative AC export power to the grid (W).
+#   Positive only when the system is a net exporter — battery charging and house
+#   loads are already subtracted by the Victron system before this hits the meter.
+# ──────────────────────────────────────────────────────────────────────────────
+
+mqtt:
+  sensor:
+
+    - name: "Pool Pump Power"
+      unique_id: "shelly_pool_pump_power"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:pump
+      device: &shelly_pool_pump
+        identifiers:
+          - shellyplusplugs_pool_pump
+        name: "Pool Pump"
+        manufacturer: "Shelly"
+        model: "Plus Plug S"
+        suggested_area: "Pool"
+      value_template: "{{ value_json.apower | round(1) }}"
+
+    # Cumulative lifetime energy from Shelly firmware (Wh → kWh).
+    # Never resets unless the device is factory-reset; total_increasing tells
+    # HA to handle any dip (reboot reset) gracefully.
+    - name: "Pool Pump Energy"
+      unique_id: "shelly_pool_pump_energy"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *shelly_pool_pump
+      value_template: "{% if value_json.aenergy is not none %}{{ (value_json.aenergy.total / 1000) | round(3) }}{% endif %}"
+
+    - name: "Pool Pump Voltage"
+      unique_id: "shelly_pool_pump_voltage"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:sine-wave
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.voltage | round(1) }}"
+
+    - name: "Pool Pump Current"
+      unique_id: "shelly_pool_pump_current"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "A"
+      device_class: current
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:current-ac
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.current | round(3) }}"
+
+    - name: "Pool Pump Temperature"
+      unique_id: "shelly_pool_pump_temperature"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      expire_after: 120
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.temperature.tC | round(1) }}"
+
+  binary_sensor:
+
+    - name: "Pool Pump Switch"
+      unique_id: "shelly_pool_pump_switch"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      device_class: power
+      expire_after: 120
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.output | string | lower }}"
+      payload_on: "true"
+      payload_off: "false"
+
+  switch:
+
+    # HA-controlled switch — sends on/off commands to the Shelly plug.
+    # The Shelly's built-in schedule must be disabled in its web UI before
+    # this switch is used, to prevent the device fighting HA commands.
+    - name: "Pool Pump"
+      unique_id: "shelly_pool_pump_control"
+      command_topic: "shelly/shellyplusplugs-pool-pump/command/switch:0"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      value_template: "{{ value_json.output }}"
+      payload_on: "on"
+      payload_off: "off"
+      device_class: switch
+      device: *shelly_pool_pump
+
+
+# ── Shared energy helpers ──────────────────────────────────────────────────────
+input_number:
+
+  energy_battery_soc_min:
+    name: "Energy Battery SoC Minimum"
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: box
+    icon: mdi:battery-low
+
+  energy_min_surplus:
+    name: "Energy Minimum PV Surplus"
+    min: 0
+    max: 2000
+    step: 50
+    unit_of_measurement: "W"
+    mode: box
+    icon: mdi:solar-power
+
+
+# ── Derived energy template sensors ───────────────────────────────────────────
+template:
+  - sensor:
+
+      # Canonical PV surplus signal for all packages.
+      # Definition: Victron grid export power (W) — true surplus after house loads
+      # and battery charging are already served. Zero when the system is a net importer.
+      - name: "Energy PV Surplus"
+        unique_id: energy_pv_surplus
+        state: "{{ states('sensor.victron_grid_power_export') | float(0) }}"
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        availability: >
+          {{ states('sensor.victron_grid_power_export') not in ['unavailable', 'unknown'] }}
+
+  - binary_sensor:
+
+      # Generic "free energy is available" gate — reusable by any opportunistic load.
+      # ON when: PV surplus exceeds the noise floor AND battery SoC is not depleted.
+      # The AND (not OR) is intentional: battery-only surplus is not "free" PV energy.
+      - name: "Energy Free Available"
+        unique_id: energy_free_available
+        state: >
+          {{ states('sensor.energy_pv_surplus') | float(0)
+             > states('input_number.energy_min_surplus') | float
+             and states('sensor.victron_battery_soc') | float(0)
+                 >= states('input_number.energy_battery_soc_min') | float }}
+        availability: >
+          {{ states('sensor.energy_pv_surplus') not in ['unavailable', 'unknown']
+             and states('sensor.victron_battery_soc') not in ['unavailable', 'unknown'] }}
