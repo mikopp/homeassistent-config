@@ -56,6 +56,14 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.pergola_slat_thickness": 3,
         "input_number.airflow_bypass_efficiency_max": 0.818,
         "input_number.airflow_bypass_efficiency_min": 0.05,
+        # Energy package defaults
+        "input_number.energy_battery_soc_min": 80,
+        "input_number.energy_min_surplus": 50,
+        # Pool pump defaults
+        "input_number.pool_pv_surplus_threshold": 500,
+        "input_number.pool_battery_soc_min": 80,
+        "input_number.pool_temp_threshold": 30,
+        "input_number.pool_orp_alarm_threshold": 650,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
@@ -192,6 +200,15 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "%", "device_class": "humidity"})
     # Heating/cooling indicator (template sensor from another package)
     ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    # VistaPool "Mike" device (cloud push integration — absent in CI); seeded above alarm
+    # threshold so binary_sensor.pool_orp_alarm starts off (no false alarm during unrelated tests)
+    ha.set_state("sensor.mike_redox_potential", "700",
+                 {"unit_of_measurement": "mV"})
+    ha.set_state("sensor.mike_ph", "7.2", {})
+    ha.set_state("sensor.mike_temperature", "28.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    # Pool schedule — seeded off (outside 11:00-17:30 window) for test baseline
+    ha.set_state("schedule.pool_pump_normal", "off", {})
 
 
 # ── Shared time-machine fixtures ─────────────────────────────────────────────────────────

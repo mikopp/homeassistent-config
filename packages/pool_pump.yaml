@@ -1,0 +1,285 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Pool Pump — schedule, water quality monitoring, and PV-aware control
+#
+# Hardware controlled:
+#   switch.pool_pump  (Shelly Plus Plug S, defined in packages/energy.yaml)
+#
+# Water quality monitoring:
+#   VistaPool integration (cloud push, UI-configured), device name "Mike":
+#     sensor.mike_redox_potential — ORP / Rx redox potential (mV)
+#     sensor.mike_ph              — pH value
+#     sensor.mike_temperature     — pool water temperature (°C)
+#
+# Normal schedule (replaces Shelly's built-in schedule — disable that in the
+# Shelly web UI before this package goes live):
+#   Daily 11:00–17:30  →  schedule.pool_pump_normal
+#
+# PV-driven early start (morning window 08:00–11:00):
+#   If PV export ≥ pool_pv_surplus_threshold → start pump early.
+#   If PV drops before 11:00 → stop again (schedule takes over at 11:00).
+#
+# Extended run (post-schedule, after 17:30):
+#   If outdoor temp > pool_temp_threshold AND ORP alarm AND
+#      (PV surplus ≥ threshold OR battery SOC ≥ pool_battery_soc_min)
+#   → keep pump running until any condition clears.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+input_number:
+
+  pool_pv_surplus_threshold:
+    name: "Pool Pump PV Surplus Threshold"
+    min: 0
+    max: 5000
+    step: 50
+    unit_of_measurement: "W"
+    mode: box
+    icon: mdi:solar-power
+
+  pool_battery_soc_min:
+    name: "Pool Pump Battery SoC Minimum"
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: box
+    icon: mdi:battery-low
+
+  pool_temp_threshold:
+    name: "Pool Pump Temperature Threshold"
+    min: 15
+    max: 45
+    step: 0.5
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:thermometer
+
+  pool_orp_alarm_threshold:
+    name: "Pool ORP Alarm Threshold"
+    min: 300
+    max: 900
+    step: 10
+    unit_of_measurement: "mV"
+    mode: box
+    icon: mdi:water-check
+
+
+input_boolean:
+
+  pool_pump_extended_run:
+    name: "Pool Pump Extended Run Active"
+    icon: mdi:pump
+
+
+# ── Template binary sensors ────────────────────────────────────────────────────
+template:
+  - binary_sensor:
+
+      # True when PV export meets the pool's operational surplus threshold.
+      # Uses sensor.energy_pv_surplus (from energy.yaml) as the canonical source.
+      # Distinct from energy_free_available: early start is PV-only, no battery gate.
+      - name: "Pool PV Surplus Available"
+        unique_id: pool_pv_surplus_available
+        state: >
+          {{ states('sensor.energy_pv_surplus') | float(0)
+             >= states('input_number.pool_pv_surplus_threshold') | float }}
+        availability: >
+          {{ states('sensor.energy_pv_surplus') not in ['unavailable', 'unknown'] }}
+
+      # Extended-run energy gate: PV surplus OR battery SoC above minimum.
+      # OR because either energy source is sufficient to sustain the extended run.
+      - name: "Pool Extended Run Energy OK"
+        unique_id: pool_extended_run_energy_ok
+        state: >
+          {{ is_state('binary_sensor.pool_pv_surplus_available', 'on')
+             or states('sensor.victron_battery_soc') | float(0)
+                >= states('input_number.pool_battery_soc_min') | float }}
+        availability: >
+          {{ states('binary_sensor.pool_pv_surplus_available') not in ['unavailable', 'unknown']
+             and states('sensor.victron_battery_soc') not in ['unavailable', 'unknown'] }}
+
+      # True when pool ORP/redox is below the alarm threshold (insufficient disinfection).
+      # Unavailable when the VistaPool cloud sensor is offline — prevents false alarms.
+      - name: "Pool ORP Alarm"
+        unique_id: pool_orp_alarm
+        state: >
+          {{ states('sensor.mike_redox_potential') | float(999)
+             < states('input_number.pool_orp_alarm_threshold') | float }}
+        availability: >
+          {{ states('sensor.mike_redox_potential') not in ['unavailable', 'unknown'] }}
+
+      # All three extended-run conditions in one sensor.
+      # Used as the trigger source for both enabling and stopping the extended run.
+      - name: "Pool Extended Run Conditions Met"
+        unique_id: pool_extended_run_conditions_met
+        state: >
+          {{ states('sensor.wheatherstation_outdoor_temperature') | float(0)
+             > states('input_number.pool_temp_threshold') | float
+             and is_state('binary_sensor.pool_orp_alarm', 'on')
+             and is_state('binary_sensor.pool_extended_run_energy_ok', 'on') }}
+        availability: >
+          {{ states('sensor.wheatherstation_outdoor_temperature') not in ['unavailable', 'unknown']
+             and states('binary_sensor.pool_orp_alarm') not in ['unavailable', 'unknown']
+             and states('binary_sensor.pool_extended_run_energy_ok') not in ['unavailable', 'unknown'] }}
+
+
+# ── Schedule ──────────────────────────────────────────────────────────────────
+# Replicates the Shelly's built-in 11:00–17:30 schedule.
+# The Shelly internal schedule must be disabled manually in its web UI.
+schedule:
+  pool_pump_normal:
+    name: "Pool Pump Schedule"
+    monday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    tuesday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    wednesday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    thursday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    friday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    saturday:
+      - from: "11:00:00"
+        to: "17:30:00"
+    sunday:
+      - from: "11:00:00"
+        to: "17:30:00"
+
+
+# ── Automations ───────────────────────────────────────────────────────────────
+automation:
+
+  # 1. Schedule start — turn pump on when the normal window opens.
+  #    Idempotent: if PV early-start already turned the pump on, this is a no-op.
+  - id: pool_pump_schedule_on
+    alias: "Pool: Schedule On"
+    description: "Turn pool pump on when normal schedule window opens (11:00)"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: schedule.pool_pump_normal
+        to: "on"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.pool_pump
+
+  # 2. Schedule end — at 17:30, either start extended run or turn pump off.
+  - id: pool_pump_schedule_off
+    alias: "Pool: Schedule Off"
+    description: "At schedule end check extended-run conditions; keep pump running or turn off"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: schedule.pool_pump_normal
+        to: "off"
+        # Only fire on the evening transition (17:30), not at midnight rollover.
+        # The schedule is off from 17:30 to 11:00 the next day; we only want to act
+        # when the pump has been running and the window just closed.
+        for: "00:00:00"
+    condition:
+      # Only act if the pump is actually on — avoids spurious runs at HA startup
+      - condition: state
+        entity_id: switch.pool_pump
+        state: "on"
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.pool_extended_run_conditions_met
+                state: "on"
+            sequence:
+              # Keep pump running; flag tracks that we are past the schedule window.
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.pool_pump_extended_run
+        default:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.pool_pump
+
+  # 3. PV early start — turn pump on during the morning window when surplus is available.
+  #    Morning window: 08:00–11:00 (before schedule.pool_pump_normal becomes active).
+  - id: pool_pump_early_start
+    alias: "Pool: PV Early Start"
+    description: "Start pump early when PV export ≥ threshold in the morning (08:00–11:00)"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.pool_pv_surplus_available
+        to: "on"
+    condition:
+      # Only in the morning window before the normal schedule starts
+      - condition: state
+        entity_id: schedule.pool_pump_normal
+        state: "off"
+      - condition: time
+        after: "08:00:00"
+        before: "11:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.pool_pump
+
+  # 4. PV early stop — cancel the early start if surplus drops before schedule opens.
+  #    Once the schedule is active (≥ 11:00) the schedule-off automation owns shutdown.
+  - id: pool_pump_early_stop
+    alias: "Pool: PV Early Stop"
+    description: "Stop pump if PV surplus drops before normal schedule starts"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.pool_pv_surplus_available
+        to: "off"
+    condition:
+      # Schedule not yet active (before 11:00) — schedule window governs after that
+      - condition: state
+        entity_id: schedule.pool_pump_normal
+        state: "off"
+      - condition: time
+        after: "08:00:00"
+        before: "11:00:00"
+      - condition: state
+        entity_id: switch.pool_pump
+        state: "on"
+    action:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.pool_pump
+
+  # 5. Extended run stop — turn pump off when any extended-run condition clears.
+  #    Two triggers: conditions-cleared and flag-just-set (safety re-check at enable time).
+  - id: pool_pump_extended_run_stop
+    alias: "Pool: Extended Run Stop"
+    description: "Stop pump when extended-run conditions (temp/ORP/energy) are no longer met"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.pool_extended_run_conditions_met
+        to: "off"
+      # Re-evaluate immediately after the flag is set, in case conditions cleared
+      # in the same second the schedule ended and set the flag.
+      - platform: state
+        entity_id: input_boolean.pool_pump_extended_run
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.pool_pump_extended_run
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.pool_extended_run_conditions_met
+        state: "off"
+    action:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.pool_pump
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.pool_pump_extended_run
