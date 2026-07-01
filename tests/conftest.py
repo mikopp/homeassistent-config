@@ -200,11 +200,13 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "%", "device_class": "humidity"})
     # Heating/cooling indicator (template sensor from another package)
     ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
-    # VistaPool (cloud push integration — absent in CI); seeded above alarm threshold so
-    # binary_sensor.pool_orp_alarm starts off (no false alarm during unrelated tests)
-    ha.set_state("sensor.vistapool_orp", "700",
+    # VistaPool "Mike" device (cloud push integration — absent in CI); seeded above alarm
+    # threshold so binary_sensor.pool_orp_alarm starts off (no false alarm during unrelated tests)
+    ha.set_state("sensor.mike_redox_potential", "700",
                  {"unit_of_measurement": "mV"})
-    ha.set_state("sensor.vistapool_ph", "7.2", {})
+    ha.set_state("sensor.mike_ph", "7.2", {})
+    ha.set_state("sensor.mike_temperature", "28.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
     # Pool schedule — seeded off (outside 11:00-17:30 window) for test baseline
     ha.set_state("schedule.pool_pump_normal", "off", {})
 

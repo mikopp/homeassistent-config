@@ -5,10 +5,10 @@
 #   switch.pool_pump  (Shelly Plus Plug S, defined in packages/energy.yaml)
 #
 # Water quality monitoring:
-#   VistaPool integration (cloud push, UI-configured) — entity IDs below are
-#   the expected names; verify on the live system before first use:
-#     sensor.vistapool_orp   — ORP / Rx redox potential (mV)
-#     sensor.vistapool_ph    — pH value
+#   VistaPool integration (cloud push, UI-configured), device name "Mike":
+#     sensor.mike_redox_potential — ORP / Rx redox potential (mV)
+#     sensor.mike_ph              — pH value
+#     sensor.mike_temperature     — pool water temperature (°C)
 #
 # Normal schedule (replaces Shelly's built-in schedule — disable that in the
 # Shelly web UI before this package goes live):
@@ -104,10 +104,10 @@ template:
       - name: "Pool ORP Alarm"
         unique_id: pool_orp_alarm
         state: >
-          {{ states('sensor.vistapool_orp') | float(999)
+          {{ states('sensor.mike_redox_potential') | float(999)
              < states('input_number.pool_orp_alarm_threshold') | float }}
         availability: >
-          {{ states('sensor.vistapool_orp') not in ['unavailable', 'unknown'] }}
+          {{ states('sensor.mike_redox_potential') not in ['unavailable', 'unknown'] }}
 
       # All three extended-run conditions in one sensor.
       # Used as the trigger source for both enabling and stopping the extended run.

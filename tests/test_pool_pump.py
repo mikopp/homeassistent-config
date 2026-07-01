@@ -45,7 +45,7 @@ def _set_soc(ha: HomeAssistant, soc: float) -> None:
 
 
 def _set_orp(ha: HomeAssistant, orp_mv: float) -> None:
-    ha.set_state("sensor.vistapool_orp", str(orp_mv), _ATTRS_MV)
+    ha.set_state("sensor.mike_redox_potential", str(orp_mv), _ATTRS_MV)
 
 
 def _set_outdoor_temp(ha: HomeAssistant, temp_c: float) -> None:
@@ -178,7 +178,7 @@ def test_pool_orp_alarm_off(home_assistant: HomeAssistant) -> None:
 
 def test_pool_orp_alarm_unavailable_propagates(home_assistant: HomeAssistant) -> None:
     """VistaPool sensor unavailable → pool_orp_alarm becomes unavailable."""
-    home_assistant.set_state("sensor.vistapool_orp", "unavailable", _ATTRS_MV)
+    home_assistant.set_state("sensor.mike_redox_potential", "unavailable", _ATTRS_MV)
     home_assistant.assert_entity_state(
         "binary_sensor.pool_orp_alarm", "unavailable", timeout=5
     )
