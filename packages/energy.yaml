@@ -1,17 +1,23 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Energy Dashboard — Shelly Plus Plug S metered devices
+# Energy Dashboard — metered devices
 #
-# Devices:
+# Shelly Plus Plug S devices:
 #   Pool Pump       — shellyplusplugs-pool-pump
 #   Rain Water Pump — shellyplusplugs-rainwaterpump
-#
-# MQTT topic: shelly/<device>/status/switch:0
-#
-# Energy Dashboard sensors per device:
+#   MQTT topic: shelly/<device>/status/switch:0 (JSON payload)
 #   sensor.<device>_power   → instantaneous draw in W (individual device power)
 #   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
+#   aenergy.total from Shelly firmware is in Wh — divided by 1000 to yield kWh.
 #
-# aenergy.total from Shelly firmware is in Wh — divided by 1000 to yield kWh.
+# evcc EV charger:
+#   Loadpoint 1 — evcc/loadpoints/1/*  (plain numeric payload, not JSON)
+#   sensor.evcc_loadpoint_1_charge_power  → instantaneous draw in W
+#   sensor.evcc_loadpoint_1_charge_energy → lifetime cumulative kWh (total_increasing)
+#
+# Shelly Pro 3EM (Heizung) — bridged from separate mosquitto broker under
+# shelly/ prefix. Gen2/3 EM component payload schema differs from Plug S:
+#   em:0     → total_act_power is already in W (no scaling)
+#   emdata:0 → total_act is cumulative Wh, divided by 1000 for kWh
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -70,16 +76,6 @@ mqtt:
       device: *shelly_pool_pump
       value_template: "{{ value_json.current | round(3) }}"
 
-    - name: "Pool Pump Temperature"
-      unique_id: "shelly_pool_pump_temperature"
-      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
-      unit_of_measurement: "°C"
-      device_class: temperature
-      state_class: measurement
-      expire_after: 120
-      device: *shelly_pool_pump
-      value_template: "{{ value_json.temperature.tC | round(1) }}"
-
     - name: "Rain Water Pump Power"
       unique_id: "shelly_rainwater_pump_power"
       state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
@@ -133,15 +129,64 @@ mqtt:
       device: *shelly_rainwater_pump
       value_template: "{{ value_json.current | round(3) }}"
 
-    - name: "Rain Water Pump Temperature"
-      unique_id: "shelly_rainwater_pump_temperature"
-      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
-      unit_of_measurement: "°C"
-      device_class: temperature
+    - name: "EVCC Loadpoint 1 Charge Power"
+      unique_id: "evcc_loadpoint_1_charge_power"
+      state_topic: "evcc/loadpoints/1/chargePower"
+      unit_of_measurement: "W"
+      device_class: power
       state_class: measurement
       expire_after: 120
-      device: *shelly_rainwater_pump
-      value_template: "{{ value_json.temperature.tC | round(1) }}"
+      icon: mdi:ev-station
+      device: &evcc_loadpoint_1
+        identifiers:
+          - evcc_loadpoint_1
+        name: "EVCC Loadpoint 1"
+        manufacturer: "evcc"
+        suggested_area: "Carport"
+      value_template: "{{ value | float | round(1) }}"
+
+    # Lifetime cumulative energy for this loadpoint (kWh, already cumulative
+    # from evcc — not per-session). total_increasing tells HA to handle any
+    # dip (evcc restart) gracefully.
+    - name: "EVCC Loadpoint 1 Charge Energy"
+      unique_id: "evcc_loadpoint_1_charge_energy"
+      state_topic: "evcc/loadpoints/1/chargeTotalImport"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *evcc_loadpoint_1
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Heizung Power"
+      unique_id: "shelly_pro3em_heizung_power"
+      state_topic: "shelly/shellypro3em-heizung/status/em:0"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:radiator
+      device: &shelly_pro3em_heizung
+        identifiers:
+          - shellypro3em_heizung
+        name: "Heizung"
+        manufacturer: "Shelly"
+        model: "Pro 3EM"
+        suggested_area: "Technikraum"
+      value_template: "{{ value_json.total_act_power | round(1) }}"
+
+    # Cumulative all-phase consumption energy from Shelly firmware (Wh → kWh).
+    - name: "Heizung Energy"
+      unique_id: "shelly_pro3em_heizung_energy"
+      state_topic: "shelly/shellypro3em-heizung/status/emdata:0"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *shelly_pro3em_heizung
+      value_template: "{% if value_json.total_act is not none %}{{ (value_json.total_act / 1000) | round(3) }}{% endif %}"
 
   binary_sensor:
 
