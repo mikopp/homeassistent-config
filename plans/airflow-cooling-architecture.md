@@ -188,11 +188,17 @@ stateDiagram-v2
 All four must hold (indoor-temp uses a 0.5 °C Schmitt: ON at `target`, stays on to `target − 0.5`):
 
 ```
-(outdoor_dew + min_dew_diff) < indoor_dew      # outdoor drier by a margin
-AND outdoor_dew ≤ dew_point_target             # importing it won't exceed target humidity
-AND outdoor_temp_5min < target − min_temp_diff # ComfoConnect intake cool enough
-AND indoor_temp ≥ temp_threshold               # room warm enough to want cooling
+(outdoor_dew + min_dew_diff) < indoor_dew        # outdoor drier by a margin
+AND outdoor_dew ≤ dew_point_target               # importing it won't exceed target humidity
+AND outdoor_temp_5min < indoor_temp − temp_diff  # intake cooler than the ROOM (not just target)
+AND indoor_temp ≥ temp_threshold                 # room warm enough to want cooling
 ```
+
+The temp gate is **indoor-relative**: any outdoor air `min_temp_diff` below the *current room*
+temperature can free-cool it — a 26 °C room is cooled by 22 °C air even though 22 °C is above a
+21.5 °C target. `indoor_temp ≥ temp_threshold` still halts cooling at target, and the room can
+never be driven below outdoor temperature. `temp_diff` carries a 0.5 °C release band (`min_temp_diff
+− 0.5`, clamped at 0, while ON) to damp flip-flop as the room converges on the outdoor temperature.
 
 ### 5.2 `humidity_flush_needed` — cool-profile moisture flush
 
@@ -263,11 +269,11 @@ flowchart TD
     B1 -- match --> SETW["set profile = warm<br/>(retain moisture / heating season)"]
     B1 -- no --> B2
 
-    B2{"BLOCK 2 → COOL<br/>(free_cooling AND cooling season)<br/>OR humidity_flush_needed"}
+    B2{"BLOCK 2 → COOL<br/>(free_cooling AND season ≠ active_heating)<br/>OR humidity_flush_needed"}
     B2 -- match --> SETC["set profile = cool<br/>(free cooling or moisture flush)"]
     B2 -- no --> B3
 
-    B3{"BLOCK 3 → COMFORT<br/>(neutral OR (cooling season AND free OFF))<br/>AND indoor dew within [dew_min, dew_max]"}
+    B3{"BLOCK 3 → COMFORT<br/>free OFF AND season ≠ heating<br/>AND indoor dew within [dew_min, dew_max]"}
     B3 -- match --> SETM["set profile = comfort"]
     B3 -- no --> DEF["default: no-op<br/>(recovery zone / already correct)"]
 ```
@@ -470,9 +476,9 @@ auto on + away off).
 |---|---|---|
 | 1A | **warm** | `indoor_dew < dew_min − 0.1` AND season ≠ COOL |
 | 1B | **warm** | season = HEAT AND `free` – AND `flush` – |
-| 2A | **cool** | `free` ✓ AND season = COOL |
+| 2A | **cool** | `free` ✓ AND season ≠ HEAT (COOL or NEUT) |
 | 2B | **cool** | `flush` ✓ (any season) |
-| 3  | **comfort** | (season = NEUT OR (season = COOL AND `free` –)) AND `dew_min ≤ indoor_dew ≤ dew_max` |
+| 3  | **comfort** | `free` – AND season ≠ HEAT (NEUT or COOL) AND `dew_min ≤ indoor_dew ≤ dew_max` |
 | 4  | **comfort** | `profile == cool` AND `free` – AND `flush` – AND season ≠ HEAT (bypass-close recovery) |
 | 5  | **comfort** | `profile == warm` AND `free` – AND `flush` – AND season = COOL (warm-stuck recovery) |
 | –  | **keep** | none of the above — only H6 (HEAT+free✓, near-impossible) reaches here |
@@ -516,7 +522,7 @@ When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
 | N1 | NEUT | – | – | – | – | DRY | warm (1A) | auto on | off | heating | **moisture_retention** |
 | N2 | NEUT | – | – | – | – | BAND | comfort (3) | auto on | off | fan | **comfort** |
 | N3 | NEUT | – | – | ✓ | – | HUM | comfort (4) | low | off | fan | **moisture_protection** |
-| N4 | NEUT | ✓ | – | – | – | BAND | comfort (3) | medium | off | fan | **comfort**² |
+| N4 | NEUT | ✓ | – | – | – | BAND | cool (2A) | medium | off | cooling | **free_cooling**² |
 | N5 | NEUT | – | ✓ | – | – | HUM | cool (2B) | medium | off | drying | **moisture_flush_cooling** |
 | N6 | NEUT | – | ✓ | – | ✓ | HUM | cool (2B) | medium | on | drying | **moisture_flush_boost** |
 | C1 | COOL | ✓ | – | – | – | BAND | cool (2A) | medium | off | cooling | **free_cooling** |
@@ -536,9 +542,10 @@ When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
 1. `keep` — no profile block matches; previous profile is retained. State/action follow whatever
    profile persists (`per-keep`). Remaining case: HEAT+free (H6, neither 1B nor 2A apply).
    Former `keep` traps C7/N3/C8 resolved by Block 4; W1/W2 resolved by Block 5.
-2. **N4** — free cooling is *available* in NEUT but profile stays comfort (2A needs cooling season),
-   so action=`fan` ⇒ state `comfort` even though preset is bumped to medium. Free air exchange
-   happens at the fan level, not via the cool profile.
+2. **N4** — free cooling in NEUT now opens the bypass (Block 2A extended to season ≠ HEAT): the
+   room is above target with cool, dry outdoor air, so `cool` + medium gives real free cooling in a
+   mild spell, not just fan-level exchange behind a closed bypass. When free clears with dew
+   out-of-band, Block 4 drains `cool → comfort`.
 3. **S2 (Away on)** — Section 1 still sets the profile; Section 2 is skipped so preset/auto_mode are
    left untouched; the boost automation's `away off` condition fails so boost is never started
    (`dry` is moot). State still derives from live actuators.

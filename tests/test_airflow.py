@@ -72,6 +72,23 @@ def test_airflow_free_cooling_inactive(home_assistant: HomeAssistant) -> None:
     # Same CI stub limitation as test_airflow_free_cooling_active.
 
 
+def test_airflow_free_cooling_neutral_season(home_assistant: HomeAssistant) -> None:
+    """Auto enabled + neutral season + free_cooling=on → Block 2A fires → cool (trace only).
+
+    Block 2A now opens the bypass whenever free cooling is available and the season is not
+    active_heating, so a warm room in a mild spell (neutral season) is actually free-cooled
+    instead of only bumping the fan (the old N4 gap). select.select_option is silently ignored
+    on the bare stub — assert trace-error absence only.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
+    _trigger(home_assistant)
+    # Block 2A: free_cooling=on AND season(neutral) ≠ active_heating → cool in production.
+
+
 def test_airflow_active_heating(home_assistant: HomeAssistant) -> None:
     """Auto enabled + active_heating + free_cooling=off → Block 1 Case B fires (trace only)."""
     home_assistant.call_action("input_boolean", "turn_on",
@@ -451,6 +468,25 @@ def test_controller_no_recovery_when_free_on(home_assistant: HomeAssistant) -> N
     _trigger(home_assistant)
     # Block 2A fires (free=on + cooling season → cool); Block 4 suppressed by free=on condition.
     # Profile stays cool — Block 4 must not override a legitimate free-cooling owner.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
+                                       "cool", timeout=3)
+
+
+def test_controller_no_recovery_when_free_on_neutral(home_assistant: HomeAssistant) -> None:
+    """Regression: free=on + NEUTRAL season → Block 2A holds cool; Block 4 suppressed (free guard).
+
+    With Block 2A extended to season ≠ active_heating, free cooling is a legitimate cool owner in
+    neutral season too. Profile seeded to `cool` → Block 2A idempotent guard suppresses the write,
+    and Block 4's free condition is `off`, so Block 4 stays inert. Profile stays `cool`.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
+    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    _trigger(home_assistant)
+    # Block 2A fires (free=on + neutral ≠ active_heating → cool); Block 4 suppressed by free=on.
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "cool", timeout=3)
 
