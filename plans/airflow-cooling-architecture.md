@@ -277,6 +277,13 @@ indoor + hot-but-dry outside ⇒ a medium flush is allowed.
 ventilation" signal Section 2 consumes, so both protections share one priority over the free-cooling
 low→medium bump. Pure OR of two already-debounced sources — no extra debounce.
 
+> **State-based, not trigger-based (deliberate).** Because it derives from two *slow* binary sensors
+> that can sit steady for hours, a trigger-based version would restore its last state on HA restart
+> and only recompute on an input *change* — so it could come back **stale** (`off` while `heat_low`
+> is `on`) and never recompute, stranding Section 2 off its low intent (observed: `heat_protection`
+> all day yet preset stuck at medium). A plain state template re-evaluates continuously and at
+> startup, so it can't go stale.
+
 ### 5.4 `humidity_drying_needed` — the noisy boost
 
 ```
