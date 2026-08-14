@@ -1378,13 +1378,29 @@ automation:
       # ===== SECTION 2: VENTILATION PRESET / AUTO_MODE (skipped during Away) =====
       # Away owns the ventilation level, so we only touch preset/auto_mode when Away is off.
       # Desired state is a priority function of the decision sensors:
-      #   low_needed        → auto_mode OFF, preset low
-      #   free OR flush     → auto_mode OFF, preset medium   (boost rides on top in hardware)
-      #   otherwise         → auto_mode ON  (hand control back to the ComfoConnect schedule)
+      #   low_needed (combined: moisture OR heat) → auto_mode OFF, preset low
+      #   free OR flush                           → auto_mode OFF, preset medium   (boost rides on top)
+      #   otherwise                               → auto_mode ON  (hand back to ComfoConnect schedule)
+      #
+      # AIRFLOW-INCREASE INVARIANTS (this section is the ONLY place that raises the fan rate):
+      #   1. Dry-air only: medium fires on free OR flush, and BOTH require outdoor drier than indoor
+      #      (dew margin) — a rate increase never imports humid air. Boost ⊂ flush inherits this.
+      #   2. A COOLING increase is guarded on moisture AND real outdoor temp: the free-cooling medium
+      #      bump fires only when the combined low intent is OFF, i.e. heat_low OFF ⇒ real
+      #      (weather-station) outdoor < indoor. A hot real-outdoor day (≥ indoor) can never raise
+      #      flow for cooling — heat_low forces LOW, overriding even a schedule-set medium/high.
+      #   3. The cool PROFILE (Section 1) is a bypass change guarded on the INTAKE temp, not a rate
+      #      increase — so a hot day sits at bypass-open + LOW (cool delivery, minimum rate).
+      #   The ONE hot-weather increase is a moisture flush: flush suppresses moisture_low AND heat_low,
+      #   so flush→medium may fire even when real outdoor ≥ indoor. That is moisture relief (dry air,
+      #   MEDIUM never boost — drying needs weather-station < target), the deliberate mould-safety
+      #   exception; it is NOT a cooling increase escaping the temp guard.
+      #
       # Each branch carries an idempotent "needs change" guard, so a notify fires only on a real
       # transition. auto_mode is turned OFF before the preset is written so the schedule can't
-      # momentarily override the manual level. low and flush are already mutually exclusive in the
-      # sensors; the low-before-medium ordering is belt-and-suspenders.
+      # momentarily override the manual level. The low branch reads the COMBINED low intent
+      # (moisture OR heat); low and flush are mutually exclusive in the sensors, and the
+      # low-before-medium ordering makes both protections outrank the medium bump.
       - if:
           - condition: state
             entity_id: switch.comfoconnect_pro_away_function
@@ -1493,7 +1509,15 @@ automation:
                     target:
                       entity_id: switch.comfoconnect_pro_auto_mode
 
-              # Medium: free cooling or humidity flush wants more air exchange. Fires ONLY from the
+              # Medium: free cooling or humidity flush wants more air exchange.
+              # GUARDS (see Section 2 header invariants): requires the COMBINED low intent OFF, so this
+              # increase inherits both protections — moisture_low off AND heat_low off. Two legs:
+              #   • free-cooling leg (a COOLING increase): heat_low off ⇒ real outdoor < indoor, and
+              #     free_cooling's own dew gates ⇒ outdoor dry. Guarded on moisture AND real outdoor temp.
+              #   • flush leg (a MOISTURE increase): flush requires outdoor drier than indoor; it also
+              #     suppresses heat_low, so it may raise flow to MEDIUM even when real outdoor ≥ indoor —
+              #     the deliberate mould-safety exception (dry air, medium never boost).
+              # Fires ONLY from the
               # auto state (auto_mode on) — it overrides the ComfoConnect schedule. Reaching this from
               # manual low is routed via the transient route-to-auto branch above (manual-low → auto →
               # medium), so the "from auto schedule" framing below is always truthful. Fires ONLY when
