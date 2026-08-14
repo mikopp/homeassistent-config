@@ -18,6 +18,18 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
   boost** in place (the device ignores it) — the value only reaches ~60 again via a switch off→on
   restart.
 
+### Template sensor pattern — trigger-based vs state-based
+A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
+**state-based** (plain `state:`, no `trigger:`). Trigger-based template sensors restore their last
+state on HA **restart** and recompute only when an input **changes** — so a derived-from-binaries
+sensor can restore **stale** and never resync (this is what stranded `ventilation_low_needed` at
+`off` while `heat_low` was `on` all day, leaving the preset at medium under `heat_protection`).
+Reserve trigger-based + restore for **primary** decision sensors driven by continuously-drifting
+numeric filters (outdoor temp/dew, weather-station temp): there the drift guarantees a recompute
+within ~1 debounce after restart, and restoring preserves the 10-min delay + `this.state` Schmitt
+hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unknown`), **not**
+*restart* (comes up with a restored value), so it does not protect against restart-stale.
+
 ### Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
 - Gate preset/auto ownership on the **stable intent sensors** (`drying_needed` ⊇ `flush_needed`), NOT
   the boost/auto switches, which flap during boost expiry/re-enable races.
