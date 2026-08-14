@@ -15,24 +15,22 @@ jobs:
     steps:
       # ── 1. Check out the repository ─────────────────────────────────────────
       - name: Check out configuration from GitHub
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # ── 2. Python tooling ────────────────────────────────────────────────────
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
       - name: Install Python dependencies
-        run: |
-          pip install pyyaml requests pytest-github-actions-annotate-failures
-          pip install git+https://github.com/HeadlessTarry/HomeAssistant-Test-Harness.git
+        run: pip install -r .github/workflows/requirements.txt
 
       # ── 3. Pull the HA image (cached by version) ─────────────────────────────
       #    Used by the config-check step. The test harness manages its own
       #    container independently.
       - name: Cache Home Assistant Docker image
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: docker-cache
         with:
           path: /tmp/ha-docker-cache.tar.gz
@@ -176,7 +174,7 @@ jobs:
       # ── 10. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
         if: steps.run_tests.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             // Find the open PR for this branch (works for push events too)

@@ -1,0 +1,10 @@
+# CI-only Python dependencies for the Home Assistant config check workflow.
+# Kept in a manifest (rather than inline `pip install`) so Dependabot can
+# track and propose updates — see .github/dependabot.yml.
+pyyaml
+requests
+pytest-github-actions-annotate-failures
+
+# Home Assistant integration test harness, pinned to the v0.11.0 release commit.
+# Dependabot bumps the pinned ref when a newer release is published.
+ha_integration_test_harness @ git+https://github.com/HeadlessTarry/HomeAssistant-Test-Harness.git@ee8abdd635af3d773676ed537ba1e7cb51133910

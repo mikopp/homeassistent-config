@@ -1,0 +1,211 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Energy Dashboard — metered devices
+#
+# Shelly Plus Plug S devices:
+#   Pool Pump       — shellyplusplugs-pool-pump
+#   Rain Water Pump — shellyplusplugs-rainwaterpump
+#   MQTT topic: shelly/<device>/status/switch:0 (JSON payload)
+#   sensor.<device>_power   → instantaneous draw in W (individual device power)
+#   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
+#   aenergy.total from Shelly firmware is in Wh — divided by 1000 to yield kWh.
+#
+# evcc EV charger:
+#   Loadpoint 1 — evcc/loadpoints/1/*  (plain numeric payload, not JSON)
+#   sensor.evcc_loadpoint_1_charge_power  → instantaneous draw in W
+#   sensor.evcc_loadpoint_1_charge_energy → lifetime cumulative kWh (total_increasing)
+#
+# Shelly Pro 3EM (Heizung) — bridged from separate mosquitto broker under
+# shelly/ prefix. Gen2/3 EM component payload schema differs from Plug S:
+#   em:0     → total_act_power is already in W (no scaling)
+#   emdata:0 → total_act is cumulative Wh, divided by 1000 for kWh
+# ──────────────────────────────────────────────────────────────────────────────
+
+mqtt:
+  sensor:
+
+    - name: "Pool Pump Power"
+      unique_id: "shelly_pool_pump_power"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:pump
+      device: &shelly_pool_pump
+        identifiers:
+          - shellyplusplugs_pool_pump
+        name: "Pool Pump"
+        manufacturer: "Shelly"
+        model: "Plus Plug S"
+        suggested_area: "Pool"
+      value_template: "{{ value_json.apower | round(1) }}"
+
+    # Cumulative lifetime energy from Shelly firmware (Wh → kWh).
+    # Never resets unless the device is factory-reset; total_increasing tells
+    # HA to handle any dip (reboot reset) gracefully.
+    - name: "Pool Pump Energy"
+      unique_id: "shelly_pool_pump_energy"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *shelly_pool_pump
+      value_template: "{% if value_json.aenergy is not none %}{{ (value_json.aenergy.total / 1000) | round(3) }}{% endif %}"
+
+    - name: "Pool Pump Voltage"
+      unique_id: "shelly_pool_pump_voltage"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:sine-wave
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.voltage | round(1) }}"
+
+    - name: "Pool Pump Current"
+      unique_id: "shelly_pool_pump_current"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      unit_of_measurement: "A"
+      device_class: current
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:current-ac
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.current | round(3) }}"
+
+    - name: "Rain Water Pump Power"
+      unique_id: "shelly_rainwater_pump_power"
+      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:pump
+      device: &shelly_rainwater_pump
+        identifiers:
+          - shellyplusplugs_rainwaterpump
+        name: "Rain Water Pump"
+        manufacturer: "Shelly"
+        model: "Plus Plug S"
+        suggested_area: "Garden"
+      value_template: "{{ value_json.apower | round(1) }}"
+
+    # Cumulative lifetime energy from Shelly firmware (Wh → kWh).
+    # Never resets unless the device is factory-reset; total_increasing tells
+    # HA to handle any dip (reboot reset) gracefully.
+    - name: "Rain Water Pump Energy"
+      unique_id: "shelly_rainwater_pump_energy"
+      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *shelly_rainwater_pump
+      value_template: "{% if value_json.aenergy is not none %}{{ (value_json.aenergy.total / 1000) | round(3) }}{% endif %}"
+
+    - name: "Rain Water Pump Voltage"
+      unique_id: "shelly_rainwater_pump_voltage"
+      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:sine-wave
+      device: *shelly_rainwater_pump
+      value_template: "{{ value_json.voltage | round(1) }}"
+
+    - name: "Rain Water Pump Current"
+      unique_id: "shelly_rainwater_pump_current"
+      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
+      unit_of_measurement: "A"
+      device_class: current
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:current-ac
+      device: *shelly_rainwater_pump
+      value_template: "{{ value_json.current | round(3) }}"
+
+    - name: "EVCC Loadpoint 1 Charge Power"
+      unique_id: "evcc_loadpoint_1_charge_power"
+      state_topic: "evcc/loadpoints/1/chargePower"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:ev-station
+      device: &evcc_loadpoint_1
+        identifiers:
+          - evcc_loadpoint_1
+        name: "EVCC Loadpoint 1"
+        manufacturer: "evcc"
+        suggested_area: "Carport"
+      value_template: "{{ value | float | round(1) }}"
+
+    # Lifetime cumulative energy for this loadpoint (kWh, already cumulative
+    # from evcc — not per-session). total_increasing tells HA to handle any
+    # dip (evcc restart) gracefully.
+    - name: "EVCC Loadpoint 1 Charge Energy"
+      unique_id: "evcc_loadpoint_1_charge_energy"
+      state_topic: "evcc/loadpoints/1/chargeTotalImport"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *evcc_loadpoint_1
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Heizung Power"
+      unique_id: "shelly_pro3em_heizung_power"
+      state_topic: "shelly/shellypro3em-heizung/status/em:0"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      expire_after: 120
+      icon: mdi:radiator
+      device: &shelly_pro3em_heizung
+        identifiers:
+          - shellypro3em_heizung
+        name: "Heizung"
+        manufacturer: "Shelly"
+        model: "Pro 3EM"
+        suggested_area: "Technikraum"
+      value_template: "{{ value_json.total_act_power | round(1) }}"
+
+    # Cumulative all-phase consumption energy from Shelly firmware (Wh → kWh).
+    - name: "Heizung Energy"
+      unique_id: "shelly_pro3em_heizung_energy"
+      state_topic: "shelly/shellypro3em-heizung/status/emdata:0"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      expire_after: 120
+      icon: mdi:lightning-bolt
+      device: *shelly_pro3em_heizung
+      value_template: "{% if value_json.total_act is not none %}{{ (value_json.total_act / 1000) | round(3) }}{% endif %}"
+
+  binary_sensor:
+
+    - name: "Pool Pump Switch"
+      unique_id: "shelly_pool_pump_switch"
+      state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
+      device_class: power
+      expire_after: 120
+      device: *shelly_pool_pump
+      value_template: "{{ value_json.output | string | lower }}"
+      payload_on: "true"
+      payload_off: "false"
+
+    - name: "Rain Water Pump Switch"
+      unique_id: "shelly_rainwater_pump_switch"
+      state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
+      device_class: power
+      expire_after: 120
+      device: *shelly_rainwater_pump
+      value_template: "{{ value_json.output | string | lower }}"
+      payload_on: "true"
+      payload_off: "false"
