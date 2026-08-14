@@ -90,21 +90,9 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.victron_ac_inverter_power", "0", attrs_w)
     ha.set_state("sensor.victron_battery_soc", "50",
                  {"unit_of_measurement": "%", "device_class": "battery", "state_class": "measurement"})
-    ha.set_state("sensor.victron_battery_voltage", "48.0",
-                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
-    ha.set_state("sensor.victron_battery_current", "0.0",
-                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
     ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    ha.set_state("sensor.victron_solar_yield_today_kwh", "0.0",
-                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    ha.set_state("sensor.victron_solar_pv_voltage", "0.0",
-                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
     ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
-                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    ha.set_state("sensor.victron_vebus_dc_to_ac_energy", "0.0",
-                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    ha.set_state("sensor.victron_vebus_ac_to_dc_energy", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
