@@ -248,6 +248,7 @@ def test_verification_step4_high_humidity_outdoor_humid_preset_fires(home_assist
                              {"unit_of_measurement": "°C", "device_class": "temperature"})
     home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_ventilation_low_needed", "on", {})
     _trigger_moisture(home_assistant)
     # In production: auto_mode=off, ventilation_level=low. CI stubs ignore service calls.
 
@@ -612,6 +613,8 @@ def test_moisture_ventilation_low_when_needed(home_assistant: HomeAssistant) -> 
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    # Section 2 keys on the combined low intent; set it directly (deterministic, no propagation race).
+    home_assistant.set_state("binary_sensor.airflow_ventilation_low_needed", "on", {})
     _trigger_moisture(home_assistant)
     # switch.turn_off and select.select_option are silently ignored on bare stubs.
 
@@ -937,6 +940,50 @@ def test_moisture_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
     home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "on", timeout=3)
     home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
                                        "medium", timeout=3)
+
+
+# ── Heat protection tests ────────────────────────────────────────────────────────────────
+# heat_ventilation_low_needed forces LOW when the REAL outdoor (weather-station) air is too warm
+# to import at volume — symmetric to moisture protection. It reads the smoothed weather-station
+# temp (not the pre-cooled ComfoConnect intake), so raising flow on a hot day can't saturate the
+# underground duct's cooling reservoir.
+
+
+def test_heat_ventilation_low_needed_off_when_outdoor_below_indoor(home_assistant: HomeAssistant) -> None:
+    """Real outdoor well below indoor → heat-protect template false → sensor stays off.
+
+    indoor 26°C, weather-station 20°C: 20 < 26 → OFF. (delay_on=10min means the ON edge can't be
+    asserted inside the CI window, so this exercises the release/off side deterministically.)
+    """
+    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
+    home_assistant.set_state("sensor.airflow_avg_indoor_temp_5min", "26.0", temp_attrs)
+    home_assistant.set_state("sensor.airflow_wheatherstation_outdoor_temp_5min", "20.0", temp_attrs)
+    home_assistant.assert_entity_state("binary_sensor.airflow_heat_ventilation_low_needed",
+                                       "off", timeout=5)
+
+
+def test_heat_protection_low_wins_over_free_cooling_bump(home_assistant: HomeAssistant) -> None:
+    """Heat-low active + free cooling available → LOW wins; the medium bump never overrides it.
+
+    Combined low intent on (via heat), free cooling on, seeded already at (auto off, preset low):
+    the low branch is idempotent (guard satisfied → no write) and the medium branch is unreachable
+    (requires combined low off). Preset must stay low — proving heat protection outranks the
+    free-cooling low→medium bump. Deterministic: cool→low idempotency preserves the seeded state.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_ventilation_low_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
+    home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
+    _trigger(home_assistant)
+    # Low branch idempotent (already low); medium branch blocked by combined low on. Preset stays low.
+    home_assistant.assert_entity_state("select.comfoconnect_pro_ventilation_preset",
+                                       "low", timeout=3)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "off", timeout=3)
 
 
 def test_medium_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
@@ -1761,6 +1808,7 @@ def test_controller_low_idempotent_no_write(home_assistant: HomeAssistant) -> No
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_ventilation_low_needed", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_auto_mode", "off", {})
     home_assistant.set_state("select.comfoconnect_pro_ventilation_preset", "low", {})
     _trigger(home_assistant)
@@ -1815,6 +1863,7 @@ def test_controller_low_priority_over_medium(home_assistant: HomeAssistant) -> N
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "on", {})
+    home_assistant.set_state("binary_sensor.airflow_ventilation_low_needed", "on", {})
     home_assistant.set_state("binary_sensor.airflow_humidity_flush_needed", "on", {})
     # Indoor dew above the dead-band keeps Section 1 from spuriously firing Block 3.
     home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "14.0",

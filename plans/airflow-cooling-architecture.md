@@ -41,10 +41,26 @@ computed at the **target temperature** via the Magnus formula.
 | `sensor.airflow_wheatherstation_outdoor_temp_5min` | weather station (filtered) | **real outdoor temp, smoothed** |
 | supply/extract air temp+humidity | ComfoConnect | bypass estimation |
 
-> **Two outdoor temperatures:** the ComfoConnect intake temp (`airflow_outdoor_temp_5min`) gates
-> the *cool-profile* logic; the smoothed weather-station temp (`airflow_wheatherstation_outdoor_temp_5min`,
-> same 5-min filter chain) gates only the *boost*. Smoothing replaces the boost sensor's old
-> `delay_on` debounce — noise spikes can no longer falsely start/stop a boost.
+> **Two outdoor temperatures — and why they differ.** The ComfoConnect intake draws through a long
+> **underground duct**, so its temperature is governed by the surrounding earth, not the outside
+> air. The ground changes far more slowly than outdoor temperature and only drifts across the year:
+> it stays cool through summer and relatively warm through winter. The intake air is therefore
+> **pre-cooled on summer days and pre-warmed on winter days**, and the intake reading
+> (`airflow_outdoor_temp_5min`) lags and is far more stable than the real outdoor temperature
+> (`airflow_wheatherstation_outdoor_temp_5min`, the weather station).
+>
+> The ground's cooling capacity is a **finite reservoir**. The intake temperature tells us *what is
+> being delivered*; the real outdoor temperature tells us *the thermal load we place on the ground*.
+> If we raised airflow based on the (cool) intake reading, we would pull a larger volume of hot
+> outdoor air through the duct, warming the earth faster and using up its cooling capacity — negating
+> the benefit. So the split is deliberate:
+> - the **cool profile / delivery** follows the **intake** temp (`free_cooling_available`,
+>   `humidity_flush_needed` temp gate) — it is the air actually delivered;
+> - any decision that **raises or holds down flow** is guarded by the **real outdoor** temp: the
+>   *boost* (`humidity_drying_needed`) and the *heat-protect* low guard (`heat_ventilation_low_needed`).
+>
+> Smoothing on the weather-station chain replaces the boost sensor's old `delay_on` debounce — noise
+> spikes can no longer falsely start/stop a boost.
 
 ### Derived thresholds — dew point at target temp (Magnus)
 
@@ -61,6 +77,8 @@ computed at the **target temperature** via the Magnus formula.
 | `binary_sensor.airflow_free_cooling_available` | outdoor cool **and** dry enough to free-cool | `delay_on`/`delay_off` 10 min |
 | `binary_sensor.airflow_humidity_flush_needed` | indoor too humid **and** outdoor drier (cool-profile flush) | `delay_on`/`delay_off` 10 min |
 | `binary_sensor.airflow_moisture_ventilation_low_needed` | outdoor too humid to import | `delay_on`/`delay_off` 10 min |
+| `binary_sensor.airflow_heat_ventilation_low_needed` | **real outdoor** too warm to import (≥ indoor) | `delay_on`/`delay_off` 10 min |
+| `binary_sensor.airflow_ventilation_low_needed` | combined low intent — moisture **or** heat | none (OR of debounced sources) |
 | `binary_sensor.airflow_humidity_drying_needed` | flush **and** weather-gated (smoothed) **and** scheduled (boost) | `delay_off` 10 min only |
 
 > **`drying_needed` has no `delay_on`.** Its temp input is now the smoothed
@@ -234,6 +252,22 @@ Indoor Schmitt (`indoor_dew ≥ dew_max` ON, stays on to `dew_target`) AND
 (`outdoor_dew ≥ dew_threshold` OR `outdoor_dew ≥ indoor_dew`). Broadly the inverse of free
 cooling: outdoor air is too humid to bring in.
 
+### 5.3b `heat_ventilation_low_needed` — hot-import protection
+
+The **temperature symmetric** of §5.3: the direct analog of that sensor's `outdoor_dew ≥ indoor_dew`
+term is `outdoor_temp ≥ indoor_temp`, on the **real outdoor** (weather-station) temp. Schmitt:
+turns ON when real outdoor reaches indoor, stays ON until it falls `min_temp_diff` below indoor.
+Gated OFF while a flush or the drying boost runs (mirrors §5.3). Forces LOW when outdoor air is too
+warm to import at volume — importing it adds net heat *and* saturates the underground duct's cooling
+reservoir (see §2). Because hot outdoor air is usually also humid, this and §5.3 frequently coincide;
+heat protection additionally covers hot-but-dry spells the dew-point guard misses.
+
+### 5.3c `ventilation_low_needed` — combined low intent
+
+`moisture_ventilation_low_needed` **OR** `heat_ventilation_low_needed`. The single "reduce
+ventilation" signal Section 2 consumes, so both protections share one priority over the free-cooling
+low→medium bump. Pure OR of two already-debounced sources — no extra debounce.
+
 ### 5.4 `humidity_drying_needed` — the noisy boost
 
 ```
@@ -328,7 +362,7 @@ flowchart TD
     S1 --> AWAY{"away == off?"}
     AWAY -- no --> END["done (profile only)"]
     AWAY -- yes --> S2["SECTION 2 — PRESET / auto_mode choose"]
-    S2 --> LO{"low ON?"}
+    S2 --> LO{"low ON?<br/>(moisture OR heat)"}
     LO -- yes --> SL["auto OFF, preset low<br/>(guard: skip if already)"]
     LO -- no --> FF{"free OR flush ON?"}
     FF -- yes --> SM["auto OFF, preset medium<br/>(guard: skip if already)"]
@@ -463,7 +497,8 @@ auto on + away off).
 | 0 | `auto` off | **off** |
 | 1 | `boost` on AND action=`drying` | **moisture_flush_boost** |
 | 2 | action=`drying` | **moisture_flush_cooling** |
-| 3 | `low` on | **moisture_protection** |
+| 3a | `heat_low` on AND `moisture_low` off | **heat_protection** |
+| 3b | `moisture_low` on OR `heat_low` on | **moisture_protection** |
 | 4 | action=`cooling` AND `free` on | **free_cooling** |
 | 5 | action=`cooling` | **cooling** |
 | 6 | action=`heating` AND `indoor_dew < dew_min` | **moisture_retention** |
@@ -489,14 +524,28 @@ auto on + away off).
 
 ### 11.4 Preset / auto_mode (Section 2 `choose`) — only when `away` off
 
+Here `low` = the **combined** `ventilation_low_needed` (moisture-low **OR** heat-low). Because the
+low branch is first and every lower branch requires `low` –, **both protections outrank the medium
+bump** — a too-humid *or* too-warm outdoor condition forces LOW even when free cooling would
+otherwise raise flow.
+
 | Branch | → output | Conditions |
 |---|---|---|
-| low | auto **off** + preset **low** | `low` ✓ |
+| low | auto **off** + preset **low** | `low` ✓  (moisture-low OR heat-low) |
 | medium | auto **off** + preset **medium** | `low` – AND (`free` ✓ OR `flush` ✓) |
 | restore | auto **on** | `low` – AND `free` – AND `flush` – (acts only if auto currently off) |
 | no-op | (unchanged) | desired already satisfied |
 
 When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
+
+> **Hot-day cycle (heat protection + free cooling).** Heat-low uses the *real outdoor* temp while
+> free cooling uses the *pre-cooled intake*, so both can be ON at once (real outdoor ≥ indoor, intake
+> below indoor). Low wins → **bypass-open + LOW**: gentle, sustainable free cooling that does not
+> saturate the ground. When real outdoor falls below indoor at night, heat-low releases and the
+> medium branch opens flow to **MEDIUM**. "Cooler but too moist" needs no special handling: moist air
+> fails `free_cooling_available`'s dew gates, so free is off (no medium bump) while moisture-low
+> forces LOW. No flip-flop: every low sensor keeps its 10-min `delay_on`/`delay_off` + Schmitt band,
+> and the combined sensor adds no debounce gap (pure OR of debounced sources).
 
 ### 11.4b Boost (`airflow_humidity_drying_boost`) — needs `auto` on AND `away` off
 
@@ -554,3 +603,12 @@ When `away` on: Section 2 is skipped entirely → preset/auto_mode left as-is.
    ERV stops over-recovering in summer). W2=HUM with `low` on (closed bypass + reduced rate = correct
    moisture protection). Block 5 is inert in neutral/heating; `profile==warm` self-guards so it
    becomes a no-op the moment comfort is set.
+
+**Heat-protection overlay (not a separate column).** The matrix `low` column is moisture-low; heat
+protection adds a second path to the *same* LOW preset. Whenever the **real outdoor** temp ≥ indoor
+(hysteresis `min_temp_diff`), `heat_ventilation_low_needed` → combined `ventilation_low_needed` ON →
+Section 2 forces **preset LOW** (`cooling_state` = **heat_protection**, or **moisture_protection**
+if moisture-low is also on), overriding the medium bump in any row above — except while a boost owns
+the level. The **profile** column is unchanged (heat protection is a flow guard only): e.g. C1/N4
+with real outdoor hot become `cool` (bypass open) at **LOW** instead of medium — gentle free cooling
+through the pre-cooled duct — reverting to medium once real outdoor drops below indoor at night.

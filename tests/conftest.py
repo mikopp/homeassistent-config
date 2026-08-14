@@ -151,6 +151,10 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # flush sensor's Branch 1 and Branch 2 collapse; branch-distinguishing tests set max_humidity=60.
     ha.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     ha.set_state("binary_sensor.airflow_humidity_drying_needed", "off", {})
+    # Heat-protection guard + combined low intent (moisture OR heat) — start clean so Section 2's
+    # medium/restore branches (which require the combined low OFF) are not blocked by a stale value.
+    ha.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "off", {})
+    ha.set_state("binary_sensor.airflow_ventilation_low_needed", "off", {})
     ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
@@ -190,6 +194,11 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
                  {"unit_of_measurement": "%", "device_class": "humidity"})
+    # Smoothed real-outdoor (weather-station) temp — gates the drying boost and heat protection.
+    # Seed at target (21.5): below indoor (22) so heat protection is OFF, and not < target so the
+    # drying-boost gate stays false — keeps both guards inert in the baseline.
+    ha.set_state("sensor.airflow_wheatherstation_outdoor_temp_5min", "21.5",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
     # Heating/cooling indicator (template sensor from another package)
     ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
 

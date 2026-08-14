@@ -21,6 +21,7 @@ views:
           - entity: binary_sensor.airflow_humidity_drying_needed
           - entity: switch.comfoconnect_pro_boost
           - entity: binary_sensor.airflow_moisture_ventilation_low_needed
+          - entity: binary_sensor.airflow_heat_ventilation_low_needed
           - entity: select.comfoconnect_pro_ventilation_preset
           - entity: switch.comfoconnect_pro_auto_mode
           - entity: sensor.comfoconnect_pro_supply_fan_volume
@@ -103,5 +104,6 @@ views:
           - select.comfoconnect_pro_temperature_profile
           - sensor.heating_cooling_indicator
           - binary_sensor.airflow_moisture_ventilation_low_needed
+          - binary_sensor.airflow_heat_ventilation_low_needed
           - binary_sensor.airflow_humidity_drying_needed
           - switch.comfoconnect_pro_boost
