@@ -254,6 +254,7 @@ template:
           {% if s == 'off' %}mdi:fan-off
           {% elif s == 'moisture_flush_boost' %}mdi:fan-plus
           {% elif s == 'moisture_protection' %}mdi:fan-minus
+          {% elif s == 'heat_protection' %}mdi:sun-thermometer
           {% elif s in ['free_cooling', 'moisture_flush_cooling', 'cooling'] %}mdi:snowflake
           {% elif s in ['heating', 'moisture_retention'] %}mdi:fire
           {% else %}mdi:fan{% endif %}
@@ -272,20 +273,24 @@ template:
           {# input_boolean/input_number: never unavailable — no defaults needed. #}
           {% set auto   = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
           {% set free   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
-          {% set low    = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+          {% set moist  = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+          {% set heat   = is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') %}
           {% set boost  = is_state('switch.comfoconnect_pro_boost', 'on') %}
           {% set action = state_attr('climate.airflow_climate', 'hvac_action') %}
           {# Indoor moisture vs the min-humidity-derived dew point at target_temp (stable threshold). #}
           {% set indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set dew_min    = states('sensor.airflow_dew_point_min') | float %}
-          {# Flush (action == 'drying') is checked BEFORE low: when air is actively being flushed,
-             that is the operative mode — never report moisture_protection. With the new mutual
-             exclusivity low can't be ON during a flush anyway, but action can also be 'drying' via
-             free_cool + boost (independent of flush_needed), so the ordering still matters. #}
+          {# Flush (action == 'drying') is checked BEFORE the low guards: when air is actively being
+             flushed, that is the operative mode — never report a protection. With the mutual
+             exclusivity a low guard can't be ON during a flush anyway, but action can also be
+             'drying' via free_cool + boost (independent of flush_needed), so the ordering matters.
+             heat_protection (too-warm outdoor) is reported only when moisture protection is not also
+             active; a hot-and-humid spell reports moisture_protection. #}
           {% if not auto %}off
           {% elif boost and action == 'drying' %}moisture_flush_boost
           {% elif action == 'drying' %}moisture_flush_cooling
-          {% elif low %}moisture_protection
+          {% elif heat and not moist %}heat_protection
+          {% elif moist or heat %}moisture_protection
           {% elif action == 'cooling' and free %}free_cooling
           {% elif action == 'cooling' %}cooling
           {% elif action == 'heating' and indoor_dew < dew_min %}moisture_retention
@@ -303,6 +308,12 @@ template:
 
   # True when outdoor air is suitable for free cooling; debounced 10min each way to prevent flip-flop.
   # min_dew_diff and min_temp_diff are user-settable via input_number helpers.
+  # Temperature gate is INDOOR-relative: outdoor air only has to be min_temp_diff below the CURRENT
+  # room temperature (not below target), so a warm room is cooled with any air cooler than itself —
+  # e.g. a 26°C room is free-cooled by 22°C outdoor air even though 22°C is above the 21.5°C target.
+  # The room can never be driven below the outdoor temperature, and the room≥target gate below stops
+  # cooling once target is reached. A 0.5°C release band on the temp gap damps the flip-flop as the
+  # room temperature converges on the outdoor temperature (layered on the 10-min delay).
   # Indoor temperature uses a 0.5°C hysteresis band (Schmitt trigger): turns ON at target_temp,
   # stays ON until indoor temp drops 0.5°C below target. This prevents the feedback loop where
   # the cool profile itself cools the room just enough to disable free cooling and vice versa.
@@ -348,13 +359,17 @@ template:
           {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
           {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
           {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
+          {# Indoor-relative temp gap: outdoor must be min_temp_diff below the CURRENT room temp.
+             Release hysteresis: while ON require a 0.5°C smaller gap (clamped at 0) so the sensor
+             stays on as the room cools toward the outdoor temperature, damping flip-flop. #}
+          {% set temp_diff = [min_temp_diff - 0.5, 0] | max if this.state == 'on' else min_temp_diff %}
           {# Maximum outdoor dew: outdoor air warmed to target_temp must not exceed target_hum. #}
           {# Centralised in sensor.airflow_dew_point_target (Magnus at target_temp, target_hum). #}
           {% set dew_max = states('sensor.airflow_dew_point_target') | float %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
             outdoor_dew <= dew_max and
-            outdoor_temp < (target_temp - min_temp_diff) and
+            outdoor_temp < (avg_indoor_temp - temp_diff) and
             avg_indoor_temp >= temp_threshold
           }}
         delay_on:
@@ -431,6 +446,73 @@ template:
           minutes: 10
         delay_off:
           minutes: 10
+
+  # True when ventilation must be reduced because the REAL outdoor air is too warm to import.
+  # Symmetric to airflow_moisture_ventilation_low_needed (the too-humid guard): the direct
+  # temperature analog of that sensor's `outdoor_dew >= indoor_dew` term is `outdoor_temp >= indoor`.
+  # Uses the WEATHER-STATION outdoor temp (real outdoor), NOT the ComfoConnect intake. The intake
+  # runs through a long underground duct that pre-cools it, so it reads cool even on a hot day;
+  # raising airflow on that cool reading would pull a larger volume of hot outdoor air through the
+  # duct, warming the earth reservoir faster and using up its finite cooling capacity. So when the
+  # real outdoor air reaches indoor temperature we force LOW — the duct still delivers useful cool
+  # air at the minimum rate, and the ground is not saturated. Indoor-temp Schmitt: turns ON when
+  # real outdoor reaches indoor, stays ON until it falls min_temp_diff below indoor (reuses the
+  # existing free-cooling margin helper). Mutual exclusivity mirrors the moisture guard: gated OFF
+  # while a cool-profile flush or the drying boost is active (active moisture exchange wins; the
+  # boost is anyway impossible on a hot day, since drying_needed requires weather-station < target).
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.airflow_wheatherstation_outdoor_temp_5min
+          - sensor.airflow_avg_indoor_temp_5min
+          - input_number.airflow_min_temp_diff
+          - binary_sensor.airflow_humidity_flush_needed
+          - binary_sensor.airflow_humidity_drying_needed
+      # Self-trigger on unknown so a YAML reload re-evaluates immediately (same reasoning as the
+      # moisture guard above); the recomputed result still passes through delay_on/off.
+      - trigger: state
+        entity_id: binary_sensor.airflow_heat_ventilation_low_needed
+        to: "unknown"
+    binary_sensor:
+      - unique_id: airflow_heat_ventilation_low_needed
+        name: "Airflow Heat Ventilation Low Needed"
+        device_class: heat
+        availability: >
+          {{ has_value('sensor.airflow_wheatherstation_outdoor_temp_5min') and
+             has_value('sensor.airflow_avg_indoor_temp_5min') }}
+        state: >
+          {% set outdoor = states('sensor.airflow_wheatherstation_outdoor_temp_5min') | float %}
+          {% set indoor  = states('sensor.airflow_avg_indoor_temp_5min') | float %}
+          {% set margin  = states('input_number.airflow_min_temp_diff') | float %}
+          {# Schmitt: ON when real outdoor reaches indoor, stays on until it falls min_temp_diff below indoor. #}
+          {% set threshold = (indoor - margin) if this.state == 'on' else indoor %}
+          {{ outdoor >= threshold
+             and not is_state('binary_sensor.airflow_humidity_flush_needed', 'on')
+             and not is_state('binary_sensor.airflow_humidity_drying_needed', 'on') }}
+        delay_on:
+          minutes: 10
+        delay_off:
+          minutes: 10
+
+  # Combined "reduce ventilation" intent: either protection — outdoor too HUMID or too WARM.
+  # Section 2 keys on this single sensor so both guards share the same priority over the
+  # free-cooling low→medium bump. Pure OR of two already-debounced sources, so it needs no extra
+  # delay; trigger-based (with an unknown self-trigger) so it restores across reload instead of
+  # coming up unknown and momentarily dropping the low intent.
+  - trigger:
+      - trigger: state
+        entity_id:
+          - binary_sensor.airflow_moisture_ventilation_low_needed
+          - binary_sensor.airflow_heat_ventilation_low_needed
+      - trigger: state
+        entity_id: binary_sensor.airflow_ventilation_low_needed
+        to: "unknown"
+    binary_sensor:
+      - unique_id: airflow_ventilation_low_needed
+        name: "Airflow Ventilation Low Needed"
+        state: >
+          {{ is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on')
+             or is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') }}
 
   # True when conditions favour flushing indoor moisture toward (and below) the
   # max-humidity-derived dew point by opening the cool profile / bypass — even when
@@ -918,9 +1000,10 @@ automation:
       - platform: state
         entity_id: sensor.airflow_avg_indoor_humidity_5min
         id: humidity_changed
-      # Preset/auto_mode drivers (Section 2)
+      # Preset/auto_mode drivers (Section 2) — combined low (moisture OR heat) so a heat-protect
+      # transition re-runs the controller too.
       - platform: state
-        entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+        entity_id: binary_sensor.airflow_ventilation_low_needed
         id: low_changed
       # Schedule flipped auto_mode back on while an owner is active → re-assert manual preset
       - platform: state
@@ -966,7 +1049,7 @@ automation:
               {{ has_value('sensor.heating_cooling_indicator') and
                  has_value('binary_sensor.airflow_free_cooling_available') and
                  has_value('binary_sensor.airflow_humidity_flush_needed') and
-                 has_value('binary_sensor.airflow_moisture_ventilation_low_needed') }}
+                 has_value('binary_sensor.airflow_ventilation_low_needed') }}
             timeout: "00:05:00"
             continue_on_timeout: false
 
@@ -1037,9 +1120,12 @@ automation:
                       Active heating, free cooling unavailable — profile set to Warm.
                     {% endif %}
 
-          # Block 2: Free cooling (cooling season) OR humidity flush → cool profile.
-          # Case A: free cooling available AND cooling season — always cool to maximise the
-          #         free-cooling benefit. UNCHANGED behaviour.
+          # Block 2: Free cooling (any non-heating season) OR humidity flush → cool profile.
+          # Case A: free cooling available AND season ≠ active_heating — open the bypass to cool
+          #         whenever the room is above target and outdoor air is cooler and dry enough,
+          #         in neutral (mild spell) as well as cooling season. The free_cooling sensor
+          #         already carries the room≥target + cool/dry-outdoor gates, so only active
+          #         heating is vetoed here (Block 1B owns heating season).
           # Case B: binary_sensor.airflow_humidity_flush_needed is ON — flush indoor moisture
           #         toward max even when target humidity is unreachable and even when the
           #         (dew_target-gated) free-cooling sensor is OFF. The flush sensor already
@@ -1053,14 +1139,15 @@ automation:
                       - condition: state
                         entity_id: binary_sensor.airflow_free_cooling_available
                         state: "on"
-                      - condition: or
+                      # Any season except active heating — free cooling opens the bypass in
+                      # neutral (mild spell / shoulder season) as well as cooling season. The
+                      # free_cooling sensor already requires room ≥ target and cool, dry outdoor
+                      # air, so the season classifier only needs to veto active heating here.
+                      - condition: not
                         conditions:
                           - condition: state
                             entity_id: sensor.heating_cooling_indicator
-                            state: "passive_cooling"
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "active_cooling"
+                            state: "active_heating"
                   - condition: state
                     entity_id: binary_sensor.airflow_humidity_flush_needed
                     state: "on"
@@ -1091,30 +1178,30 @@ automation:
                       Indoor dew {{ dew }}°C vs max-dew {{ dew_max }}°C
                       (≈{{ rh }}% RH) — profile set to Cool to flush humid air.
                     {% else %}
-                      Free cooling active (cooling season) — profile set to Cool.
+                      Free cooling active — profile set to Cool to bring in cooler outdoor air.
                     {% endif %}
 
-          # Block 3: Neutral season or cooling season without free cooling → comfort profile.
+          # Block 3: Neutral or cooling season WITHOUT free cooling → comfort profile.
           # Dead-band guard [min, max] prevents overriding Block 1's warm profile on re-triggers.
+          # Free-cooling guard: Block 2A now owns `cool` in every non-heating season (neutral
+          # included), so this comfort block must yield whenever free cooling is available —
+          # otherwise, once the profile is already `cool`, 2A's idempotency guard skips and this
+          # block would flip it back to comfort (a cool ↔ comfort oscillation).
           - conditions:
+              - condition: state
+                entity_id: binary_sensor.airflow_free_cooling_available
+                state: "off"
               - condition: or
                 conditions:
                   - condition: state
                     entity_id: sensor.heating_cooling_indicator
                     state: "neutral"
-                  - condition: and
-                    conditions:
-                      - condition: or
-                        conditions:
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "passive_cooling"
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "active_cooling"
-                      - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "off"
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "passive_cooling"
+                  - condition: state
+                    entity_id: sensor.heating_cooling_indicator
+                    state: "active_cooling"
               - condition: template
                 value_template: >
                   {# Indoor moisture within the dead-band [dew_min, dew_max] (inclusive, no epsilon). #}
@@ -1328,10 +1415,11 @@ automation:
                         target:
                           entity_id: switch.comfoconnect_pro_auto_mode
 
-              # Low: reduce ventilation. Act unless we are already at (auto off, preset low).
+              # Low: reduce ventilation (outdoor too humid OR too warm). Act unless we are already
+              # at (auto off, preset low). Keys on the combined low intent so both protections win.
               - conditions:
                   - condition: state
-                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    entity_id: binary_sensor.airflow_ventilation_low_needed
                     state: "on"
                   - condition: template
                     value_template: >
@@ -1350,10 +1438,17 @@ automation:
                     data:
                       title: "Ventilation: Low Level"
                       message: >
-                        Indoor dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C above target-dew
-                        {{ states('sensor.airflow_dew_point_target') }}°C
-                        (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
-                        too humid — ventilation set to Low.
+                        {% if is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on')
+                              and not is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+                          Outdoor air {{ states('sensor.airflow_wheatherstation_outdoor_temp_5min') }}°C
+                          at/above indoor {{ states('sensor.airflow_avg_indoor_temp_5min') }}°C —
+                          too warm to import; ventilation set to Low to spare the ground reservoir.
+                        {% else %}
+                          Indoor dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C above target-dew
+                          {{ states('sensor.airflow_dew_point_target') }}°C
+                          (≈{{ states('sensor.airflow_avg_indoor_humidity_5min') }}% RH) and outdoor air
+                          too humid — ventilation set to Low.
+                        {% endif %}
 
               # Transient route-to-auto: we are in MANUAL LOW (auto off, preset low), the low owner
               # has cleared, and a medium owner (free cooling or humidity flush) is now active. The
@@ -1371,7 +1466,7 @@ automation:
                     entity_id: select.comfoconnect_pro_ventilation_preset
                     state: "low"
                   - condition: state
-                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    entity_id: binary_sensor.airflow_ventilation_low_needed
                     state: "off"
                   - condition: state
                     entity_id: switch.comfoconnect_pro_boost
@@ -1405,7 +1500,7 @@ automation:
                     entity_id: switch.comfoconnect_pro_auto_mode
                     state: "on"
                   - condition: state
-                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    entity_id: binary_sensor.airflow_ventilation_low_needed
                     state: "off"
                   - condition: or
                     conditions:
@@ -1447,7 +1542,7 @@ automation:
               # ComfoConnect schedule, but only if WE had taken it (auto_mode currently off).
               - conditions:
                   - condition: state
-                    entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
+                    entity_id: binary_sensor.airflow_ventilation_low_needed
                     state: "off"
                   - condition: state
                     entity_id: binary_sensor.airflow_free_cooling_available
@@ -1653,6 +1748,8 @@ group:
       - input_number.airflow_min_humidity
       - input_number.airflow_max_humidity
       - binary_sensor.airflow_moisture_ventilation_low_needed
+      - binary_sensor.airflow_heat_ventilation_low_needed
+      - binary_sensor.airflow_ventilation_low_needed
       # Drying boost
       - binary_sensor.airflow_humidity_drying_needed
       - schedule.airflow_boost_workday
