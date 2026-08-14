@@ -262,6 +262,15 @@ warm to import at volume — importing it adds net heat *and* saturates the unde
 reservoir (see §2). Because hot outdoor air is usually also humid, this and §5.3 frequently coincide;
 heat protection additionally covers hot-but-dry spells the dew-point guard misses.
 
+**Design intent (not just a consequence).** A hot day with acceptable indoor humidity is **always**
+held at LOW — that is the goal, not a side effect. The single sanctioned override is a genuine
+indoor-moisture problem: a flush requires indoor dew above the **target** humidity (Branch 2) or
+above **max** (Branch 1) *and* outdoor drier than indoor, so it can override heat protection only
+when indoor is actually too moist — and only at **MEDIUM** (mould/condensation safety outranks
+sparing the reservoir). A boost (HIGH) can never coincide with heat, since `drying_needed` requires
+weather-station `< target`. So: comfortable indoor humidity + hot outside ⇒ **LOW**; too-moist
+indoor + hot-but-dry outside ⇒ a medium flush is allowed.
+
 ### 5.3c `ventilation_low_needed` — combined low intent
 
 `moisture_ventilation_low_needed` **OR** `heat_ventilation_low_needed`. The single "reduce
@@ -379,6 +388,38 @@ Preset is computed **independent of `drying`/boost**. Since `drying ⊂ flush`, 
 runs the preset rule already yields medium, set *before* the boost starts; idempotent apply means
 no preset write disturbs the running boost, and medium fallback is already in place when it expires.
 That's why `drying_needed` is **not** a controller trigger.
+
+#### Airflow-increase guard invariants (load-bearing)
+
+Raising the ventilation **rate** — the medium bump, or the high boost — is what pulls outdoor air
+into the house in volume, so every increase is guarded. Opening the cool **profile** (bypass) is a
+separate thing: it changes the air *path*, not the fan level.
+
+1. **Dry-air only — no increase ever imports humid air.** Both rate-increase triggers require
+   outdoor distinctly drier than indoor: `free_cooling_available` and `flush_needed` each demand
+   `outdoor_dew + min_dew_diff < indoor_dew` (free cooling additionally caps `outdoor_dew ≤
+   dew_target`). Medium via free *or* flush, and the boost (⊂ flush), all inherit this.
+
+2. **A cooling increase is guarded on moisture AND real outdoor temperature.** The only
+   temperature-driven increase is the medium bump via `free_cooling_available` (flush off). It fires
+   only when `ventilation_low_needed` is **off** — i.e. `heat_low` off, meaning the **real outdoor**
+   (weather-station) temp is below indoor. So a hot real-outdoor day (≥ indoor) can never raise flow
+   for cooling; `heat_low` forces LOW instead, overriding even a schedule-set medium/high. The boost
+   is likewise real-outdoor-guarded (`drying_needed` requires weather-station `< target`).
+
+3. **The cool profile is guarded on the *intake* temperature, not the rate.** Block 2A opens `cool`
+   on `free_cooling_available`, whose temp gate is the pre-cooled ComfoConnect **intake**
+   (`outdoor_temp_5min < indoor − min_temp_diff`); Block 2B opens `cool` to flush moisture. Opening
+   the bypass never changes the fan level — that stays governed by invariants 1–2. This is exactly
+   why a hot day can sit at **bypass-open + LOW**: cool delivery through the pre-cooled duct at the
+   minimum rate.
+
+**The one hot-weather increase is a moisture flush, by design.** When `flush_needed` is on (indoor
+above target humidity, outdoor drier) it suppresses both `moisture_low` and `heat_low`, so the
+medium branch fires via the flush leg even if real outdoor ≥ indoor. That is a **moisture** relief
+action — dry air, at **medium** never high (the boost's weather-station `< target` gate keeps it off
+in heat) — and mould/condensation safety is the one thing allowed to raise flow on a hot day. It is
+**not** a cooling increase escaping the temperature guard.
 
 ### 7.2 `airflow_humidity_drying_boost` (mode: single)
 
