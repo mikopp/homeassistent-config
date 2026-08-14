@@ -262,6 +262,15 @@ warm to import at volume — importing it adds net heat *and* saturates the unde
 reservoir (see §2). Because hot outdoor air is usually also humid, this and §5.3 frequently coincide;
 heat protection additionally covers hot-but-dry spells the dew-point guard misses.
 
+**Design intent (not just a consequence).** A hot day with acceptable indoor humidity is **always**
+held at LOW — that is the goal, not a side effect. The single sanctioned override is a genuine
+indoor-moisture problem: a flush requires indoor dew above the **target** humidity (Branch 2) or
+above **max** (Branch 1) *and* outdoor drier than indoor, so it can override heat protection only
+when indoor is actually too moist — and only at **MEDIUM** (mould/condensation safety outranks
+sparing the reservoir). A boost (HIGH) can never coincide with heat, since `drying_needed` requires
+weather-station `< target`. So: comfortable indoor humidity + hot outside ⇒ **LOW**; too-moist
+indoor + hot-but-dry outside ⇒ a medium flush is allowed.
+
 ### 5.3c `ventilation_low_needed` — combined low intent
 
 `moisture_ventilation_low_needed` **OR** `heat_ventilation_low_needed`. The single "reduce

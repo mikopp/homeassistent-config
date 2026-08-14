@@ -458,8 +458,17 @@ template:
   # air at the minimum rate, and the ground is not saturated. Indoor-temp Schmitt: turns ON when
   # real outdoor reaches indoor, stays ON until it falls min_temp_diff below indoor (reuses the
   # existing free-cooling margin helper). Mutual exclusivity mirrors the moisture guard: gated OFF
-  # while a cool-profile flush or the drying boost is active (active moisture exchange wins; the
-  # boost is anyway impossible on a hot day, since drying_needed requires weather-station < target).
+  # while a cool-profile flush or the drying boost is active.
+  #
+  # DESIGN INTENT — a hot day with acceptable indoor humidity is ALWAYS held at LOW. This is a
+  # deliberate goal, not a side effect: on a hot day fresh-air intake must drop to the minimum to
+  # avoid importing heat and to protect the ground reservoir. The ONE sanctioned exception is a
+  # genuine indoor-moisture problem: a flush requires indoor dew above the TARGET humidity (Branch 2)
+  # or above MAX (Branch 1) AND outdoor drier than indoor, so it can only override heat-protect when
+  # indoor is actually too moist — and only at MEDIUM (mould/condensation safety outranks sparing the
+  # reservoir). A boost (HIGH) can never coincide with heat at all: drying_needed requires
+  # weather-station < target, which a hot day fails. So: comfortable indoor humidity + hot outside =>
+  # heat-protect holds LOW; too-moist indoor + hot-but-dry outside => a medium flush is allowed.
   - trigger:
       - trigger: state
         entity_id:
