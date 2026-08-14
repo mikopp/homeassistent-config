@@ -272,7 +272,7 @@ mqtt:
           - loxone_dishwasher
         name: "Dishwasher"
         manufacturer: "Loxone"
-        suggested_area: "Technikraum"
+        suggested_area: "Kitchen"
       value_template: "{{ value | float | round(3) }}"
 
     - name: "Dishwasher Energy"
