@@ -18,6 +18,17 @@
 # shelly/ prefix. Gen2/3 EM component payload schema differs from Plug S:
 #   em:0     → total_act_power is already in W (no scaling)
 #   emdata:0 → total_act is cumulative Wh, divided by 1000 for kWh
+#
+# Loxone appliances (Washer, Tumble Dryer, Dishwasher):
+#   MQTT topics: loxone/<device>/power and loxone/<device>/energy
+#     <device> ∈ washer | tumble-dry | dishwasher   (note: hyphen in topic)
+#   Payloads are plain numeric values (not JSON), 3-digit precision.
+#   sensor.<device>_power   → instantaneous draw in kW (native, no scaling)
+#   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
+#   Loxone publishes ONLY on change, has NO heartbeat (idle → silent for hours),
+#   but publishes a 0 when a draw ends and retains its last value for new
+#   subscribers. Hence: NO expire_after (would go unavailable during idle and
+#   break the Energy Dashboard); the retained/last value is held instead.
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -187,6 +198,92 @@ mqtt:
       icon: mdi:lightning-bolt
       device: *shelly_pro3em_heizung
       value_template: "{% if value_json.total_act is not none %}{{ (value_json.total_act / 1000) | round(3) }}{% endif %}"
+
+    # ── Loxone Washer ──────────────────────────────────────────────────────────
+    # Loxone publishes only on change (and a 0 when a draw ends), so holding the
+    # last value reads the true draw while running and 0 while idle. No
+    # expire_after: with no heartbeat, an idle appliance is silent for hours/days
+    # and must not go unavailable; the retained last value is kept instead.
+    - name: "Washer Power"
+      unique_id: "loxone_washer_power"
+      state_topic: "loxone/washer/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:washing-machine
+      device: &loxone_washer
+        identifiers:
+          - loxone_washer
+        name: "Washer"
+        manufacturer: "Loxone"
+        suggested_area: "Technikraum"
+      value_template: "{{ value | float | round(3) }}"
+
+    # Cumulative lifetime energy (kWh). Loxone updates it at least every 5 min
+    # while it is changing (i.e. while drawing); no heartbeat during idle.
+    # total_increasing + no expire_after → the Energy Dashboard's source of truth.
+    - name: "Washer Energy"
+      unique_id: "loxone_washer_energy"
+      state_topic: "loxone/washer/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_washer
+      value_template: "{{ value | float | round(3) }}"
+
+    # ── Loxone Tumble Dryer ────────────────────────────────────────────────────
+    # NB: topic uses a hyphen (loxone/tumble-dry/*); HA ids use underscores.
+    - name: "Tumble Dryer Power"
+      unique_id: "loxone_tumble_dry_power"
+      state_topic: "loxone/tumble-dry/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:tumble-dryer
+      device: &loxone_tumble_dry
+        identifiers:
+          - loxone_tumble_dry
+        name: "Tumble Dryer"
+        manufacturer: "Loxone"
+        suggested_area: "Technikraum"
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Tumble Dryer Energy"
+      unique_id: "loxone_tumble_dry_energy"
+      state_topic: "loxone/tumble-dry/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_tumble_dry
+      value_template: "{{ value | float | round(3) }}"
+
+    # ── Loxone Dishwasher ──────────────────────────────────────────────────────
+    - name: "Dishwasher Power"
+      unique_id: "loxone_dishwasher_power"
+      state_topic: "loxone/dishwasher/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:dishwasher
+      device: &loxone_dishwasher
+        identifiers:
+          - loxone_dishwasher
+        name: "Dishwasher"
+        manufacturer: "Loxone"
+        suggested_area: "Kitchen"
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Dishwasher Energy"
+      unique_id: "loxone_dishwasher_energy"
+      state_topic: "loxone/dishwasher/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_dishwasher
+      value_template: "{{ value | float | round(3) }}"
 
   binary_sensor:
 
