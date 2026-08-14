@@ -505,18 +505,16 @@ template:
 
   # Combined "reduce ventilation" intent: either protection — outdoor too HUMID or too WARM.
   # Section 2 keys on this single sensor so both guards share the same priority over the
-  # free-cooling low→medium bump. Pure OR of two already-debounced sources, so it needs no extra
-  # delay; trigger-based (with an unknown self-trigger) so it restores across reload instead of
-  # coming up unknown and momentarily dropping the low intent.
-  - trigger:
-      - trigger: state
-        entity_id:
-          - binary_sensor.airflow_moisture_ventilation_low_needed
-          - binary_sensor.airflow_heat_ventilation_low_needed
-      - trigger: state
-        entity_id: binary_sensor.airflow_ventilation_low_needed
-        to: "unknown"
-    binary_sensor:
+  # free-cooling low→medium bump.
+  #
+  # STATE-BASED (deliberately NOT trigger-based): this is a pure derived OR of two SLOW binary
+  # sensors that can sit steady for hours. A trigger-based template RESTORES its last state on HA
+  # restart and only recomputes when an input CHANGES — so it could come back STALE (e.g. 'off'
+  # while heat_low is 'on') and never recompute, stranding Section 2 off its low intent (observed:
+  # heat-protection all day but preset stuck at medium because this sensor read 'off'). A plain
+  # state-based template re-evaluates continuously from the current inputs and at startup, so it can
+  # never go stale. It carries no delay/hysteresis of its own — the two source sensors already do.
+  - binary_sensor:
       - unique_id: airflow_ventilation_low_needed
         name: "Airflow Ventilation Low Needed"
         state: >
