@@ -216,7 +216,7 @@ mqtt:
           - loxone_washer
         name: "Washer"
         manufacturer: "Loxone"
-        suggested_area: "Laundry"
+        suggested_area: "Technikraum"
       value_template: "{{ value | float | round(3) }}"
 
     # Cumulative lifetime energy (kWh). Loxone updates it at least every 5 min
@@ -246,7 +246,7 @@ mqtt:
           - loxone_tumble_dry
         name: "Tumble Dryer"
         manufacturer: "Loxone"
-        suggested_area: "Laundry"
+        suggested_area: "Technikraum"
       value_template: "{{ value | float | round(3) }}"
 
     - name: "Tumble Dryer Energy"
@@ -272,7 +272,7 @@ mqtt:
           - loxone_dishwasher
         name: "Dishwasher"
         manufacturer: "Loxone"
-        suggested_area: "Kitchen"
+        suggested_area: "Technikraum"
       value_template: "{{ value | float | round(3) }}"
 
     - name: "Dishwasher Energy"
