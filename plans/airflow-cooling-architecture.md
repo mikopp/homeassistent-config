@@ -507,6 +507,15 @@ flushing (`profile == cool AND flush_needed`); `cooling` for plain cool profile;
 | Block 4 bypass-close recovery | profile automation | drains stuck-`cool` when no owner; gated `profile==cool` so it can't oscillate vs Block 1 |
 | Block 5 warm-stuck recovery | profile automation | drains stuck-`warm` in cooling season when no owner; gated `profile==warm + cooling season` — inert in neutral/heating |
 
+> **Trigger-based vs state-based (restart-stale guardrail).** The decision sensors are
+> *trigger-based* and restore on restart to preserve the delay + Schmitt hysteresis; each is driven
+> by a continuously-drifting numeric filter (outdoor temp/dew, weather-station temp), so it recomputes
+> within ~1 debounce after a restart. `ventilation_low_needed` is the **lone state-based** decision
+> sensor **on purpose**: it derives from only two *slow binary* sensors (`moisture_low`, `heat_low`),
+> so trigger-based + restore could leave it stale for hours (it did — `off` while `heat_low` was on
+> all day). Rule: a template binary_sensor whose inputs are only other binary sensors must be
+> state-based. See `packages/CLAUDE.md`.
+
 ---
 
 ## 11. Complete state transition reference
