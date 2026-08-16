@@ -43,12 +43,14 @@ def _seed(
 
 
 def _reset_energy(ha: HomeAssistant) -> None:
-    """Force all energy accumulation sensors to 0.0 kWh, clearing any baseline attribute.
+    """Force all energy accumulation sensors to 0.0 kWh and un-baseline the counter-delta sensors.
 
     Called after the first clock jump in accumulation tests so any side-effect
     accumulation during the jump itself is wiped before the test scenario is seeded.
-    Passing a fresh attrs dict (no last_dc_total/last_mppt_total/last_acpv_total) also
-    resets the AC-referenced accumulators to their un-baselined bootstrap state.
+    The counter-delta baseline sensors (victron_solar_yield_dc_baseline_kwh,
+    victron_ac_pv_energy_baseline_kwh — own dedicated sensors, not attributes; see
+    packages/victron.yaml) are reset to literal 'unknown' so the AC-referenced accumulators
+    that read them start un-baselined (bootstrap-fallback state) in every test.
     """
     attrs_kwh = {
         "unit_of_measurement": "kWh",
@@ -66,6 +68,8 @@ def _reset_energy(ha: HomeAssistant) -> None:
         "sensor.victron_solar_yield_total_kwh",
     ):
         ha.set_state(eid, "0.0", attrs_kwh)
+    ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
+    ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
 
 
 def _seed_eta(ha: HomeAssistant, *, ac_out: float, dc_in: float) -> None:
@@ -402,6 +406,9 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
 
     Also verifies a counter rollback is absorbed (no negative delta) rather than corrupting
     the running total, and that a source going unavailable holds both state and baseline.
+    The baseline lives in sensor.victron_solar_yield_dc_baseline_kwh, its own dedicated
+    state-only sensor (see packages/victron.yaml) — checked here as a separate entity_id,
+    not as a custom attribute.
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
     time_machine.jump_to_next(hour=10, minute=0, second=0)
@@ -413,7 +420,11 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: float(s) == 0.0,
-        expected_attributes={"last_dc_total": lambda v: float(v) == 100.0},
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 100.0,
         timeout=5,
     )
 
@@ -423,7 +434,11 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        expected_attributes={"last_dc_total": lambda v: float(v) == 100.5},
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 100.5,
         timeout=5,
     )
 
@@ -434,7 +449,11 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        expected_attributes={"last_dc_total": lambda v: float(v) == 10.0},
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 10.0,
         timeout=5,
     )
 
@@ -444,7 +463,11 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        expected_attributes={"last_dc_total": lambda v: float(v) == 10.0},
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 10.0,
         timeout=5,
     )
 

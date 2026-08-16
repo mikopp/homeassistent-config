@@ -100,18 +100,21 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # VEBus/MultiPlus conversion-efficiency accumulators (trigger template sensors,
     # packages/victron.yaml). Seeded to 0.0 so sensor.victron_multiplus_conversion_efficiency
     # is deterministically at its 100 % bootstrap in every test that does not explicitly
-    # exercise eta — without this, minute
-    # ticks from unrelated tests would slowly accumulate into it. Passing a fresh attrs dict
-    # also clears any last_dc_total/last_mppt_total/last_acpv_total baseline attribute, so
-    # every test starts un-baselined (see the bootstrap-fallback comments in victron.yaml).
+    # exercise eta — without this, minute ticks from unrelated tests would slowly accumulate
+    # into it.
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
     ha.set_state("sensor.victron_multiplus_ac_out_energy", "0.0", attrs_kwh)
     ha.set_state("sensor.victron_multiplus_dc_in_energy", "0.0", attrs_kwh)
     ha.set_state("sensor.victron_multiplus_conversion_loss_energy", "0.0", attrs_kwh)
     # sensor.victron_solar_yield_total_kwh is now the REPOINTED AC-referenced accumulator
     # (see packages/victron.yaml's repoint note) — same reset pattern as the other trigger
-    # accumulators above: clears its last_dc_total baseline attribute too.
+    # accumulators above.
     ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
+    # Counter-delta baselines (victron.yaml, own dedicated state-only sensors — not custom
+    # attributes, see that file's comment) reset to literal 'unknown' so every test starts
+    # un-baselined, same semantics the -1 sentinel used to get from an empty attribute.
+    ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
+    ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})

@@ -1,9 +1,10 @@
 # Victron: AC-referenced Solar & Battery for the HA Energy Dashboard
 
-**Status:** IMPLEMENTED — repo-side changes complete; deploy (with entity-registry reclaim) pending.
+**Status:** IMPLEMENTED — repo-side changes complete, CI green (see "CI fix" section below); deploy
+(with entity-registry reclaim) pending.
 **Target files:** `packages/victron.yaml`, `packages/pergola.yaml`, `tests/test_victron.py`,
 `tests/conftest.py`, `tests/test_pergola.py`
-**Branch:** `remove-unused-victron-sensors`
+**Branch:** `fix-victron-ac-dc-mixup` (PR #101)
 
 ---
 
@@ -720,3 +721,67 @@ was dropped from `_seed()` and its conftest.py baseline seed removed — nothing
 
 Final entity count: 30 sensors (was 34), 0 `utility_meter`s (was 8) — the `utility_meter:` key is
 removed from the file entirely.
+
+## CI fix: custom `attributes:` on trigger sensors don't survive across ticks (post-implementation)
+
+PR #101's CI (`ha_check.yaml`, real HA container at this repo's pinned `.HA_VERSION`, 2026.8.1) failed
+2 of the new tests: `test_solar_yield_ac_total_baselines_then_applies_delta` and
+`test_battery_energy_residual_uses_counter_delta_once_baselined`. Config check itself was clean —
+only the live-container pytest run failed.
+
+**Root cause.** Steps 6/7 as originally implemented (see "Implementation" above) stashed each
+accumulator's previous-tick lifetime-counter reading in a custom `attributes:` key
+(`last_dc_total`, `last_mppt_total`, `last_acpv_total`), read back via `this.attributes.get(...)`.
+On real HA 2026.8.1 this does not reliably round-trip: every tick reads back the "no baseline"
+sentinel, so the counter-delta branch never leaves bootstrap (confirmed via the CI traceback —
+tick 2 of the battery test computed `batt_inc == 0` instead of the expected `-1.2`, the exact
+signature of `mppt_prev`/`acpv_prev` still reading `-1`).
+
+Traced against HA core source at the `2026.8.1` tag (not guessed, not generic knowledge — see the
+new CLAUDE.md "HA version gate" rule this incident is why it was added):
+- `TriggerEntity._render_templates` (in `homeassistant/components/template/trigger_entity.py`)
+  stores custom attributes into `self._attr_extra_state_attributes`, exposed via an overridden
+  `extra_state_attributes` property.
+- That override and the whole restore-attribute wiring landed in
+  **home-assistant/core#172847** ("Add restore state framework for template entities"), merged
+  **2026-06-24** — about 6 weeks before this repo's pinned `.HA_VERSION`.
+- 2026.7 also shipped #173974 ("Call state change listeners immediately instead of deferring them
+  to the event loop"), touching the same dispatch path.
+- Open upstream issue **home-assistant/core#178145** (filed against 2026.8.0b3) independently
+  reports `CoordinatorEntity`-based entities losing reliable state writes after a few update
+  cycles on this same version range — `TriggerEntity` is itself a `CoordinatorEntity`.
+
+No sensor anywhere in this repo used custom `attributes:` on a trigger sensor before this PR, so
+there was no working precedent to check it against — this landed squarely on a code path HA
+reworked weeks before the pinned version.
+
+**Fix.** Dropped the `attributes:` blocks entirely. Replaced with two dedicated, state-only
+sensors that hold the previous counter reading as their own `state:` (never a custom attribute):
+- `victron_solar_yield_dc_baseline_kwh` — previous `victron_solar_yield_dc_total_kwh` reading.
+  Consumed by `victron_solar_yield_total_kwh` and both `victron_battery_energy_in/out`.
+- `victron_ac_pv_energy_baseline_kwh` — previous `victron_ac_inverter_energy_total_kwh` reading.
+  Consumed by both `victron_battery_energy_in/out`.
+
+`this.state` self-reference (not `this.attributes`) is the proven-reliable pattern already used by
+the Grid Energy Import/Export accumulators — those tests pass and always have. The two baseline
+sensors reuse exactly that.
+
+Both baseline sensors are declared *after* their consumers in the same `- trigger:` block:
+entities in one trigger pass render in declaration order, and an earlier entity's fresh write IS
+visible to a later entity's `states()` read within that same pass (the same mechanism already
+documented for the η one-tick lag). Declaring the baselines last means the consumers read last
+tick's value, not one the baseline has already advanced to this tick.
+
+`victron_battery_energy_in` and `_out` now share one baseline pair instead of each carrying its
+own copy — the original per-sensor duplication existed specifically to dodge same-tick staleness
+from reading a *sibling's* freshly-written attribute; a dedicated external sensor read via
+`states()` doesn't have that hazard (both consumers read the same not-yet-updated baseline in the
+same pass), so the duplication was no longer needed and was dropped.
+
+Test changes: `_reset_energy()` and `conftest.py`'s `baseline_states` now reset the two new
+baseline sensors to the literal string `"unknown"` (same "no baseline yet" sentinel semantics the
+empty attribute used to provide) instead of clearing an attribute dict.
+`test_solar_yield_ac_total_baselines_then_applies_delta`'s `expected_attributes` checks became
+separate `assert_entity_state` calls against `sensor.victron_solar_yield_dc_baseline_kwh`.
+
+Entity count after this fix: 32 sensors (30 + the 2 new baseline sensors).

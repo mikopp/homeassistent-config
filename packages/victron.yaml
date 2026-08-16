@@ -485,26 +485,27 @@ template:
       # sensor.victron_solar_yield_dc_total_kwh), NOT by integrating power: the counter is the
       # MPPT's own authoritative measurement, so this sensor inherits its accuracy and cannot
       # drift from per-minute sampling error, however the tick rate behaves. Each minute:
-      #     delta = victron_solar_yield_dc_total_kwh - attributes.last_dc_total
+      #     delta = victron_solar_yield_dc_total_kwh - victron_solar_yield_dc_baseline_kwh
       #     state = state + max(delta, 0) * eta
-      #     attributes.last_dc_total = victron_solar_yield_dc_total_kwh
+      #   (the baseline sensor, defined further below, updates itself to the new reading)
       #
-      # `state` and `attributes` render in ONE pass against the SAME pre-update `this`, so the
-      # state template reads the OLD baseline while the attribute template writes the NEW one —
-      # never make an attribute template depend on the newly computed state, it would read stale.
+      # Previous baseline lives in sensor.victron_solar_yield_dc_baseline_kwh, NOT a custom
+      # `attributes:` key — verified against real HA 2026.8.1 in CI that custom attributes on
+      # trigger-based template sensors do not reliably round-trip across ticks (see that
+      # sensor's own comment, further below, and plans/victron-ac-referenced-accounting.md).
+      # `this.state` self-reference (used here for the running total) IS reliable — proven by
+      # the Grid Energy Import/Export accumulators above.
       #
       # Guards:
-      #   • first run ever / after a failed restore: attributes are empty → the sentinel default
-      #     -1 marks "no baseline" → this tick only re-baselines and adds nothing, so the lifetime
-      #     counter is never mistaken for a one-minute delta. The very next tick applies the real
-      #     delta (see the "wait 2 minutes" note in plans/victron-ac-referenced-accounting.md).
-      #   • counter reset or backwards jump: max(delta, 0) adds nothing; the baseline re-anchors
-      #     to the new lower value.
-      #   • source unavailable: state is held and the OLD baseline is re-emitted, so no energy is
-      #     lost — the next successful tick picks up the whole gap in one delta.
-      #   • the sentinel is numeric (-1), never the string 'None': a non-numeric attribute would
-      #     pass an `is none` test but float() to 0 and add the entire lifetime total as one delta.
-      #   • state and custom attributes both persist across restarts via unique_id.
+      #   • first run ever, or baseline sensor still unrendered: baseline state is 'unknown' →
+      #     float(-1) sentinel → "no baseline" → this tick only re-baselines and adds nothing, so
+      #     the lifetime counter is never mistaken for a one-minute delta. The very next tick
+      #     applies the real delta (see the "wait 2 minutes" note in
+      #     plans/victron-ac-referenced-accounting.md).
+      #   • counter reset or backwards jump: max(delta, 0) adds nothing; the baseline sensor
+      #     re-anchors to the new lower value.
+      #   • source unavailable: state is held; the baseline sensor also holds its last value, so
+      #     no energy is lost — the next successful tick picks up the whole gap in one delta.
       #
       # η lags by up to one minute here (it is derived from the accumulators above, in this same
       # trigger block) — negligible for a long-run ratio that moves <0.01 %/min past bootstrap.
@@ -517,7 +518,7 @@ template:
         icon: mdi:solar-power
         state: >
           {% set src  = states('sensor.victron_solar_yield_dc_total_kwh') %}
-          {% set prev = this.attributes.get('last_dc_total', -1) | float(-1) %}
+          {% set prev = states('sensor.victron_solar_yield_dc_baseline_kwh') | float(-1) %}
           {% set cur  = this.state | float(0) %}
           {% set eta  = (states('sensor.victron_multiplus_conversion_efficiency') | float(100)) / 100 %}
           {% if src in ['unavailable', 'unknown'] or prev < 0 %}
@@ -525,16 +526,6 @@ template:
           {% else %}
             {{ (cur + ([(src | float(0)) - prev, 0] | max) * eta) | round(3) }}
           {% endif %}
-        attributes:
-          # Baseline for the next delta. Held at the previous value while the source is
-          # unavailable; -1 means "no baseline yet" (see the guards above).
-          last_dc_total: >
-            {% set src = states('sensor.victron_solar_yield_dc_total_kwh') %}
-            {% if src in ['unavailable', 'unknown'] %}
-              {{ this.attributes.get('last_dc_total', -1) | float(-1) }}
-            {% else %}
-              {{ src | float(-1) }}
-            {% endif %}
 
       # ── Battery energy accumulators — ENERGY-domain residual ─────────────────
       # Reconciled against the SAME counter/integration series the Energy Dashboard actually
@@ -560,11 +551,13 @@ template:
       # residual and stays there permanently; this is a one-time cold-start behaviour, not a
       # steady-state one.
       #
-      # This sensor and Victron Battery Energy Out each carry their OWN last_mppt_total /
-      # last_acpv_total baseline attributes rather than sharing one pair: reading a sibling
-      # sensor's already-updated attribute would reintroduce the same-tick staleness hazard that
-      # the single-sensor design above avoids by construction. Both sensors derive an identical
-      # batt_inc from the same source states, so the duplication costs a few lines, not accuracy.
+      # Previous counter readings come from sensor.victron_solar_yield_dc_baseline_kwh /
+      # sensor.victron_ac_pv_energy_baseline_kwh (defined further below), NOT a custom
+      # `attributes:` key on this sensor — verified against real HA 2026.8.1 in CI that custom
+      # attributes on trigger-based template sensors do not reliably round-trip across ticks.
+      # Both In and Out read the SAME shared baseline sensors (no need for an own copy each —
+      # a states() read of another same-block sensor already returns that sensor's PRE-this-tick
+      # value here, since the baselines are declared AFTER their consumers; see their comment).
       - name: "Victron Battery Energy In"
         unique_id: victron_battery_energy_in
         unit_of_measurement: "kWh"
@@ -573,8 +566,8 @@ template:
         state: >
           {% set mppt_src  = states('sensor.victron_solar_yield_dc_total_kwh') %}
           {% set acpv_src  = states('sensor.victron_ac_inverter_energy_total_kwh') %}
-          {% set mppt_prev = this.attributes.get('last_mppt_total', -1) | float(-1) %}
-          {% set acpv_prev = this.attributes.get('last_acpv_total', -1) | float(-1) %}
+          {% set mppt_prev = states('sensor.victron_solar_yield_dc_baseline_kwh') | float(-1) %}
+          {% set acpv_prev = states('sensor.victron_ac_pv_energy_baseline_kwh') | float(-1) %}
           {% set eta       = (states('sensor.victron_multiplus_conversion_efficiency') | float(100)) / 100 %}
           {% set dc_pv     = states('sensor.victron_dc_pv_total_power') | float(0) %}
           {% set ac_pv_w   = states('sensor.victron_ac_inverter_power') | float(0) %}
@@ -592,21 +585,6 @@ template:
           {% set load_inc = (states('sensor.victron_ac_load_total_power') | float(0)) / 60000 %}
           {% set batt_inc = load_inc - grid_inc - acpv_inc - solar_inc %}
           {{ ((this.state | float(0)) + ([-batt_inc, 0] | max)) | round(3) }}
-        attributes:
-          last_mppt_total: >
-            {% set src = states('sensor.victron_solar_yield_dc_total_kwh') %}
-            {% if src in ['unavailable', 'unknown'] %}
-              {{ this.attributes.get('last_mppt_total', -1) | float(-1) }}
-            {% else %}
-              {{ src | float(-1) }}
-            {% endif %}
-          last_acpv_total: >
-            {% set src = states('sensor.victron_ac_inverter_energy_total_kwh') %}
-            {% if src in ['unavailable', 'unknown'] %}
-              {{ this.attributes.get('last_acpv_total', -1) | float(-1) }}
-            {% else %}
-              {{ src | float(-1) }}
-            {% endif %}
 
       - name: "Victron Battery Energy Out"
         unique_id: victron_battery_energy_out
@@ -616,8 +594,8 @@ template:
         state: >
           {% set mppt_src  = states('sensor.victron_solar_yield_dc_total_kwh') %}
           {% set acpv_src  = states('sensor.victron_ac_inverter_energy_total_kwh') %}
-          {% set mppt_prev = this.attributes.get('last_mppt_total', -1) | float(-1) %}
-          {% set acpv_prev = this.attributes.get('last_acpv_total', -1) | float(-1) %}
+          {% set mppt_prev = states('sensor.victron_solar_yield_dc_baseline_kwh') | float(-1) %}
+          {% set acpv_prev = states('sensor.victron_ac_pv_energy_baseline_kwh') | float(-1) %}
           {% set eta       = (states('sensor.victron_multiplus_conversion_efficiency') | float(100)) / 100 %}
           {% set dc_pv     = states('sensor.victron_dc_pv_total_power') | float(0) %}
           {% set ac_pv_w   = states('sensor.victron_ac_inverter_power') | float(0) %}
@@ -635,21 +613,44 @@ template:
           {% set load_inc = (states('sensor.victron_ac_load_total_power') | float(0)) / 60000 %}
           {% set batt_inc = load_inc - grid_inc - acpv_inc - solar_inc %}
           {{ ((this.state | float(0)) + ([batt_inc, 0] | max)) | round(3) }}
-        attributes:
-          last_mppt_total: >
-            {% set src = states('sensor.victron_solar_yield_dc_total_kwh') %}
-            {% if src in ['unavailable', 'unknown'] %}
-              {{ this.attributes.get('last_mppt_total', -1) | float(-1) }}
-            {% else %}
-              {{ src | float(-1) }}
-            {% endif %}
-          last_acpv_total: >
-            {% set src = states('sensor.victron_ac_inverter_energy_total_kwh') %}
-            {% if src in ['unavailable', 'unknown'] %}
-              {{ this.attributes.get('last_acpv_total', -1) | float(-1) }}
-            {% else %}
-              {{ src | float(-1) }}
-            {% endif %}
+
+      # ── Counter-delta baselines (STATE-only, no custom attributes) ───────────
+      # Hold the previous tick's lifetime-counter reading for the three accumulators above
+      # (Solar Yield AC Total, Battery Energy In, Battery Energy Out), read back via states().
+      #
+      # An earlier design stashed this baseline in a custom `attributes:` key on each consumer,
+      # read back via `this.attributes.get(...)`. CI caught that this does not work: verified
+      # against HA 2026.8.1 (this repo's pinned .HA_VERSION) that custom attributes on
+      # trigger-based template sensors do not reliably round-trip tick-to-tick — traced to
+      # home-assistant/core#172847 (trigger-entity restore-state rework, merged 2026-06-24,
+      # weeks before this pinned version) reworking exactly this code path. `this.state`
+      # self-reference does NOT have this problem — it is the same mechanism the Grid Energy
+      # Import/Export accumulators above already rely on successfully — so the baseline is now
+      # a dedicated sensor's own state instead of an attribute. See
+      # plans/victron-ac-referenced-accounting.md for the full writeup.
+      #
+      # Declared AFTER their consumers (Solar Yield AC Total, Battery Energy In/Out) in this
+      # same trigger block: sensors within one trigger pass render in declaration order, and an
+      # earlier sensor's fresh write IS visible to a later sensor's states() read within that
+      # same pass (this is also why η, further above, lags by one tick behind its accumulators).
+      # Putting the baselines last means the consumers above see last tick's value here, not one
+      # this tick has already advanced.
+      #
+      # 'unknown' (before this sensor has ever rendered) | float(-1) reproduces the same -1
+      # "no baseline yet" sentinel the consumers already guard for.
+      - name: "Victron Solar Yield DC Baseline kWh"
+        unique_id: victron_solar_yield_dc_baseline_kwh
+        unit_of_measurement: "kWh"
+        state: >
+          {% set src = states('sensor.victron_solar_yield_dc_total_kwh') %}
+          {{ src if src not in ['unavailable', 'unknown'] else this.state }}
+
+      - name: "Victron AC PV Energy Baseline kWh"
+        unique_id: victron_ac_pv_energy_baseline_kwh
+        unit_of_measurement: "kWh"
+        state: >
+          {% set src = states('sensor.victron_ac_inverter_energy_total_kwh') %}
+          {{ src if src not in ['unavailable', 'unknown'] else this.state }}
 
       # Conversion loss energy — the source power is already clamped ≥ 0, so this is monotonic.
       - name: "Victron MultiPlus Conversion Loss Energy"
