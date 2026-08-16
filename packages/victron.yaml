@@ -638,9 +638,16 @@ template:
       #
       # 'unknown' (before this sensor has ever rendered) | float(-1) reproduces the same -1
       # "no baseline yet" sentinel the consumers already guard for.
+      # device_class/state_class deliberately match every other self-referencing (this.state)
+      # trigger sensor in this file (Grid Energy Import/Export, the η accumulators, Solar Yield
+      # AC Total, Battery Energy In/Out) — that combination is the only `this.state` pattern
+      # actually proven to persist reliably tick-to-tick in this repo's CI, so these two match it
+      # rather than being the only exception.
       - name: "Victron Solar Yield DC Baseline kWh"
         unique_id: victron_solar_yield_dc_baseline_kwh
         unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
         state: >
           {% set src = states('sensor.victron_solar_yield_dc_total_kwh') %}
           {{ src if src not in ['unavailable', 'unknown'] else this.state }}
@@ -648,6 +655,8 @@ template:
       - name: "Victron AC PV Energy Baseline kWh"
         unique_id: victron_ac_pv_energy_baseline_kwh
         unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
         state: >
           {% set src = states('sensor.victron_ac_inverter_energy_total_kwh') %}
           {{ src if src not in ['unavailable', 'unknown'] else this.state }}

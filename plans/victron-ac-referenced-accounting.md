@@ -785,3 +785,14 @@ empty attribute used to provide) instead of clearing an attribute dict.
 separate `assert_entity_state` calls against `sensor.victron_solar_yield_dc_baseline_kwh`.
 
 Entity count after this fix: 32 sensors (30 + the 2 new baseline sensors).
+
+**Follow-up (same CI fix round):** the first push of the baseline sensors still failed —
+different symptom this time: the baseline sensor's own state stayed the literal string
+`"unknown"` forever (`ValueError: could not convert string to float: 'unknown'`), meaning even a
+plain `this.state` self-reference didn't reliably commit for these two entities. The two new
+sensors were the only self-referencing trigger sensors in this file defined with just a bare
+`unit_of_measurement` and no `device_class`/`state_class` — every other one that relies on
+`this.state` (Grid Energy Import/Export, the η accumulators, Solar Yield AC Total, Battery Energy
+In/Out) pairs `device_class: energy` + `state_class: total_increasing`. Added that same pairing to
+both baseline sensors to match the only pattern actually proven reliable in this repo's CI, rather
+than being the one exception without it.
