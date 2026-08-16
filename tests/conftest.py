@@ -6,9 +6,42 @@ session-scoped fixtures automatically via its installed conftest.
 """
 
 import pytest
+import requests
 from datetime import timedelta
 
 from ha_integration_test_harness import HomeAssistant, TimeMachine
+
+
+# ── Bound every HTTP call the harness makes ──────────────────────────────────────────────
+# ha_integration_test_harness (pinned at v0.11.0) calls requests.get/post/delete with NO
+# timeout= kwarg, so a Home Assistant container that accepts the TCP connection but never
+# answers blocks the test process forever. This is not hypothetical: CI hung repeatedly on
+# this branch, and the pytest-timeout thread dump (see plans/ci-test-isolation.md) put the
+# main thread in socket.recv_into inside requests.get, waiting on the HTTP status line.
+#
+# assert_entity_state(timeout=5) does NOT protect against this. Its timeout is checked
+# BETWEEN poll iterations; each iteration calls get_state(), and one unbounded get_state()
+# inside the loop means the 5s ceiling is never reached. Every timeout= in this suite is
+# decorative against a wedged container without this shim.
+#
+# The harness is a pinned pip dependency, so it cannot be fixed in place. Instead default a
+# timeout onto the module-level requests helpers it uses. setdefault, not an override: any
+# caller passing its own timeout= still wins. Result: a wedged container produces a
+# requests.exceptions.ReadTimeout naming the failing call within 30s, and the remaining
+# tests still run — instead of the whole invocation stalling until pytest-timeout kills it.
+_HTTP_TIMEOUT_SECONDS = 30
+
+
+def _with_default_timeout(func):
+    """Wrap a requests helper so it carries a default timeout unless the caller set one."""
+    def wrapper(*args, **kwargs):
+        kwargs.setdefault("timeout", _HTTP_TIMEOUT_SECONDS)
+        return func(*args, **kwargs)
+    return wrapper
+
+
+for _name in ("get", "post", "delete", "put", "patch", "request"):
+    setattr(requests, _name, _with_default_timeout(getattr(requests, _name)))
 
 
 # Originally: run pergola tests before airflow tests to prevent event-loop load from airflow

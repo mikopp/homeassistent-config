@@ -23,6 +23,7 @@ or the per-branch idempotency templates — so Away gating and branch selection 
 """
 
 import requests
+from datetime import timedelta
 
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
@@ -1600,15 +1601,22 @@ def test_flush_unavailable_when_dependency_missing(home_assistant: HomeAssistant
 def _assert_recomputes_after_reload(
     ha: HomeAssistant, tm: TimeMachine, entity_id: str
 ) -> None:
-    """Force `entity_id` to 'unknown' (reload simulation) → assert it recomputes to on/off."""
-    tm.jump_to_next(hour=10, minute=0, second=0)
+    """Force `entity_id` to 'unknown' (reload simulation) → assert it recomputes to on/off.
+
+    Uses fast_forward, not jump_to_next(hour=...): the latter is forward-only, so asking for an
+    hour the mocked clock has already passed silently advances a FULL DAY (see
+    plans/victron-test-clock-simplification.md). Neither sensor asserted here reads schedule.*,
+    binary_sensor.workday, or any time function — verified against their template bodies in
+    packages/airflow_cooling.yaml — so no absolute wall-clock anchor is needed. The only clock
+    requirement is crossing the 10-minute delay_on/delay_off window.
+    """
     # Baseline deps are available, so the sensor holds a definite state before the "reload".
     ha.assert_entity_state(entity_id, lambda s: s in ("on", "off"), timeout=5)
     # Simulate the reload: the entity is re-created as 'unknown'. The self-trigger (to: "unknown")
     # fires on this transition and re-evaluates the state template.
     ha.set_state(entity_id, "unknown", {})
-    # The recomputed result must pass the 10-min delay_on/delay_off before it lands; jump past it.
-    tm.jump_to_next(hour=10, minute=11, second=0)
+    # The recomputed result must pass the 10-min delay_on/delay_off before it lands; step past it.
+    tm.fast_forward(timedelta(minutes=11))
     # Without the self-trigger the entity would stay 'unknown' (no input changed) — reaching a
     # definite on/off proves the self-trigger fired and recomputed the template.
     ha.assert_entity_state(entity_id, lambda s: s in ("on", "off"), timeout=5)

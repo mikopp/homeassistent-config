@@ -3,14 +3,22 @@
 Verifies the full chain:
   MQTT sensor values (seeded via set_state; MQTT broker absent in CI)
   → derived template sensors (grid, battery, VEBus attribution)
-  → energy accumulation sensors — most are trigger-based (1-minute intervals; see
-    time_machine.jump_to_next() below), except sensor.victron_grid_energy_import/export,
-    which are `platform: integration` and instead integrate on every source state
-    change/report (see test_grid_import_energy_accumulates for why those two tests use
-    time_machine.fast_forward() and a relative baseline delta instead).
+  → energy accumulation sensors — most are trigger-based (the `time_pattern: minutes: "/1"`
+    block in packages/victron.yaml), except sensor.victron_grid_energy_import/export, which
+    are `platform: integration` and instead integrate on every source state change/report
+    (see test_grid_import_energy_accumulates for why those two assert a relative baseline
+    delta rather than an absolute value).
 
-time_machine.jump_to_next() fires all time_pattern triggers that were crossed,
-including the every-minute energy accumulation trigger — no real waiting needed.
+CLOCK HANDLING: every time-dependent test here uses exactly one
+time_machine.fast_forward(timedelta(minutes=1)), which crosses exactly one `/1` boundary and
+so renders the trigger block exactly once. That is the only thing any of these tests need from
+the clock — nothing in packages/victron.yaml is time-of-day dependent (no sun, no now(), no
+hour conditions; its only two triggers are time_pattern /1 and the /30s mqtt keepalive).
+
+Deliberately NOT jump_to_next(hour=...): that call is forward-only, so re-requesting an hour
+the mocked clock has already passed silently advances a FULL DAY. Anchoring every test to
+10:00 therefore cost ~11 day-long jumps across this file and made every `platform: integration`
+step integrate 86400 s in one trapezoid. See plans/victron-test-clock-simplification.md.
 """
 
 from datetime import timedelta
@@ -52,8 +60,8 @@ def _reset_energy(ha: HomeAssistant) -> None:
     """Force all trigger-based energy accumulation sensors to 0.0 kWh and un-baseline the
     counter-delta sensors.
 
-    Called after the first clock jump in accumulation tests so any side-effect
-    accumulation during the jump itself is wiped before the test scenario is seeded.
+    Called at the top of an accumulation test, BEFORE the fast_forward() that fires the tick
+    under test, so the sensors start from a known 0.0 and only the tick being tested counts.
     The counter-delta baseline sensors (victron_solar_yield_dc_baseline_kwh,
     victron_ac_pv_energy_baseline_kwh — own dedicated sensors, not attributes; see
     packages/victron.yaml) are reset to literal 'unknown' so the AC-referenced accumulators
@@ -215,16 +223,9 @@ def test_grid_import_energy_accumulates(
     at all. The 1 W step keeps the trapezoidal average (3000+3001)/2 = 3000.5 W indistinguishable
     from 3000 W at this test's tolerance while still forcing a real state change.
 
-    Still opens with jump_to_next(hour=10, minute=0) even though the timed step itself uses
-    fast_forward(), not a second jump_to_next: every other test in this suite anchors the mocked
-    clock to that round boundary before doing anything else, and an earlier version of this test
-    that dropped it (going straight to fast_forward with no prior alignment) left the session
-    clock at an arbitrary, non-round timestamp — which then made a LATER, unrelated test's own
-    jump_to_next() hang for 20+ minutes in CI (reproduced deterministically on a rerun). Keep the
-    alignment step so every test in the suite starts every clock-touching sequence from the same
-    kind of position.
+    One clock op: fast_forward(1 min). No absolute anchor — see the module docstring for why
+    jump_to_next(hour=...) is avoided throughout this file.
     """
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _seed(home_assistant, grid_l1=3000)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "3000.0", timeout=5)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
@@ -249,10 +250,8 @@ def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
     """~1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
-    for why this asserts a relative delta rather than an absolute reset-then-value, why the
-    second seed nudges the value by 1 W instead of repeating it exactly, and why this still opens
-    with jump_to_next(hour=10, minute=0) to anchor the clock before the fast_forward() step."""
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    for why this asserts a relative delta rather than an absolute reset-then-value, and why the
+    second seed nudges the value by 1 W instead of repeating it exactly."""
     _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", "1800.0", timeout=5)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
@@ -280,11 +279,10 @@ def test_battery_discharge_energy_accumulates(
     battery_ac_power = -(ac_load - grid - dc_pv - ac_pv) = -(1200 - 0 - 0 - 0) = -1200 W.
     Energy accumulates from the AC-equivalent half-wave, not the DC battery sensor.
     """
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     _seed(home_assistant, ac_l1=1200)
     home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 1200, timeout=5)
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: abs(float(s) - 0.02) < 0.001,
@@ -307,12 +305,11 @@ def test_night_no_grid_energy_accumulates(
     import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
     export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
 
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, ac_l1=1500)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import", lambda s: float(s) == import_baseline, timeout=5
     )
@@ -466,13 +463,12 @@ def test_conversion_loss_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
     """600 W loss (ac_load=600, vebus_dc=-1200) × 1 min = 0.01 kWh accumulated."""
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     _seed(home_assistant, ac_l1=600, vebus_dc=-1200)
     home_assistant.assert_entity_state(
         "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 600, timeout=5
     )
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_multiplus_conversion_loss_energy",
         lambda s: abs(float(s) - 0.01) < 0.001,
@@ -508,21 +504,19 @@ def test_solar_yield_ac_total_captures_baseline_on_first_tick(
     state-only sensor (see packages/victron.yaml) — checked here as a separate entity_id, not
     as a custom attribute.
 
-    Each of the 4 solar-yield-AC-total scenarios below is its own test using a single
-    time_machine.jump_to_next() after the reset, rather than one test chaining several jumps:
-    the ha_integration_test_harness time_pattern trigger only reliably re-fires on the FIRST
-    jump after a reset within a given test — a second/third chained jump in the same test does
-    not reliably re-fire it (confirmed via a diagnostic dump: the entity's last_updated stayed
-    pinned to the reset's timestamp, never advancing to the later jump's). Any "already
-    baselined" precondition is instead seeded directly via set_state on the baseline sensor,
-    which is possible now that it is a first-class sensor rather than a custom attribute.
+    Each of the 4 solar-yield-AC-total scenarios below is its own test firing a single tick
+    (one fast_forward), rather than one test chaining several ticks: the harness's time_pattern
+    trigger only reliably re-fires on the FIRST clock advance after a reset within a given test
+    (confirmed via a diagnostic dump: the entity's last_updated stayed pinned to the reset's
+    timestamp, never advancing to the later advance's). Any "already baselined" precondition is
+    instead seeded directly via set_state on the baseline sensor, which is possible now that it
+    is a first-class sensor rather than a custom attribute.
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "100.0", attrs_kwh)
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: float(s) == 0.0,
@@ -540,7 +534,6 @@ def test_solar_yield_ac_total_applies_delta_once_baselined(
 ) -> None:
     """Once baselined, a tick applies the delta (eta at 100% bootstrap -> delta added 1:1)."""
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     # Seed "already baselined at 100.0, running total 0.0" directly -- what a real first tick
     # would have produced (see test_solar_yield_ac_total_captures_baseline_on_first_tick).
@@ -548,7 +541,7 @@ def test_solar_yield_ac_total_applies_delta_once_baselined(
     home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "100.5", attrs_kwh)
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
@@ -566,13 +559,12 @@ def test_solar_yield_ac_total_counter_reset_clamped_to_zero(
 ) -> None:
     """A counter rollback (device reset) is absorbed: delta clamped to 0, baseline re-anchors down."""
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "100.5", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.5", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "10.0", attrs_kwh)
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
@@ -590,13 +582,12 @@ def test_solar_yield_ac_total_holds_on_source_unavailable(
 ) -> None:
     """Source going unavailable holds both the running total and the baseline -- no energy lost."""
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "10.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.5", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "unavailable", {})
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
@@ -619,13 +610,12 @@ def test_battery_energy_residual_bootstrap_before_baseline(
     for why this is a single-jump test rather than chaining a second tick in here too.
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "50.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_ac_inverter_energy_total_kwh", "20.0", attrs_kwh)
     _seed(home_assistant)  # all power sensors at 0
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state("sensor.victron_battery_energy_in", "0.0", timeout=5)
     home_assistant.assert_entity_state("sensor.victron_battery_energy_out", "0.0", timeout=5)
 
@@ -643,7 +633,6 @@ def test_battery_energy_residual_uses_counter_delta_once_baselined(
     battery: batt_inc = 0 - 0 - 0.2 - 1.0*eta(1.0) = -1.2  ->  energy_in += 1.2
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "50.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "20.0", attrs_kwh)
@@ -651,7 +640,7 @@ def test_battery_energy_residual_uses_counter_delta_once_baselined(
     home_assistant.set_state("sensor.victron_ac_inverter_energy_total_kwh", "20.2", attrs_kwh)
     _seed(home_assistant)  # all power sensors at 0
 
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    time_machine.fast_forward(timedelta(minutes=1))
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_in",
         lambda s: abs(float(s) - 1.2) < 0.001,

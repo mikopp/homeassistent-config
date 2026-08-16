@@ -69,7 +69,25 @@ Current packages:
   2. If a new pattern emerged, update the "Active Patterns" or "Anti-Patterns" sections.
   3. Append a dated entry to the "Log" section using the exact markdown schema.
   4. Keep insights dense, punchy, and actionable. Do not log trivial details.
-  
+
+### NEVER write an unconfirmed learning
+An entry in `.claude/learnings.md` is a claim future sessions will act on without re-deriving it.
+Only write one when the cause is **proven**, not when it is merely plausible.
+
+- **A single green CI run is not proof.** Neither is "the symptom went away after I changed X" —
+  that is correlation on a sample of one, and for an intermittent failure it is worth nothing.
+- Acceptable evidence: a stack trace / thread dump / error naming the mechanism; the relevant
+  source read at the pinned `.HA_VERSION`; a config-check or test failure that reproduces
+  deterministically; a bisect over several runs.
+- If the cause is still a hypothesis, it belongs in the feature's `plans/` file marked as such —
+  not in learnings.
+- When a logged learning is later contradicted, **delete it** (or strike it through and say what
+  disproved it). Do not leave a wrong entry standing next to its correction.
+
+This rule exists because two entries in this file had to be removed as false positives: both were
+plausible mechanisms fitted to one confirming run, and both sent later sessions down wrong paths.
+
+
 ## HA template / helper rules
 
 ### `input_number` / `input_boolean` / `input_select` / `input_datetime`
