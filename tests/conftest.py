@@ -11,10 +11,14 @@ from datetime import timedelta
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
 
-# Run pergola tests before airflow tests to prevent event-loop load from airflow
-# automations (mode:restart + humidity trigger) causing sun-integration race
-# conditions that overwrite sensor.pergola_effective_slat_angle with the
-# script's float(90) default before the test assertion fires.
+# Originally: run pergola tests before airflow tests to prevent event-loop load from airflow
+# automations (mode:restart + humidity trigger) causing sun-integration race conditions that
+# overwrite sensor.pergola_effective_slat_angle with the script's float(90) default before the
+# test assertion fires. That race is now handled structurally instead: .github/workflows/
+# ha_check.yaml runs test_pergola.py as its own pytest invocation (its own fresh HA instance,
+# see plans/ci-test-isolation.md), so airflow tests are never even collected in the same process.
+# This sort is harmless to keep — for that isolated run everything already matches "test_pergola"
+# and sorts alphabetically among itself either way.
 def pytest_collection_modifyitems(items: list) -> None:
     def sort_key(item):
         return (0 if "test_pergola" in item.nodeid else 1, item.nodeid)

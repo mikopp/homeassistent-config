@@ -141,19 +141,48 @@ jobs:
           print(f\"Found {len(d['state_templates'])} state template(s) and {len(d['runtime_templates'])} runtime template(s).\")
           "
 
-      # ── 8. Run pytest — templates + automation tests ─────────────────────────
-      #    The ha_integration_test_harness plugin starts a session-scoped HA
-      #    container (via Docker Compose), runs all tests, and stops the container
-      #    automatically. Template validation and automation tests share the same
-      #    live HA instance for efficiency.
-      - name: Run pytest (template validation + automation scenarios)
-        id: run_tests
+      # ── 8a. Run pytest — pergola tests (isolated HA instance) ────────────────
+      #    tests/test_pergola.py uses fixtures (midday_sun/low_elevation_sun in
+      #    conftest.py) that call jump_to_next(month="Jun", ...) — once the mocked
+      #    clock is already past June 21 in the current mocked year, each further
+      #    call jumps a FULL YEAR forward. Run as its own pytest invocation so it
+      #    gets a fresh harness-managed Docker container and a clock starting near
+      #    real "now": ha_integration_test_harness's docker/home_assistant/
+      #    time_machine fixtures are scope="session", hardwired in the harness's
+      #    own bundled conftest (not overridable from this repo) — a session
+      #    boundary is a process boundary is a fresh container, there is no
+      #    fixture-scope override available. Without this, those year-jumps
+      #    front-load years of clock drift onto the shared session before any
+      #    other test file runs, degrading (and eventually hanging) tests much
+      #    later in the suite. See plans/ci-test-isolation.md for the full
+      #    investigation.
+      #
+      #    PATTERN for any future test file/group that needs its own instance:
+      #    add one more `pytest tests/<file>.py -v` step following this one, and
+      #    add `--ignore=tests/<file>.py` to the shared-instance step below.
+      - name: Run pytest — pergola tests (isolated HA instance)
+        id: run_tests_pergola
         continue-on-error: true
         env:
           HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
           TEMPLATES_JSON: /tmp/templates.json
         run: |
-          pytest tests/ -v 2>&1 | tee /tmp/pytest_output.txt
+          pytest tests/test_pergola.py -v 2>&1 | tee /tmp/pytest_pergola_output.txt
+          exit_code=${PIPESTATUS[0]}
+          exit $exit_code
+
+      # ── 8b. Run pytest — everything else (shared HA instance) ────────────────
+      #    Template validation and the remaining automation scenarios share one
+      #    live HA instance for efficiency — none of them use the year-jumping
+      #    sun fixtures above.
+      - name: Run pytest — remaining tests (shared HA instance)
+        id: run_tests_rest
+        continue-on-error: true
+        env:
+          HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
+          TEMPLATES_JSON: /tmp/templates.json
+        run: |
+          pytest tests/ --ignore=tests/test_pergola.py -v 2>&1 | tee /tmp/pytest_rest_output.txt
           exit_code=${PIPESTATUS[0]}
           exit $exit_code
 
@@ -163,9 +192,19 @@ jobs:
         run: |
           echo "## Home Assistant CI Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f /tmp/pytest_output.txt ]; then
+          echo "### Pergola tests (isolated HA instance)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/pytest_pergola_output.txt ]; then
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat /tmp/pytest_output.txt >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pytest_pergola_output.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No pytest output found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Remaining tests (shared HA instance)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/pytest_rest_output.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pytest_rest_output.txt >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No pytest output found." >> "$GITHUB_STEP_SUMMARY"
@@ -173,7 +212,7 @@ jobs:
 
       # ── 10. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
-        if: steps.run_tests.outcome == 'failure'
+        if: steps.run_tests_pergola.outcome == 'failure' || steps.run_tests_rest.outcome == 'failure'
         uses: actions/github-script@v9
         with:
           script: |
@@ -187,8 +226,11 @@ jobs:
             });
             const prNumber = (prs[0] && prs[0].number) || (context.issue && context.issue.number);
             if (!prNumber) { console.log('No PR found for branch', branch); return; }
-            const output = require('fs').readFileSync('/tmp/pytest_output.txt', 'utf8');
-            const truncated = output.length > 60000 ? output.slice(-60000) : output;
+            const fs = require('fs');
+            const pergola = fs.existsSync('/tmp/pytest_pergola_output.txt') ? fs.readFileSync('/tmp/pytest_pergola_output.txt', 'utf8') : '(no output)';
+            const rest = fs.existsSync('/tmp/pytest_rest_output.txt') ? fs.readFileSync('/tmp/pytest_rest_output.txt', 'utf8') : '(no output)';
+            const combined = '### Pergola tests (isolated HA instance)\n' + pergola + '\n\n### Remaining tests (shared HA instance)\n' + rest;
+            const truncated = combined.length > 60000 ? combined.slice(-60000) : combined;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -198,5 +240,5 @@ jobs:
 
       # ── 11. Re-fail the job after the comment step ───────────────────────────
       - name: Fail if any check failed
-        if: steps.run_tests.outcome == 'failure'
+        if: steps.run_tests_pergola.outcome == 'failure' || steps.run_tests_rest.outcome == 'failure'
         run: exit 1
