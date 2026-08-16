@@ -526,9 +526,11 @@ formulas instead, and give the raw DC readings NEW entity IDs
   see the code comments in `packages/victron.yaml` for the exact wiring.
 - **`packages/pergola.yaml`** repointed to `sensor.victron_solar_yield_dc_watts` (it wants true panel
   output, not an AC-discounted figure) — done, see that file's `pergola_pv_power` sensor.
-- **`victron_solar_mppt_monthly`** repointed to the new DC entity (preserves its original DC-tracking
-  purpose); **`victron_solar_ac_monthly`** repointed to the now-AC `victron_solar_yield_total_kwh`.
-  Their difference still *is* the monthly conversion loss.
+- **`victron_solar_mppt_monthly`** — CORRECTION to an earlier draft of this line: there is no
+  repointing to do. All six `utility_meter`s were YAML in this file and are **deleted outright** by
+  this branch (commit `3a08660`), so `victron_solar_mppt_monthly` does not survive the deploy and
+  the "does it track DC or AC now" question never arises. Deploy runbook step 4 covers deleting
+  their orphaned registry rows.
 
 ### The entity-registry catch — this is NOT a zero-touch restart
 
@@ -549,7 +551,10 @@ The correct, still-lossless mechanism requires one manual step per repointed ent
 2. Restart. The old `mqtt:` entities disappear from their platform; their entity_ids become orphaned
    registry rows (state `unavailable`, no config providing them) — NOT automatically deleted.
 3. **Settings → Devices & Services → Entities → find each orphaned entity → delete it.** This frees
-   the entity_id string. (Two entities: `sensor.solar_yield_watts`, `sensor.victron_solar_yield_total_kwh`.)
+   the entity_id string. (**Four** entities, not two — the solar pair above plus
+   `sensor.victron_grid_energy_import`/`_export`, which make the same kind of platform move
+   `template` → `integration` in the grid-accuracy follow-up. Full table in the deploy runbook
+   below.)
 4. **Find the new template entity** (it will have landed on a fallback id, e.g.
    `sensor.victron_solar_yield_watts_2` or similar) **→ rename its Entity ID** in the UI to the freed
    string (`sensor.solar_yield_watts` / `sensor.victron_solar_yield_total_kwh`). A user-initiated
@@ -564,26 +569,217 @@ dark, no lifetime total resets to zero.
 
 ---
 
-## Deploy steps (user actions — not deployable by `git pull` alone)
+## Deploy runbook (complete) — user actions, not deployable by `git pull` alone
 
-1. `git pull` on the HA host → Developer Tools → YAML → *Check configuration* → **full restart**
-   (new `utility_meter` entities need a restart; a template reload is not enough).
-2. **Entity-registry reclaim** (see "The entity-registry catch" above) — for BOTH
-   `sensor.solar_yield_watts` and `sensor.victron_solar_yield_total_kwh`:
-   a. Delete the orphaned old entity in Settings → Devices & Services → Entities.
-   b. Find the new template entity (likely landed on a fallback/suffixed id) and rename its Entity ID
-      to the freed string.
-3. **Wait ≥ 2 minutes** so the `/1` trigger fires twice: tick 1 baselines the counter-delta logic,
-   tick 2 applies the first real delta. Verify `sensor.victron_solar_yield_total_kwh`'s `last_dc_total`
-   attribute equals the current `sensor.victron_solar_yield_dc_total_kwh`.
-4. **No Energy Dashboard reconfiguration needed** — it already points at `solar_yield_watts` /
-   `victron_solar_yield_total_kwh`, which now carry the AC-referenced values directly. Confirm the
-   Solar production chart continues its existing line with no gap.
-5. **Attach every NEW template entity to the Victron device** (`device:` is unsupported in template
-   YAML, so this is lost automatically the moment an entity moves from `mqtt:` to `template:`):
-   Settings → Devices & Services → Entities → assign each of the entities listed under "Final audit"
-   below to "Victron Energy System", including the two repointed ones. Optionally mark the η
-   accumulators and the roundtrip loss as *Diagnostic*.
+Re-derived against the *implemented* `packages/victron.yaml` (not the original design) and against
+the live install: Energy Dashboard prefs read via `energy/get_prefs`, entity list read via the
+entity registry, HA source checked at the pinned `.HA_VERSION` = **2026.8.1**.
+
+Total manual UI work: **4 entity-registry reclaims** (step 2), **9 orphan deletions** (3 removed
+sensors in step 3 + 6 removed monthly meters in step 4), **0 decisions**, **0 Energy Dashboard
+changes**, plus optional device assignment. Only step 2 is time-sensitive.
+
+### 0. Pre-flight (before pulling)
+
+Note the current values so the post-deploy continuity check is meaningful:
+
+| Entity | Value at time of writing |
+|---|---|
+| `sensor.victron_solar_yield_total_kwh` (DC lifetime) | 5150.25 kWh |
+| `sensor.victron_grid_energy_import` | 155.495 kWh |
+| `sensor.victron_grid_energy_export` | 2192.032 kWh |
+| `sensor.victron_solar_mppt_monthly` | 207.44 kWh — *record it if you care; the meter is deleted by this deploy, see step 4* |
+| `sensor.victron_battery_energy_in` / `_out` | 809.335 / 539.072 kWh |
+
+### 1. Pull, check, restart
+
+1. `git pull` on the HA host.
+2. Developer Tools → YAML → **Check configuration**.
+3. **Full restart** (not a YAML reload): the new `sensor: platform: integration` entities and the
+   removal of `mqtt:` sensors both need a real restart.
+
+### 2. Entity-registry reclaim — 4 entities
+
+**Why this is needed:** the entity registry is keyed by **`platform` + `unique_id`**, not
+`unique_id` alone. Four entities keep their `unique_id` but change platform in this deploy, so HA
+sees them as new registry rows, finds the wanted entity_id still held by the old (now orphaned) row,
+and falls back to a `_2`-suffixed id. Verified at 2026.8.1 in
+`homeassistant/helpers/entity_platform.py` (`_async_derive_object_ids` → `suggested_object_id` →
+registry collision → suffix) — `default_entity_id:` sets the *suggestion*, it does not win a
+conflict.
+
+| # | unique_id | old platform | new platform | Orphan holding the id | New entity lands on | Rename it to |
+|---|---|---|---|---|---|---|
+| 1 | `victron_solar_yield` | `mqtt` | `template` | `sensor.solar_yield_watts` ("Solar Yield Watts") | `sensor.solar_yield_watts_2` ("Victron Solar Yield AC Watts") | `sensor.solar_yield_watts` |
+| 2 | `victron_solar_yield_total_kwh` | `mqtt` | `template` (trigger) | `sensor.victron_solar_yield_total_kwh` ("Victron Solar Yield Total kWh") | `sensor.victron_solar_yield_total_kwh_2` ("Victron Solar Yield AC Total kWh") | `sensor.victron_solar_yield_total_kwh` |
+| 3 | `victron_grid_energy_import` | `template` (trigger) | `integration` | `sensor.victron_grid_energy_import` | `sensor.victron_grid_energy_import_2` | `sensor.victron_grid_energy_import` |
+| 4 | `victron_grid_energy_export` | `template` (trigger) | `integration` | `sensor.victron_grid_energy_export` | `sensor.victron_grid_energy_export_2` | `sensor.victron_grid_energy_export` |
+
+For **each** row, in Settings → Devices & Services → **Entities**:
+
+- a. Find the **orphan** (column 5). It shows as `unavailable`/restored and has no config behind it.
+  Identify it by its **old friendly name**, not by the id — both rows share the id prefix.
+  → **Delete entity**. This frees the entity_id string.
+- b. Find the **new** entity (column 6, identified by its new friendly name) → **Settings (gear) →
+  Entity ID** → change it to the freed string (column 7) → Update.
+
+**Do this within ~5 minutes of the restart.** Rationale, verified in HA 2026.8.1
+(`recorder/table_managers/statistics_meta.py::update_statistic_id`): renaming an entity fires a
+statistics-metadata rename, and if a `statistics_meta` row for the *target* id already exists (it
+does — that is the history being preserved), HA logs
+`Cannot rename statistic_id ... because the new statistic_id is already in use` and skips the
+rename. That is harmless **provided the `_2` entity has not yet accumulated statistics of its own**
+— short-term statistics compile every 5 minutes, so acting inside the first 5-minute window leaves
+nothing orphaned. Either way the outcome for the dashboard is correct: once the entity carries the
+old entity_id, new statistics are written into the **existing** series and history continues
+unbroken. If you miss the window, clean up the leftover `..._2` series afterwards in
+Developer Tools → **Statistics** ("no longer being recorded" → delete).
+
+The same source file confirms the states-table rename path
+(`recorder/entity_registry.py::_async_entity_id_changed` → `update_states_metadata`), so raw
+history follows the rename too.
+
+### 3. Delete the orphans of removed entities — 3 entities
+
+These three are deleted from `packages/victron.yaml` in this branch and have no replacement. Their
+registry rows survive the restart as permanent `unavailable` clutter until deleted:
+
+| Orphan | Was | Note |
+|---|---|---|
+| `sensor.victron_battery_power` | `mqtt` | already `unavailable` on the live system — dead branch |
+| `sensor.victron_system_losses_power` | `template` | DC-bus balance, superseded by `victron_multiplus_conversion_loss_power` |
+| `sensor.victron_system_losses_energy` | `template` | terminal — nothing consumed it |
+
+Settings → Devices & Services → Entities → filter for `unavailable` → delete each.
+
+If you also want their long-term statistics gone (`system_losses_energy` has ~263 kWh recorded),
+Developer Tools → Statistics → delete. Optional; leaving them costs only DB rows.
+
+### 4. Monthly utility meters — delete all six, nothing to repoint
+
+**Correction to an earlier draft of this section (which was wrong twice over).** The six
+`utility_meter`s were never UI helpers: they were defined in `packages/victron.yaml` (added in
+`f3dcce8`) and **this branch deletes the entire `utility_meter:` key** in commit `3a08660` — see
+"Removed (user-requested cleanup, post-implementation)" above, where you confirmed none of the six
+were actually being checked against the EVN/Verbund invoices. They only still exist on the live
+system because the HA host has not pulled this branch yet.
+
+So after the restart in step 1, all six stop being provided by any config and become orphaned
+registry rows, exactly like the three in step 3. There is **no repointing decision** — the
+`victron_solar_mppt_monthly` "does it track DC or AC now" question is moot because the meter itself
+is gone.
+
+Settings → Devices & Services → Entities → filter `unavailable` → delete:
+
+| Orphan | Was sourced from |
+|---|---|
+| `sensor.victron_grid_import_monthly` | `sensor.victron_grid_energy_import` |
+| `sensor.victron_grid_export_monthly` | `sensor.victron_grid_energy_export` |
+| `sensor.victron_battery_in_monthly` | `sensor.victron_battery_energy_in` |
+| `sensor.victron_battery_out_monthly` | `sensor.victron_battery_energy_out` |
+| `sensor.victron_solar_ac_inverter_monthly` | `sensor.victron_ac_inverter_energy_total_kwh` |
+| `sensor.victron_solar_mppt_monthly` | `sensor.victron_solar_yield_total_kwh` |
+
+Their `utility_meter` config entries also disappear from Settings → Devices & Services → Helpers on
+their own — no separate cleanup needed there.
+
+Their accumulated long-term statistics survive in the recorder DB (they are not deleted with the
+registry row). Delete them in Developer Tools → **Statistics** if you want them gone; leaving them
+costs only DB rows and keeps the historical monthly figures readable. Their source energy sensors
+are untouched, so nothing about grid/battery/solar accounting depends on this cleanup.
+
+**If you later want monthly figures back**, add a `utility_meter:` block to
+`packages/victron.yaml` in a new commit rather than creating UI helpers — that keeps them in
+version control like everything else here.
+
+### 5. Energy Dashboard — verify only, no changes
+
+Read live from `.storage/energy`; every configured statistic id is preserved by this deploy:
+
+| Slot | Configured id | Status |
+|---|---|---|
+| Solar "PV Victron" energy | `sensor.victron_solar_yield_total_kwh` | reclaimed in step 2 → now AC |
+| Solar "PV Victron" power | `sensor.solar_yield_watts` | reclaimed in step 2 → now AC |
+| Solar "PV SolarEdge" energy/power | `sensor.victron_ac_inverter_energy_total_kwh` / `_power` | unchanged |
+| Battery in/out | `sensor.victron_battery_energy_in` / `_out` | unchanged entities |
+| Battery power / SOC | `sensor.victron_battery_ac_power` / `sensor.victron_battery_soc` | unchanged |
+| Grid import/export energy | `sensor.victron_grid_energy_import` / `_export` | reclaimed in step 2 |
+| Grid import/export power | `sensor.victron_grid_power_import` / `_export` | unchanged |
+
+**Nothing to re-select.** If any dashboard slot goes blank after the restart, step 2 was not
+completed for that entity — fix the reclaim rather than re-selecting a `_2` entity in the dropdown
+(re-selecting would permanently fork the history).
+
+### 6. Device assignment (optional, cosmetic)
+
+`device:` is not supported in template YAML, so every entity that moved into `template:` loses its
+Victron device link. Settings → Devices & Services → Entities → assign to "Victron Energy System":
+
+**Reclaimed (moved off `mqtt:`):** `sensor.solar_yield_watts`,
+`sensor.victron_solar_yield_total_kwh`.
+
+**New this deploy:** `sensor.victron_multiplus_ac_net_power`,
+`sensor.victron_multiplus_conversion_efficiency`, `sensor.victron_multiplus_conversion_loss_power`,
+`sensor.victron_multiplus_ac_out_energy`, `sensor.victron_multiplus_dc_in_energy`,
+`sensor.victron_multiplus_conversion_loss_energy`, `sensor.victron_solar_yield_dc_baseline_kwh`,
+`sensor.victron_ac_pv_energy_baseline_kwh`, `sensor.victron_solar_yield_dc_watts`,
+`sensor.victron_solar_yield_dc_total_kwh`.
+
+Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
+`victron_multiplus_dc_in_energy`, `victron_solar_yield_dc_baseline_kwh`,
+`victron_ac_pv_energy_baseline_kwh` — they exist only to feed other sensors.
+
+### 7. Verification
+
+**After ~2 minutes** (the `/1` trigger has fired at least twice):
+- `sensor.victron_solar_yield_dc_baseline_kwh` equals the current
+  `sensor.victron_solar_yield_dc_total_kwh` (≈ 5150 kWh). If it is `unknown`, the trigger block has
+  not rendered — check the log for a template error.
+- `sensor.victron_multiplus_conversion_efficiency` = `100.0` (bootstrap, expected).
+- `sensor.victron_multiplus_ac_net_power`, `sensor.victron_multiplus_conversion_loss_power` are
+  numeric, not `unavailable`.
+
+**After ~1 hour:**
+- Power identity holds continuously:
+  `solar_yield_watts + victron_ac_inverter_power + victron_grid_total_power +
+  victron_battery_ac_power == victron_ac_load_total_power`.
+- The two `platform: integration` grid sensors are climbing smoothly (they restart from 0 — see
+  "one-off artifacts" below) and the Energy Dashboard grid bars show no negative spike.
+
+**After ~24 h of inverting:**
+- `sensor.victron_multiplus_conversion_efficiency` leaves the 100 % bootstrap once
+  `sensor.victron_multiplus_dc_in_energy` passes 1.0 kWh, and settles in a plausible **92–95 %**
+  band. Pinned at exactly 50 % or 100 % for days means the clamp is hiding a sign/topology error —
+  cross-check `sensor.victron_multiplus_ac_net_power` against VRM's "MultiPlus AC out".
+
+**After ~1 week:**
+- Energy Dashboard "Home consumption" for a full day matches the integral of
+  `sensor.victron_ac_load_total_power` to within rounding. A residual gap now means an AC-side input
+  is going `unavailable`, not a formula error.
+- Compare `sensor.victron_solar_yield_dc_total_kwh` (raw DC lifetime) against
+  `sensor.victron_solar_yield_total_kwh` (AC-referenced, accumulating from deploy time): over a
+  given window the gap should be ≈ 6 % of MPPT production, and is the conversion loss this whole
+  change exists to make visible. (No monthly meters exist any more — see step 4 — so this is a
+  manual comparison over whatever window you pick.)
+
+### One-off artifacts to expect (not bugs)
+
+1. **Grid energy counters restart from 0.** `sensor.victron_grid_energy_import`/`_export` are now
+   `platform: integration` entities with their own `RestoreSensor` memory, which is empty on first
+   run — they do **not** inherit 155.495 / 2192.032 kWh. Both the Energy Dashboard and the monthly
+   utility meters treat a drop as a counter reset, so no negative or phantom spike appears; the
+   historical statistics stay in place and the new series appends after the reset.
+2. **State class changes on those two** from `total_increasing` (old trigger sensor) to `total`
+   (what `platform: integration` sets). Same unit, same `has_sum` semantics — HA may log a one-off
+   state-class-change notice for the statistic.
+3. **`sensor.victron_solar_yield_total_kwh` restarts from 0** as an accumulator (it now counts
+   AC-referenced yield from deploy time, rather than mirroring the Victron lifetime counter).
+   `total_increasing` means the first value produces no delta, so no phantom spike — but the raw
+   number on a card drops from ~5150 to ~0. The **lifetime DC** figure is still available on the new
+   `sensor.victron_solar_yield_dc_total_kwh`.
+4. **η = 100 % for the first hours**, so Solar/Battery behave exactly as before the change until
+   `victron_multiplus_dc_in_energy` passes 1.0 kWh. Intentional and self-correcting — do not read
+   day one as the final result.
 
 ---
 
