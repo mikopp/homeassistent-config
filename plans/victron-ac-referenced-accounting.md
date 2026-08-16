@@ -936,13 +936,12 @@ sensor:
     unit_prefix: k
     method: trapezoidal
     round: 3
-    device_class: energy
-    state_class: total_increasing
 ```
 
-`device_class`/`state_class` set explicitly rather than relying on any platform default (docs
-didn't confirm one either way) — matches this file's existing house style and guarantees Energy
-Dashboard eligibility. `unique_id` kept **identical** to the sensors being replaced —
+No `device_class`/`state_class` — CI's config check rejected them outright
+(`'device_class' is an invalid option for 'sensor.integration'`): the platform applies its own
+automatically and does not accept them as config options, settling what the docs left ambiguous.
+`unique_id` kept **identical** to the sensors being replaced —
 `victron_grid_energy_import`/`_export` — so the same repoint-not-duplicate technique already used
 for Solar Yield AC Total applies: history/dashboard config stay on the entity_id, not the platform.
 

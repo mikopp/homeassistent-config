@@ -224,6 +224,9 @@ mqtt:
 # accuracy", for the accuracy rationale and the required one-time entity-registry reclaim
 # (platform changed from template to integration, so the entity_id is not preserved
 # automatically — same procedure as the earlier Solar Yield AC Total repoint).
+#
+# No device_class/state_class here — sensor.integration rejects them as invalid config options
+# (confirmed by this repo's HA config check) and applies its own automatically.
 sensor:
   - platform: integration
     name: "Victron Grid Energy Import"
@@ -232,8 +235,6 @@ sensor:
     unit_prefix: k
     method: trapezoidal
     round: 3
-    device_class: energy
-    state_class: total_increasing
 
   - platform: integration
     name: "Victron Grid Energy Export"
@@ -242,8 +243,6 @@ sensor:
     unit_prefix: k
     method: trapezoidal
     round: 3
-    device_class: energy
-    state_class: total_increasing
 
 
 # ── Derived template sensors ───────────────────────────────────────────────────
