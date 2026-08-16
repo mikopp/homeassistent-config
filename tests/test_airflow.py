@@ -20,6 +20,23 @@ seeded state already equals the desired state, or a guard/gate suppresses the br
 possible for the active-write scenarios. Note: triggering with skip_condition=True bypasses
 the automation-level "automatic enabled" gate, but NOT the in-action `if away == off` guard
 or the per-branch idempotency templates — so Away gating and branch selection ARE testable.
+
+CLOCK HANDLING: only one helper in this file touches the clock
+(_assert_recomputes_after_reload), and it uses fast_forward(timedelta(minutes=11)) — never
+jump_to_next(hour=...). jump_to_next is forward-only, so re-requesting an hour the mocked clock
+has already passed silently advances a FULL DAY; the previous jump_to_next(hour=10, minute=0)
+here was costing a day per call for no reason. See plans/victron-test-clock-simplification.md.
+
+The delayed binary sensors in this package (delay_on/delay_off = 10 min, trigger-based, no
+homeassistant:start trigger) sit at 'unknown' after HA boots. conftest's baseline_states seeds
+their inputs, which fires their triggers, but the result only LANDS once the mocked clock has
+crossed the 10-minute delay window. Any test asserting a definite on/off from one of them
+therefore needs a clock advance somewhere before it — and two of them
+(test_flush_unavailable_when_dependency_missing,
+test_heat_ventilation_low_needed_off_when_outdoor_below_indoor) currently get that from
+_assert_recomputes_after_reload running earlier in nodeid order rather than from anything of
+their own. Both are flagged at their definition; do not remove that helper's first
+fast_forward, and expect either to fail with `current: 'unknown'` if run in isolation via -k.
 """
 
 import requests
@@ -955,6 +972,13 @@ def test_heat_ventilation_low_needed_off_when_outdoor_below_indoor(home_assistan
 
     indoor 26°C, weather-station 20°C: 20 < 26 → OFF. (delay_on=10min means the ON edge can't be
     asserted inside the CI window, so this exercises the release/off side deterministically.)
+
+    ORDER DEPENDENCY — same shape as test_flush_unavailable_when_dependency_missing above:
+    binary_sensor.airflow_heat_ventilation_low_needed also carries a 10-minute delay and starts
+    'unknown' after HA boots. This test advances no clock, so it depends on
+    test_flush_needed_recomputes_after_reload_unknown (which sorts earlier by nodeid) having
+    already crossed a delay window. Run in isolation it fails with `current: 'unknown'`. Fix by
+    adding an explicit fast_forward, not by relying on the ordering.
     """
     temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
     home_assistant.set_state("sensor.airflow_avg_indoor_temp_5min", "26.0", temp_attrs)
@@ -1579,7 +1603,21 @@ def test_flush_hysteresis_deadband_branch1(home_assistant: HomeAssistant) -> Non
 
 
 def test_flush_unavailable_when_dependency_missing(home_assistant: HomeAssistant) -> None:
-    """has_value guard: a missing input → binary_sensor.airflow_humidity_flush_needed unavailable."""
+    """has_value guard: a missing input → binary_sensor.airflow_humidity_flush_needed unavailable.
+
+    ORDER DEPENDENCY — this test does not stand alone. Its opening assertion needs
+    binary_sensor.airflow_humidity_flush_needed to already hold a definite state, which only
+    happens after the mocked clock has crossed that sensor's 10-minute delay_on/delay_off window
+    at least once (see the "delayed sensors start 'unknown'" note on
+    _assert_recomputes_after_reload below). Nothing in this test advances the clock, so it relies
+    on test_flush_needed_recomputes_after_reload_unknown having run first and done it.
+
+    That ordering holds only because pytest sorts by nodeid here (see tests/conftest.py's
+    pytest_collection_modifyitems) and "flush_needed…" sorts before "flush_unavailable…". It is
+    fragile: renaming either test, or running this one in isolation with `-k`, makes it fail with
+    `current: 'unknown'`. If you touch it, give it its own fast_forward(timedelta(minutes=11))
+    before the first assertion rather than preserving the accident.
+    """
     # Baseline seeds all inputs → sensor resolves (off in baseline, see conftest).
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_flush_needed",
                                        "off", timeout=5)
