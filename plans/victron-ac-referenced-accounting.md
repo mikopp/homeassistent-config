@@ -985,6 +985,30 @@ Energy Dashboard depends on.
       them is a no-op per the above.
 - [x] Config/test-file validation: `yaml.safe_load` on `packages/victron.yaml` (no duplicate
       `unique_id`s, 32 total across the file) and `ast.parse` on the two edited test files.
-      Real CI run pending (this file's status line above will be updated once green).
+
+### Two real CI-round-trip fixes (not anticipated in the design above)
+
+1. **`device_class`/`state_class` are invalid config keys for `sensor.integration`** — CI's
+   config check rejected them outright (`'device_class' is an invalid option for
+   'sensor.integration'`). Removed both; the platform applies its own automatically and does not
+   accept overrides for either. Settles what the docs left ambiguous during design.
+2. **Re-posting the identical power value in the grid energy tests never propagated** — the
+   second `_seed()` call (same value as the first) was meant to force the `platform: integration`
+   sensor to compute its trapezoidal step, but produced no effect: `sensor.victron_grid_energy_
+   import` stayed exactly at its captured baseline. Traced against this repo's pinned HA
+   2026.8.1 source (`homeassistant/helpers/event.py`): classic `template:` sensors — the whole
+   chain between the raw MQTT leaf and the integration source
+   (`victron_grid_total_power`/`victron_grid_power_import`/`_export`) — use
+   `async_track_template_result`, whose internal listener subscribes to `EVENT_STATE_CHANGED`
+   only, never `EVENT_STATE_REPORTED` (the "same value, re-reported" event HA 2024.9+ introduced).
+   A same-value REST re-post of the raw MQTT leaf therefore never re-renders the derived template
+   chain, so `victron_grid_power_import`/`_export` themselves never emit a second event, so the
+   integration sensor watching them never sees one either. Fixed by nudging the second seed value
+   by 1 W (3000→3001, -1800→-1801) instead of repeating it — forces a genuine `EVENT_STATE_CHANGED`
+   while keeping the trapezoidal average within the test's existing tolerance (off by ~0.0008%
+   of the expected delta, far inside the 0.002 kWh margin).
+
+CI run pending for this fix (status line at the top of this document will be updated once green).
+
 - [ ] Deploy note: add the entity-registry reclaim for these 2 entities to the Deploy steps section
 - [ ] Update "Final audit" entity list / counts elsewhere in this doc once CI confirms green

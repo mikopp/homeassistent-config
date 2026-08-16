@@ -195,7 +195,7 @@ def test_night_solar_off_battery_discharge(home_assistant: HomeAssistant) -> Non
 def test_grid_import_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """3000 W grid import held for 1 min adds ~0.05 kWh (trapezoidal integral of grid power).
+    """~3000 W grid import held for 1 min adds ~0.05 kWh (trapezoidal integral of grid power).
 
     sensor.victron_grid_energy_import is `platform: integration` (packages/victron.yaml), which
     integrates on every source state change/report rather than a fixed clock, and keeps its
@@ -204,6 +204,16 @@ def test_grid_import_energy_accumulates(
     baseline is captured AFTER settling at 3000 W (not before), so the state transition into
     3000 W (over an unknown elapsed time since whatever the source last was) is absorbed into
     the baseline itself, leaving only the controlled 1-minute step to be measured.
+
+    The second seed uses 3001 W, not 3000 again: classic `template:` sensors (victron_grid_total_
+    power, victron_grid_power_import — the whole chain between the raw MQTT leaf and this
+    integration source) only re-render on a genuine EVENT_STATE_CHANGED, never on
+    EVENT_STATE_REPORTED (same-value re-report) — confirmed against this repo's pinned HA
+    2026.8.1 source (homeassistant/helpers/event.py, async_track_template_result's internal
+    listener is EVENT_STATE_CHANGED-only). Re-posting the identical 3000 therefore would never
+    propagate through the chain, and the integration sensor would never see a second data point
+    at all. The 1 W step keeps the trapezoidal average (3000+3001)/2 = 3000.5 W indistinguishable
+    from 3000 W at this test's tolerance while still forcing a real state change.
     """
     _seed(home_assistant, grid_l1=3000)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "3000.0", timeout=5)
@@ -211,7 +221,7 @@ def test_grid_import_energy_accumulates(
     export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
 
     time_machine.fast_forward(timedelta(minutes=1))
-    _seed(home_assistant, grid_l1=3000)  # re-report the same value -> triggers the trapezoidal step
+    _seed(home_assistant, grid_l1=3001)
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import",
         lambda s: abs((float(s) - baseline) - 0.05) < 0.002,
@@ -228,15 +238,16 @@ def test_grid_import_energy_accumulates(
 def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
-    for why this asserts a relative delta rather than an absolute reset-then-value."""
+    """~1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
+    for why this asserts a relative delta rather than an absolute reset-then-value, and why the
+    second seed nudges the value by 1 W instead of repeating it exactly."""
     _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", "1800.0", timeout=5)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
     import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
 
     time_machine.fast_forward(timedelta(minutes=1))
-    _seed(home_assistant, grid_l1=-1800)
+    _seed(home_assistant, grid_l1=-1801)
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_export",
         lambda s: abs((float(s) - baseline) - 0.03) < 0.002,
