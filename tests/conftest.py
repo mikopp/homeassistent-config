@@ -72,15 +72,16 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # within seconds if the fake time is set to night. Tests that need a specific sun
     # position use the midday_sun fixture which uses the time machine.
     ha.set_state("sun.sun", "above_horizon", {"elevation": 45, "azimuth": 180})
-    # Victron solar charger (MQTT — broker absent in CI)
-    ha.set_state("sensor.solar_yield_watts", "1500",
+    # Victron solar charger (MQTT — broker absent in CI). Raw DC input — the repointed
+    # sensor.solar_yield_watts (AC-referenced, packages/victron.yaml) is computed from
+    # sensor.victron_dc_pv_total_power instead, not from this one.
+    ha.set_state("sensor.victron_solar_yield_dc_watts", "1500",
                  {"unit_of_measurement": "W", "device_class": "power"})
     # Victron MQTT sensors — all power sensors at 0 W so template sensors start
     # at 0 and energy accumulators do not advance during unrelated tests.
     attrs_w = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
     ha.set_state("sensor.victron_vebus_dc_power", "0", attrs_w)
     ha.set_state("sensor.victron_dc_pv_total_power", "0", attrs_w)
-    ha.set_state("sensor.victron_battery_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l1_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l2_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l3_power", "0", attrs_w)
@@ -90,10 +91,27 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.victron_ac_inverter_power", "0", attrs_w)
     ha.set_state("sensor.victron_battery_soc", "50",
                  {"unit_of_measurement": "%", "device_class": "battery", "state_class": "measurement"})
-    ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0",
+    # Raw DC lifetime counter — feeds the repointed sensor.victron_solar_yield_total_kwh
+    # (AC-referenced) via counter-delta, and the battery energy residual's mppt_src.
+    ha.set_state("sensor.victron_solar_yield_dc_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
     ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
+    # VEBus/MultiPlus conversion-efficiency accumulators (trigger template sensors,
+    # packages/victron.yaml). Seeded to 0.0 so sensor.victron_multiplus_conversion_efficiency
+    # is deterministically at its 100 % bootstrap in every test that does not explicitly
+    # exercise eta — without this, minute
+    # ticks from unrelated tests would slowly accumulate into it. Passing a fresh attrs dict
+    # also clears any last_dc_total/last_mppt_total/last_acpv_total baseline attribute, so
+    # every test starts un-baselined (see the bootstrap-fallback comments in victron.yaml).
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    ha.set_state("sensor.victron_multiplus_ac_out_energy", "0.0", attrs_kwh)
+    ha.set_state("sensor.victron_multiplus_dc_in_energy", "0.0", attrs_kwh)
+    ha.set_state("sensor.victron_multiplus_conversion_loss_energy", "0.0", attrs_kwh)
+    # sensor.victron_solar_yield_total_kwh is now the REPOINTED AC-referenced accumulator
+    # (see packages/victron.yaml's repoint note) — same reset pattern as the other trigger
+    # accumulators above: clears its last_dc_total baseline attribute too.
+    ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
