@@ -215,6 +215,37 @@ mqtt:
       value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
 
+# ── Grid energy (Riemann-sum integral of grid power, not a fixed-clock sample) ──
+# Integrates sensor.victron_grid_power_import/export (below, template: block — already the
+# non-negative import/export half-waves) on EVERY source state change rather than on a fixed
+# per-minute clock, so it tracks Victron's real 1-2s MQTT update cadence instead of sampling one
+# instantaneous reading per minute. unique_id UNCHANGED from the previous trigger-based sensors
+# these replace — see plans/victron-ac-referenced-accounting.md, "Follow-up: grid import/export
+# accuracy", for the accuracy rationale and the required one-time entity-registry reclaim
+# (platform changed from template to integration, so the entity_id is not preserved
+# automatically — same procedure as the earlier Solar Yield AC Total repoint).
+sensor:
+  - platform: integration
+    name: "Victron Grid Energy Import"
+    unique_id: victron_grid_energy_import
+    source: sensor.victron_grid_power_import
+    unit_prefix: k
+    method: trapezoidal
+    round: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: integration
+    name: "Victron Grid Energy Export"
+    unique_id: victron_grid_energy_export
+    source: sensor.victron_grid_power_export
+    unit_prefix: k
+    method: trapezoidal
+    round: 3
+    device_class: energy
+    state_class: total_increasing
+
+
 # ── Derived template sensors ───────────────────────────────────────────────────
 template:
   - sensor:
@@ -427,28 +458,20 @@ template:
 
 # ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
 # Fires every minute and adds power_W / 60000 kWh to the running total.
-# Lives in `template:` (not `sensor: platform: integration`) so it initialises
-# after all source entities exist. State is persisted across HA restarts via
-# unique_id — this.state | float(0) restores the last value on startup.
+# State is persisted across HA restarts via unique_id — this.state | float(0) restores the
+# last value on startup.
+#
+# Grid import/export energy used to live here too (sampling victron_grid_power_import/export
+# once a minute), but that throws away almost all of Victron's 1-2s MQTT update resolution —
+# error scales with how spiky the load is between samples. Moved to sensor.victron_grid_energy_
+# import/export below (platform: integration), which re-integrates on every source state change
+# instead of a fixed clock. See plans/victron-ac-referenced-accounting.md, "Follow-up: grid
+# import/export accuracy".
 
   - trigger:
       - platform: time_pattern
         minutes: "/1"
     sensor:
-      - name: "Victron Grid Energy Import"
-        unique_id: victron_grid_energy_import
-        unit_of_measurement: "kWh"
-        device_class: energy
-        state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_import') | float(0) / 60000)) | round(3) }}"
-
-      - name: "Victron Grid Energy Export"
-        unique_id: victron_grid_energy_export
-        unit_of_measurement: "kWh"
-        device_class: energy
-        state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + (states('sensor.victron_grid_power_export') | float(0) / 60000)) | round(3) }}"
-
       # ── Inverter efficiency (η) accumulators ─────────────────────────────────
       # Only the INVERTING direction is accumulated (both half-waves clamped at 0):
       #   ac_out += max( mp_ac_net, 0) / 60000   AC delivered by the Multi

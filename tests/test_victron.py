@@ -3,11 +3,17 @@
 Verifies the full chain:
   MQTT sensor values (seeded via set_state; MQTT broker absent in CI)
   → derived template sensors (grid, battery, VEBus attribution)
-  → energy accumulation sensors (trigger-based, 1-minute intervals)
+  → energy accumulation sensors — most are trigger-based (1-minute intervals; see
+    time_machine.jump_to_next() below), except sensor.victron_grid_energy_import/export,
+    which are `platform: integration` and instead integrate on every source state
+    change/report (see test_grid_import_energy_accumulates for why those two tests use
+    time_machine.fast_forward() and a relative baseline delta instead).
 
 time_machine.jump_to_next() fires all time_pattern triggers that were crossed,
 including the every-minute energy accumulation trigger — no real waiting needed.
 """
+
+from datetime import timedelta
 
 import pytest
 from ha_integration_test_harness import HomeAssistant, TimeMachine
@@ -43,7 +49,8 @@ def _seed(
 
 
 def _reset_energy(ha: HomeAssistant) -> None:
-    """Force all energy accumulation sensors to 0.0 kWh and un-baseline the counter-delta sensors.
+    """Force all trigger-based energy accumulation sensors to 0.0 kWh and un-baseline the
+    counter-delta sensors.
 
     Called after the first clock jump in accumulation tests so any side-effect
     accumulation during the jump itself is wiped before the test scenario is seeded.
@@ -51,6 +58,15 @@ def _reset_energy(ha: HomeAssistant) -> None:
     victron_ac_pv_energy_baseline_kwh — own dedicated sensors, not attributes; see
     packages/victron.yaml) are reset to literal 'unknown' so the AC-referenced accumulators
     that read them start un-baselined (bootstrap-fallback state) in every test.
+
+    Does NOT include sensor.victron_grid_energy_import/export: those are now
+    `platform: integration` sensors (see packages/victron.yaml), which keep their running
+    total in the entity object's own Python memory, restored via RestoreSensor at HA startup —
+    not derived by reading their own HA-visible state each step (unlike every trigger-based
+    sensor here). A set_state() REST override would show up momentarily but gets silently
+    overwritten by the next real integration step, using the OLD internal value underneath —
+    it does not actually reset anything, so tests exercising those two use a
+    before/after baseline delta instead (see _grid_energy_baseline()).
     """
     attrs_kwh = {
         "unit_of_measurement": "kWh",
@@ -58,8 +74,6 @@ def _reset_energy(ha: HomeAssistant) -> None:
         "state_class": "total_increasing",
     }
     for eid in (
-        "sensor.victron_grid_energy_import",
-        "sensor.victron_grid_energy_export",
         "sensor.victron_battery_energy_in",
         "sensor.victron_battery_energy_out",
         "sensor.victron_multiplus_ac_out_energy",
@@ -70,6 +84,16 @@ def _reset_energy(ha: HomeAssistant) -> None:
         ha.set_state(eid, "0.0", attrs_kwh)
     ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
     ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
+
+
+def _grid_energy_baseline(ha: HomeAssistant, entity_id: str) -> float:
+    """Snapshot the current value of a platform: integration grid energy sensor.
+
+    Used to assert a RELATIVE delta afterwards, since these two sensors cannot be reset via
+    set_state() (see _reset_energy's docstring) — every other test in the session may have
+    already pushed them to some nonzero total.
+    """
+    return float(ha.get_state(entity_id)["state"])
 
 
 def _seed_eta(ha: HomeAssistant, *, ac_out: float, dc_in: float) -> None:
@@ -171,35 +195,58 @@ def test_night_solar_off_battery_discharge(home_assistant: HomeAssistant) -> Non
 def test_grid_import_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """3000 W grid import × 1 min = 0.05 kWh accumulated in grid_energy_import."""
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
-    _reset_energy(home_assistant)
+    """3000 W grid import held for 1 min adds ~0.05 kWh (trapezoidal integral of grid power).
+
+    sensor.victron_grid_energy_import is `platform: integration` (packages/victron.yaml), which
+    integrates on every source state change/report rather than a fixed clock, and keeps its
+    running total in the entity's own memory — not resettable via set_state(). So this asserts
+    a relative delta from a captured baseline, not an absolute value from a reset zero. The
+    baseline is captured AFTER settling at 3000 W (not before), so the state transition into
+    3000 W (over an unknown elapsed time since whatever the source last was) is absorbed into
+    the baseline itself, leaving only the controlled 1-minute step to be measured.
+    """
     _seed(home_assistant, grid_l1=3000)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "3000.0", timeout=5)
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
+    export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
+
+    time_machine.fast_forward(timedelta(minutes=1))
+    _seed(home_assistant, grid_l1=3000)  # re-report the same value -> triggers the trapezoidal step
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import",
-        lambda s: abs(float(s) - 0.05) < 0.001,
+        lambda s: abs((float(s) - baseline) - 0.05) < 0.002,
         timeout=5,
     )
-    home_assistant.assert_entity_state("sensor.victron_grid_energy_export", "0.0", timeout=5)
+    # No export flow this whole test -> export total must not have moved.
+    home_assistant.assert_entity_state(
+        "sensor.victron_grid_energy_export",
+        lambda s: float(s) == export_baseline,
+        timeout=5,
+    )
 
 
 def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """1800 W grid export × 1 min = 0.03 kWh accumulated in grid_energy_export."""
-    time_machine.jump_to_next(hour=10, minute=0, second=0)
-    _reset_energy(home_assistant)
+    """1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
+    for why this asserts a relative delta rather than an absolute reset-then-value."""
     _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", "1800.0", timeout=5)
-    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
+    import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
+
+    time_machine.fast_forward(timedelta(minutes=1))
+    _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_export",
-        lambda s: abs(float(s) - 0.03) < 0.001,
+        lambda s: abs((float(s) - baseline) - 0.03) < 0.002,
         timeout=5,
     )
-    home_assistant.assert_entity_state("sensor.victron_grid_energy_import", "0.0", timeout=5)
+    home_assistant.assert_entity_state(
+        "sensor.victron_grid_energy_import",
+        lambda s: float(s) == import_baseline,
+        timeout=5,
+    )
 
 
 def test_battery_discharge_energy_accumulates(
@@ -226,18 +273,29 @@ def test_battery_discharge_energy_accumulates(
 def test_night_no_grid_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """Night: zero grid flow, 1500 W battery discharge supplying 1500 W AC load → grid stays 0, batt_out grows.
+    """Night: zero grid flow, 1500 W battery discharge supplying 1500 W AC load → grid stays put, batt_out grows.
 
     battery_ac_power = -(1500 - 0 - 0 - 0) = -1500 W → energy_out accumulates.
+    Grid energy import/export totals must not move: a zero-power trapezoidal step is exactly
+    zero area regardless of elapsed time, so they should equal their own pre-test baseline
+    (not literal "0.0" — see test_grid_import_energy_accumulates for why these two entities
+    cannot be reset to zero via set_state()).
     """
+    import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
+    export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
+
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     _seed(home_assistant, grid_l1=0, grid_l2=0, grid_l3=0, ac_l1=1500)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
     time_machine.jump_to_next(hour=10, minute=1, second=0)
-    home_assistant.assert_entity_state("sensor.victron_grid_energy_import", "0.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_energy_export", "0.0", timeout=5)
+    home_assistant.assert_entity_state(
+        "sensor.victron_grid_energy_import", lambda s: float(s) == import_baseline, timeout=5
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_grid_energy_export", lambda s: float(s) == export_baseline, timeout=5
+    )
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: float(s) > 0,

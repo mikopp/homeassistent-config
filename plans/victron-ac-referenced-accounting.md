@@ -873,3 +873,119 @@ capture-then-apply transition by `test_solar_yield_ac_total_applies_delta_once_b
 (which pre-seeds the "already captured" state that a first tick would produce).
 
 31 of 32 tests active; 1 skipped with a documented reason.
+
+## Follow-up: grid import/export accuracy (post-CI-fix)
+
+### Context
+
+User flagged that `victron_grid_energy_import/export` sample `victron_grid_power_import/export`
+once a minute (the same `this.state + power/60000` Riemann-sum pattern used throughout this file)
+and assume that one instantaneous reading held constant for the whole preceding minute. Victron
+publishes grid power over MQTT every 1-2s, so this throws away almost all of that resolution —
+error scales with how spiky the load is between samples (steady loads integrate near-exactly;
+short high-power spikes are either fully counted or fully missed depending on tick timing).
+
+### Decision
+
+Scope: **grid import/export only** (user's choice — the two sensors this was raised about), not
+the MultiPlus AC-out/DC-in/conversion-loss accumulators, which use the same pattern but feed η
+internally and would need an extra clamping template sensor per accumulator (`integration:` can't
+clamp to `max(x, 0)` natively) — more surface area than this pass needs.
+
+Switch `victron_grid_energy_import`/`_export` from the trigger-based per-minute sampler to HA's
+built-in `sensor: platform: integration` (Riemann-sum integral), sourcing directly from
+`sensor.victron_grid_power_import`/`_export` — already non-negative half-wave power sensors
+(victron.yaml:239-253, `[power, 0] | max`), so no extra clamping template needed; the integration
+platform can source from them directly.
+
+`platform: integration` re-integrates on **every source state change**, not on a fixed clock, so
+with 1-2s MQTT cadence the effective sampling resolution goes from 60s to ~1-2s — the same
+trapezoidal-vs-left-Riemann accuracy gain plus a ~30-60x sampling-rate improvement.
+
+### Verified against this repo's pinned HA version (2026.8.1) before implementing
+
+The removed trigger-based sensors carry this comment: *"Lives in `template:` (not
+`sensor: platform: integration`) so it initialises after all source entities exist."* Checked this
+claim against the current `integration:` platform docs
+(home-assistant.io/integrations/integration) rather than trusting the old comment at face value
+(per this repo's CLAUDE.md "HA version gate" rule): the docs state the integral sensor "picks up
+where it left off and continues integrating from the restored value as soon as the source sensor
+starts providing new readings" — i.e. it already tolerates a source that doesn't exist yet at HA
+startup (same graceful-degradation behavior as any `states()` template read), and begins
+integrating once the source shows up. The old comment's premise does not hold for this version;
+proceeding with `integration:` platform.
+
+### Config
+
+```yaml
+sensor:
+  - platform: integration
+    name: "Victron Grid Energy Import"
+    unique_id: victron_grid_energy_import
+    source: sensor.victron_grid_power_import
+    unit_prefix: k
+    method: trapezoidal
+    round: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: integration
+    name: "Victron Grid Energy Export"
+    unique_id: victron_grid_energy_export
+    source: sensor.victron_grid_power_export
+    unit_prefix: k
+    method: trapezoidal
+    round: 3
+    device_class: energy
+    state_class: total_increasing
+```
+
+`device_class`/`state_class` set explicitly rather than relying on any platform default (docs
+didn't confirm one either way) — matches this file's existing house style and guarantees Energy
+Dashboard eligibility. `unique_id` kept **identical** to the sensors being replaced —
+`victron_grid_energy_import`/`_export` — so the same repoint-not-duplicate technique already used
+for Solar Yield AC Total applies: history/dashboard config stay on the entity_id, not the platform.
+
+This is a genuine platform change (`template` → `integration`, both under the `sensor` domain, but
+the entity-registry key is `platform + unique_id`), so it needs the **same one-time manual
+entity-registry reclaim** as the earlier solar-yield repoint: after deploy, delete the orphaned
+`template`-platform row for each entity_id in Settings → Entities, then rename the new
+`integration`-platform entity onto the freed entity_id. See "Revision: repoint instead of
+duplicate" above for the exact procedure — identical steps, different entities.
+
+### recorder note (user asked, answered before implementing)
+
+Energy Dashboard reads long-term statistics (`statistics`/`statistics_short_term` tables), built
+by the recorder from state changes — **not** live state. `recorder: exclude:`-ing an entity stops
+recorder from seeing its state changes at all, which also stops statistics generation for it —
+would break the dashboard for that source. Not done. Instead, added a bare
+`recorder: purge_keep_days: 5` to `configuration.yaml` (previously unset, defaulting to 10) —
+this only governs the raw `states` table (history graphs/logbook) and has no effect on long-term
+statistics, which are retained indefinitely regardless. Chosen instead of a full exclude because it
+reduces disk growth from the higher-frequency integration updates without touching anything the
+Energy Dashboard depends on.
+
+### Status
+- [x] Remove `victron_grid_energy_import`/`_export` from the trigger-based sensor block
+- [x] Add the two `platform: integration` sensors (new top-level `sensor:` key in victron.yaml)
+- [x] `tests/test_victron.py` — rewrote `test_grid_import_energy_accumulates` and
+      `test_grid_export_energy_accumulates` to use `time_machine.fast_forward()` instead of
+      `jump_to_next()`+`time_pattern`, and a captured before/after baseline delta instead of a
+      reset-to-zero absolute value. Discovered mid-implementation (not anticipated in the
+      original plan above) that `platform: integration` keeps its running total in the entity
+      object's own Python memory, restored via `RestoreSensor` at HA startup — NOT derived by
+      re-reading its own HA-visible state each step like every trigger-based sensor in this
+      file. A `set_state()` REST override displays momentarily but is silently overwritten by
+      the next real integration step using the OLD internal value — it does not reset anything.
+      This also broke every OTHER test asserting these two entities' literal `"0.0"`
+      (`test_night_no_grid_energy_accumulates`) once a real nonzero total exists anywhere in the
+      session — fixed the same way, baseline-delta instead of a literal value. Added
+      `_grid_energy_baseline()` helper.
+- [x] `tests/conftest.py` — no changes needed there (it never reset these two entities directly);
+      removed them from `test_victron.py`'s `_reset_energy()` list instead, since REST-setting
+      them is a no-op per the above.
+- [x] Config/test-file validation: `yaml.safe_load` on `packages/victron.yaml` (no duplicate
+      `unique_id`s, 32 total across the file) and `ast.parse` on the two edited test files.
+      Real CI run pending (this file's status line above will be updated once green).
+- [ ] Deploy note: add the entity-registry reclaim for these 2 entities to the Deploy steps section
+- [ ] Update "Final audit" entity list / counts elsewhere in this doc once CI confirms green
