@@ -1,6 +1,6 @@
 # CI: per-file test isolation pattern (fresh Docker instance)
 
-**Status:** IMPLEMENTING
+**Status:** DONE — CI green (4m38s, no hang, all 4 checks pass)
 **Target files:** `.github/workflows/ha_check.yaml`, `tests/conftest.py` (comment only)
 **Branch:** `fix-victron-ac-dc-mixup` (PR #101)
 
@@ -85,4 +85,4 @@ order, so its comment is updated to note that, without changing the logic.
 - [x] Update "Fail if any check failed" step for two step outcomes
 - [x] Update `tests/conftest.py`'s sort-hook comment (logic unchanged)
 - [x] Validate workflow YAML syntax (`yaml.safe_load`) and `conftest.py` syntax (`ast.parse`)
-- [ ] Push and confirm CI green, with the clock-drift/hang problem resolved
+- [x] Push and confirm CI green, with the clock-drift/hang problem resolved
