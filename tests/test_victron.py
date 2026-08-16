@@ -399,45 +399,56 @@ def test_conversion_loss_energy_accumulates(
     )
 
 
-def test_solar_yield_ac_total_baselines_then_applies_delta(
+def test_solar_yield_ac_total_captures_baseline_on_first_tick(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """First tick after a reset only baselines (no delta exists yet); the next tick applies it.
+    """No baseline yet -> a tick holds the running total at 0.0 but captures the baseline.
 
-    Also verifies a counter rollback is absorbed (no negative delta) rather than corrupting
-    the running total, and that a source going unavailable holds both state and baseline.
     The baseline lives in sensor.victron_solar_yield_dc_baseline_kwh, its own dedicated
-    state-only sensor (see packages/victron.yaml) — checked here as a separate entity_id,
-    not as a custom attribute.
+    state-only sensor (see packages/victron.yaml) — checked here as a separate entity_id, not
+    as a custom attribute.
+
+    Each of the 4 solar-yield-AC-total scenarios below is its own test using a single
+    time_machine.jump_to_next() after the reset, rather than one test chaining several jumps:
+    the ha_integration_test_harness time_pattern trigger only reliably re-fires on the FIRST
+    jump after a reset within a given test — a second/third chained jump in the same test does
+    not reliably re-fire it (confirmed via a diagnostic dump: the entity's last_updated stayed
+    pinned to the reset's timestamp, never advancing to the later jump's). Any "already
+    baselined" precondition is instead seeded directly via set_state on the baseline sensor,
+    which is possible now that it is a first-class sensor rather than a custom attribute.
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
     time_machine.jump_to_next(hour=10, minute=0, second=0)
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "100.0", attrs_kwh)
 
-    # Tick 1: no baseline yet -> hold at 0.0, but capture the baseline.
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: float(s) == 0.0,
         timeout=5,
     )
-    # DIAGNOSTIC (temporary): dump raw state of source + baseline before the real assertion,
-    # to see what the baseline sensor actually rendered instead of guessing blind. Remove once
-    # the underlying CI mystery (baseline never leaves 'unknown') is resolved.
-    import sys
-    print("DIAG src:", home_assistant.get_state("sensor.victron_solar_yield_dc_total_kwh"), file=sys.stderr)
-    print("DIAG baseline:", home_assistant.get_state("sensor.victron_solar_yield_dc_baseline_kwh"), file=sys.stderr)
-    print("DIAG consumer:", home_assistant.get_state("sensor.victron_solar_yield_total_kwh"), file=sys.stderr)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.0,
         timeout=5,
     )
 
-    # Tick 2: baseline now set, source advances by 0.5 kWh, eta at 100% bootstrap -> +0.5.
+
+def test_solar_yield_ac_total_applies_delta_once_baselined(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """Once baselined, a tick applies the delta (eta at 100% bootstrap -> delta added 1:1)."""
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    # Seed "already baselined at 100.0, running total 0.0" directly -- what a real first tick
+    # would have produced (see test_solar_yield_ac_total_captures_baseline_on_first_tick).
+    home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "100.0", attrs_kwh)
+    home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "100.5", attrs_kwh)
-    time_machine.jump_to_next(hour=10, minute=2, second=0)
+
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
@@ -449,46 +460,63 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
         timeout=5,
     )
 
-    # Tick 3: counter rolls back (device reset) -> delta clamped to 0, no negative energy,
-    # baseline re-anchors to the lower value.
-    home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "10.0", attrs_kwh)
-    time_machine.jump_to_next(hour=10, minute=3, second=0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_solar_yield_total_kwh",
-        expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        timeout=5,
-    )
-    home_assistant.assert_entity_state(
-        "sensor.victron_solar_yield_dc_baseline_kwh",
-        lambda s: float(s) == 10.0,
-        timeout=5,
-    )
 
-    # Tick 4: source goes unavailable -> state AND baseline both hold, no energy lost.
-    home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "unavailable", {})
-    time_machine.jump_to_next(hour=10, minute=4, second=0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_solar_yield_total_kwh",
-        expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        timeout=5,
-    )
-    home_assistant.assert_entity_state(
-        "sensor.victron_solar_yield_dc_baseline_kwh",
-        lambda s: float(s) == 10.0,
-        timeout=5,
-    )
-
-
-def test_battery_energy_residual_uses_counter_delta_once_baselined(
+def test_solar_yield_ac_total_counter_reset_clamped_to_zero(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """Once both lifetime counters have a baseline, the accumulators switch from the
-    power-domain bootstrap fallback to the true energy-domain counter-delta residual.
+    """A counter rollback (device reset) is absorbed: delta clamped to 0, baseline re-anchors down."""
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "100.5", attrs_kwh)
+    home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.5", attrs_kwh)
+    home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "10.0", attrs_kwh)
 
-    Tick 1 only baselines both counters at 50.0/20.0 kWh (bootstrap fallback active, all
-    power sensors at 0 -> no accumulation). Tick 2 advances MPPT by 1.0 kWh and AC-PV by
-    0.2 kWh with zero AC load/grid, so the entire 1.2 kWh surplus must go to the battery:
-        batt_inc = 0 - 0 - 0.2 - 1.0*eta(1.0) = -1.2  ->  energy_in += 1.2
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_total_kwh",
+        expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 10.0,
+        timeout=5,
+    )
+
+
+def test_solar_yield_ac_total_holds_on_source_unavailable(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """Source going unavailable holds both the running total and the baseline -- no energy lost."""
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "10.0", attrs_kwh)
+    home_assistant.set_state("sensor.victron_solar_yield_total_kwh", "0.5", attrs_kwh)
+    home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "unavailable", {})
+
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_total_kwh",
+        expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_solar_yield_dc_baseline_kwh",
+        lambda s: float(s) == 10.0,
+        timeout=5,
+    )
+
+
+def test_battery_energy_residual_bootstrap_before_baseline(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """Before either lifetime counter has a baseline, a tick only captures the baseline.
+
+    All power sensors at 0 -> the power-domain bootstrap fallback also contributes nothing,
+    so both accumulators stay at 0.0. See test_solar_yield_ac_total_captures_baseline_on_first_tick
+    for why this is a single-jump test rather than chaining a second tick in here too.
     """
     attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
     time_machine.jump_to_next(hour=10, minute=0, second=0)
@@ -501,9 +529,29 @@ def test_battery_energy_residual_uses_counter_delta_once_baselined(
     home_assistant.assert_entity_state("sensor.victron_battery_energy_in", "0.0", timeout=5)
     home_assistant.assert_entity_state("sensor.victron_battery_energy_out", "0.0", timeout=5)
 
+
+def test_battery_energy_residual_uses_counter_delta_once_baselined(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """Once both lifetime counters have a baseline, the accumulators switch from the
+    power-domain bootstrap fallback to the true energy-domain counter-delta residual.
+
+    Both counters are seeded as already-baselined at 50.0/20.0 kWh directly via set_state on
+    the two shared baseline sensors (what a real prior tick would have produced -- see
+    test_battery_energy_residual_bootstrap_before_baseline). MPPT then advances by 1.0 kWh and
+    AC-PV by 0.2 kWh with zero AC load/grid, so the entire 1.2 kWh surplus must go to the
+    battery: batt_inc = 0 - 0 - 0.2 - 1.0*eta(1.0) = -1.2  ->  energy_in += 1.2
+    """
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
+    _reset_energy(home_assistant)
+    home_assistant.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "50.0", attrs_kwh)
+    home_assistant.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "20.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "51.0", attrs_kwh)
     home_assistant.set_state("sensor.victron_ac_inverter_energy_total_kwh", "20.2", attrs_kwh)
-    time_machine.jump_to_next(hour=10, minute=2, second=0)
+    _seed(home_assistant)  # all power sensors at 0
+
+    time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_in",
         lambda s: abs(float(s) - 1.2) < 0.001,

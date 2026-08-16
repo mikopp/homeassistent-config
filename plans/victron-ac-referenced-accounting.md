@@ -794,5 +794,50 @@ sensors were the only self-referencing trigger sensors in this file defined with
 `unit_of_measurement` and no `device_class`/`state_class` — every other one that relies on
 `this.state` (Grid Energy Import/Export, the η accumulators, Solar Yield AC Total, Battery Energy
 In/Out) pairs `device_class: energy` + `state_class: total_increasing`. Added that same pairing to
-both baseline sensors to match the only pattern actually proven reliable in this repo's CI, rather
-than being the one exception without it.
+both baseline sensors to match the only pattern actually proven reliable in this repo's CI — this
+turned out to be a red herring (see the correction below), but is harmless/correct to keep.
+
+## Correction: the real root cause was the test harness, not HA's trigger-attribute engine
+
+The `device_class`/`state_class` fix above did **not** change the symptom at all — same failure,
+identical down to the timestamp. That ruled it out and prompted a diagnostic push (temporary
+`print(home_assistant.get_state(...), file=sys.stderr)` calls in the failing test) to get real
+data instead of a third guess.
+
+The dump showed the baseline sensor's `last_changed`/`last_reported`/`last_updated` all pinned to
+the exact microsecond of the test's `_reset_energy()` REST call — never advancing to the later
+`time_machine.jump_to_next()` tick at all. The consumer sensor showed the same pattern once
+cross-checked. **The `time_pattern` trigger simply never fired a second time within the test.**
+
+Checking every test in `tests/test_victron.py` for how many `time_machine.jump_to_next()` calls
+it makes in sequence: every currently-passing energy-accumulation test (Grid Energy Import/Export,
+Battery Discharge, Night No Grid, Conversion Loss Energy) makes exactly **one** jump after the
+reset (two total, counting the initial jump to a known clock position). The two new tests were the
+only ones chaining a **second or third** sequential jump within one test function. That is the
+actual, narrow, test-infrastructure-level cause: `ha_integration_test_harness`'s time-mocking (or
+the interaction between `time_pattern` and repeated `jump_to_next` calls) does not reliably
+re-fire a trigger on the second+ chained jump within a single test — a harness/mocking limitation,
+not a production HA behavior. (Consistent with the user's "is this even working with time machine
+setup" question when this was found.)
+
+This means the original `home-assistant/core#172847` source-code trace earlier in this document,
+while real and worth keeping as background research, was very likely **not** the actual cause of
+the CI failures — the original `attributes:`-based design would plausibly have worked fine against
+real HA. The state-only baseline-sensor redesign is still kept (it is simpler, matches this file's
+only proven `this.state` pattern, and is not wrong) — but the deciding fix was rewriting the two
+failing tests to stop chaining multiple `jump_to_next()` calls in one test, exactly like every
+other passing test in this file already does.
+
+**Test fix.** Split each chained test into independent single-jump tests. Since the counter-delta
+baseline is now a first-class sensor (not a hidden attribute), an "already baselined from a prior
+tick" precondition can be seeded directly via `set_state` instead of requiring a real second tick:
+- `test_solar_yield_ac_total_baselines_then_applies_delta` → split into
+  `test_solar_yield_ac_total_captures_baseline_on_first_tick`,
+  `test_solar_yield_ac_total_applies_delta_once_baselined`,
+  `test_solar_yield_ac_total_counter_reset_clamped_to_zero`,
+  `test_solar_yield_ac_total_holds_on_source_unavailable`.
+- `test_battery_energy_residual_uses_counter_delta_once_baselined` → split into
+  `test_battery_energy_residual_bootstrap_before_baseline` (kept the counter-delta-once-baselined
+  name for the tick that actually exercises the counter-delta path) and the original name.
+
+32 tests total in the file after the split (was 30 before this CI-fix round).
