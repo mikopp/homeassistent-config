@@ -422,6 +422,13 @@ def test_solar_yield_ac_total_baselines_then_applies_delta(
         expected_state=lambda s: float(s) == 0.0,
         timeout=5,
     )
+    # DIAGNOSTIC (temporary): dump raw state of source + baseline before the real assertion,
+    # to see what the baseline sensor actually rendered instead of guessing blind. Remove once
+    # the underlying CI mystery (baseline never leaves 'unknown') is resolved.
+    import sys
+    print("DIAG src:", home_assistant.get_state("sensor.victron_solar_yield_dc_total_kwh"), file=sys.stderr)
+    print("DIAG baseline:", home_assistant.get_state("sensor.victron_solar_yield_dc_baseline_kwh"), file=sys.stderr)
+    print("DIAG consumer:", home_assistant.get_state("sensor.victron_solar_yield_total_kwh"), file=sys.stderr)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.0,
