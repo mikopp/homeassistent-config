@@ -214,7 +214,17 @@ def test_grid_import_energy_accumulates(
     propagate through the chain, and the integration sensor would never see a second data point
     at all. The 1 W step keeps the trapezoidal average (3000+3001)/2 = 3000.5 W indistinguishable
     from 3000 W at this test's tolerance while still forcing a real state change.
+
+    Still opens with jump_to_next(hour=10, minute=0) even though the timed step itself uses
+    fast_forward(), not a second jump_to_next: every other test in this suite anchors the mocked
+    clock to that round boundary before doing anything else, and an earlier version of this test
+    that dropped it (going straight to fast_forward with no prior alignment) left the session
+    clock at an arbitrary, non-round timestamp — which then made a LATER, unrelated test's own
+    jump_to_next() hang for 20+ minutes in CI (reproduced deterministically on a rerun). Keep the
+    alignment step so every test in the suite starts every clock-touching sequence from the same
+    kind of position.
     """
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _seed(home_assistant, grid_l1=3000)
     home_assistant.assert_entity_state("sensor.victron_grid_power_import", "3000.0", timeout=5)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
@@ -239,8 +249,10 @@ def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
     """~1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
-    for why this asserts a relative delta rather than an absolute reset-then-value, and why the
-    second seed nudges the value by 1 W instead of repeating it exactly."""
+    for why this asserts a relative delta rather than an absolute reset-then-value, why the
+    second seed nudges the value by 1 W instead of repeating it exactly, and why this still opens
+    with jump_to_next(hour=10, minute=0) to anchor the clock before the fast_forward() step."""
+    time_machine.jump_to_next(hour=10, minute=0, second=0)
     _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state("sensor.victron_grid_power_export", "1800.0", timeout=5)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")

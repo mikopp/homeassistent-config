@@ -986,7 +986,7 @@ Energy Dashboard depends on.
 - [x] Config/test-file validation: `yaml.safe_load` on `packages/victron.yaml` (no duplicate
       `unique_id`s, 32 total across the file) and `ast.parse` on the two edited test files.
 
-### Two real CI-round-trip fixes (not anticipated in the design above)
+### Three real CI-round-trip fixes (not anticipated in the design above)
 
 1. **`device_class`/`state_class` are invalid config keys for `sensor.integration`** — CI's
    config check rejected them outright (`'device_class' is an invalid option for
@@ -1007,6 +1007,21 @@ Energy Dashboard depends on.
    by 1 W (3000→3001, -1800→-1801) instead of repeating it — forces a genuine `EVENT_STATE_CHANGED`
    while keeping the trapezoidal average within the test's existing tolerance (off by ~0.0008%
    of the expected delta, far inside the 0.002 kWh margin).
+
+3. **The propagation fix (nudging the second seed value) removed the two grid tests' opening
+   `time_machine.jump_to_next(hour=10, minute=0)` clock-alignment call, using only
+   `fast_forward()` from then on.** This left the mocked session clock at an arbitrary, non-round
+   timestamp instead of the round boundary every other test in the suite anchors to first. CI
+   then hung — not failed, genuinely hung for 20+ minutes — in the very next alphabetically-
+   sorted test (`test_night_no_grid_energy_accumulates`), whose own `jump_to_next(hour=10,
+   minute=0)` presumably had to resolve from that arbitrary starting point. Reproduced
+   deterministically on an exact rerun of the same commit (ruling out a one-off Actions/Docker
+   hiccup) before making this fix. Restored the `jump_to_next(hour=10, minute=0, second=0)`
+   opening call in both tests — `fast_forward()` is now used only for the second, controlled
+   1-minute step, not as a replacement for the initial alignment.
+   `ha_integration_test_harness`'s `get_state()`/`assert_entity_state()` calls have no explicit
+   HTTP timeout (confirmed by reading the harness source) — worth knowing if a future CI run ever
+   appears to hang again rather than fail cleanly.
 
 CI run pending for this fix (status line at the top of this document will be updated once green).
 
