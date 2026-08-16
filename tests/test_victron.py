@@ -428,6 +428,17 @@ def test_solar_yield_ac_total_captures_baseline_on_first_tick(
         expected_state=lambda s: float(s) == 0.0,
         timeout=5,
     )
+    # DIAGNOSTIC (temporary): this is the one test (of the 4-way split) that still fails
+    # deterministically (2/2 CI runs, not a flake) -- every sibling test that pre-seeds the
+    # baseline to a real number instead of leaving it at the reset's 'unknown' passes. Dumping
+    # raw state to see what's actually different about the un-primed 'unknown' -> real
+    # transition instead of guessing a third time. Remove once resolved.
+    import sys
+    print("DIAG src:", home_assistant.get_state("sensor.victron_solar_yield_dc_total_kwh"), file=sys.stderr)
+    print("DIAG baseline:", home_assistant.get_state("sensor.victron_solar_yield_dc_baseline_kwh"), file=sys.stderr)
+    print("DIAG consumer:", home_assistant.get_state("sensor.victron_solar_yield_total_kwh"), file=sys.stderr)
+    print("DIAG eff:", home_assistant.get_state("sensor.victron_multiplus_conversion_efficiency"), file=sys.stderr)
+    print("DIAG ac_pv_baseline:", home_assistant.get_state("sensor.victron_ac_pv_energy_baseline_kwh"), file=sys.stderr)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.0,
