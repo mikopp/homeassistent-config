@@ -422,27 +422,24 @@ def test_solar_yield_ac_total_captures_baseline_on_first_tick(
     _reset_energy(home_assistant)
     home_assistant.set_state("sensor.victron_solar_yield_dc_total_kwh", "100.0", attrs_kwh)
 
+    # DIAGNOSTIC data (from a prior CI run) showed this test's tick genuinely never fired within
+    # 5s -- last_updated on every sensor in the trigger block was frozen at the reset's own
+    # timestamp, not just the two new baseline sensors. This jump is the first in the whole
+    # session to span a full day-plus (this test follows a long run of prior tests, each
+    # advancing the mocked clock by ~1 day), so time_machine.jump_to_next() has to fire every
+    # crossed /1 minute boundary across that whole span (~1400+ firings x ~10 sensors each)
+    # before the state settles -- a longer timeout here tests whether that backlog just needs
+    # more real wall-clock time to drain, rather than never firing at all.
     time_machine.jump_to_next(hour=10, minute=1, second=0)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: float(s) == 0.0,
-        timeout=5,
+        timeout=20,
     )
-    # DIAGNOSTIC (temporary): this is the one test (of the 4-way split) that still fails
-    # deterministically (2/2 CI runs, not a flake) -- every sibling test that pre-seeds the
-    # baseline to a real number instead of leaving it at the reset's 'unknown' passes. Dumping
-    # raw state to see what's actually different about the un-primed 'unknown' -> real
-    # transition instead of guessing a third time. Remove once resolved.
-    import sys
-    print("DIAG src:", home_assistant.get_state("sensor.victron_solar_yield_dc_total_kwh"), file=sys.stderr)
-    print("DIAG baseline:", home_assistant.get_state("sensor.victron_solar_yield_dc_baseline_kwh"), file=sys.stderr)
-    print("DIAG consumer:", home_assistant.get_state("sensor.victron_solar_yield_total_kwh"), file=sys.stderr)
-    print("DIAG eff:", home_assistant.get_state("sensor.victron_multiplus_conversion_efficiency"), file=sys.stderr)
-    print("DIAG ac_pv_baseline:", home_assistant.get_state("sensor.victron_ac_pv_energy_baseline_kwh"), file=sys.stderr)
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.0,
-        timeout=5,
+        timeout=20,
     )
 
 
