@@ -11,6 +11,13 @@ jobs:
   ha-ci:
     name: HA Config Check · Template Validation · Automation Tests
     runs-on: ubuntu-latest
+    # Hard ceiling on the whole job. Without this, GitHub's default job
+    # timeout is 6 hours — so an unbounded hang (e.g. the harness's
+    # requests.get/post or subprocess.run calls with no timeout= blocking
+    # forever, see plans/ci-test-isolation.md) would burn most of that budget
+    # before failing. 20 minutes is generously above the observed full-suite
+    # runtime (well under 5 minutes green) while still bounding the worst case.
+    timeout-minutes: 20
 
     steps:
       # ── 1. Check out the repository ─────────────────────────────────────────
@@ -160,6 +167,29 @@ jobs:
       #    PATTERN for any future test file/group that needs its own instance:
       #    add one more `pytest tests/<file>.py -v` step following this one, and
       #    add `--ignore=tests/<file>.py` to the shared-instance step below.
+      #
+      #    --timeout / --timeout-method (pytest-timeout, installed via
+      #    requirements.txt): this suite has intermittently HUNG (not failed)
+      #    in CI — root-caused to ha_integration_test_harness v0.11.0 making
+      #    requests.get/post and subprocess.run(["docker","exec",...]) calls
+      #    with no timeout=, so a stall blocks forever instead of erroring.
+      #    See plans/ci-test-isolation.md for the full investigation. 90s is
+      #    ~4x headroom over the slowest legitimately-passing test observed in
+      #    the last green run (21.8s; typical tests are 0.2–1.7s), so it won't
+      #    false-positive on real work, while still surfacing a hang within
+      #    ~1.5 min instead of silently consuming the job's time budget.
+      #    --timeout-method=thread is the important part: on expiry it dumps
+      #    the stack of every running thread, which names the exact blocking
+      #    line instead of just reporting "test timed out".
+      #
+      #    KNOWN TRADE-OFF of the `thread` method: it dumps the stacks and then
+      #    kills the whole process, so a timeout ABORTS the remaining tests in
+      #    that invocation rather than failing one test and carrying on. That is
+      #    the right trade while the hang is undiagnosed (a hung run was already
+      #    producing no further results anyway). Switch to
+      #    --timeout-method=signal once the cause is known and we only want a
+      #    per-test guard rail — signal raises inside the test and lets the run
+      #    continue, but reports only the main thread.
       - name: Run pytest — pergola tests (isolated HA instance)
         id: run_tests_pergola
         continue-on-error: true
@@ -167,7 +197,7 @@ jobs:
           HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
           TEMPLATES_JSON: /tmp/templates.json
         run: |
-          pytest tests/test_pergola.py -v 2>&1 | tee /tmp/pytest_pergola_output.txt
+          pytest tests/test_pergola.py -v --timeout=90 --timeout-method=thread 2>&1 | tee /tmp/pytest_pergola_output.txt
           exit_code=${PIPESTATUS[0]}
           exit $exit_code
 
@@ -175,6 +205,11 @@ jobs:
       #    Template validation and the remaining automation scenarios share one
       #    live HA instance for efficiency — none of them use the year-jumping
       #    sun fixtures above.
+      #
+      #    --timeout / --timeout-method: same rationale as the pergola step
+      #    above — this is in fact where the observed hangs have stalled
+      #    (test_victron.py::test_solar_yield_ac_total_applies_delta_once_baselined).
+      #    See plans/ci-test-isolation.md.
       - name: Run pytest — remaining tests (shared HA instance)
         id: run_tests_rest
         continue-on-error: true
@@ -182,7 +217,7 @@ jobs:
           HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
           TEMPLATES_JSON: /tmp/templates.json
         run: |
-          pytest tests/ --ignore=tests/test_pergola.py -v 2>&1 | tee /tmp/pytest_rest_output.txt
+          pytest tests/ --ignore=tests/test_pergola.py -v --timeout=90 --timeout-method=thread 2>&1 | tee /tmp/pytest_rest_output.txt
           exit_code=${PIPESTATUS[0]}
           exit $exit_code
 
