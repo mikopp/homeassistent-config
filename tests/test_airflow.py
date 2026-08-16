@@ -1608,9 +1608,22 @@ def _assert_recomputes_after_reload(
     plans/victron-test-clock-simplification.md). Neither sensor asserted here reads schedule.*,
     binary_sensor.workday, or any time function — verified against their template bodies in
     packages/airflow_cooling.yaml — so no absolute wall-clock anchor is needed. The only clock
-    requirement is crossing the 10-minute delay_on/delay_off window.
+    requirement is crossing the 10-minute delay_on/delay_off window — which has to happen TWICE:
+    once so the sensor reaches a definite state at all, and once after the simulated reload.
+
+    The first crossing is not optional. These are trigger-based binary sensors with no
+    homeassistant:start trigger, so after HA boots they sit at 'unknown' until an input trigger
+    fires AND their 10-minute delay elapses. conftest's baseline_states seeds the inputs (firing
+    the triggers), but only a clock advance lands the result. The previous
+    jump_to_next(hour=10, minute=0) supplied that crossing as a side effect of advancing a full
+    day; dropping it without replacement left these sensors at 'unknown' and broke two unrelated
+    airflow tests that were silently piggybacking on this helper running earlier in the
+    alphabetical order (test_flush_unavailable_when_dependency_missing,
+    test_heat_ventilation_low_needed_off_when_outdoor_below_indoor). That cross-test dependency
+    is pre-existing and fragile, but is deliberately left as-is here rather than redesigned.
     """
-    # Baseline deps are available, so the sensor holds a definite state before the "reload".
+    # Cross the delay window once so the sensor holds a definite state before the "reload".
+    tm.fast_forward(timedelta(minutes=11))
     ha.assert_entity_state(entity_id, lambda s: s in ("on", "off"), timeout=5)
     # Simulate the reload: the entity is re-created as 'unknown'. The self-trigger (to: "unknown")
     # fires on this transition and re-evaluates the state template.
