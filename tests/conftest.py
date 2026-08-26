@@ -94,6 +94,14 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
     ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
+    # go-e Charger wallbox (MQTT auto-discovery — broker absent in CI). These are
+    # the SOURCE entities behind sensor.wallbox_power / sensor.wallbox_energy.
+    # Seeded in the go-e API v2 native units (nrg[11] in W, eto in Wh) so the
+    # wrappers' unit normalisation is exercised on the conversion path.
+    ha.set_state("sensor.go_echarger_homekopp_power_total", "0",
+                 {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
+    ha.set_state("sensor.go_echarger_homekopp_total_energy_charged", "3500",
+                 {"unit_of_measurement": "Wh", "device_class": "energy"})
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
