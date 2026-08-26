@@ -6,15 +6,52 @@ session-scoped fixtures automatically via its installed conftest.
 """
 
 import pytest
+import requests
 from datetime import timedelta
 
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
 
-# Run pergola tests before airflow tests to prevent event-loop load from airflow
-# automations (mode:restart + humidity trigger) causing sun-integration race
-# conditions that overwrite sensor.pergola_effective_slat_angle with the
-# script's float(90) default before the test assertion fires.
+# ── Bound every HTTP call the harness makes ──────────────────────────────────────────────
+# ha_integration_test_harness (pinned at v0.11.0) calls requests.get/post/delete with NO
+# timeout= kwarg, so a Home Assistant container that accepts the TCP connection but never
+# answers blocks the test process forever. This is not hypothetical: CI hung repeatedly on
+# this branch, and the pytest-timeout thread dump (see plans/ci-test-isolation.md) put the
+# main thread in socket.recv_into inside requests.get, waiting on the HTTP status line.
+#
+# assert_entity_state(timeout=5) does NOT protect against this. Its timeout is checked
+# BETWEEN poll iterations; each iteration calls get_state(), and one unbounded get_state()
+# inside the loop means the 5s ceiling is never reached. Every timeout= in this suite is
+# decorative against a wedged container without this shim.
+#
+# The harness is a pinned pip dependency, so it cannot be fixed in place. Instead default a
+# timeout onto the module-level requests helpers it uses. setdefault, not an override: any
+# caller passing its own timeout= still wins. Result: a wedged container produces a
+# requests.exceptions.ReadTimeout naming the failing call within 30s, and the remaining
+# tests still run — instead of the whole invocation stalling until pytest-timeout kills it.
+_HTTP_TIMEOUT_SECONDS = 30
+
+
+def _with_default_timeout(func):
+    """Wrap a requests helper so it carries a default timeout unless the caller set one."""
+    def wrapper(*args, **kwargs):
+        kwargs.setdefault("timeout", _HTTP_TIMEOUT_SECONDS)
+        return func(*args, **kwargs)
+    return wrapper
+
+
+for _name in ("get", "post", "delete", "put", "patch", "request"):
+    setattr(requests, _name, _with_default_timeout(getattr(requests, _name)))
+
+
+# Originally: run pergola tests before airflow tests to prevent event-loop load from airflow
+# automations (mode:restart + humidity trigger) causing sun-integration race conditions that
+# overwrite sensor.pergola_effective_slat_angle with the script's float(90) default before the
+# test assertion fires. That race is now handled structurally instead: .github/workflows/
+# ha_check.yaml runs test_pergola.py as its own pytest invocation (its own fresh HA instance,
+# see plans/ci-test-isolation.md), so airflow tests are never even collected in the same process.
+# This sort is harmless to keep — for that isolated run everything already matches "test_pergola"
+# and sorts alphabetically among itself either way.
 def pytest_collection_modifyitems(items: list) -> None:
     def sort_key(item):
         return (0 if "test_pergola" in item.nodeid else 1, item.nodeid)
@@ -72,15 +109,16 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # within seconds if the fake time is set to night. Tests that need a specific sun
     # position use the midday_sun fixture which uses the time machine.
     ha.set_state("sun.sun", "above_horizon", {"elevation": 45, "azimuth": 180})
-    # Victron solar charger (MQTT — broker absent in CI)
-    ha.set_state("sensor.solar_yield_watts", "1500",
+    # Victron solar charger (MQTT — broker absent in CI). Raw DC input — the repointed
+    # sensor.solar_yield_watts (AC-referenced, packages/victron.yaml) is computed from
+    # sensor.victron_dc_pv_total_power instead, not from this one.
+    ha.set_state("sensor.victron_solar_yield_dc_watts", "1500",
                  {"unit_of_measurement": "W", "device_class": "power"})
     # Victron MQTT sensors — all power sensors at 0 W so template sensors start
     # at 0 and energy accumulators do not advance during unrelated tests.
     attrs_w = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
     ha.set_state("sensor.victron_vebus_dc_power", "0", attrs_w)
     ha.set_state("sensor.victron_dc_pv_total_power", "0", attrs_w)
-    ha.set_state("sensor.victron_battery_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l1_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l2_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l3_power", "0", attrs_w)
@@ -90,10 +128,30 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.victron_ac_inverter_power", "0", attrs_w)
     ha.set_state("sensor.victron_battery_soc", "50",
                  {"unit_of_measurement": "%", "device_class": "battery", "state_class": "measurement"})
-    ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0",
+    # Raw DC lifetime counter — feeds the repointed sensor.victron_solar_yield_total_kwh
+    # (AC-referenced) via counter-delta, and the battery energy residual's mppt_src.
+    ha.set_state("sensor.victron_solar_yield_dc_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
     ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
                  {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
+    # VEBus/MultiPlus conversion-efficiency accumulators (trigger template sensors,
+    # packages/victron.yaml). Seeded to 0.0 so sensor.victron_multiplus_conversion_efficiency
+    # is deterministically at its 100 % bootstrap in every test that does not explicitly
+    # exercise eta — without this, minute ticks from unrelated tests would slowly accumulate
+    # into it.
+    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    ha.set_state("sensor.victron_multiplus_ac_out_energy", "0.0", attrs_kwh)
+    ha.set_state("sensor.victron_multiplus_dc_in_energy", "0.0", attrs_kwh)
+    ha.set_state("sensor.victron_multiplus_conversion_loss_energy", "0.0", attrs_kwh)
+    # sensor.victron_solar_yield_total_kwh is now the REPOINTED AC-referenced accumulator
+    # (see packages/victron.yaml's repoint note) — same reset pattern as the other trigger
+    # accumulators above.
+    ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
+    # Counter-delta baselines (victron.yaml, own dedicated state-only sensors — not custom
+    # attributes, see that file's comment) reset to literal 'unknown' so every test starts
+    # un-baselined, same semantics the -1 sentinel used to get from an empty attribute.
+    ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
+    ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
     # go-e Charger wallbox (MQTT auto-discovery — broker absent in CI). These are
     # the SOURCE entities behind sensor.wallbox_power / sensor.wallbox_energy.
     # Seeded in the go-e API v2 native units (nrg[11] in W, eto in Wh) so the

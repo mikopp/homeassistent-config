@@ -11,13 +11,84 @@ jobs:
   ha-ci:
     name: HA Config Check · Template Validation · Automation Tests
     runs-on: ubuntu-latest
+    # Hard ceiling on the whole job. Without this, GitHub's default job
+    # timeout is 6 hours — so an unbounded hang (e.g. the harness's
+    # requests.get/post or subprocess.run calls with no timeout= blocking
+    # forever, see plans/ci-test-isolation.md) would burn most of that budget
+    # before failing. 20 minutes is generously above the observed full-suite
+    # runtime (well under 5 minutes green) while still bounding the worst case.
+    timeout-minutes: 20
 
     steps:
       # ── 1. Check out the repository ─────────────────────────────────────────
       - name: Check out configuration from GitHub
         uses: actions/checkout@v7
 
-      # ── 2. Python tooling ────────────────────────────────────────────────────
+      # ── 2. Start BOTH image pulls in the background, concurrently ────────────
+      #    This job needs two container images:
+      #      * ghcr.io/home-assistant/home-assistant:<.HA_VERSION>  ~655 MB
+      #      * acockburn/appdaemon:latest (Docker Hub)               ~50 MB
+      #    Neither can be fetched by any earlier step, and no step between here
+      #    and the barrier (step 7) touches either one, so both downloads are
+      #    started here and collected later.
+      #
+      #    WHY NOT actions/cache + docker save/load, which this replaced:
+      #    the cache stored the HA image as a gzipped tar and restored it with
+      #    `docker load`. That took a rock-steady 61s across the last 20 runs
+      #    (60-77s, clustered on 61-62s) — single-threaded gunzip of 655 MB, on
+      #    the critical path, overlapping nothing. A registry pull fetches layers
+      #    in parallel (--max-concurrent-downloads, default 3 per pull) and can
+      #    be backgrounded, which a cache restore cannot. ghcr also does not
+      #    rate-limit anonymous pulls, and dropping the cache frees ~600 MB of
+      #    the repo's 10 GB Actions cache budget.
+      #
+      #    CONCURRENCY: the two pulls run as two independent `docker pull`
+      #    processes against two different registries, so they overlap each other
+      #    as well as the steps below. The daemon serialises only the image-store
+      #    writes it must; layer downloads proceed in parallel.
+      #
+      #    HONEST NOTE ON COVER: the steps between here and the barrier are
+      #    pip install (~7s) plus a few sub-second ones — call it ~8s. That is
+      #    ALL the cover this job has; there is no other CPU-bound work to hide a
+      #    655 MB download behind. The win here is pull-beats-gunzip, not cover.
+      #    Do not claim otherwise when reading the resulting timings.
+      #
+      #    MECHANICS that are easy to get wrong:
+      #    - `nohup ... &` survives the step boundary. The runner starts each step
+      #      in its own shell but does not reap orphans, so the pulls keep running
+      #      across subsequent steps.
+      #    - ALL output must be redirected to a file. The step's stdout/stderr
+      #      pipes are closed when the step ends, and a background process still
+      #      writing to them dies on EPIPE.
+      #    - Each pull writes its exit code to a sentinel file only after it
+      #      finishes; that is what the barrier waits on. Polling
+      #      `docker image inspect` instead would race — the image becomes visible
+      #      in the store before the pull is fully committed.
+      - name: Prefetch container images (background, concurrent)
+        run: |
+          HA_IMAGE="ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)"
+          echo "$HA_IMAGE" > /tmp/ha_image_ref
+          rm -f /tmp/ha_pull.rc /tmp/appdaemon_pull.rc
+
+          nohup bash -c "
+            docker pull '$HA_IMAGE' > /tmp/ha_pull.log 2>&1
+            echo \$? > /tmp/ha_pull.rc
+          " > /dev/null 2>&1 &
+          disown
+
+          nohup bash -c '
+            docker pull acockburn/appdaemon:latest > /tmp/appdaemon_pull.log 2>&1
+            echo $? > /tmp/appdaemon_pull.rc
+          ' > /dev/null 2>&1 &
+          disown
+
+          echo "Started concurrent background pulls:"
+          echo "  $HA_IMAGE"
+          echo "  acockburn/appdaemon:latest"
+
+      # ── 3. Python tooling ────────────────────────────────────────────────────
+      #    This is the only step with meaningful duration before the barrier, so
+      #    it is the only real cover the background pulls get (~7s).
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -25,27 +96,6 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r .github/workflows/requirements.txt
-
-      # ── 3. Pull the HA image (cached by version) ─────────────────────────────
-      #    Used by the config-check step. The test harness manages its own
-      #    container independently.
-      - name: Cache Home Assistant Docker image
-        uses: actions/cache@v6
-        id: docker-cache
-        with:
-          path: /tmp/ha-docker-cache.tar.gz
-          key: ha-docker-${{ hashFiles('.HA_VERSION') }}
-
-      - name: Load cached Docker image
-        if: steps.docker-cache.outputs.cache-hit == 'true'
-        run: docker load -i /tmp/ha-docker-cache.tar.gz
-
-      - name: Pull Home Assistant Docker image
-        if: steps.docker-cache.outputs.cache-hit != 'true'
-        run: |
-          docker pull ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
-          docker save ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
-            | gzip > /tmp/ha-docker-cache.tar.gz
 
       # ── 4. Prepare config dir ────────────────────────────────────────────────
       - name: Prepare HA config dir
@@ -116,7 +166,106 @@ jobs:
               print(f"Written HA YAML config fixtures ({len(ha_yaml_configs)} entries) to {fixture_path}")
           EOF
 
-      # ── 6. Config check (one-shot, no server) ────────────────────────────────
+      # ── 6. Extract Jinja2 templates ──────────────────────────────────────────
+      #    Produces /tmp/templates.json with state_templates and runtime_templates
+      #    lists, consumed by tests/test_templates.py via the TEMPLATES_JSON env
+      #    var on the pytest step below.
+      #
+      #    Runs BEFORE the image barrier on purpose: this is pure local YAML
+      #    parsing — no Docker, no running HA, no network — so it belongs with the
+      #    other docker-independent work, where it acts as cover for the
+      #    background pulls instead of sitting idle behind them. (Measured at ~0s,
+      #    so the cover it adds is negligible; the ordering is still the correct
+      #    one.) It cannot muddy the config-check diagnostics that now follow it:
+      #    extract_templates.py swallows yaml.YAMLError per file by design.
+      #
+      #    Must stay AFTER "Prepare HA config dir" (which injects the latitude
+      #    block) and AFTER "Install custom component dependencies" (which writes
+      #    packages/ha_ci_fixtures.yaml) — it rglobs the whole repo and would
+      #    otherwise miss templates from those files.
+      - name: Extract Jinja2 templates
+        run: |
+          python3 .github/scripts/extract_templates.py . > /tmp/templates.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/templates.json'))
+          print(f\"Found {len(d['state_templates'])} state template(s) and {len(d['runtime_templates'])} runtime template(s).\")
+          "
+
+      # ── 7. Barrier: collect the background pulls ─────────────────────────────
+      #    First point in the job that needs either image. Placed as late as
+      #    possible so the pulls get every preceding step as cover, and before the
+      #    config check, which is the first consumer.
+      #
+      #    HA pull: hard requirement. Everything downstream needs it, so on
+      #    failure retry once in the foreground and fail loudly if that also
+      #    fails — a clear error here beats an opaque "image not found" from
+      #    `docker run` or `docker tag` two steps later.
+      #
+      #    AppDaemon pull: soft. If it failed or is still running, the harness's
+      #    `docker compose up --wait` pulls it inline exactly as it did before
+      #    this optimisation existed — slower, but not a new failure mode. Emit a
+      #    warning annotation so the degradation is visible rather than silent.
+      #
+      #    Timings are echoed so the next run can settle the open question in
+      #    plans/ci-container-startup-cost.md: is a backgrounded pull actually
+      #    faster than the 61s `docker load` this replaced?
+      - name: Wait for image prefetch
+        run: |
+          HA_IMAGE=$(cat /tmp/ha_image_ref)
+          start=$(date +%s)
+
+          # Wait for the HA pull (hard requirement).
+          for _ in $(seq 1 600); do
+            [ -f /tmp/ha_pull.rc ] && break
+            sleep 1
+          done
+          ha_rc=$(cat /tmp/ha_pull.rc 2>/dev/null || echo "timeout")
+          if [ "$ha_rc" != "0" ]; then
+            echo "::warning::Background HA image pull did not succeed (rc=$ha_rc) — retrying in foreground"
+            cat /tmp/ha_pull.log 2>/dev/null || true
+            docker pull "$HA_IMAGE"
+          fi
+
+          # Wait for the AppDaemon pull (best effort).
+          for _ in $(seq 1 180); do
+            [ -f /tmp/appdaemon_pull.rc ] && break
+            sleep 1
+          done
+          ad_rc=$(cat /tmp/appdaemon_pull.rc 2>/dev/null || echo "timeout")
+          if [ "$ad_rc" != "0" ]; then
+            echo "::warning::AppDaemon image prefetch did not complete (rc=$ad_rc) — docker compose will pull it inline"
+            cat /tmp/appdaemon_pull.log 2>/dev/null || true
+          fi
+
+          echo "Barrier blocked for $(( $(date +%s) - start ))s (ha_rc=$ha_rc appdaemon_rc=$ad_rc)"
+          docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
+      # ── 6b. Retag the pinned image for the test harness ──────────────────────
+      #    ha_integration_test_harness bundles its own docker-compose.yaml which
+      #    hardcodes `image: homeassistant/home-assistant:stable` (Docker Hub) —
+      #    a different registry AND a different tag from the image pulled above,
+      #    so the harness used to pull a second, near-identical HA image on every
+      #    run. Retagging the local image under the name compose asks for makes
+      #    compose's default pull_policy (`missing`) find it and skip that pull.
+      #
+      #    Two effects, both wanted:
+      #    1. Speed. Measured on run 31958805407: the gap between pytest's
+      #       "collected N items" and the first PASSED was 73.2s on the first
+      #       invocation but only 21.0s on the second — identical fixture code,
+      #       the only difference being that the images were already local. That
+      #       52s delta is the pull, and it is paid inside the harness's
+      #       session-scoped `docker` fixture before a single test executes.
+      #    2. Correctness, and the more important half. Without this the harness
+      #       tested whatever Docker Hub's `:stable` resolved to that day, while
+      #       check_config below tested .HA_VERSION — the suite that actually
+      #       exercises the templates and automations was not testing the version
+      #       that gets deployed. See the HA version gate in CLAUDE.md.
+      - name: Tag pinned HA image for the test harness
+        run: |
+          docker tag "$(cat /tmp/ha_image_ref)" homeassistant/home-assistant:stable
+
+      # ── 7. Config check (one-shot, no server) ────────────────────────────────
       - name: Run Home Assistant config check
         run: |
           output=$(docker run --rm \
@@ -129,31 +278,78 @@ jobs:
             exit 1
           fi
 
-      # ── 7. Extract Jinja2 templates ──────────────────────────────────────────
-      #    Produces /tmp/templates.json with state_templates and runtime_templates
-      #    lists consumed by tests/test_templates.py. Does not require HA running.
-      - name: Extract Jinja2 templates
+      # ── 9a. Run pytest — pergola tests (isolated HA instance) ────────────────
+      #    tests/test_pergola.py uses fixtures (midday_sun/low_elevation_sun in
+      #    conftest.py) that call jump_to_next(month="Jun", ...) — once the mocked
+      #    clock is already past June 21 in the current mocked year, each further
+      #    call jumps a FULL YEAR forward. Run as its own pytest invocation so it
+      #    gets a fresh harness-managed Docker container and a clock starting near
+      #    real "now": ha_integration_test_harness's docker/home_assistant/
+      #    time_machine fixtures are scope="session", hardwired in the harness's
+      #    own bundled conftest (not overridable from this repo) — a session
+      #    boundary is a process boundary is a fresh container, there is no
+      #    fixture-scope override available. Without this, those year-jumps
+      #    front-load years of clock drift onto the shared session before any
+      #    other test file runs, degrading (and eventually hanging) tests much
+      #    later in the suite. See plans/ci-test-isolation.md for the full
+      #    investigation.
+      #
+      #    PATTERN for any future test file/group that needs its own instance:
+      #    add one more `pytest tests/<file>.py -v` step following this one, and
+      #    add `--ignore=tests/<file>.py` to the shared-instance step below.
+      #
+      #    --timeout / --timeout-method (pytest-timeout, installed via
+      #    requirements.txt): this suite has intermittently HUNG (not failed)
+      #    in CI — root-caused to ha_integration_test_harness v0.11.0 making
+      #    requests.get/post and subprocess.run(["docker","exec",...]) calls
+      #    with no timeout=, so a stall blocks forever instead of erroring.
+      #    See plans/ci-test-isolation.md for the full investigation. 90s is
+      #    ~4x headroom over the slowest legitimately-passing test observed in
+      #    the last green run (21.8s; typical tests are 0.2–1.7s), so it won't
+      #    false-positive on real work, while still surfacing a hang within
+      #    ~1.5 min instead of silently consuming the job's time budget.
+      #    --timeout-method=thread is the important part: on expiry it dumps
+      #    the stack of every running thread, which names the exact blocking
+      #    line instead of just reporting "test timed out".
+      #
+      #    KNOWN TRADE-OFF of the `thread` method: it dumps the stacks and then
+      #    kills the whole process, so a timeout ABORTS the remaining tests in
+      #    that invocation rather than failing one test and carrying on. That is
+      #    the right trade while the hang is undiagnosed (a hung run was already
+      #    producing no further results anyway). Switch to
+      #    --timeout-method=signal once the cause is known and we only want a
+      #    per-test guard rail — signal raises inside the test and lets the run
+      #    continue, but reports only the main thread.
+      #    No TEMPLATES_JSON here: /tmp/templates.json is read only by
+      #    tests/test_templates.py, which this invocation does not collect. It
+      #    belongs on the shared-instance step below and nowhere else.
+      - name: Run pytest — pergola tests (isolated HA instance)
+        id: run_tests_pergola
+        continue-on-error: true
+        env:
+          HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
         run: |
-          python3 .github/scripts/extract_templates.py . > /tmp/templates.json
-          python3 -c "
-          import json
-          d = json.load(open('/tmp/templates.json'))
-          print(f\"Found {len(d['state_templates'])} state template(s) and {len(d['runtime_templates'])} runtime template(s).\")
-          "
+          pytest tests/test_pergola.py -v --timeout=90 --timeout-method=thread 2>&1 | tee /tmp/pytest_pergola_output.txt
+          exit_code=${PIPESTATUS[0]}
+          exit $exit_code
 
-      # ── 8. Run pytest — templates + automation tests ─────────────────────────
-      #    The ha_integration_test_harness plugin starts a session-scoped HA
-      #    container (via Docker Compose), runs all tests, and stops the container
-      #    automatically. Template validation and automation tests share the same
-      #    live HA instance for efficiency.
-      - name: Run pytest (template validation + automation scenarios)
-        id: run_tests
+      # ── 8b. Run pytest — everything else (shared HA instance) ────────────────
+      #    Template validation and the remaining automation scenarios share one
+      #    live HA instance for efficiency — none of them use the year-jumping
+      #    sun fixtures above.
+      #
+      #    --timeout / --timeout-method: same rationale as the pergola step
+      #    above — this is in fact where the observed hangs have stalled
+      #    (test_victron.py::test_solar_yield_ac_total_applies_delta_once_baselined).
+      #    See plans/ci-test-isolation.md.
+      - name: Run pytest — remaining tests (shared HA instance)
+        id: run_tests_rest
         continue-on-error: true
         env:
           HOME_ASSISTANT_CONFIG_ROOT: ${{ github.workspace }}
           TEMPLATES_JSON: /tmp/templates.json
         run: |
-          pytest tests/ -v 2>&1 | tee /tmp/pytest_output.txt
+          pytest tests/ --ignore=tests/test_pergola.py -v --timeout=90 --timeout-method=thread 2>&1 | tee /tmp/pytest_rest_output.txt
           exit_code=${PIPESTATUS[0]}
           exit $exit_code
 
@@ -163,9 +359,19 @@ jobs:
         run: |
           echo "## Home Assistant CI Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f /tmp/pytest_output.txt ]; then
+          echo "### Pergola tests (isolated HA instance)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/pytest_pergola_output.txt ]; then
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat /tmp/pytest_output.txt >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pytest_pergola_output.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No pytest output found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Remaining tests (shared HA instance)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/pytest_rest_output.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pytest_rest_output.txt >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No pytest output found." >> "$GITHUB_STEP_SUMMARY"
@@ -173,7 +379,7 @@ jobs:
 
       # ── 10. Post a PR comment on failure ─────────────────────────────────────
       - name: Comment on PR with failures
-        if: steps.run_tests.outcome == 'failure'
+        if: steps.run_tests_pergola.outcome == 'failure' || steps.run_tests_rest.outcome == 'failure'
         uses: actions/github-script@v9
         with:
           script: |
@@ -187,8 +393,11 @@ jobs:
             });
             const prNumber = (prs[0] && prs[0].number) || (context.issue && context.issue.number);
             if (!prNumber) { console.log('No PR found for branch', branch); return; }
-            const output = require('fs').readFileSync('/tmp/pytest_output.txt', 'utf8');
-            const truncated = output.length > 60000 ? output.slice(-60000) : output;
+            const fs = require('fs');
+            const pergola = fs.existsSync('/tmp/pytest_pergola_output.txt') ? fs.readFileSync('/tmp/pytest_pergola_output.txt', 'utf8') : '(no output)';
+            const rest = fs.existsSync('/tmp/pytest_rest_output.txt') ? fs.readFileSync('/tmp/pytest_rest_output.txt', 'utf8') : '(no output)';
+            const combined = '### Pergola tests (isolated HA instance)\n' + pergola + '\n\n### Remaining tests (shared HA instance)\n' + rest;
+            const truncated = combined.length > 60000 ? combined.slice(-60000) : combined;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -198,5 +407,5 @@ jobs:
 
       # ── 11. Re-fail the job after the comment step ───────────────────────────
       - name: Fail if any check failed
-        if: steps.run_tests.outcome == 'failure'
+        if: steps.run_tests_pergola.outcome == 'failure' || steps.run_tests_rest.outcome == 'failure'
         run: exit 1

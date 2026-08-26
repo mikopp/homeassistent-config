@@ -5,6 +5,12 @@ pyyaml
 requests
 pytest-github-actions-annotate-failures
 
+# Converts CI hangs into failures: enforces a per-test wall-clock timeout and,
+# with --timeout-method=thread (set in ha_check.yaml), dumps every thread's
+# stack on expiry so the exact blocking line is visible in the CI log instead
+# of the job silently stalling. See plans/ci-test-isolation.md.
+pytest-timeout
+
 # Home Assistant integration test harness, pinned to the v0.11.0 release commit.
 # Dependabot bumps the pinned ref when a newer release is published.
 ha_integration_test_harness @ git+https://github.com/HeadlessTarry/HomeAssistant-Test-Harness.git@ee8abdd635af3d773676ed537ba1e7cb51133910
