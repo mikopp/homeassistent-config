@@ -40,6 +40,21 @@ MQTT-based monitoring of a Victron solar/battery/grid installation (MPPT charger
 - **Utility meters**: monthly billing meters aligned to the Austrian tariff reset date (1st of month)
 - **Status**: charger/inverter mode detection, system state
 
+### `packages/energy.yaml` — Metered Devices for the Energy Dashboard
+MQTT sensors for every individually metered appliance, plus the wallbox abstraction layer.
+
+- **Shelly Plus Plug S**: pool pump and rainwater pump — power, energy, voltage, current, relay state
+- **Shelly Pro 3EM**: heating circuit — total active power and cumulative consumption
+- **Loxone appliances**: washer, tumble dryer, dishwasher — no `expire_after`, because Loxone publishes only on change and would otherwise go unavailable while idle
+- **Wallbox**: `sensor.wallbox_power` / `sensor.wallbox_energy` — deliberately source-independent template wrappers
+
+**Wallbox indirection rule.** The Energy Dashboard references `sensor.wallbox_*` and never the
+charger's own entities. The wrappers currently read the go-e Charger's MQTT auto-discovery entities
+(previously evcc, which republished too slowly to track a live session); swapping the source again is
+a one-line change to the wrapper templates — no entity rename, no lost history, no dashboard edit.
+The wrappers also normalise units from the source's own `unit_of_measurement` and supply the
+`state_class: total_increasing` that go-e's discovery payload omits.
+
 ---
 
 ## Dashboards
@@ -106,3 +121,4 @@ The `tests/` directory contains a `pytest` suite:
 | `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
 | `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
 | `test_victron.py` | Template sensor correctness for energy accumulation and mode detection |
+| `test_wallbox.py` | Wallbox wrapper sensors: unit normalisation (W/kW, Wh/kWh) and availability propagation |
