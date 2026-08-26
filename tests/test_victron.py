@@ -26,6 +26,17 @@ from datetime import timedelta
 import pytest
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
+# Assertion budget for a value that only changes when the `time_pattern: /1` trigger block
+# renders. fast_forward() returns as soon as the mocked clock has moved; HA then has to fire
+# the trigger and write ~10 accumulator states, which on a loaded runner has been observed to
+# take longer than the 5 s used elsewhere in this file (CI run 32988752439 attempt 1:
+# battery_energy_out still at its reset 0.0 after 5 s, green on a re-run of the same commit).
+# assert_entity_state returns the moment its predicate holds, so a larger budget costs nothing
+# on a passing run — it only buys headroom before a false failure.
+# Assertions that a value did NOT move are deliberately left at 5 s: they are satisfied
+# immediately and gain nothing from waiting.
+TICK_TIMEOUT = 30
+
 
 def _seed(
     ha: HomeAssistant,
@@ -236,7 +247,7 @@ def test_grid_import_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import",
         lambda s: abs((float(s) - baseline) - 0.05) < 0.002,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
     # No export flow this whole test -> export total must not have moved.
     home_assistant.assert_entity_state(
@@ -262,7 +273,7 @@ def test_grid_export_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_export",
         lambda s: abs((float(s) - baseline) - 0.03) < 0.002,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import",
@@ -286,7 +297,7 @@ def test_battery_discharge_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: abs(float(s) - 0.02) < 0.001,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
     home_assistant.assert_entity_state("sensor.victron_battery_energy_in", "0.0", timeout=5)
 
@@ -319,7 +330,7 @@ def test_night_no_grid_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_out",
         lambda s: float(s) > 0,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
 
 
@@ -472,7 +483,7 @@ def test_conversion_loss_energy_accumulates(
     home_assistant.assert_entity_state(
         "sensor.victron_multiplus_conversion_loss_energy",
         lambda s: abs(float(s) - 0.01) < 0.001,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
 
 
@@ -525,7 +536,7 @@ def test_solar_yield_ac_total_captures_baseline_on_first_tick(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.0,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
 
 
@@ -545,12 +556,12 @@ def test_solar_yield_ac_total_applies_delta_once_baselined(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_total_kwh",
         expected_state=lambda s: abs(float(s) - 0.5) < 0.001,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 100.5,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
 
 
@@ -573,7 +584,7 @@ def test_solar_yield_ac_total_counter_reset_clamped_to_zero(
     home_assistant.assert_entity_state(
         "sensor.victron_solar_yield_dc_baseline_kwh",
         lambda s: float(s) == 10.0,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
 
 
@@ -644,6 +655,6 @@ def test_battery_energy_residual_uses_counter_delta_once_baselined(
     home_assistant.assert_entity_state(
         "sensor.victron_battery_energy_in",
         lambda s: abs(float(s) - 1.2) < 0.001,
-        timeout=5,
+        timeout=TICK_TIMEOUT,
     )
     home_assistant.assert_entity_state("sensor.victron_battery_energy_out", "0.0", timeout=5)
