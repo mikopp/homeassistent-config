@@ -9,15 +9,32 @@
 #   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
 #   aenergy.total from Shelly firmware is in Wh — divided by 1000 to yield kWh.
 #
-# evcc EV charger:
-#   Loadpoint 1 — evcc/loadpoints/1/*  (plain numeric payload, not JSON)
-#   sensor.evcc_loadpoint_1_charge_power  → instantaneous draw in W
-#   sensor.evcc_loadpoint_1_charge_energy → lifetime cumulative kWh (total_increasing)
+# go-e Charger (Wallbox) — added to HA via the charger firmware's own MQTT
+# auto-discovery (discovery: homeassistant/<domain>/go-e_291401/*,
+# data topics: go-eCharger/<key>). Replaces the previous evcc loadpoint
+# sensors, which republished far too slowly to track a live charge session.
+#   Source entities — owned by the MQTT integration, ids can change if the
+#   device is ever re-paired:
+#     sensor.go_echarger_homekopp_power_total          ← go-eCharger/nrg (nrg[11])
+#     sensor.go_echarger_homekopp_total_energy_charged ← go-eCharger/eto (lifetime)
+#   The Energy Dashboard NEVER references those directly — it uses the
+#   sensor.wallbox_* wrappers defined in the template: section at the bottom.
 #
 # Shelly Pro 3EM (Heizung) — bridged from separate mosquitto broker under
 # shelly/ prefix. Gen2/3 EM component payload schema differs from Plug S:
 #   em:0     → total_act_power is already in W (no scaling)
 #   emdata:0 → total_act is cumulative Wh, divided by 1000 for kWh
+#
+# Loxone appliances (Washer, Tumble Dryer, Dishwasher):
+#   MQTT topics: loxone/<device>/power and loxone/<device>/energy
+#     <device> ∈ washer | tumble-dry | dishwasher   (note: hyphen in topic)
+#   Payloads are plain numeric values (not JSON), 3-digit precision.
+#   sensor.<device>_power   → instantaneous draw in kW (native, no scaling)
+#   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
+#   Loxone publishes ONLY on change, has NO heartbeat (idle → silent for hours),
+#   but publishes a 0 when a draw ends and retains its last value for new
+#   subscribers. Hence: NO expire_after (would go unavailable during idle and
+#   break the Energy Dashboard); the retained/last value is held instead.
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -129,36 +146,6 @@ mqtt:
       device: *shelly_rainwater_pump
       value_template: "{{ value_json.current | round(3) }}"
 
-    - name: "EVCC Loadpoint 1 Charge Power"
-      unique_id: "evcc_loadpoint_1_charge_power"
-      state_topic: "evcc/loadpoints/1/chargePower"
-      unit_of_measurement: "W"
-      device_class: power
-      state_class: measurement
-      expire_after: 120
-      icon: mdi:ev-station
-      device: &evcc_loadpoint_1
-        identifiers:
-          - evcc_loadpoint_1
-        name: "EVCC Loadpoint 1"
-        manufacturer: "evcc"
-        suggested_area: "Carport"
-      value_template: "{{ value | float | round(1) }}"
-
-    # Lifetime cumulative energy for this loadpoint (kWh, already cumulative
-    # from evcc — not per-session). total_increasing tells HA to handle any
-    # dip (evcc restart) gracefully.
-    - name: "EVCC Loadpoint 1 Charge Energy"
-      unique_id: "evcc_loadpoint_1_charge_energy"
-      state_topic: "evcc/loadpoints/1/chargeTotalImport"
-      unit_of_measurement: "kWh"
-      device_class: energy
-      state_class: total_increasing
-      expire_after: 120
-      icon: mdi:lightning-bolt
-      device: *evcc_loadpoint_1
-      value_template: "{{ value | float | round(3) }}"
-
     - name: "Heizung Power"
       unique_id: "shelly_pro3em_heizung_power"
       state_topic: "shelly/shellypro3em-heizung/status/em:0"
@@ -188,6 +175,92 @@ mqtt:
       device: *shelly_pro3em_heizung
       value_template: "{% if value_json.total_act is not none %}{{ (value_json.total_act / 1000) | round(3) }}{% endif %}"
 
+    # ── Loxone Washer ──────────────────────────────────────────────────────────
+    # Loxone publishes only on change (and a 0 when a draw ends), so holding the
+    # last value reads the true draw while running and 0 while idle. No
+    # expire_after: with no heartbeat, an idle appliance is silent for hours/days
+    # and must not go unavailable; the retained last value is kept instead.
+    - name: "Washer Power"
+      unique_id: "loxone_washer_power"
+      state_topic: "loxone/washer/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:washing-machine
+      device: &loxone_washer
+        identifiers:
+          - loxone_washer
+        name: "Washer"
+        manufacturer: "Loxone"
+        suggested_area: "Technikraum"
+      value_template: "{{ value | float | round(3) }}"
+
+    # Cumulative lifetime energy (kWh). Loxone updates it at least every 5 min
+    # while it is changing (i.e. while drawing); no heartbeat during idle.
+    # total_increasing + no expire_after → the Energy Dashboard's source of truth.
+    - name: "Washer Energy"
+      unique_id: "loxone_washer_energy"
+      state_topic: "loxone/washer/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_washer
+      value_template: "{{ value | float | round(3) }}"
+
+    # ── Loxone Tumble Dryer ────────────────────────────────────────────────────
+    # NB: topic uses a hyphen (loxone/tumble-dry/*); HA ids use underscores.
+    - name: "Tumble Dryer Power"
+      unique_id: "loxone_tumble_dry_power"
+      state_topic: "loxone/tumble-dry/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:tumble-dryer
+      device: &loxone_tumble_dry
+        identifiers:
+          - loxone_tumble_dry
+        name: "Tumble Dryer"
+        manufacturer: "Loxone"
+        suggested_area: "Technikraum"
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Tumble Dryer Energy"
+      unique_id: "loxone_tumble_dry_energy"
+      state_topic: "loxone/tumble-dry/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_tumble_dry
+      value_template: "{{ value | float | round(3) }}"
+
+    # ── Loxone Dishwasher ──────────────────────────────────────────────────────
+    - name: "Dishwasher Power"
+      unique_id: "loxone_dishwasher_power"
+      state_topic: "loxone/dishwasher/power"
+      unit_of_measurement: "kW"          # native kW, as published by Loxone
+      device_class: power
+      state_class: measurement
+      icon: mdi:dishwasher
+      device: &loxone_dishwasher
+        identifiers:
+          - loxone_dishwasher
+        name: "Dishwasher"
+        manufacturer: "Loxone"
+        suggested_area: "Kitchen"
+      value_template: "{{ value | float | round(3) }}"
+
+    - name: "Dishwasher Energy"
+      unique_id: "loxone_dishwasher_energy"
+      state_topic: "loxone/dishwasher/energy"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:lightning-bolt
+      device: *loxone_dishwasher
+      value_template: "{{ value | float | round(3) }}"
+
   binary_sensor:
 
     - name: "Pool Pump Switch"
@@ -209,3 +282,69 @@ mqtt:
       value_template: "{{ value_json.output | string | lower }}"
       payload_on: "true"
       payload_off: "false"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Wallbox abstraction layer — STABLE ENTITY IDS
+#
+# sensor.wallbox_power / sensor.wallbox_energy are what the Energy Dashboard,
+# long-term statistics and any dashboard card reference. They are named after
+# the *function* (wallbox), never after the device or its integration, so that
+# swapping the charger or how it reaches HA is a one-line change to `state:` and
+# `availability:` below — no entity rename, no loss of history, no Energy
+# Dashboard edit.
+#
+#   Today's source:  go-e Charger, via its firmware's MQTT auto-discovery.
+#   Previous source: evcc loadpoint 1 (removed — republished too slowly).
+#
+# Two further reasons this indirection is not optional:
+#   1. The go-e discovery entity for total_energy_charged ships WITHOUT
+#      state_class, so it cannot be selected in the Energy Dashboard at all.
+#      The wrapper supplies state_class: total_increasing.
+#   2. Units are normalised from the source's own unit_of_measurement rather
+#      than assumed — go-e's API v2 is natively W / Wh, but the firmware's
+#      discovery payload is free to declare kW / kWh instead, and a future
+#      source may differ again.
+# ──────────────────────────────────────────────────────────────────────────────
+template:
+  - sensor:
+
+      # ── Wallbox Power ─────────────────────────────────────────────────────────
+      # Instantaneous charge power across all phases (go-e nrg[11]), normalised
+      # to W. Display-only: when the charger drops off MQTT this goes
+      # unavailable rather than reporting a misleading 0.
+      - name: "Wallbox Power"
+        unique_id: wallbox_power
+        state: >
+          {% set src = 'sensor.go_echarger_homekopp_power_total' %}
+          {% set unit = state_attr(src, 'unit_of_measurement') %}
+          {{ ((states(src) | float * 1000) if unit == 'kW'
+              else (states(src) | float)) | round(1) }}
+        availability: >
+          {{ states('sensor.go_echarger_homekopp_power_total')
+             not in ['unavailable', 'unknown'] }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:ev-station
+
+      # ── Wallbox Energy ────────────────────────────────────────────────────────
+      # Lifetime cumulative charged energy (go-e eto) — the Energy Dashboard's
+      # source of truth for the wallbox. eto is a lifetime counter, not a
+      # per-session one, and is natively Wh. total_increasing lets HA absorb a
+      # counter reset (charger factory reset) without booking a phantom spike,
+      # and baselines on the first observed value so the pre-existing lifetime
+      # total does not land as day-one consumption.
+      - name: "Wallbox Energy"
+        unique_id: wallbox_energy
+        state: >
+          {% set src = 'sensor.go_echarger_homekopp_total_energy_charged' %}
+          {% set unit = state_attr(src, 'unit_of_measurement') %}
+          {{ ((states(src) | float / 1000) if unit == 'Wh'
+              else (states(src) | float)) | round(3) }}
+        availability: >
+          {{ states('sensor.go_echarger_homekopp_total_energy_charged')
+             not in ['unavailable', 'unknown'] }}
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:lightning-bolt

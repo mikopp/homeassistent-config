@@ -152,6 +152,14 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # un-baselined, same semantics the -1 sentinel used to get from an empty attribute.
     ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
     ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
+    # go-e Charger wallbox (MQTT auto-discovery — broker absent in CI). These are
+    # the SOURCE entities behind sensor.wallbox_power / sensor.wallbox_energy.
+    # Seeded in the go-e API v2 native units (nrg[11] in W, eto in Wh) so the
+    # wrappers' unit normalisation is exercised on the conversion path.
+    ha.set_state("sensor.go_echarger_homekopp_power_total", "0",
+                 {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
+    ha.set_state("sensor.go_echarger_homekopp_total_energy_charged", "3500",
+                 {"unit_of_measurement": "Wh", "device_class": "energy"})
     # Weather station (UDP integration — absent in CI)
     ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})

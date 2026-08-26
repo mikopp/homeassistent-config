@@ -1011,6 +1011,25 @@ def test_heat_protection_low_wins_over_free_cooling_bump(home_assistant: HomeAss
     home_assistant.assert_entity_state("switch.comfoconnect_pro_auto_mode", "off", timeout=3)
 
 
+def test_ventilation_low_needed_derives_from_heat(home_assistant: HomeAssistant) -> None:
+    """Combined low intent tracks heat_low with no set on itself — regression for the stale-derive bug.
+
+    ventilation_low_needed is a STATE-based template (not trigger-based), so it must recompute to
+    'on' the moment heat_low is 'on' even though nothing sets the combined sensor directly. The
+    earlier trigger-based version could restore stale 'off' on HA restart while heat_low stayed 'on'
+    for hours, stranding Section 2 off its low intent (preset stuck at medium under heat_protection).
+    """
+    # Baseline seeds both source sensors + the combined to 'off'. Flip only heat_low on.
+    home_assistant.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "on", {})
+    home_assistant.assert_entity_state("binary_sensor.airflow_ventilation_low_needed",
+                                       "on", timeout=5)
+    # And back off when both sources clear.
+    home_assistant.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "off", {})
+    home_assistant.assert_entity_state("binary_sensor.airflow_ventilation_low_needed",
+                                       "off", timeout=5)
+
+
 def test_medium_preset_away_suppressed(home_assistant: HomeAssistant) -> None:
     """away=on: the Away guard skips Section 2 even with free_cooling=on (observable no-change)."""
     home_assistant.call_action("input_boolean", "turn_on",
