@@ -86,8 +86,9 @@ jobs:
               domain = dep["domain"]
               name = dep.get("name", domain)
               owner_repo = repo.rstrip("/").removeprefix("https://github.com/")
-              url = f"https://github.com/{owner_repo}/archive/refs/heads/main.tar.gz"
-              print(f"Installing {name} ({domain}) from {repo}")
+              ref = dep.get("ref", "main")
+              url = f"https://github.com/{owner_repo}/archive/refs/heads/{ref}.tar.gz"
+              print(f"Installing {name} ({domain}) from {repo}@{ref}")
               with tempfile.TemporaryDirectory() as tmp:
                   archive = os.path.join(tmp, "component.tar.gz")
                   urllib.request.urlretrieve(url, archive)
