@@ -72,3 +72,101 @@ Corollaries:
   a downstream rule requires `pv == 0` at night.)
 - New source entities need a seed in `tests/conftest.py::baseline_states` — `test_templates.py`
   renders every `state:` template strictly and fails on a sentinel output.
+
+## heating_pv_boost.yaml — Vaillant geoTHERM via ebusd
+
+Verified against a full `ebusctl` dump of the live bus and the upstream ebusd Vaillant
+definitions. These findings outlive any one plan — check here before adding an ebusd register.
+
+### Bus participants
+
+| Addr | Device | Circuits |
+|---|---|---|
+| 08 / 23 / 25 / 50 | geoTHERM `EHP00`, art. `0010002787` | `ehp`, `cc`, `hwc`, `mc` |
+| 15 | control interface `UIH00` | `uih` |
+| 75 | VR 90/3 remote control, art. `0020040079` | `rcc` |
+| 05 | VR 920 internet module, art. `0020252922` | none — **dormant**, Vaillant discontinued the service |
+
+There is **no VRC 700 and no `700` circuit**, so `Hc1RoomCircuitMode`, `Z1DayTemp` and friends do
+not exist here. The VR 90 writes to the bus but accepts and keeps a value HA writes, so HA is the
+sole effective writer of the control registers.
+
+### Payload format — do NOT enable `--mqttjson`
+
+ebusd publishes plain `;`-separated values, and **the Loxone integration consumes these same topics
+in that format**. Switching to JSON would break it. Multi-field messages are therefore parsed
+positionally; document the field list inline at every such sensor.
+
+### Enum representation is inconsistent, and writes differ from reads
+
+Whether an enum arrives as a decoded name or a raw number is **not predictable from its declared
+type**. Live: `mc/OperatingMode` reads `low` while `mc/CoolingOperatingModeHc2` reads `1`,
+`mc/CoolingRequestHc2` reads `0` and `ehp/Hc1Pump` reads `0` — yet `ebusctl` decodes all of them to
+names. Compounding it, the older ebusd config leaves `ehp/Status` field 3 unnamed (type `hcmode2`)
+with an enum lacking `1=cooling`, so cooling arrives as a raw `1` until the config is updated.
+
+- **Every enum read accepts both forms**, mapping through one table; unmapped → `unknown`.
+- **Writes take names** (`low`, `on`). Never echo a normalised read back on a write.
+- Field *position* is stable across config generations even where field *names* are not, which is
+  the one place positional parsing beats named access.
+
+### Register decodes
+
+`ehp/Status` = `HcFlowTemp;HcPress;SourcePress;hcmode;hex` — confirmed by exact value match against
+the standalone registers (`25.19;1.266;1.682;off;00`). `hcmode`: `0=off 1=cooling 3=heat 4=water`.
+
+`ehp/HcReturnTemp` (register `0A00`, internal sensor T5) = `temp;sensor` where sensor is
+`ok|circuit|cutoff`. Reads on demand but may not be published — enable polling by publishing `?5`
+to `ebusd/ehp/HcReturnTemp/get`.
+
+`mc/Status0a` = `flowtemp;mixer;pump;onoff;flowtempdesired`.
+`mc/Status` = `flowtempdesired;onoff;flowtemp;tempdesired` — no modulation field; field 3 is a
+second setpoint, not a percentage.
+`hwc/Status` = `desired;onoff;actual;desired`.
+
+**Unusable:** `mc/Mode` field 5 decodes `pool` while both `mc/CfgHeatSinkType` and `mc/Params` say
+`mixer` — do not use `mc/Mode` at all. `ehp/Status01` times out (unsupported). `ehp/Status02`
+returns placeholder data (`disabled;0;100.0;0;100.0`).
+
+### Hardware limits the controller must respect
+
+- **`ehp/TimeBetweenTwoCompStartsMin` = 1200 s.** The compressor cannot restart within 20 minutes,
+  so no hysteresis may be shorter than that — a faster toggle cannot cycle the machine and only
+  adds bus traffic, wear and misleading traces. (`TimeCompOffMin` 300 s, `TimeCompOnMin` 240 s.)
+- **No buffer tank.** `uih/EhpHeatBufferAvailable` is `off` and both storage sensors read `cutoff`.
+  The slab is the only thermal store, which is why `ehp/HcReturnTemp` reads on its charge state.
+- **Resistive backup exists.** `ehp/BackupType` = `internalheatandwater`, currently `no_backup` on
+  both circuits. It delivers roughly a quarter of the heat per kWh that the compressor does, so
+  never spend PV surplus while `ehp/Backup` is on.
+- Thermal ceilings are hardware protections, not tuning targets: `mc/FlowTempMax` 35 °C,
+  `mc/FloorProtectionLimit` 44 °C, `ehp/ReturnTempMax` 46 °C, `mc/OtShutdownLimit` 15 °C.
+- **No electrical-power or modulation register.** `ehp/Comp` is plain on/off and
+  `ActualEnvironmentPower` is thermal display data ("only for graphic display" upstream), so
+  `sensor.heizung_power` (Shelly Pro 3EM) is the only real electrical measurement.
+
+### Heating and cooling are separate mode axes
+
+`mc/OperatingMode` is *"Betriebsmodus **Heizen**"* — heating only. Cooling has its own register,
+`mc/CoolingOperatingModeHc2`. Writing the heating mode therefore cannot disturb cooling.
+
+Cooling activates in three stages, and the distinction matters:
+`mc/CoolingOperatingModeHc2` is a writable **setting** (reads `On` through summer);
+`uih/CoolingDemand` is the raw need; `mc/CoolingRequestHc2` is the gated, actually-triggered one
+(*"abhängig von der Kühlungsbetriebsart, Zeitfenstern und Effizienzfunktionen"*). Use the activity
+signals as interlocks — **never block on the setting**, which would disable heating permanently if
+it is not maintained seasonally.
+
+Cooling is released on outdoor temperature, not room setpoint:
+`mc/OtShutdownLimit` + `mc/CoolingStartOffsetHc2` = 15 + 2 = 17 °C **outdoor**. So writing
+`mc/TempDesired` does not move the cooling threshold. `mc/EfficiencyHysteresisHc2Min` (1.0) is a
+flow-to-room delta for *releasing* cooling, not a heating-band constraint.
+`DWMOffToCoolingDelayHc2` / `DWMOffToHeatingDelayHc2` are both **6 hours** — the machine enforcing
+the same slow-slab logic that makes daily changeover pointless.
+
+### `mc/TempDesiredLow` is the only human knob
+
+Everything HA writes is derived from it, so `mc/TempDesired` set at the wall will be overwritten.
+`mc/RoomTempOffset` is write-only (visible on MQTT only because ebusd passively decodes the VR 90
+writing it) and so is unusable as a lever. Holiday mode is unused on this system
+(`rcc/HolidayPeriod` still holds 2015 dates) and there is no Quick/Party button on the VR 90 —
+recorded so neither gets rediscovered as a hypothetical.

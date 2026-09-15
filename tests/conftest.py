@@ -32,6 +32,7 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.pergola_heating"})
     ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_cooling_optimized"})
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.heating_pv_boost_enabled"})
     ha.call_action("input_select", "select_option", {
         "entity_id": "input_select.pergola_automation_state",
         "option": "sun_automatik_cooling",
@@ -56,6 +57,11 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.pergola_slat_thickness": 3,
         "input_number.airflow_bypass_efficiency_max": 0.818,
         "input_number.airflow_bypass_efficiency_min": 0.05,
+        "input_number.heating_boost_offset": 1.5,
+        "input_number.heating_pv_surplus_threshold": 1500,
+        "input_number.heating_pv_deficit_threshold": 500,
+        "input_number.heating_pv_min_battery_soc": 70,
+        "input_number.heating_return_temp_max": 30,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
@@ -197,6 +203,30 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     # Heating/cooling indicator (template sensor from another package)
     ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    # Shelly Pro 3EM on the heating circuit (MQTT). Load-bearing for sensor.heating_pv_surplus,
+    # which subtracts it so the surplus figure is invariant under the heat pump's own draw.
+    ha.set_state("sensor.heizung_power", "0",
+                 {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
+    # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
+    # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
+    ha.set_state("sensor.heating_generator_mode", "off", {})
+    ha.set_state("sensor.heating_flow_temp", "25.2",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.heating_return_temp", "24.9",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.heating_setback_temp", "21.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.heating_setpoint_actual", "21.0",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.heating_mode_actual", "low", {})
+    # ebusd interlock inputs — all inactive, so the baseline permits heating.
+    ha.set_state("binary_sensor.heating_cooling_demand", "off", {})
+    ha.set_state("binary_sensor.heating_cooling_request", "off", {})
+    ha.set_state("binary_sensor.heating_cooling_running", "off", {})
+    ha.set_state("binary_sensor.heating_hwc_running", "off", {})
+    ha.set_state("binary_sensor.heating_backup_heater", "off", {})
+    # Loxone comfort signal — "not warm enough", i.e. the house wants heat.
+    ha.set_state("binary_sensor.heating_loxone_warm_enough", "off", {})
 
 
 # ── Shared time-machine fixtures ─────────────────────────────────────────────────────────

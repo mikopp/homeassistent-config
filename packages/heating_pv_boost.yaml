@@ -1,0 +1,649 @@
+# --- EBUSD PV HEATING OPTIMISATION ---
+# Phase 1: READ-ONLY DECISION LAYER.
+#
+# Everything here observes and decides; NOTHING writes to the heat pump yet. The purpose of this
+# phase is to run the full decision against live data for several days so the thresholds — above
+# all the return-temperature saturation point — can be calibrated before any register is written.
+#
+# Hardware context and verified ebusd register decodes live in packages/CLAUDE.md.
+#
+# ebusd MQTT payload format: plain ';'-separated values (NOT --mqttjson, which must stay off
+# because the Loxone integration consumes these same topics in this format). Multi-field messages
+# are therefore parsed positionally; the field list is documented inline at each sensor.
+#
+# Enum values arrive inconsistently as either a decoded name or a raw number, and which one is not
+# predictable from the register's declared type (live: mc/OperatingMode reads "low" while
+# mc/CoolingRequestHc2 reads "0"). Every enum read below accepts BOTH forms so that updating the
+# ebusd configuration later cannot break the control logic.
+
+mqtt:
+  sensor:
+    # ── geoTHERM: generator state ─────────────────────────────────────────────
+    # ehp/Status fields (confirmed by exact value match against the standalone registers):
+    #   0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
+    # hcmode enum: 0=off 1=cooling 3=heat 4=water. On the older ebusd config the field is the
+    # unnamed type "hcmode2" whose enum lacks 1=cooling, so cooling arrives as the raw "1".
+    # Field POSITION is stable at index 3 across both config generations, which is why this parses
+    # positionally rather than by name.
+    - name: "Heating Generator Mode"
+      unique_id: heating_generator_mode
+      state_topic: "ebusd/ehp/Status"
+      icon: mdi:heat-pump
+      device: &ebusd_geotherm
+        identifiers:
+          - ebusd_geotherm
+        name: "geoTHERM"
+        manufacturer: "Vaillant"
+        model: "geoTHERM EHP00"
+        suggested_area: "Technikraum"
+      value_template: >-
+        {% set f = value.split(';') %}
+        {% if f | count > 3 %}
+          {% set raw = f[3] | trim | lower %}
+          {% if raw in ['0', 'off'] %}off
+          {% elif raw in ['1', 'cool', 'cooling'] %}cooling
+          {% elif raw in ['3', 'heat'] %}heat
+          {% elif raw in ['4', 'water'] %}water
+          {% else %}unknown{% endif %}
+        {% endif %}
+
+    # Heating flow temperature — ehp/Status field 0. Also the freshness reference for
+    # binary_sensor.heating_ebusd_online, because this topic updates every few seconds.
+    - name: "Heating Flow Temp"
+      unique_id: heating_flow_temp
+      state_topic: "ebusd/ehp/Status"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set f = value.split(';') %}
+        {% if f | count > 0 and f[0] | trim | float(none) is not none %}{{ f[0] | float | round(2) }}{% endif %}
+
+    # ── The slab saturation signal ────────────────────────────────────────────
+    # ehp/HcReturnTemp (register 0A00, internal return sensor T5). Fields: 0 temp °C | 1 sensor
+    # status (ok/circuit/cutoff). Readings are only emitted when the sensor reports "ok", so a
+    # faulted probe holds the last good value rather than publishing a garbage temperature.
+    #
+    # NOTE: this register reads fine on demand but was NOT seen in the observed published topic
+    # sample. If this sensor stays unavailable after deploy, enable polling by publishing "?5" to
+    # ebusd/ehp/HcReturnTemp/get — see the post-deploy steps in plans/.
+    - name: "Heating Return Temp"
+      unique_id: heating_return_temp
+      state_topic: "ebusd/ehp/HcReturnTemp"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set f = value.split(';') %}
+        {% if f | count > 1 and f[1] | trim | lower == 'ok' %}{{ f[0] | float | round(2) }}{% endif %}
+
+    # ── The only human knob ───────────────────────────────────────────────────
+    # mc/TempDesiredLow (Absenktemperatur). Every setpoint HA will write in Phase 2 is derived
+    # from this value, so it is the one register a person is expected to change.
+    #
+    # NOTE: not seen in the observed published topic sample either. Documented fallback if it never
+    # arrives: mc/Params field 1 (same value, but a 9-field positional parse).
+    - name: "Heating Setback Temp"
+      unique_id: heating_setback_temp
+      state_topic: "ebusd/mc/TempDesiredLow"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:thermometer-low
+      device: *ebusd_geotherm
+      value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
+
+    # ── Current machine state, for observation and later write verification ───
+    # These are read-only views. Phase 2 adds separate number/select entities for writing, so
+    # there is no entity churn when control is enabled.
+    - name: "Heating Setpoint Actual"
+      unique_id: heating_setpoint_actual
+      state_topic: "ebusd/mc/TempDesired"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:thermometer
+      device: *ebusd_geotherm
+      value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
+
+    # mc/OperatingMode governs HEATING only — upstream comment is "Betriebsmodus Heizen".
+    # Cooling is a separate axis (mc/CoolingOperatingModeHc2), so this never disturbs cooling.
+    # Enum: 0=disabled 1=on 2=off 3=auto 4=eco 5=low. Normalised to names.
+    - name: "Heating Mode Actual"
+      unique_id: heating_mode_actual
+      state_topic: "ebusd/mc/OperatingMode"
+      icon: mdi:radiator
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set raw = value | trim | lower %}
+        {% if raw in ['0', 'disabled'] %}disabled
+        {% elif raw in ['1', 'on'] %}on
+        {% elif raw in ['2', 'off'] %}off
+        {% elif raw in ['3', 'auto'] %}auto
+        {% elif raw in ['4', 'eco'] %}eco
+        {% elif raw in ['5', 'low'] %}low
+        {% else %}unknown{% endif %}
+
+  binary_sensor:
+    # ── Cooling interlock inputs ──────────────────────────────────────────────
+    # Standalone single-field registers are used in preference to multi-field messages: they carry
+    # no field-order or field-naming exposure and so survive an ebusd config update untouched.
+    #
+    # mc/CoolingOperatingModeHc2 is deliberately NOT used as an interlock. It is a writable
+    # *setting* (reads "On" in September), not evidence that cooling is happening; blocking on it
+    # would disable the boost permanently if it is not maintained seasonally.
+    - name: "Heating Cooling Demand"
+      unique_id: heating_cooling_demand
+      state_topic: "ebusd/uih/CoolingDemand"
+      icon: mdi:snowflake-alert
+      device: *ebusd_geotherm
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # Circuit-specific cooling request — upstream: "abhängig von der Kühlungsbetriebsart,
+    # Zeitfenstern und Effizienzfunktionen", i.e. the gated, actually-triggered signal.
+    - name: "Heating Cooling Request"
+      unique_id: heating_cooling_request
+      state_topic: "ebusd/mc/CoolingRequestHc2"
+      icon: mdi:snowflake-alert
+      device: *ebusd_geotherm
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # Cooling actually running. Not seen in the observed topic sample; stays unavailable if the
+    # register is not published, in which case the two signals above carry the interlock.
+    - name: "Heating Cooling Running"
+      unique_id: heating_cooling_running
+      state_topic: "ebusd/uih/CoolingActive"
+      icon: mdi:snowflake
+      device: *ebusd_geotherm
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # ── DHW detection ─────────────────────────────────────────────────────────
+    # hwc/Status fields: 0 desired °C | 1 on/off | 2 actual °C | 3 desired °C.
+    # Field 1 is the DHW circuit state.
+    - name: "Heating Hwc Running"
+      unique_id: heating_hwc_running
+      state_topic: "ebusd/hwc/Status"
+      icon: mdi:water-boiler
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set f = value.split(';') %}
+        {% if f | count > 1 %}{{ 'ON' if f[1] | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}{% endif %}
+
+    # ── Resistive backup heater ───────────────────────────────────────────────
+    # An immersion element exists (BackupType internalheatandwater, 347 h on it), currently
+    # disabled for both circuits. Spending PV surplus on resistive heat delivers roughly a quarter
+    # of the heat per kWh that the compressor does, so a boost must never run while this is on.
+    - name: "Heating Backup Heater"
+      unique_id: heating_backup_heater
+      state_topic: "ebusd/ehp/Backup"
+      icon: mdi:heating-coil
+      device: *ebusd_geotherm
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # ── Loxone: the single comfort signal ─────────────────────────────────────
+    # Loxone owns human comfort and publishes one boolean. No expire_after: Loxone publishes only
+    # on change and sends no heartbeat, so an unchanging value must not decay to unavailable —
+    # the same reason documented for the Loxone appliance meters in packages/energy.yaml.
+    # Staleness is instead detected on value age (binary_sensor.heating_loxone_online).
+    - name: "Heating Loxone Warm Enough"
+      unique_id: heating_loxone_warm_enough
+      state_topic: "loxone/heating/warm_enough"
+      icon: mdi:home-thermometer
+      device:
+        identifiers:
+          - loxone_heating
+        name: "Loxone Heating"
+        manufacturer: "Loxone"
+        suggested_area: "Technikraum"
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+# ── HELPERS ─────────────────────────────────────────────────────────────────────
+# No initial: values anywhere — HA resets to initial on every restart and would overwrite a tuned
+# value. Set these once in the UI after deploy.
+input_boolean:
+  # Master switch for the whole slab-charging feature. Default off; Phase 1 does not act at all.
+  heating_pv_boost_enabled:
+    name: "Heating PV Boost Enabled"
+    icon: mdi:solar-power-variant
+
+input_number:
+  # How far above the normal heating-season setpoint a slab charge is allowed to push.
+  # This cap is what bounds comfort during a boost: the Vaillant will not exceed TempDesired,
+  # enforced through its own VR 90 room influence, so no room sensors are needed. Keep it small —
+  # a crash mid-boost leaves the house held at this offset until the watchdog runs.
+  heating_boost_offset:
+    name: "Heating Boost Offset"
+    min: 0.5
+    max: 3
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-plus
+    mode: box
+
+  # Surplus needed to START a slab charge, in watts of PV that would be free with the heat pump
+  # off. Sits below Loxone's ~3 kW hot-water threshold so heating uses surplus when DHW is not
+  # eligible; above 3 kW both want to run and the heat pump arbitrates via its own DHW priority.
+  heating_pv_surplus_threshold:
+    name: "Heating PV Surplus Threshold"
+    min: 500
+    max: 5000
+    step: 100
+    unit_of_measurement: "W"
+    icon: mdi:solar-power
+    mode: box
+
+  # Surplus below which a running charge STOPS. Deliberately a separate, lower number than the
+  # start threshold — one number would chatter around the boundary.
+  heating_pv_deficit_threshold:
+    name: "Heating PV Deficit Threshold"
+    min: 0
+    max: 3000
+    step: 100
+    unit_of_measurement: "W"
+    icon: mdi:solar-power-variant-outline
+    mode: box
+
+  # Battery floor. The house battery gets first call on surplus; a slab charge must not drain it.
+  heating_pv_min_battery_soc:
+    name: "Heating PV Min Battery SOC"
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:battery-charging-80
+    mode: box
+
+  # Return temperature at which the slab has stopped absorbing — collapsing flow-to-return ΔT.
+  # This is a SATURATION threshold, not a safety limit: the hardware protections sit far above it
+  # (mc/FloorProtectionLimit 44 °C, ehp/ReturnTempMax 46 °C). CALIBRATE THIS IN PHASE 1 by watching
+  # flow-vs-return during real heating cycles; it cannot be guessed from the desk.
+  heating_return_temp_max:
+    name: "Heating Return Temp Max"
+    min: 20
+    max: 40
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-chevron-up
+    mode: box
+
+# Daylight window in which a slab charge may start. A schedule entity rather than fixed times so
+# it can be shifted seasonally from the UI without a config change.
+schedule:
+  heating_pv_window:
+    name: "Heating PV Window"
+    icon: mdi:sun-clock
+    monday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    tuesday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    wednesday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    thursday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    friday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    saturday:
+      - from: "09:00:00"
+        to: "16:00:00"
+    sunday:
+      - from: "09:00:00"
+        to: "16:00:00"
+
+# ── DERIVED SENSORS AND THE DECISION ────────────────────────────────────────────
+template:
+  - sensor:
+      # ── PV surplus ────────────────────────────────────────────────────────
+      # "How much PV would be free if the heat pump were off."
+      #
+      # Grid export alone is unusable here: the Victron battery absorbs surplus first, so
+      # sensor.victron_grid_power_export only goes positive once the battery is full — typically
+      # too late in the day to charge a slab.
+      #
+      # And a naive "generation minus load" self-cancels: once a boost draws 2 kW, measured
+      # surplus drops by 2 kW and the boost immediately turns itself off. Subtracting the heating
+      # circuit's own draw (sensor.heizung_power, the Shelly Pro 3EM clamp) makes this figure
+      # INVARIANT under our own action, which is what a hysteresis controller needs.
+      #
+      # Both PV sources are included: this system has DC-coupled MPPT and an AC-coupled inverter.
+      # The heat pump itself exposes no electrical-power register (EHP00 has a fixed-speed
+      # compressor; ActualEnvironmentPower is thermal display data), so the Shelly clamp is the
+      # only real electrical measurement and this formula depends on it.
+      - name: "Heating PV Surplus"
+        unique_id: heating_pv_surplus
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        # Propagate unavailable rather than fabricating a 0: victron_grid_power_* have no
+        # availability guard of their own and read 0 during a GX outage, so this guards on the
+        # sources it actually uses. sensor.heizung_power carries expire_after: 120.
+        availability: >
+          {{ has_value('sensor.victron_dc_pv_total_power')
+             and has_value('sensor.victron_ac_inverter_power')
+             and has_value('sensor.victron_ac_load_total_power')
+             and has_value('sensor.heizung_power') }}
+        state: >
+          {% set pv = (states('sensor.victron_dc_pv_total_power') | float)
+                    + (states('sensor.victron_ac_inverter_power') | float) %}
+          {% set load_without_heating = (states('sensor.victron_ac_load_total_power') | float)
+                                      - (states('sensor.heizung_power') | float) %}
+          {{ (pv - load_without_heating) | round(0) }}
+
+      # ── Return temperature, masked during hot-water charging ──────────────
+      # While the heat pump is making hot water, its water temperatures reflect the DHW circuit
+      # rather than the heating circuit, so the return reading says nothing about the slab.
+      # This sensor goes UNAVAILABLE for the duration instead of publishing a misleading number,
+      # which means every numeric threshold downstream simply never fires during DHW — no
+      # sentinel value to remember, and it matches the repo rule on propagating unavailable.
+      - name: "Heating Return Temp Valid"
+        unique_id: heating_return_temp_valid
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-water
+        availability: >
+          {{ has_value('sensor.heating_return_temp')
+             and is_state('binary_sensor.heating_dhw_active', 'off') }}
+        state: "{{ states('sensor.heating_return_temp') | float | round(2) }}"
+
+      # ── The setpoint HA will command in Phase 2 ───────────────────────────
+      # Derived, never captured. Because this can always be recomputed there is nothing to save
+      # and restore across a boost or an HA restart, which is what removes the whole
+      # capture/restore mechanism a stateful design would need.
+      #
+      # Always the ABSOLUTE target — never a relative "current + offset", which is not idempotent:
+      # a retry, a duplicated trigger or a restart mid-boost would compound it to +2x offset.
+      #
+      # Phase 1 only publishes this for comparison against sensor.heating_setpoint_actual.
+      - name: "Heating Target Temp"
+        unique_id: heating_target_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-auto
+        availability: "{{ has_value('sensor.heating_setback_temp') }}"
+        state: >
+          {% set tdl = states('sensor.heating_setback_temp') | float %}
+          {% if not is_state('binary_sensor.heating_season_active', 'on') %}
+            {{ tdl | round(1) }}
+          {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
+            {{ (tdl + 1 + (states('input_number.heating_boost_offset') | float)) | round(1) }}
+          {% else %}
+            {{ (tdl + 1) | round(1) }}
+          {% endif %}
+
+      # ── Reason-based status, for the dashboard and for notifications ──────
+      # A derived view only; the decision sensors below remain the source of truth. Notifications
+      # fire off transitions of THIS sensor so a persistent fault reports once rather than
+      # repeating. Ordered most-specific first.
+      - name: "Heating Control State"
+        unique_id: heating_control_state
+        icon: >
+          {% set s = this.state %}
+          {% if s == 'slab_charging' %}mdi:sun-thermometer
+          {% elif s == 'ebusd_offline' %}mdi:lan-disconnect
+          {% elif s == 'backup_heater' %}mdi:heating-coil
+          {% elif s == 'cooling' %}mdi:snowflake
+          {% elif s == 'hot_water' %}mdi:water-boiler
+          {% elif s == 'heating' %}mdi:fire
+          {% elif s == 'off_season' %}mdi:weather-sunny
+          {% else %}mdi:radiator-disabled{% endif %}
+        state: >
+          {% if not is_state('binary_sensor.heating_ebusd_online', 'on') %}ebusd_offline
+          {% elif is_state('binary_sensor.heating_backup_heater', 'on') %}backup_heater
+          {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}cooling
+          {% elif not is_state('binary_sensor.heating_season_active', 'on') %}off_season
+          {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}slab_charging
+          {% elif is_state('binary_sensor.heating_dhw_active', 'on') %}hot_water
+          {% elif is_state('binary_sensor.heating_loxone_warm_enough', 'on') %}warm_enough
+          {% else %}heating{% endif %}
+
+  - binary_sensor:
+      # ── Season gate ───────────────────────────────────────────────────────
+      # Reuses the repo's existing 48-hour outdoor-mean classifier rather than inventing a
+      # date-based season. Both active_heating AND neutral permit heating: shoulder-season sunny
+      # days are exactly when cheap surplus heat is most available.
+      - name: "Heating Season Active"
+        unique_id: heating_season_active
+        icon: mdi:snowflake-thermometer
+        availability: "{{ has_value('sensor.heating_cooling_indicator') }}"
+        state: >
+          {{ states('sensor.heating_cooling_indicator') in ['active_heating', 'neutral'] }}
+
+      # ── Cooling interlock ─────────────────────────────────────────────────
+      # The same hydraulics serve heating and cooling, so nothing may push heat while the machine
+      # is cooling. Uses the machine's actual state, not its configured cooling mode.
+      # is_state() is used throughout so an unknown input reads as "not cooling" — the separate
+      # ebusd-online gate is what protects against acting on missing data.
+      - name: "Heating Cooling Active"
+        unique_id: heating_cooling_active
+        icon: mdi:snowflake-check
+        state: >
+          {{ is_state('binary_sensor.heating_cooling_running', 'on')
+             or is_state('binary_sensor.heating_cooling_demand', 'on')
+             or is_state('binary_sensor.heating_cooling_request', 'on')
+             or is_state('sensor.heating_generator_mode', 'cooling') }}
+
+      # ── Hot-water masking ─────────────────────────────────────────────────
+      # delay_off holds the mask through the thermal tail after a charge ends: the heating-circuit
+      # return does not recover the instant the DHW valve closes.
+      # A DHW charge does NOT cancel a slab charge — the heat pump arbitrates internally via its
+      # own hot-water priority. This only suppresses the return-temperature reading.
+      - name: "Heating DHW Active"
+        unique_id: heating_dhw_active
+        icon: mdi:water-boiler
+        delay_off: "00:25:00"
+        state: >
+          {{ is_state('sensor.heating_generator_mode', 'water')
+             or is_state('binary_sensor.heating_hwc_running', 'on') }}
+
+      # ── Liveness ──────────────────────────────────────────────────────────
+      # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
+      # and avoids putting expire_after on registers whose publish cadence is not yet known.
+      - name: "Heating ebusd Online"
+        unique_id: heating_ebusd_online
+        device_class: connectivity
+        state: >
+          {% set s = states.sensor.heating_flow_temp %}
+          {{ s is not none and s.last_updated is not none
+             and (now() - s.last_updated).total_seconds() < 900 }}
+
+      # Loxone publishes only on change with no heartbeat, so a long silence is normal and the
+      # window is correspondingly generous. Losing this signal is not fatal: HA holds heat during
+      # the heating season and the Vaillant governs comfort on its own weather curve.
+      - name: "Heating Loxone Online"
+        unique_id: heating_loxone_online
+        device_class: connectivity
+        state: >
+          {% set s = states.binary_sensor.heating_loxone_warm_enough %}
+          {{ s is not none and s.last_updated is not none
+             and (now() - s.last_updated).total_seconds() < 86400 }}
+
+      # ── THE DECISION ──────────────────────────────────────────────────────
+      # Phase 1 computes this but nothing acts on it. Phase 3 turns it into register writes.
+      #
+      # Two thresholds, not one: a single number would chatter around the boundary. The Schmitt
+      # logic reads this.state, so once charging it holds until surplus falls below the lower
+      # deficit threshold.
+      #
+      # delay_on/delay_off are FIXED rather than helper-driven because they are bounded by
+      # hardware, not taste: ehp/TimeBetweenTwoCompStartsMin is 1200 s, so the compressor cannot
+      # restart within 20 minutes. Anything faster cannot cycle the machine — it would only add
+      # bus traffic, wear and confusing traces. That is why delay_off is 20 minutes.
+      - name: "Heating Slab Mode Wanted"
+        unique_id: heating_slab_mode_wanted
+        icon: mdi:home-thermometer-outline
+        delay_on: "00:15:00"
+        delay_off: "00:20:00"
+        availability: >
+          {{ has_value('sensor.heating_pv_surplus')
+             and has_value('sensor.victron_battery_soc') }}
+        state: >
+          {% set surplus = states('sensor.heating_pv_surplus') | float %}
+          {% set start_at = states('input_number.heating_pv_surplus_threshold') | float %}
+          {% set stop_at = states('input_number.heating_pv_deficit_threshold') | float %}
+          {% set soc = states('sensor.victron_battery_soc') | float %}
+          {% set soc_floor = states('input_number.heating_pv_min_battery_soc') | float %}
+          {% set return_temp = states('sensor.heating_return_temp_valid') %}
+          {% set saturated = return_temp not in ['unknown', 'unavailable']
+             and (return_temp | float) >= (states('input_number.heating_return_temp_max') | float) %}
+          {% if not is_state('input_boolean.heating_pv_boost_enabled', 'on') %}false
+          {% elif not is_state('binary_sensor.heating_ebusd_online', 'on') %}false
+          {% elif not is_state('binary_sensor.heating_season_active', 'on') %}false
+          {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}false
+          {% elif is_state('binary_sensor.heating_backup_heater', 'on') %}false
+          {% elif not is_state('schedule.heating_pv_window', 'on') %}false
+          {% elif soc < soc_floor %}false
+          {% elif saturated %}false
+          {% elif this.state == 'on' %}{{ surplus >= stop_at }}
+          {% else %}{{ surplus >= start_at }}
+          {% endif %}
+
+# ── NOTIFICATIONS ───────────────────────────────────────────────────────────────
+# Driven off transitions of the reason-based state sensor and the liveness sensors, so a
+# persistent fault reports once rather than repeating.
+#
+# Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_setpoint_actual and
+# sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
+# pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
+automation:
+  # Losing ebusd means HA can see nothing and (from Phase 3) could write nothing. The Vaillant
+  # carries on standalone, so this is a "you have lost visibility" alert, not an emergency.
+  - alias: "Heating: ebusd connectivity changed"
+    id: heating_ebusd_connectivity
+    description: "Alert when the ebus bridge goes silent or comes back"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.heating_ebusd_online
+        to: "off"
+        for:
+          minutes: 5
+        id: lost
+      - platform: state
+        entity_id: binary_sensor.heating_ebusd_online
+        to: "on"
+        id: restored
+    condition:
+      - condition: template
+        value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+    action:
+      - action: notify.mobile_app_greywinds_iphone
+        data:
+          title: "Heating: ebus bridge {{ 'lost' if trigger.id == 'lost' else 'restored' }}"
+          message: >
+            {% if trigger.id == 'lost' %}
+              No ebusd data for 5 minutes — heat pump telemetry and control are unavailable.
+              The Vaillant continues on its own weather curve, so heating is unaffected.
+              Last flow temperature seen: {{ states('sensor.heating_flow_temp') }} °C.
+            {% else %}
+              ebusd is publishing again. Flow {{ states('sensor.heating_flow_temp') }} °C,
+              return {{ states('sensor.heating_return_temp') }} °C,
+              generator {{ states('sensor.heating_generator_mode') }}.
+            {% endif %}
+    mode: single
+
+  # The immersion heater delivers roughly a quarter of the heat per kWh that the compressor does.
+  # If it engages, surplus is being spent at a poor rate and a slab charge should not run.
+  - alias: "Heating: backup heater engaged"
+    id: heating_backup_heater_engaged
+    description: "Alert when the resistive backup heater runs"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.heating_backup_heater
+        to: "on"
+        for:
+          minutes: 2
+    action:
+      - action: notify.mobile_app_greywinds_iphone
+        data:
+          title: "Heating: backup heater running"
+          message: >
+            The resistive backup heater is on while the heating circuit draws
+            {{ states('sensor.heizung_power') }} W. Slab charging is blocked while it runs,
+            because resistive heat delivers far less per kWh than the compressor.
+            Outside {{ states('sensor.wheatherstation_outdoor_temperature') }} °C,
+            flow {{ states('sensor.heating_flow_temp') }} °C.
+    mode: single
+
+  # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
+  # thresholds can be judged against real days before any register is written. Retire or quieten
+  # this once Phase 3 makes the decision visible through actual behaviour.
+  - alias: "Heating: slab charge decision changed"
+    id: heating_slab_decision_changed
+    description: "Phase 1 observation — report when the slab-charge decision flips"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.heating_slab_mode_wanted
+        to: "on"
+        id: wanted
+      - platform: state
+        entity_id: binary_sensor.heating_slab_mode_wanted
+        to: "off"
+        id: ended
+    condition:
+      # Only report while the feature is armed, so a disarmed system stays silent.
+      - condition: state
+        entity_id: input_boolean.heating_pv_boost_enabled
+        state: "on"
+    action:
+      - action: notify.mobile_app_greywinds_iphone
+        data:
+          title: "Heating: slab charge {{ 'wanted' if trigger.id == 'wanted' else 'no longer wanted' }}"
+          message: >
+            Surplus {{ states('sensor.heating_pv_surplus') }} W,
+            battery {{ states('sensor.victron_battery_soc') }} %,
+            return {{ states('sensor.heating_return_temp_valid') }} °C,
+            setpoint would be {{ states('sensor.heating_target_temp') }} °C
+            (setback {{ states('sensor.heating_setback_temp') }} °C).
+            Phase 1 — observation only, nothing was written to the heat pump.
+    mode: single
+
+# --- GROUP ---
+# All entities belonging to the heating_pv_boost feature.
+# When new entities are added to this feature, add them here as well.
+group:
+  heating_pv_boost:
+    name: "Heating PV Boost"
+    entities:
+      # ebusd telemetry
+      - sensor.heating_generator_mode
+      - sensor.heating_flow_temp
+      - sensor.heating_return_temp
+      - sensor.heating_setback_temp
+      - sensor.heating_setpoint_actual
+      - sensor.heating_mode_actual
+      # ebusd interlock inputs
+      - binary_sensor.heating_cooling_demand
+      - binary_sensor.heating_cooling_request
+      - binary_sensor.heating_cooling_running
+      - binary_sensor.heating_hwc_running
+      - binary_sensor.heating_backup_heater
+      # Loxone comfort signal
+      - binary_sensor.heating_loxone_warm_enough
+      # Derived sensors
+      - sensor.heating_pv_surplus
+      - sensor.heating_return_temp_valid
+      - sensor.heating_target_temp
+      - sensor.heating_control_state
+      # Decision and gates
+      - binary_sensor.heating_season_active
+      - binary_sensor.heating_cooling_active
+      - binary_sensor.heating_dhw_active
+      - binary_sensor.heating_ebusd_online
+      - binary_sensor.heating_loxone_online
+      - binary_sensor.heating_slab_mode_wanted
+      # Helpers
+      - input_boolean.heating_pv_boost_enabled
+      - input_number.heating_boost_offset
+      - input_number.heating_pv_surplus_threshold
+      - input_number.heating_pv_deficit_threshold
+      - input_number.heating_pv_min_battery_soc
+      - input_number.heating_return_temp_max
+      - schedule.heating_pv_window
