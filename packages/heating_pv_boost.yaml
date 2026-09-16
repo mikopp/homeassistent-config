@@ -19,14 +19,20 @@
 mqtt:
   sensor:
     # ── geoTHERM: generator state ─────────────────────────────────────────────
+    # ehp/Status field 3 (hcmode) is what the generator is doing RIGHT NOW — off / cooling /
+    # heat / water, changing as the compressor cycles. In HA climate-entity terms this is
+    # HVAC ACTION (hvac_action), not HVAC mode: it is read-only telemetry of current activity,
+    # never a setting anyone chooses. Do not confuse it with sensor.heating_hvac_mode below,
+    # which reads mc/OperatingMode, the configured setting (HVAC MODE).
+    #
     # ehp/Status fields (confirmed by exact value match against the standalone registers):
     #   0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
     # hcmode enum: 0=off 1=cooling 3=heat 4=water. On the older ebusd config the field is the
     # unnamed type "hcmode2" whose enum lacks 1=cooling, so cooling arrives as the raw "1".
     # Field POSITION is stable at index 3 across both config generations, which is why this parses
     # positionally rather than by name.
-    - name: "Heating Generator Mode"
-      unique_id: heating_generator_mode
+    - name: "Heating HVAC Action"
+      unique_id: heating_hvac_action
       state_topic: "ebusd/ehp/Status"
       icon: mdi:heat-pump
       device: &ebusd_geotherm
@@ -108,11 +114,16 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
 
-    # mc/OperatingMode governs HEATING only — upstream comment is "Betriebsmodus Heizen".
-    # Cooling is a separate axis (mc/CoolingOperatingModeHc2), so this never disturbs cooling.
+    # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
+    # climate-entity terms, as opposed to sensor.heating_hvac_action above, which is the
+    # generator's real-time activity (HVAC action). This is what the control law will write in
+    # Phase 3 (as "low" or "on", never "off" — see the plan). Read-only here in Phase 1.
+    #
+    # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
+    # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.
     # Enum: 0=disabled 1=on 2=off 3=auto 4=eco 5=low. Normalised to names.
-    - name: "Heating Mode Actual"
-      unique_id: heating_mode_actual
+    - name: "Heating HVAC Mode"
+      unique_id: heating_hvac_mode
       state_topic: "ebusd/mc/OperatingMode"
       icon: mdi:radiator
       device: *ebusd_geotherm
@@ -429,7 +440,7 @@ template:
           {{ is_state('binary_sensor.heating_cooling_running', 'on')
              or is_state('binary_sensor.heating_cooling_demand', 'on')
              or is_state('binary_sensor.heating_cooling_request', 'on')
-             or is_state('sensor.heating_generator_mode', 'cooling') }}
+             or is_state('sensor.heating_hvac_action', 'cooling') }}
 
       # ── Hot-water masking ─────────────────────────────────────────────────
       # delay_off holds the mask through the thermal tail after a charge ends: the heating-circuit
@@ -441,7 +452,7 @@ template:
         icon: mdi:water-boiler
         delay_off: "00:25:00"
         state: >
-          {{ is_state('sensor.heating_generator_mode', 'water')
+          {{ is_state('sensor.heating_hvac_action', 'water')
              or is_state('binary_sensor.heating_hwc_running', 'on') }}
 
       # ── Liveness ──────────────────────────────────────────────────────────
@@ -545,7 +556,7 @@ automation:
             {% else %}
               ebusd is publishing again. Flow {{ states('sensor.heating_flow_temp') }} °C,
               return {{ states('sensor.heating_return_temp') }} °C,
-              generator {{ states('sensor.heating_generator_mode') }}.
+              generator {{ states('sensor.heating_hvac_action') }}.
             {% endif %}
     mode: single
 
@@ -613,12 +624,12 @@ group:
     name: "Heating PV Boost"
     entities:
       # ebusd telemetry
-      - sensor.heating_generator_mode
+      - sensor.heating_hvac_action
       - sensor.heating_flow_temp
       - sensor.heating_return_temp
       - sensor.heating_setback_temp
       - sensor.heating_setpoint_actual
-      - sensor.heating_mode_actual
+      - sensor.heating_hvac_mode
       # ebusd interlock inputs
       - binary_sensor.heating_cooling_demand
       - binary_sensor.heating_cooling_request

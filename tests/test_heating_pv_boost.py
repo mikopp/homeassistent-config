@@ -131,7 +131,7 @@ def test_return_temp_is_masked_while_making_hot_water(home_assistant: HomeAssist
         lambda s: abs(float(s) - 24.9) < 0.01,
         timeout=5,
     )
-    home_assistant.set_state("sensor.heating_generator_mode", "water", {})
+    home_assistant.set_state("sensor.heating_hvac_action", "water", {})
     home_assistant.assert_entity_state("binary_sensor.heating_dhw_active", "on", timeout=5)
     home_assistant.assert_entity_state(
         "sensor.heating_return_temp_valid", "unavailable", timeout=5
@@ -143,7 +143,7 @@ def test_cooling_interlock_follows_the_machine_not_the_setting(
 ) -> None:
     """Any of the three activity signals means cooling; the generator's own mode is one of them."""
     home_assistant.assert_entity_state("binary_sensor.heating_cooling_active", "off", timeout=5)
-    home_assistant.set_state("sensor.heating_generator_mode", "cooling", {})
+    home_assistant.set_state("sensor.heating_hvac_action", "cooling", {})
     home_assistant.assert_entity_state("binary_sensor.heating_cooling_active", "on", timeout=5)
 
 

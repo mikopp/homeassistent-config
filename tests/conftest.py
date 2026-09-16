@@ -209,7 +209,7 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
     # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
     # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
-    ha.set_state("sensor.heating_generator_mode", "off", {})
+    ha.set_state("sensor.heating_hvac_action", "off", {})
     ha.set_state("sensor.heating_flow_temp", "25.2",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.heating_return_temp", "24.9",
@@ -218,7 +218,7 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.heating_setpoint_actual", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_mode_actual", "low", {})
+    ha.set_state("sensor.heating_hvac_mode", "low", {})
     # ebusd interlock inputs — all inactive, so the baseline permits heating.
     ha.set_state("binary_sensor.heating_cooling_demand", "off", {})
     ha.set_state("binary_sensor.heating_cooling_request", "off", {})
