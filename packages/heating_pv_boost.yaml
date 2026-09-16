@@ -53,10 +53,13 @@ mqtt:
           {% else %}unknown{% endif %}
         {% endif %}
 
-    # Heating flow temperature — ehp/Status field 0. Also the freshness reference for
-    # binary_sensor.heating_ebusd_online, because this topic updates every few seconds.
-    - name: "Heating Flow Temp"
-      unique_id: heating_flow_temp
+    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT'S flow temperature. Named "Hc"
+    # to match the register, because a different, separate register — ehp/FlowTemp (VF2), the
+    # system-wide flow sensor — also exists on this bus and answers a different question. Also
+    # the freshness reference for binary_sensor.heating_ebusd_online, since this topic updates
+    # every few seconds.
+    - name: "Heating Circuit Flow Temp"
+      unique_id: heating_hc_flow_temp
       state_topic: "ebusd/ehp/Status"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -74,8 +77,8 @@ mqtt:
     # NOTE: this register reads fine on demand but was NOT seen in the observed published topic
     # sample. If this sensor stays unavailable after deploy, enable polling by publishing "?5" to
     # ebusd/ehp/HcReturnTemp/get — see the post-deploy steps in plans/.
-    - name: "Heating Return Temp"
-      unique_id: heating_return_temp
+    - name: "Heating Circuit Return Temp"
+      unique_id: heating_hc_return_temp
       state_topic: "ebusd/ehp/HcReturnTemp"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -91,8 +94,8 @@ mqtt:
     #
     # NOTE: not seen in the observed published topic sample either. Documented fallback if it never
     # arrives: mc/Params field 1 (same value, but a 9-field positional parse).
-    - name: "Heating Setback Temp"
-      unique_id: heating_setback_temp
+    - name: "Heating Temp Desired Low"
+      unique_id: heating_temp_desired_low
       state_topic: "ebusd/mc/TempDesiredLow"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -104,8 +107,8 @@ mqtt:
     # ── Current machine state, for observation and later write verification ───
     # These are read-only views. Phase 2 adds separate number/select entities for writing, so
     # there is no entity churn when control is enabled.
-    - name: "Heating Setpoint Actual"
-      unique_id: heating_setpoint_actual
+    - name: "Heating Temp Desired"
+      unique_id: heating_temp_desired
       state_topic: "ebusd/mc/TempDesired"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -161,10 +164,13 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
 
-    # Cooling actually running. Not seen in the observed topic sample; stays unavailable if the
-    # register is not published, in which case the two signals above carry the interlock.
-    - name: "Heating Cooling Running"
-      unique_id: heating_cooling_running
+    # uih/CoolingActive — the UIH's own "is cooling actually on" flag (Vaillant's own comment:
+    # "Kühlung aktiv" — cooling active). Suffixed _uih to avoid colliding with the derived
+    # interlock binary_sensor.heating_cooling_active below, which ORs this together with the
+    # other two cooling signals. Not seen in the observed topic sample; stays unavailable if the
+    # register is not published, in which case the two signals above carry the interlock alone.
+    - name: "Heating Cooling Active (UIH)"
+      unique_id: heating_cooling_active_uih
       state_topic: "ebusd/uih/CoolingActive"
       icon: mdi:snowflake
       device: *ebusd_geotherm
@@ -172,9 +178,11 @@ mqtt:
 
     # ── DHW detection ─────────────────────────────────────────────────────────
     # hwc/Status fields: 0 desired °C | 1 on/off | 2 actual °C | 3 desired °C.
-    # Field 1 is the DHW circuit state.
-    - name: "Heating Hwc Running"
-      unique_id: heating_hwc_running
+    # Field 1 is the DHW circuit state — an unnamed generic "onoff" subfield in the ebusd
+    # definitions, so there is no register-given name to inherit. Named "active" rather than
+    # "running" to match the convention used for the cooling signals above.
+    - name: "Heating Hwc Active"
+      unique_id: heating_hwc_active
       state_topic: "ebusd/hwc/Status"
       icon: mdi:water-boiler
       device: *ebusd_geotherm
@@ -353,16 +361,16 @@ template:
       # This sensor goes UNAVAILABLE for the duration instead of publishing a misleading number,
       # which means every numeric threshold downstream simply never fires during DHW — no
       # sentinel value to remember, and it matches the repo rule on propagating unavailable.
-      - name: "Heating Return Temp Valid"
-        unique_id: heating_return_temp_valid
+      - name: "Heating Circuit Return Temp Valid"
+        unique_id: heating_hc_return_temp_valid
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         icon: mdi:thermometer-water
         availability: >
-          {{ has_value('sensor.heating_return_temp')
+          {{ has_value('sensor.heating_hc_return_temp')
              and is_state('binary_sensor.heating_dhw_active', 'off') }}
-        state: "{{ states('sensor.heating_return_temp') | float | round(2) }}"
+        state: "{{ states('sensor.heating_hc_return_temp') | float | round(2) }}"
 
       # ── The setpoint HA will command in Phase 2 ───────────────────────────
       # Derived, never captured. Because this can always be recomputed there is nothing to save
@@ -372,16 +380,16 @@ template:
       # Always the ABSOLUTE target — never a relative "current + offset", which is not idempotent:
       # a retry, a duplicated trigger or a restart mid-boost would compound it to +2x offset.
       #
-      # Phase 1 only publishes this for comparison against sensor.heating_setpoint_actual.
+      # Phase 1 only publishes this for comparison against sensor.heating_temp_desired.
       - name: "Heating Target Temp"
         unique_id: heating_target_temp
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         icon: mdi:thermometer-auto
-        availability: "{{ has_value('sensor.heating_setback_temp') }}"
+        availability: "{{ has_value('sensor.heating_temp_desired_low') }}"
         state: >
-          {% set tdl = states('sensor.heating_setback_temp') | float %}
+          {% set tdl = states('sensor.heating_temp_desired_low') | float %}
           {% if not is_state('binary_sensor.heating_season_active', 'on') %}
             {{ tdl | round(1) }}
           {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
@@ -437,7 +445,7 @@ template:
         unique_id: heating_cooling_active
         icon: mdi:snowflake-check
         state: >
-          {{ is_state('binary_sensor.heating_cooling_running', 'on')
+          {{ is_state('binary_sensor.heating_cooling_active_uih', 'on')
              or is_state('binary_sensor.heating_cooling_demand', 'on')
              or is_state('binary_sensor.heating_cooling_request', 'on')
              or is_state('sensor.heating_hvac_action', 'cooling') }}
@@ -453,7 +461,7 @@ template:
         delay_off: "00:25:00"
         state: >
           {{ is_state('sensor.heating_hvac_action', 'water')
-             or is_state('binary_sensor.heating_hwc_running', 'on') }}
+             or is_state('binary_sensor.heating_hwc_active', 'on') }}
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -462,7 +470,7 @@ template:
         unique_id: heating_ebusd_online
         device_class: connectivity
         state: >
-          {% set s = states.sensor.heating_flow_temp %}
+          {% set s = states.sensor.heating_hc_flow_temp %}
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 900 }}
 
@@ -502,7 +510,7 @@ template:
           {% set stop_at = states('input_number.heating_pv_deficit_threshold') | float %}
           {% set soc = states('sensor.victron_battery_soc') | float %}
           {% set soc_floor = states('input_number.heating_pv_min_battery_soc') | float %}
-          {% set return_temp = states('sensor.heating_return_temp_valid') %}
+          {% set return_temp = states('sensor.heating_hc_return_temp_valid') %}
           {% set saturated = return_temp not in ['unknown', 'unavailable']
              and (return_temp | float) >= (states('input_number.heating_return_temp_max') | float) %}
           {% if not is_state('input_boolean.heating_pv_boost_enabled', 'on') %}false
@@ -521,7 +529,7 @@ template:
 # Driven off transitions of the reason-based state sensor and the liveness sensors, so a
 # persistent fault reports once rather than repeating.
 #
-# Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_setpoint_actual and
+# Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_temp_desired and
 # sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
 # pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
 automation:
@@ -552,10 +560,10 @@ automation:
             {% if trigger.id == 'lost' %}
               No ebusd data for 5 minutes — heat pump telemetry and control are unavailable.
               The Vaillant continues on its own weather curve, so heating is unaffected.
-              Last flow temperature seen: {{ states('sensor.heating_flow_temp') }} °C.
+              Last flow temperature seen: {{ states('sensor.heating_hc_flow_temp') }} °C.
             {% else %}
-              ebusd is publishing again. Flow {{ states('sensor.heating_flow_temp') }} °C,
-              return {{ states('sensor.heating_return_temp') }} °C,
+              ebusd is publishing again. Flow {{ states('sensor.heating_hc_flow_temp') }} °C,
+              return {{ states('sensor.heating_hc_return_temp') }} °C,
               generator {{ states('sensor.heating_hvac_action') }}.
             {% endif %}
     mode: single
@@ -580,7 +588,7 @@ automation:
             {{ states('sensor.heizung_power') }} W. Slab charging is blocked while it runs,
             because resistive heat delivers far less per kWh than the compressor.
             Outside {{ states('sensor.wheatherstation_outdoor_temperature') }} °C,
-            flow {{ states('sensor.heating_flow_temp') }} °C.
+            flow {{ states('sensor.heating_hc_flow_temp') }} °C.
     mode: single
 
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
@@ -610,9 +618,9 @@ automation:
           message: >
             Surplus {{ states('sensor.heating_pv_surplus') }} W,
             battery {{ states('sensor.victron_battery_soc') }} %,
-            return {{ states('sensor.heating_return_temp_valid') }} °C,
+            return {{ states('sensor.heating_hc_return_temp_valid') }} °C,
             setpoint would be {{ states('sensor.heating_target_temp') }} °C
-            (setback {{ states('sensor.heating_setback_temp') }} °C).
+            (setback {{ states('sensor.heating_temp_desired_low') }} °C).
             Phase 1 — observation only, nothing was written to the heat pump.
     mode: single
 
@@ -625,22 +633,22 @@ group:
     entities:
       # ebusd telemetry
       - sensor.heating_hvac_action
-      - sensor.heating_flow_temp
-      - sensor.heating_return_temp
-      - sensor.heating_setback_temp
-      - sensor.heating_setpoint_actual
+      - sensor.heating_hc_flow_temp
+      - sensor.heating_hc_return_temp
+      - sensor.heating_temp_desired_low
+      - sensor.heating_temp_desired
       - sensor.heating_hvac_mode
       # ebusd interlock inputs
       - binary_sensor.heating_cooling_demand
       - binary_sensor.heating_cooling_request
-      - binary_sensor.heating_cooling_running
-      - binary_sensor.heating_hwc_running
+      - binary_sensor.heating_cooling_active_uih
+      - binary_sensor.heating_hwc_active
       - binary_sensor.heating_backup_heater
       # Loxone comfort signal
       - binary_sensor.heating_loxone_warm_enough
       # Derived sensors
       - sensor.heating_pv_surplus
-      - sensor.heating_return_temp_valid
+      - sensor.heating_hc_return_temp_valid
       - sensor.heating_target_temp
       - sensor.heating_control_state
       # Decision and gates

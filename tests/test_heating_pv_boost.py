@@ -85,7 +85,7 @@ def test_target_temp_is_setback_plus_one_in_heating_season(
     home_assistant: HomeAssistant,
 ) -> None:
     """Season neutral (seeded) counts as heating season → TempDesiredLow + 1."""
-    home_assistant.set_state("sensor.heating_setback_temp", "21.0", _C)
+    home_assistant.set_state("sensor.heating_temp_desired_low", "21.0", _C)
     home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
@@ -98,7 +98,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
     home_assistant: HomeAssistant,
 ) -> None:
     """Out of heating season the setpoint collapses onto the setback value, so the circuit idles."""
-    home_assistant.set_state("sensor.heating_setback_temp", "21.0", _C)
+    home_assistant.set_state("sensor.heating_temp_desired_low", "21.0", _C)
     home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
     home_assistant.assert_entity_state("binary_sensor.heating_season_active", "off", timeout=5)
     home_assistant.assert_entity_state(
@@ -111,7 +111,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
 def test_target_temp_tracks_a_changed_setback(home_assistant: HomeAssistant) -> None:
     """TempDesiredLow is the only human knob — moving it must move the derived setpoint."""
     home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
-    home_assistant.set_state("sensor.heating_setback_temp", "20.0", _C)
+    home_assistant.set_state("sensor.heating_temp_desired_low", "20.0", _C)
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
         lambda s: abs(float(s) - 21.0) < 0.01,
@@ -125,16 +125,16 @@ def test_return_temp_is_masked_while_making_hot_water(home_assistant: HomeAssist
     The valid-return sensor must go unavailable so no numeric threshold downstream can fire on a
     reading that means something else.
     """
-    home_assistant.set_state("sensor.heating_return_temp", "24.9", _C)
+    home_assistant.set_state("sensor.heating_hc_return_temp", "24.9", _C)
     home_assistant.assert_entity_state(
-        "sensor.heating_return_temp_valid",
+        "sensor.heating_hc_return_temp_valid",
         lambda s: abs(float(s) - 24.9) < 0.01,
         timeout=5,
     )
     home_assistant.set_state("sensor.heating_hvac_action", "water", {})
     home_assistant.assert_entity_state("binary_sensor.heating_dhw_active", "on", timeout=5)
     home_assistant.assert_entity_state(
-        "sensor.heating_return_temp_valid", "unavailable", timeout=5
+        "sensor.heating_hc_return_temp_valid", "unavailable", timeout=5
     )
 
 
