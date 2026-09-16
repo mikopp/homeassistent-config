@@ -25,12 +25,15 @@ mqtt:
     # never a setting anyone chooses. Do not confuse it with sensor.heating_hvac_mode below,
     # which reads mc/OperatingMode, the configured setting (HVAC MODE).
     #
-    # ehp/Status fields (confirmed by exact value match against the standalone registers):
+    # ehp/Status fields (confirmed by exact value match against the standalone registers,
+    # and against https://ebus.github.io/de/vaillant/08.ehp.csv — the currently-served
+    # definitions; the archived/ CSVs in a local ebusd-configuration checkout are stale):
     #   0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
-    # hcmode enum: 0=off 1=cooling 3=heat 4=water. On the older ebusd config the field is the
-    # unnamed type "hcmode2" whose enum lacks 1=cooling, so cooling arrives as the raw "1".
-    # Field POSITION is stable at index 3 across both config generations, which is why this parses
-    # positionally rather than by name.
+    # hcmode enum: 0=off 1=cooling 3=heat 4=water. An OLDER config generation (not the one
+    # currently served) names this field "hcmode2" with an enum lacking 1=cooling, so cooling
+    # would arrive as the raw "1" there — confirmed absent from the current config, but which
+    # generation this ebusd instance runs is unconfirmed, so both forms are still accepted.
+    # See packages/CLAUDE.md for the full verification.
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
       state_topic: "ebusd/ehp/Status"

@@ -75,8 +75,13 @@ Corollaries:
 
 ## heating_pv_boost.yaml — Vaillant geoTHERM via ebusd
 
-Verified against a full `ebusctl` dump of the live bus and the upstream ebusd Vaillant
-definitions. These findings outlive any one plan — check here before adding an ebusd register.
+Verified against a full `ebusctl` dump of the live bus and the **published** ebusd Vaillant
+message definitions at `https://ebus.github.io/de/vaillant/*.csv` — this is the config ebusd
+≥24.1 actually downloads and runs. **Do not use the `archived/` CSVs in a local
+`john30/ebusd-configuration` checkout as a source** — that tree is a frozen historical
+snapshot and does not reflect the currently-served definitions (confirmed divergences below).
+These findings outlive any one plan — check here before adding an ebusd register, and
+re-verify against the live URL above rather than any local clone.
 
 ### Bus participants
 
@@ -102,8 +107,16 @@ positionally; document the field list inline at every such sensor.
 Whether an enum arrives as a decoded name or a raw number is **not predictable from its declared
 type**. Live: `mc/OperatingMode` reads `low` while `mc/CoolingOperatingModeHc2` reads `1`,
 `mc/CoolingRequestHc2` reads `0` and `ehp/Hc1Pump` reads `0` — yet `ebusctl` decodes all of them to
-names. Compounding it, the older ebusd config leaves `ehp/Status` field 3 unnamed (type `hcmode2`)
-with an enum lacking `1=cooling`, so cooling arrives as a raw `1` until the config is updated.
+names.
+
+A second, config-VERSION-dependent risk on top of that: an older ebusd config generation (the
+frozen `archived/` tree, not the currently-served one) leaves `ehp/Status` field 3 unnamed (type
+`hcmode2`) with an enum lacking `1=cooling`, so cooling would arrive as a raw `1` on that
+generation. **Confirmed NOT present in the currently-published config** — `hcmode2` does not
+appear anywhere in `https://ebus.github.io/de/vaillant/*.csv`; field 3 there is cleanly named
+`hcmode` with the full `0=off;1=cooling;3=heat;4=water` enum. Which generation this specific
+ebusd instance actually runs is unconfirmed from here — the dual-form parsing stays in place as
+cheap insurance either way.
 
 - **Every enum read accepts both forms**, mapping through one table; unmapped → `unknown`.
 - **Writes take names** (`low`, `on`). Never echo a normalised read back on a write.
@@ -125,8 +138,16 @@ second setpoint, not a percentage.
 `hwc/Status` = `desired;onoff;actual;desired`.
 
 **Unusable:** `mc/Mode` field 5 decodes `pool` while both `mc/CfgHeatSinkType` and `mc/Params` say
-`mixer` — do not use `mc/Mode` at all. `ehp/Status01` times out (unsupported). `ehp/Status02`
-returns placeholder data (`disabled;0;100.0;0;100.0`).
+`mixer` — do not use `mc/Mode` at all. `ehp/Status02` returns placeholder data
+(`disabled;0;100.0;0;100.0`).
+
+`ehp/Status01` is **not undefined** — the live config defines it fully: `temp` (flow),
+`temp_1` (**return** temperature — an independent alternative to `ehp/HcReturnTemp`), `temp_2`
+(outside), `temp_3` (hot water), `temp_4` (storage), `pumpstate`. This specific EHP unit returns
+a hardware timeout when it is polled (`ERR: read timeout` in the live dump) — the message exists
+and is well-formed, this unit just doesn't answer it. Worth an occasional re-check rather than
+writing it off permanently: if it ever responds, `temp_1` is a second, independently-addressed
+return-temperature reading.
 
 ### Hardware limits the controller must respect
 
@@ -166,7 +187,15 @@ the same slow-slab logic that makes daily changeover pointless.
 ### `mc/TempDesiredLow` is the only human knob
 
 Everything HA writes is derived from it, so `mc/TempDesired` set at the wall will be overwritten.
-`mc/RoomTempOffset` is write-only (visible on MQTT only because ebusd passively decodes the VR 90
-writing it) and so is unusable as a lever. Holiday mode is unused on this system
-(`rcc/HolidayPeriod` still holds 2015 dates) and there is no Quick/Party button on the VR 90 —
-recorded so neither gets rediscovered as a hypothetical.
+`mc/RoomTempOffset` is write-only (confirmed — only a `w` entry exists, no `r`; visible on MQTT
+only because ebusd passively decodes the VR 90 writing it) and so is unusable as a lever.
+
+Holiday mode is unused on this system (`rcc/HolidayPeriod` and `rcc/RoomTempHoliday` both exist
+and are confirmed-present registers, but the live dump shows 2015 dates — never actively set).
+
+**`mc/Party` ("Quick - Party", `b505 05`, write-only) does exist in the register catalog** —
+confirmed present in the live config, on `mc`, `hwc` and `cc` alike. What doesn't exist is a
+physical control for it: the VR 90 has no Party button, confirmed directly against this
+installation. So the register is real but untriggerable from the wall on this hardware — recorded
+this precisely (rather than "no such register") so a future reader doesn't rediscover `mc/Party`
+in a scan and wrongly conclude this note was mistaken.
