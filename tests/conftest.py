@@ -210,9 +210,9 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
     # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
     ha.set_state("sensor.heating_hvac_action", "off", {})
-    ha.set_state("sensor.heating_hc_flow_temp", "25.2",
+    ha.set_state("sensor.heating_circuit_flow_temp", "25.2",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_hc_return_temp", "24.9",
+    ha.set_state("sensor.heating_circuit_return_temp", "24.9",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.heating_temp_desired_low", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})

@@ -56,13 +56,18 @@ mqtt:
           {% else %}unknown{% endif %}
         {% endif %}
 
-    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT'S flow temperature. Named "Hc"
-    # to match the register, because a different, separate register — ehp/FlowTemp (VF2), the
-    # system-wide flow sensor — also exists on this bus and answers a different question. Also
-    # the freshness reference for binary_sensor.heating_ebusd_online, since this topic updates
-    # every few seconds.
+    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT'S flow temperature. Named
+    # explicitly "circuit" rather than a bare "flow temp", because a different, separate
+    # register — ehp/FlowTemp (VF2), the system-wide flow sensor — also exists on this bus and
+    # answers a different question; a generic name would risk colliding with it if that
+    # register is ever added. (The register's own "Hc" abbreviation is not reused in the entity
+    # id — HA derives entity_id from the friendly `name:` via slugify, not from `unique_id:`,
+    # confirmed against a real boot's entity registry, so id and name must always match after
+    # slugifying; spelling "circuit" out in both keeps that guaranteed rather than relying on
+    # a name/id pair staying in sync by hand.) Also the freshness reference for
+    # binary_sensor.heating_ebusd_online, since this topic updates every few seconds.
     - name: "Heating Circuit Flow Temp"
-      unique_id: heating_hc_flow_temp
+      unique_id: heating_circuit_flow_temp
       state_topic: "ebusd/ehp/Status"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -81,7 +86,7 @@ mqtt:
     # sample. If this sensor stays unavailable after deploy, enable polling by publishing "?5" to
     # ebusd/ehp/HcReturnTemp/get — see the post-deploy steps in plans/.
     - name: "Heating Circuit Return Temp"
-      unique_id: heating_hc_return_temp
+      unique_id: heating_circuit_return_temp
       state_topic: "ebusd/ehp/HcReturnTemp"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -365,15 +370,15 @@ template:
       # which means every numeric threshold downstream simply never fires during DHW — no
       # sentinel value to remember, and it matches the repo rule on propagating unavailable.
       - name: "Heating Circuit Return Temp Valid"
-        unique_id: heating_hc_return_temp_valid
+        unique_id: heating_circuit_return_temp_valid
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         icon: mdi:thermometer-water
         availability: >
-          {{ has_value('sensor.heating_hc_return_temp')
+          {{ has_value('sensor.heating_circuit_return_temp')
              and is_state('binary_sensor.heating_dhw_active', 'off') }}
-        state: "{{ states('sensor.heating_hc_return_temp') | float | round(2) }}"
+        state: "{{ states('sensor.heating_circuit_return_temp') | float | round(2) }}"
 
       # ── The setpoint HA will command in Phase 2 ───────────────────────────
       # Derived, never captured. Because this can always be recomputed there is nothing to save
@@ -473,7 +478,7 @@ template:
         unique_id: heating_ebusd_online
         device_class: connectivity
         state: >
-          {% set s = states.sensor.heating_hc_flow_temp %}
+          {% set s = states.sensor.heating_circuit_flow_temp %}
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 900 }}
 
@@ -513,7 +518,7 @@ template:
           {% set stop_at = states('input_number.heating_pv_deficit_threshold') | float %}
           {% set soc = states('sensor.victron_battery_soc') | float %}
           {% set soc_floor = states('input_number.heating_pv_min_battery_soc') | float %}
-          {% set return_temp = states('sensor.heating_hc_return_temp_valid') %}
+          {% set return_temp = states('sensor.heating_circuit_return_temp_valid') %}
           {% set saturated = return_temp not in ['unknown', 'unavailable']
              and (return_temp | float) >= (states('input_number.heating_return_temp_max') | float) %}
           {% if not is_state('input_boolean.heating_pv_boost_enabled', 'on') %}false
@@ -539,23 +544,23 @@ automation:
   # Losing ebusd means HA can see nothing and (from Phase 3) could write nothing. The Vaillant
   # carries on standalone, so this is a "you have lost visibility" alert, not an emergency.
   - alias: "Heating: ebusd connectivity changed"
-    id: heating_ebusd_connectivity
+    id: heating_ebusd_connectivity_changed
     description: "Alert when the ebus bridge goes silent or comes back"
-    trigger:
-      - platform: state
+    triggers:
+      - trigger: state
         entity_id: binary_sensor.heating_ebusd_online
         to: "off"
         for:
           minutes: 5
         id: lost
-      - platform: state
+      - trigger: state
         entity_id: binary_sensor.heating_ebusd_online
         to: "on"
         id: restored
-    condition:
+    conditions:
       - condition: template
         value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
-    action:
+    actions:
       - action: notify.mobile_app_greywinds_iphone
         data:
           title: "Heating: ebus bridge {{ 'lost' if trigger.id == 'lost' else 'restored' }}"
@@ -563,10 +568,10 @@ automation:
             {% if trigger.id == 'lost' %}
               No ebusd data for 5 minutes — heat pump telemetry and control are unavailable.
               The Vaillant continues on its own weather curve, so heating is unaffected.
-              Last flow temperature seen: {{ states('sensor.heating_hc_flow_temp') }} °C.
+              Last flow temperature seen: {{ states('sensor.heating_circuit_flow_temp') }} °C.
             {% else %}
-              ebusd is publishing again. Flow {{ states('sensor.heating_hc_flow_temp') }} °C,
-              return {{ states('sensor.heating_hc_return_temp') }} °C,
+              ebusd is publishing again. Flow {{ states('sensor.heating_circuit_flow_temp') }} °C,
+              return {{ states('sensor.heating_circuit_return_temp') }} °C,
               generator {{ states('sensor.heating_hvac_action') }}.
             {% endif %}
     mode: single
@@ -576,13 +581,13 @@ automation:
   - alias: "Heating: backup heater engaged"
     id: heating_backup_heater_engaged
     description: "Alert when the resistive backup heater runs"
-    trigger:
-      - platform: state
+    triggers:
+      - trigger: state
         entity_id: binary_sensor.heating_backup_heater
         to: "on"
         for:
           minutes: 2
-    action:
+    actions:
       - action: notify.mobile_app_greywinds_iphone
         data:
           title: "Heating: backup heater running"
@@ -591,37 +596,37 @@ automation:
             {{ states('sensor.heizung_power') }} W. Slab charging is blocked while it runs,
             because resistive heat delivers far less per kWh than the compressor.
             Outside {{ states('sensor.wheatherstation_outdoor_temperature') }} °C,
-            flow {{ states('sensor.heating_hc_flow_temp') }} °C.
+            flow {{ states('sensor.heating_circuit_flow_temp') }} °C.
     mode: single
 
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
   # thresholds can be judged against real days before any register is written. Retire or quieten
   # this once Phase 3 makes the decision visible through actual behaviour.
   - alias: "Heating: slab charge decision changed"
-    id: heating_slab_decision_changed
+    id: heating_slab_charge_decision_changed
     description: "Phase 1 observation — report when the slab-charge decision flips"
-    trigger:
-      - platform: state
+    triggers:
+      - trigger: state
         entity_id: binary_sensor.heating_slab_mode_wanted
         to: "on"
         id: wanted
-      - platform: state
+      - trigger: state
         entity_id: binary_sensor.heating_slab_mode_wanted
         to: "off"
         id: ended
-    condition:
+    conditions:
       # Only report while the feature is armed, so a disarmed system stays silent.
       - condition: state
         entity_id: input_boolean.heating_pv_boost_enabled
         state: "on"
-    action:
+    actions:
       - action: notify.mobile_app_greywinds_iphone
         data:
           title: "Heating: slab charge {{ 'wanted' if trigger.id == 'wanted' else 'no longer wanted' }}"
           message: >
             Surplus {{ states('sensor.heating_pv_surplus') }} W,
             battery {{ states('sensor.victron_battery_soc') }} %,
-            return {{ states('sensor.heating_hc_return_temp_valid') }} °C,
+            return {{ states('sensor.heating_circuit_return_temp_valid') }} °C,
             setpoint would be {{ states('sensor.heating_target_temp') }} °C
             (setback {{ states('sensor.heating_temp_desired_low') }} °C).
             Phase 1 — observation only, nothing was written to the heat pump.
@@ -636,8 +641,8 @@ group:
     entities:
       # ebusd telemetry
       - sensor.heating_hvac_action
-      - sensor.heating_hc_flow_temp
-      - sensor.heating_hc_return_temp
+      - sensor.heating_circuit_flow_temp
+      - sensor.heating_circuit_return_temp
       - sensor.heating_temp_desired_low
       - sensor.heating_temp_desired
       - sensor.heating_hvac_mode
@@ -651,7 +656,7 @@ group:
       - binary_sensor.heating_loxone_warm_enough
       # Derived sensors
       - sensor.heating_pv_surplus
-      - sensor.heating_hc_return_temp_valid
+      - sensor.heating_circuit_return_temp_valid
       - sensor.heating_target_temp
       - sensor.heating_control_state
       # Decision and gates

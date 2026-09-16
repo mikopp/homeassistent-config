@@ -125,16 +125,16 @@ def test_return_temp_is_masked_while_making_hot_water(home_assistant: HomeAssist
     The valid-return sensor must go unavailable so no numeric threshold downstream can fire on a
     reading that means something else.
     """
-    home_assistant.set_state("sensor.heating_hc_return_temp", "24.9", _C)
+    home_assistant.set_state("sensor.heating_circuit_return_temp", "24.9", _C)
     home_assistant.assert_entity_state(
-        "sensor.heating_hc_return_temp_valid",
+        "sensor.heating_circuit_return_temp_valid",
         lambda s: abs(float(s) - 24.9) < 0.01,
         timeout=5,
     )
     home_assistant.set_state("sensor.heating_hvac_action", "water", {})
     home_assistant.assert_entity_state("binary_sensor.heating_dhw_active", "on", timeout=5)
     home_assistant.assert_entity_state(
-        "sensor.heating_hc_return_temp_valid", "unavailable", timeout=5
+        "sensor.heating_circuit_return_temp_valid", "unavailable", timeout=5
     )
 
 
