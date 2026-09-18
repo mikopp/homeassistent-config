@@ -196,22 +196,54 @@ happen to share a name.** The `rcc` one calibrates the VR 90's own sensor readin
 level constants; live 0.50, alongside `RoomTempOffsetSelfWarming` −2.00). The `mc` one is the
 actual room-influence signal feeding the flow-setpoint computation — the one that matters here.
 
-**Room influence on this hardware has no mode selector and is structurally confined to a
-continuous additive correction — there is no path for it to behave as a hard on/off veto.**
-This was worth resolving explicitly: the uploaded plan this project started from assumed a
-VRC700-style `off`/`modulating`/`thermostat` switch (`Hc1RoomTempSwitchOn`, `rcmode` enum), which
-does not exist on this bus — see "no VRC 700" above. What actually exists is one channel,
-`mc/RoomTempOffset`, a plain signed `D2C` value with no accompanying mode flag, and the VR 90 has
-never been observed writing anything else on this bus (never `mc/OperatingMode`, nothing else) —
-so whatever its internal firmware decides, injecting a continuous offset is the only thing it can
-*do* to the circuit. Corroborated (not ebus-derived, so held to a lower confidence bar) by
-Vaillant's own public description of room compensation as a continuous shift of the heating curve
-(vaillant.de/21-grad), and by a detailed third-party write-up describing a *separate*, harder
-Vaillant controller mode that adds true on/off hysteresis — a materially different mechanism this
-installation shows no evidence of having a channel for. Practical consequence: raising
-`mc/TempDesired` during a boost overcomes an additive offset by construction, which is why the
-boost design does not need to know or control anything about the VR 90's internal room-influence
-logic. Not bounded, though — no declared max on `RoomTempOffset`'s magnitude was found; observed
+**CORRECTION (superseding an earlier note in this section): a "Raumaufschaltung: off/thermostat"
+toggle does exist on this installation and is ebus-communicated — confirmed directly by the owner,
+who switches it from both the VR 90 menu and the geoTHERM's own panel.** An earlier version of this
+note claimed room influence "has no mode selector" and is structurally additive-only; that claim
+was reasoned from the register catalog alone and is now known to be incomplete, not the toggle's
+non-existence.
+
+**The toggle itself is not a separate cataloged register.** An exhaustive re-search of the live
+GitHub Pages CSVs (`mc`, `ehp`, `uih`, `rcc`, `hwc`, `cc`, `broadcast` — refetched fresh, not the
+stale local clone) for `aufschalt`, `thermostat`, `raum*`, and every `UCH`/enum field on all six
+circuits found exactly one register whose comment literally says "Raumaufschaltung":
+`mc/RoomTempOffset` (`b505 2d`, write-only, plain signed `D2C` °C value, no enum, no mode flag —
+see above). Nothing else in the public catalog matches. Two explanations fit the evidence:
+
+1. **Most likely**: "off"/"thermostat" is a VR 90-side (and mirrored geoTHERM-panel-side) menu
+   selection that governs *whether the VR 90 writes to `mc/RoomTempOffset` at all*, not a separate
+   discrete register — "off" means the VR 90 never sends a correction (or sends a fixed neutral
+   one); "thermostat" means it actively trims the flow setpoint from its own room reading. This
+   fits the register's shape exactly (a continuous additive correction is precisely what a
+   "thermostat trim" would ride on) and needs no undocumented message to exist.
+2. **Possible but unconfirmed**: the toggle is a genuine installer-level parameter that the
+   community catalog simply never captured, because these CSVs are reverse-engineered from typical
+   runtime traffic and installer-menu-only parameters are exactly what such catalogs miss.
+
+**Not yet live-verified which of the two is true, or which value this installation currently has.**
+The only way to settle it from here is a live test: watch `ebusd/mc/RoomTempOffset` on MQTT (or
+`ebusctl read -f -c mc RoomTempOffset`) while toggling Raumaufschaltung on the real hardware, to see
+whether the write starts/stops appearing, or a completely different message ID shows up instead.
+
+**What this means for the plan.** If "thermostat" is the current setting, the VR 90's own
+room-based trim could write a compensating correction through `RoomTempOffset` as the room warms
+during a slab boost — partially undercutting the very over-charge the boost is trying to achieve,
+which is exactly the concern the original (pre-verification) reference plan's Task 3.1 was reacting
+to. But this design already does not use or need room-sensor trim: bedrooms are permanently
+hydraulically throttled and Loxone's `warm_enough` boolean is the sole comfort input the design
+honours (see the plan's "Rejected alternatives" section) — so "thermostat" mode's room compensation
+is redundant with this architecture even outside a boost, not merely inconvenient during one. The
+pragmatic resolution folded into the plan: set Raumaufschaltung to **off** as a one-time Vaillant/VR
+90-side change, alongside setting a real `mc/TempDesiredLow` (see the plan's "Changes outside this
+repo"). That removes the interference at the source and needs no new HA-side register write. If the
+owner wants room trim active during *normal* (non-boost) operation and only suppressed during a
+boost, HA would need to toggle the setting itself — which requires first identifying its literal
+ebus write, not yet found, and would need a live capture during an actual toggle to catch it.
+
+Practical consequence either way: raising `mc/TempDesired` during a boost overcomes an additive
+`RoomTempOffset` correction by construction (it is additive, not a hard ceiling), so even without
+resolving this, a boost is not blocked — only possibly less effective for as long as "thermostat"
+stays on. Not bounded, though — no declared max on `RoomTempOffset`'s magnitude was found; observed
 live values are small (0.00), but that is observation, not a guarantee.
 
 Holiday mode is unused on this system (`rcc/HolidayPeriod` and `rcc/RoomTempHoliday` both exist

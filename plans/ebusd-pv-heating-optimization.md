@@ -58,6 +58,13 @@ under our own action.
 - **HA rebuilds room comfort from HA room sensors.** Loxone already holds per-room setpoints and
   weighting. Duplicating it would drift. Comfort during a boost is instead bounded by the offset
   cap, enforced by the Vaillant's own VR 90 room influence — so HA needs no room sensors at all.
+- **HA toggles the VR 90's "Raumaufschaltung" (off/thermostat) room-influence setting.** This
+  toggle is confirmed to exist and be ebus-communicated, but its own write is not in the public
+  register catalog (only the continuous `mc/RoomTempOffset` "Raumaufschaltung" correction value
+  is — see `packages/CLAUDE.md`). Since this design already doesn't use or need room-sensor trim
+  (bedrooms are permanently throttled; Loxone's boolean is the sole comfort input), the setting is
+  redundant with this architecture regardless of boost state — so the fix is a one-time manual
+  change (below), not a register HA has to find and drive.
 - **HA writes `off` to stop heating.** Removing `off` from HA's vocabulary is what makes every
   failure path safe.
 - **`--mqttjson`.** The Loxone integration consumes these topics in the plain `;`-separated form
@@ -88,6 +95,12 @@ Verified register findings that outlive this plan (see that file).
    topic never appears, the sensor stays `unavailable` — that is the signal, and the documented
    fallback for `TempDesiredLow` is `mc/Params` field 1.
 3. Leave `--mqttjson` **off**.
+4. Set VR 90 **Raumaufschaltung to "off"** (currently unconfirmed which value is live). This
+   design does not use room-sensor trim — see `packages/CLAUDE.md` — so leaving it on "thermostat"
+   only risks the VR 90 quietly undercutting a boost's `TempDesired` increase via
+   `mc/RoomTempOffset`, never anything worse. Optional to confirm first with a live watch of
+   `ebusd/mc/RoomTempOffset` while toggling the setting, if the mechanism is worth nailing down
+   exactly rather than just switched off.
 
 ## Status
 
