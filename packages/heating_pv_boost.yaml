@@ -82,9 +82,13 @@ mqtt:
     # status (ok/circuit/cutoff). Readings are only emitted when the sensor reports "ok", so a
     # faulted probe holds the last good value rather than publishing a garbage temperature.
     #
-    # NOTE: this register reads fine on demand but was NOT seen in the observed published topic
-    # sample. If this sensor stays unavailable after deploy, enable polling by publishing "?5" to
-    # ebusd/ehp/HcReturnTemp/get — see the post-deploy steps in plans/.
+    # STATUS (2026-09-18 live ebusctl test): confirmed to answer a forced read cleanly —
+    # temp=23.56 sensor=ok — so the register and the hardware behind it both work end to end.
+    # Not yet confirmed to publish on MQTT UNPROMPTED (i.e. via ebusd's own background poll,
+    # without an explicit forced read) — that is a separate question from "does the register
+    # work", and is what actually determines whether this sensor is live after deploy. If it
+    # stays unavailable, enable polling by publishing "?5" to ebusd/ehp/HcReturnTemp/get — see
+    # the post-deploy steps in plans/.
     - name: "Heating Circuit Return Temp"
       unique_id: heating_circuit_return_temp
       state_topic: "ebusd/ehp/HcReturnTemp"
@@ -100,8 +104,13 @@ mqtt:
     # mc/TempDesiredLow (Absenktemperatur). Every setpoint HA will write in Phase 2 is derived
     # from this value, so it is the one register a person is expected to change.
     #
-    # NOTE: not seen in the observed published topic sample either. Documented fallback if it never
-    # arrives: mc/Params field 1 (same value, but a 9-field positional parse).
+    # STATUS (2026-09-18 live ebusctl test): confirmed to answer a forced read cleanly —
+    # value=21.0 °C — the same register/hardware-works confirmation as ehp/HcReturnTemp above,
+    # and the SAME open question: not yet confirmed to publish on MQTT unprompted. This is the
+    # single most important register to see arrive live, since every setpoint HA writes in
+    # Phase 2 is derived from it — if it stays unavailable after deploy, apply the same "?5" fix
+    # to ebusd/mc/TempDesiredLow/get. Documented fallback if it never arrives at all:
+    # mc/Params field 1 (same value, but a 9-field positional parse).
     - name: "Heating Temp Desired Low"
       unique_id: heating_temp_desired_low
       state_topic: "ebusd/mc/TempDesiredLow"
