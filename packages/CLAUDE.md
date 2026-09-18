@@ -190,6 +190,30 @@ Everything HA writes is derived from it, so `mc/TempDesired` set at the wall wil
 `mc/RoomTempOffset` is write-only (confirmed — only a `w` entry exists, no `r`; visible on MQTT
 only because ebusd passively decodes the VR 90 writing it) and so is unusable as a lever.
 
+**Do not confuse `mc/RoomTempOffset` (`b505 2d`, "Raumaufschaltung") with `rcc/RoomTempOffset`
+(`1f00`, "Raumisttemp. Korrekturwert") — two different registers on two different circuits that
+happen to share a name.** The `rcc` one calibrates the VR 90's own sensor reading (small install-
+level constants; live 0.50, alongside `RoomTempOffsetSelfWarming` −2.00). The `mc` one is the
+actual room-influence signal feeding the flow-setpoint computation — the one that matters here.
+
+**Room influence on this hardware has no mode selector and is structurally confined to a
+continuous additive correction — there is no path for it to behave as a hard on/off veto.**
+This was worth resolving explicitly: the uploaded plan this project started from assumed a
+VRC700-style `off`/`modulating`/`thermostat` switch (`Hc1RoomTempSwitchOn`, `rcmode` enum), which
+does not exist on this bus — see "no VRC 700" above. What actually exists is one channel,
+`mc/RoomTempOffset`, a plain signed `D2C` value with no accompanying mode flag, and the VR 90 has
+never been observed writing anything else on this bus (never `mc/OperatingMode`, nothing else) —
+so whatever its internal firmware decides, injecting a continuous offset is the only thing it can
+*do* to the circuit. Corroborated (not ebus-derived, so held to a lower confidence bar) by
+Vaillant's own public description of room compensation as a continuous shift of the heating curve
+(vaillant.de/21-grad), and by a detailed third-party write-up describing a *separate*, harder
+Vaillant controller mode that adds true on/off hysteresis — a materially different mechanism this
+installation shows no evidence of having a channel for. Practical consequence: raising
+`mc/TempDesired` during a boost overcomes an additive offset by construction, which is why the
+boost design does not need to know or control anything about the VR 90's internal room-influence
+logic. Not bounded, though — no declared max on `RoomTempOffset`'s magnitude was found; observed
+live values are small (0.00), but that is observation, not a guarantee.
+
 Holiday mode is unused on this system (`rcc/HolidayPeriod` and `rcc/RoomTempHoliday` both exist
 and are confirmed-present registers, but the live dump shows 2015 dates — never actively set).
 
