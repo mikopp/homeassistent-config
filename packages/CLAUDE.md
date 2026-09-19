@@ -102,6 +102,36 @@ ebusd publishes plain `;`-separated values, and **the Loxone integration consume
 in that format**. Switching to JSON would break it. Multi-field messages are therefore parsed
 positionally; document the field list inline at every such sensor.
 
+### Poll-priority registration is a runtime MQTT action, not just a CSV `poll` column
+
+Publishing `?N` (N = priority digit 1-9) to a register's `ebusd/<circuit>/<name>/get` topic does
+two things at once: performs an immediate read AND enables ONGOING automatic polling of that
+register at priority N going forward. An EMPTY payload to the same topic is different — it's a
+ONE-TIME forced read only, no ongoing polling. `automation.heating_ebusd_poll_registration` in
+`packages/heating_pv_boost.yaml` uses the `?N` form for exactly this reason.
+
+**Confirmed by the system owner: a runtime-set poll priority does NOT survive an ebusd process
+restart.** ebusd also publishes its own process status to MQTT under `ebusd/global/*` (retained
+topics): `running` (`"true"`/`"false"`, set to `"false"` as an MQTT last-will when ebusd
+disconnects); `scan` (`"OK"` / `"running"` / `"finished"` — its bus/device discovery status);
+`version`; `uptime`; `signal`. `binary_sensor.heating_ebusd_running` and
+`sensor.heating_ebusd_scan_status` (in `packages/heating_pv_boost.yaml`) expose the first two.
+
+**Sequencing rule (owner-confirmed): a poll priority must not be registered while `scan` reads
+`"running"`** — ebusd may still be mid-discovery of what's on the bus, so the message catalog a
+registration targets can be incomplete. Register only once `scan` leaves `"running"`, and
+re-register whenever it transitions back to `"running"` and out again (a fresh scan — most likely
+correlated with an ebusd restart, but treated as its own signal regardless of cause).
+`heating_ebusd_poll_registration` gates on this with a single condition
+(`{{ states('sensor.heating_ebusd_scan_status') != 'running' }}`) applied uniformly across all of
+its triggers, rather than allowlisting one specific resting value — it's undocumented whether
+ebusd's steady state after a scan is `"finished"` or settles back to `"OK"`, and the only state
+that's actually unsafe is `"running"`.
+
+Priority itself is a relative scheduling weight ("polled every Nth poll cycle"), not a documented
+number of seconds — the mapping to real-world cadence depends on total bus load and participant
+count, so treat it as relative ordering only.
+
 ### Enum representation is inconsistent, and writes differ from reads
 
 Whether an enum arrives as a decoded name or a raw number is **not predictable from its declared
@@ -129,8 +159,12 @@ cheap insurance either way.
 the standalone registers (`25.19;1.266;1.682;off;00`). `hcmode`: `0=off 1=cooling 3=heat 4=water`.
 
 `ehp/HcReturnTemp` (register `0A00`, internal sensor T5) = `temp;sensor` where sensor is
-`ok|circuit|cutoff`. Reads on demand but may not be published — enable polling by publishing `?5`
-to `ebusd/ehp/HcReturnTemp/get`.
+`ok|circuit|cutoff`. Reads on demand; ongoing polling is now registered automatically (priority 3)
+by `automation.heating_ebusd_poll_registration` in `packages/heating_pv_boost.yaml` rather than
+needing a manual `?5` publish — see that automation and the "Poll-priority registration" section
+below. Not yet live-confirmed to actually publish as a result — whether `ebusd/#` reaches HA's
+broker at all is still an open item in `plans/ebusd-pv-heating-optimization.md`'s Status
+checklist, so the mechanism changed but the outcome isn't verified yet.
 
 `mc/Status0a` = `flowtemp;mixer;pump;onoff;flowtempdesired`.
 `mc/Status` = `flowtempdesired;onoff;flowtemp;tempdesired` — no modulation field; field 3 is a

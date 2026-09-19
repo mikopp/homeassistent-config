@@ -219,6 +219,10 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.heating_temp_desired", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.heating_hvac_mode", "low", {})
+    # ebusd bridge status — "finished" is the steady/safe state (scan not in progress), so the
+    # poll-registration automation's condition gate passes by default in tests.
+    ha.set_state("sensor.heating_ebusd_scan_status", "finished", {})
+    ha.set_state("binary_sensor.heating_ebusd_running", "on", {})
     # ebusd interlock inputs — all inactive, so the baseline permits heating.
     ha.set_state("binary_sensor.heating_cooling_demand", "off", {})
     ha.set_state("binary_sensor.heating_cooling_request", "off", {})

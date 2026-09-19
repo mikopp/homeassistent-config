@@ -157,6 +157,22 @@ mqtt:
         {% elif raw in ['5', 'low'] %}low
         {% else %}unknown{% endif %}
 
+    # ── ebusd bridge status (the ebusd process itself, not the geoTHERM hardware) ─────────────
+    # ebusd's own bus/device scan status: "OK", "running", or "finished" (retained). A poll
+    # priority registered while this reads "running" targets a message catalog that may still be
+    # incomplete (ebusd is mid-discovery of what's on the bus) and is unreliable.
+    # automation.heating_ebusd_poll_registration gates on this being anything other than
+    # "running" before it (re-)registers polling — see that automation and packages/CLAUDE.md.
+    - name: "Heating ebusd Scan Status"
+      unique_id: heating_ebusd_scan_status
+      state_topic: "ebusd/global/scan"
+      icon: mdi:magnify-scan
+      device: &ebusd_bridge
+        identifiers:
+          - ebusd_bridge
+        name: "ebusd"
+        suggested_area: "Technikraum"
+
   binary_sensor:
     # ── Cooling interlock inputs ──────────────────────────────────────────────
     # Standalone single-field registers are used in preference to multi-field messages: they carry
@@ -233,6 +249,21 @@ mqtt:
         name: "Loxone Heating"
         manufacturer: "Loxone"
         suggested_area: "Technikraum"
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # ── ebusd bridge liveness (distinct from bus-data liveness) ────────────────
+    # ebusd's own MQTT status topic — retained, and set to "false" as an MQTT last-will when
+    # ebusd disconnects, "true" again once it reconnects. Signals that the ebusd PROCESS itself
+    # restarted (and therefore lost any runtime-set poll priorities — confirmed, not assumed:
+    # they do not survive a restart). Deliberately separate from binary_sensor.heating_ebusd_online
+    # below, which instead answers "is the bus DATA still fresh" (also trips on a dead serial/ebus
+    # link even with ebusd itself healthy). By itself this is NOT sufficient to know it is safe to
+    # register poll priorities — see sensor.heating_ebusd_scan_status above.
+    - name: "Heating ebusd Running"
+      unique_id: heating_ebusd_running
+      state_topic: "ebusd/global/running"
+      device_class: connectivity
+      device: *ebusd_bridge
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
 
 # ── HELPERS ─────────────────────────────────────────────────────────────────────
@@ -542,14 +573,98 @@ template:
           {% else %}{{ surplus >= start_at }}
           {% endif %}
 
-# ── NOTIFICATIONS ───────────────────────────────────────────────────────────────
-# Driven off transitions of the reason-based state sensor and the liveness sensors, so a
-# persistent fault reports once rather than repeating.
-#
-# Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_temp_desired and
-# sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
-# pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
+# ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
+  # ── ebusd MQTT poll-priority registration ─────────────────────────────────
+  # Nine of the ten ebusd registers this feature reads are confirmed (or suspected) to answer a
+  # forced read but not to auto-publish on MQTT without one — ehp/Status is the sole exception,
+  # already broadcasting every few seconds (see the sensor comments above and packages/CLAUDE.md).
+  # Publishing "?N" (N = priority digit 1-9) to a register's ".../get" topic both performs a read
+  # AND enables ONGOING automatic polling at that priority going forward — an empty payload to the
+  # same topic is a one-time read only. Priority is a relative scheduling weight ("polled every
+  # Nth poll cycle"), not a documented number of seconds — validate real cadence once deployed
+  # (see plans/ebusd-pv-heating-optimization.md) and retune the tiers below if needed.
+  #
+  # Confirmed (not assumed): ebusd does NOT retain a runtime-set poll priority across its own
+  # process restart. This automation re-asserts all nine on HA start and whenever ebusd is seen
+  # to come back (either global/running or the bus-data liveness sensor) or its bus scan
+  # completes — "recompute and re-assert, no state to recover", the same self-healing approach
+  # planned for Phase 3's watchdog. Every trigger funnels through one condition — the scan must
+  # not currently read "running" — so a registration is never issued while ebusd's message
+  # catalog might still be mid-discovery; on a scan-in-progress restart, the fourth trigger
+  # (scan → finished/OK) is what actually fires the registration once it is safe.
+  - alias: "Heating: ebusd poll registration"
+    id: heating_ebusd_poll_registration
+    description: "Register/refresh ebusd polling priorities once its bus scan is not in progress"
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: binary_sensor.heating_ebusd_running
+        to: "on"
+      - trigger: state
+        entity_id: binary_sensor.heating_ebusd_online
+        to: "on"
+      - trigger: state
+        entity_id: sensor.heating_ebusd_scan_status
+        to:
+          - "finished"
+          - "OK"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.heating_ebusd_scan_status') != 'running' }}"
+    actions:
+      # Tier 1 (priority 3) — the primary numeric decision driver and the signal that masks it
+      # during a DHW cycle.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/HcReturnTemp/get"
+          payload: "?3"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/hwc/Status/get"
+          payload: "?3"
+      # Tier 2 (priority 5) — safety interlocks, already debounced by the 15 min delay_on in
+      # binary_sensor.heating_slab_mode_wanted.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/Backup/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/CoolingRequestHc2/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/uih/CoolingDemand/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/uih/CoolingActive/get"
+          payload: "?5"
+      # Tier 3 (priority 7) — the human knob (changes rarely) plus Phase 1 read-only telemetry.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/TempDesiredLow/get"
+          payload: "?7"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/TempDesired/get"
+          payload: "?7"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/OperatingMode/get"
+          payload: "?7"
+    mode: single
+
+  # ── NOTIFICATIONS ───────────────────────────────────────────────────────────────
+  # Driven off transitions of the reason-based state sensor and the liveness sensors, so a
+  # persistent fault reports once rather than repeating.
+  #
+  # Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_temp_desired and
+  # sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
+  # pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
+
   # Losing ebusd means HA can see nothing and (from Phase 3) could write nothing. The Vaillant
   # carries on standalone, so this is a "you have lost visibility" alert, not an emergency.
   - alias: "Heating: ebusd connectivity changed"
@@ -655,12 +770,14 @@ group:
       - sensor.heating_temp_desired_low
       - sensor.heating_temp_desired
       - sensor.heating_hvac_mode
+      - sensor.heating_ebusd_scan_status
       # ebusd interlock inputs
       - binary_sensor.heating_cooling_demand
       - binary_sensor.heating_cooling_request
       - binary_sensor.heating_cooling_active_uih
       - binary_sensor.heating_hwc_active
       - binary_sensor.heating_backup_heater
+      - binary_sensor.heating_ebusd_running
       # Loxone comfort signal
       - binary_sensor.heating_loxone_warm_enough
       # Derived sensors
