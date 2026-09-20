@@ -36,6 +36,7 @@ mqtt:
     # See packages/CLAUDE.md for the full verification.
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
+      default_entity_id: sensor.heating_hvac_action
       state_topic: "ebusd/ehp/Status"
       icon: mdi:heat-pump
       device: &ebusd_geotherm
@@ -68,6 +69,7 @@ mqtt:
     # binary_sensor.heating_ebusd_online, since this topic updates every few seconds.
     - name: "Heating Circuit Flow Temp"
       unique_id: heating_circuit_flow_temp
+      default_entity_id: sensor.heating_circuit_flow_temp
       state_topic: "ebusd/ehp/Status"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -91,6 +93,7 @@ mqtt:
     # the post-deploy steps in plans/.
     - name: "Heating Circuit Return Temp"
       unique_id: heating_circuit_return_temp
+      default_entity_id: sensor.heating_circuit_return_temp
       state_topic: "ebusd/ehp/HcReturnTemp"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -113,6 +116,7 @@ mqtt:
     # mc/Params field 1 (same value, but a 9-field positional parse).
     - name: "Heating Temp Desired Low"
       unique_id: heating_temp_desired_low
+      default_entity_id: sensor.heating_temp_desired_low
       state_topic: "ebusd/mc/TempDesiredLow"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -126,6 +130,7 @@ mqtt:
     # there is no entity churn when control is enabled.
     - name: "Heating Temp Desired"
       unique_id: heating_temp_desired
+      default_entity_id: sensor.heating_temp_desired
       state_topic: "ebusd/mc/TempDesired"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -144,6 +149,7 @@ mqtt:
     # Enum: 0=disabled 1=on 2=off 3=auto 4=eco 5=low. Normalised to names.
     - name: "Heating HVAC Mode"
       unique_id: heating_hvac_mode
+      default_entity_id: sensor.heating_hvac_mode
       state_topic: "ebusd/mc/OperatingMode"
       icon: mdi:radiator
       device: *ebusd_geotherm
@@ -165,6 +171,7 @@ mqtt:
     # "running" before it (re-)registers polling — see that automation and packages/CLAUDE.md.
     - name: "Heating ebusd Scan Status"
       unique_id: heating_ebusd_scan_status
+      default_entity_id: sensor.heating_ebusd_scan_status
       state_topic: "ebusd/global/scan"
       icon: mdi:magnify-scan
       device: &ebusd_bridge
@@ -183,6 +190,7 @@ mqtt:
     # would disable the boost permanently if it is not maintained seasonally.
     - name: "Heating Cooling Demand"
       unique_id: heating_cooling_demand
+      default_entity_id: binary_sensor.heating_cooling_demand
       state_topic: "ebusd/uih/CoolingDemand"
       icon: mdi:snowflake-alert
       device: *ebusd_geotherm
@@ -192,6 +200,7 @@ mqtt:
     # Zeitfenstern und Effizienzfunktionen", i.e. the gated, actually-triggered signal.
     - name: "Heating Cooling Request"
       unique_id: heating_cooling_request
+      default_entity_id: binary_sensor.heating_cooling_request
       state_topic: "ebusd/mc/CoolingRequestHc2"
       icon: mdi:snowflake-alert
       device: *ebusd_geotherm
@@ -204,6 +213,7 @@ mqtt:
     # register is not published, in which case the two signals above carry the interlock alone.
     - name: "Heating Cooling Active (UIH)"
       unique_id: heating_cooling_active_uih
+      default_entity_id: binary_sensor.heating_cooling_active_uih
       state_topic: "ebusd/uih/CoolingActive"
       icon: mdi:snowflake
       device: *ebusd_geotherm
@@ -216,6 +226,7 @@ mqtt:
     # "running" to match the convention used for the cooling signals above.
     - name: "Heating Hwc Active"
       unique_id: heating_hwc_active
+      default_entity_id: binary_sensor.heating_hwc_active
       state_topic: "ebusd/hwc/Status"
       icon: mdi:water-boiler
       device: *ebusd_geotherm
@@ -229,6 +240,7 @@ mqtt:
     # of the heat per kWh that the compressor does, so a boost must never run while this is on.
     - name: "Heating Backup Heater"
       unique_id: heating_backup_heater
+      default_entity_id: binary_sensor.heating_backup_heater
       state_topic: "ebusd/ehp/Backup"
       icon: mdi:heating-coil
       device: *ebusd_geotherm
@@ -241,6 +253,7 @@ mqtt:
     # Staleness is instead detected on value age (binary_sensor.heating_loxone_online).
     - name: "Heating Loxone Warm Enough"
       unique_id: heating_loxone_warm_enough
+      default_entity_id: binary_sensor.heating_loxone_warm_enough
       state_topic: "loxone/heating/warm_enough"
       icon: mdi:home-thermometer
       device:
@@ -261,6 +274,7 @@ mqtt:
     # register poll priorities — see sensor.heating_ebusd_scan_status above.
     - name: "Heating ebusd Running"
       unique_id: heating_ebusd_running
+      default_entity_id: binary_sensor.heating_ebusd_running
       state_topic: "ebusd/global/running"
       device_class: connectivity
       device: *ebusd_bridge
