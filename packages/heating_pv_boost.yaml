@@ -22,7 +22,7 @@ mqtt:
     # ehp/Status field 3 (hcmode) is what the generator is doing RIGHT NOW — off / cooling /
     # heat / water, changing as the compressor cycles. In HA climate-entity terms this is
     # HVAC ACTION (hvac_action), not HVAC mode: it is read-only telemetry of current activity,
-    # never a setting anyone chooses. Do not confuse it with sensor.heating_hvac_mode below,
+    # never a setting anyone chooses. Do not confuse it with sensor.geotherm_heating_hvac_mode below,
     # which reads mc/OperatingMode, the configured setting (HVAC MODE).
     #
     # ehp/Status fields (confirmed by exact value match against the standalone registers,
@@ -36,7 +36,7 @@ mqtt:
     # See packages/CLAUDE.md for the full verification.
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
-      default_entity_id: sensor.heating_hvac_action
+      default_entity_id: sensor.geotherm_heating_hvac_action
       state_topic: "ebusd/ehp/Status"
       icon: mdi:heat-pump
       device: &ebusd_geotherm
@@ -69,7 +69,7 @@ mqtt:
     # binary_sensor.heating_ebusd_online, since this topic updates every few seconds.
     - name: "Heating Circuit Flow Temp"
       unique_id: heating_circuit_flow_temp
-      default_entity_id: sensor.heating_circuit_flow_temp
+      default_entity_id: sensor.geotherm_heating_circuit_flow_temp
       state_topic: "ebusd/ehp/Status"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -93,7 +93,7 @@ mqtt:
     # the post-deploy steps in plans/.
     - name: "Heating Circuit Return Temp"
       unique_id: heating_circuit_return_temp
-      default_entity_id: sensor.heating_circuit_return_temp
+      default_entity_id: sensor.geotherm_heating_circuit_return_temp
       state_topic: "ebusd/ehp/HcReturnTemp"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -116,7 +116,7 @@ mqtt:
     # mc/Params field 1 (same value, but a 9-field positional parse).
     - name: "Heating Temp Desired Low"
       unique_id: heating_temp_desired_low
-      default_entity_id: sensor.heating_temp_desired_low
+      default_entity_id: sensor.geotherm_heating_temp_desired_low
       state_topic: "ebusd/mc/TempDesiredLow"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -130,7 +130,7 @@ mqtt:
     # there is no entity churn when control is enabled.
     - name: "Heating Temp Desired"
       unique_id: heating_temp_desired
-      default_entity_id: sensor.heating_temp_desired
+      default_entity_id: sensor.geotherm_heating_temp_desired
       state_topic: "ebusd/mc/TempDesired"
       unit_of_measurement: "°C"
       device_class: temperature
@@ -140,7 +140,7 @@ mqtt:
       value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
 
     # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
-    # climate-entity terms, as opposed to sensor.heating_hvac_action above, which is the
+    # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
     # generator's real-time activity (HVAC action). This is what the control law will write in
     # Phase 3 (as "low" or "on", never "off" — see the plan). Read-only here in Phase 1.
     #
@@ -149,7 +149,7 @@ mqtt:
     # Enum: 0=disabled 1=on 2=off 3=auto 4=eco 5=low. Normalised to names.
     - name: "Heating HVAC Mode"
       unique_id: heating_hvac_mode
-      default_entity_id: sensor.heating_hvac_mode
+      default_entity_id: sensor.geotherm_heating_hvac_mode
       state_topic: "ebusd/mc/OperatingMode"
       icon: mdi:radiator
       device: *ebusd_geotherm
@@ -171,7 +171,7 @@ mqtt:
     # "running" before it (re-)registers polling — see that automation and packages/CLAUDE.md.
     - name: "Heating ebusd Scan Status"
       unique_id: heating_ebusd_scan_status
-      default_entity_id: sensor.heating_ebusd_scan_status
+      default_entity_id: sensor.ebusd_heating_ebusd_scan_status
       state_topic: "ebusd/global/scan"
       icon: mdi:magnify-scan
       device: &ebusd_bridge
@@ -190,7 +190,7 @@ mqtt:
     # would disable the boost permanently if it is not maintained seasonally.
     - name: "Heating Cooling Demand"
       unique_id: heating_cooling_demand
-      default_entity_id: binary_sensor.heating_cooling_demand
+      default_entity_id: binary_sensor.geotherm_heating_cooling_demand
       state_topic: "ebusd/uih/CoolingDemand"
       icon: mdi:snowflake-alert
       device: *ebusd_geotherm
@@ -200,7 +200,7 @@ mqtt:
     # Zeitfenstern und Effizienzfunktionen", i.e. the gated, actually-triggered signal.
     - name: "Heating Cooling Request"
       unique_id: heating_cooling_request
-      default_entity_id: binary_sensor.heating_cooling_request
+      default_entity_id: binary_sensor.geotherm_heating_cooling_request
       state_topic: "ebusd/mc/CoolingRequestHc2"
       icon: mdi:snowflake-alert
       device: *ebusd_geotherm
@@ -213,7 +213,7 @@ mqtt:
     # register is not published, in which case the two signals above carry the interlock alone.
     - name: "Heating Cooling Active (UIH)"
       unique_id: heating_cooling_active_uih
-      default_entity_id: binary_sensor.heating_cooling_active_uih
+      default_entity_id: binary_sensor.geotherm_heating_cooling_active_uih
       state_topic: "ebusd/uih/CoolingActive"
       icon: mdi:snowflake
       device: *ebusd_geotherm
@@ -226,7 +226,7 @@ mqtt:
     # "running" to match the convention used for the cooling signals above.
     - name: "Heating Hwc Active"
       unique_id: heating_hwc_active
-      default_entity_id: binary_sensor.heating_hwc_active
+      default_entity_id: binary_sensor.geotherm_heating_hwc_active
       state_topic: "ebusd/hwc/Status"
       icon: mdi:water-boiler
       device: *ebusd_geotherm
@@ -240,7 +240,7 @@ mqtt:
     # of the heat per kWh that the compressor does, so a boost must never run while this is on.
     - name: "Heating Backup Heater"
       unique_id: heating_backup_heater
-      default_entity_id: binary_sensor.heating_backup_heater
+      default_entity_id: binary_sensor.geotherm_heating_backup_heater
       state_topic: "ebusd/ehp/Backup"
       icon: mdi:heating-coil
       device: *ebusd_geotherm
@@ -253,7 +253,7 @@ mqtt:
     # Staleness is instead detected on value age (binary_sensor.heating_loxone_online).
     - name: "Heating Loxone Warm Enough"
       unique_id: heating_loxone_warm_enough
-      default_entity_id: binary_sensor.heating_loxone_warm_enough
+      default_entity_id: binary_sensor.loxone_heating_heating_loxone_warm_enough
       state_topic: "loxone/heating/warm_enough"
       icon: mdi:home-thermometer
       device:
@@ -271,10 +271,10 @@ mqtt:
     # they do not survive a restart). Deliberately separate from binary_sensor.heating_ebusd_online
     # below, which instead answers "is the bus DATA still fresh" (also trips on a dead serial/ebus
     # link even with ebusd itself healthy). By itself this is NOT sufficient to know it is safe to
-    # register poll priorities — see sensor.heating_ebusd_scan_status above.
+    # register poll priorities — see sensor.ebusd_heating_ebusd_scan_status above.
     - name: "Heating ebusd Running"
       unique_id: heating_ebusd_running
-      default_entity_id: binary_sensor.heating_ebusd_running
+      default_entity_id: binary_sensor.ebusd_heating_ebusd_running
       state_topic: "ebusd/global/running"
       device_class: connectivity
       device: *ebusd_bridge
@@ -430,9 +430,9 @@ template:
         state_class: measurement
         icon: mdi:thermometer-water
         availability: >
-          {{ has_value('sensor.heating_circuit_return_temp')
+          {{ has_value('sensor.geotherm_heating_circuit_return_temp')
              and is_state('binary_sensor.heating_dhw_active', 'off') }}
-        state: "{{ states('sensor.heating_circuit_return_temp') | float | round(2) }}"
+        state: "{{ states('sensor.geotherm_heating_circuit_return_temp') | float | round(2) }}"
 
       # ── The setpoint HA will command in Phase 2 ───────────────────────────
       # Derived, never captured. Because this can always be recomputed there is nothing to save
@@ -442,16 +442,16 @@ template:
       # Always the ABSOLUTE target — never a relative "current + offset", which is not idempotent:
       # a retry, a duplicated trigger or a restart mid-boost would compound it to +2x offset.
       #
-      # Phase 1 only publishes this for comparison against sensor.heating_temp_desired.
+      # Phase 1 only publishes this for comparison against sensor.geotherm_heating_temp_desired.
       - name: "Heating Target Temp"
         unique_id: heating_target_temp
         unit_of_measurement: "°C"
         device_class: temperature
         state_class: measurement
         icon: mdi:thermometer-auto
-        availability: "{{ has_value('sensor.heating_temp_desired_low') }}"
+        availability: "{{ has_value('sensor.geotherm_heating_temp_desired_low') }}"
         state: >
-          {% set tdl = states('sensor.heating_temp_desired_low') | float %}
+          {% set tdl = states('sensor.geotherm_heating_temp_desired_low') | float %}
           {% if not is_state('binary_sensor.heating_season_active', 'on') %}
             {{ tdl | round(1) }}
           {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
@@ -478,12 +478,12 @@ template:
           {% else %}mdi:radiator-disabled{% endif %}
         state: >
           {% if not is_state('binary_sensor.heating_ebusd_online', 'on') %}ebusd_offline
-          {% elif is_state('binary_sensor.heating_backup_heater', 'on') %}backup_heater
+          {% elif is_state('binary_sensor.geotherm_heating_backup_heater', 'on') %}backup_heater
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}cooling
           {% elif not is_state('binary_sensor.heating_season_active', 'on') %}off_season
           {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}slab_charging
           {% elif is_state('binary_sensor.heating_dhw_active', 'on') %}hot_water
-          {% elif is_state('binary_sensor.heating_loxone_warm_enough', 'on') %}warm_enough
+          {% elif is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on') %}warm_enough
           {% else %}heating{% endif %}
 
   - binary_sensor:
@@ -507,10 +507,10 @@ template:
         unique_id: heating_cooling_active
         icon: mdi:snowflake-check
         state: >
-          {{ is_state('binary_sensor.heating_cooling_active_uih', 'on')
-             or is_state('binary_sensor.heating_cooling_demand', 'on')
-             or is_state('binary_sensor.heating_cooling_request', 'on')
-             or is_state('sensor.heating_hvac_action', 'cooling') }}
+          {{ is_state('binary_sensor.geotherm_heating_cooling_active_uih', 'on')
+             or is_state('binary_sensor.geotherm_heating_cooling_demand', 'on')
+             or is_state('binary_sensor.geotherm_heating_cooling_request', 'on')
+             or is_state('sensor.geotherm_heating_hvac_action', 'cooling') }}
 
       # ── Hot-water masking ─────────────────────────────────────────────────
       # delay_off holds the mask through the thermal tail after a charge ends: the heating-circuit
@@ -522,8 +522,8 @@ template:
         icon: mdi:water-boiler
         delay_off: "00:25:00"
         state: >
-          {{ is_state('sensor.heating_hvac_action', 'water')
-             or is_state('binary_sensor.heating_hwc_active', 'on') }}
+          {{ is_state('sensor.geotherm_heating_hvac_action', 'water')
+             or is_state('binary_sensor.geotherm_heating_hwc_active', 'on') }}
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -532,7 +532,7 @@ template:
         unique_id: heating_ebusd_online
         device_class: connectivity
         state: >
-          {% set s = states.sensor.heating_circuit_flow_temp %}
+          {% set s = states.sensor.geotherm_heating_circuit_flow_temp %}
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 900 }}
 
@@ -543,7 +543,7 @@ template:
         unique_id: heating_loxone_online
         device_class: connectivity
         state: >
-          {% set s = states.binary_sensor.heating_loxone_warm_enough %}
+          {% set s = states.binary_sensor.loxone_heating_heating_loxone_warm_enough %}
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 86400 }}
 
@@ -579,7 +579,7 @@ template:
           {% elif not is_state('binary_sensor.heating_ebusd_online', 'on') %}false
           {% elif not is_state('binary_sensor.heating_season_active', 'on') %}false
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}false
-          {% elif is_state('binary_sensor.heating_backup_heater', 'on') %}false
+          {% elif is_state('binary_sensor.geotherm_heating_backup_heater', 'on') %}false
           {% elif not is_state('schedule.heating_pv_window', 'on') %}false
           {% elif soc < soc_floor %}false
           {% elif saturated %}false
@@ -614,19 +614,19 @@ automation:
       - trigger: homeassistant
         event: start
       - trigger: state
-        entity_id: binary_sensor.heating_ebusd_running
+        entity_id: binary_sensor.ebusd_heating_ebusd_running
         to: "on"
       - trigger: state
         entity_id: binary_sensor.heating_ebusd_online
         to: "on"
       - trigger: state
-        entity_id: sensor.heating_ebusd_scan_status
+        entity_id: sensor.ebusd_heating_ebusd_scan_status
         to:
           - "finished"
           - "OK"
     conditions:
       - condition: template
-        value_template: "{{ states('sensor.heating_ebusd_scan_status') != 'running' }}"
+        value_template: "{{ states('sensor.ebusd_heating_ebusd_scan_status') != 'running' }}"
     actions:
       # Tier 1 (priority 3) — the primary numeric decision driver and the signal that masks it
       # during a DHW cycle.
@@ -675,7 +675,7 @@ automation:
   # Driven off transitions of the reason-based state sensor and the liveness sensors, so a
   # persistent fault reports once rather than repeating.
   #
-  # Phase 1 deliberately does NOT notify on a mismatch between sensor.heating_temp_desired and
+  # Phase 1 deliberately does NOT notify on a mismatch between sensor.geotherm_heating_temp_desired and
   # sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
   # pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
 
@@ -706,11 +706,11 @@ automation:
             {% if trigger.id == 'lost' %}
               No ebusd data for 5 minutes — heat pump telemetry and control are unavailable.
               The Vaillant continues on its own weather curve, so heating is unaffected.
-              Last flow temperature seen: {{ states('sensor.heating_circuit_flow_temp') }} °C.
+              Last flow temperature seen: {{ states('sensor.geotherm_heating_circuit_flow_temp') }} °C.
             {% else %}
-              ebusd is publishing again. Flow {{ states('sensor.heating_circuit_flow_temp') }} °C,
-              return {{ states('sensor.heating_circuit_return_temp') }} °C,
-              generator {{ states('sensor.heating_hvac_action') }}.
+              ebusd is publishing again. Flow {{ states('sensor.geotherm_heating_circuit_flow_temp') }} °C,
+              return {{ states('sensor.geotherm_heating_circuit_return_temp') }} °C,
+              generator {{ states('sensor.geotherm_heating_hvac_action') }}.
             {% endif %}
     mode: single
 
@@ -721,7 +721,7 @@ automation:
     description: "Alert when the resistive backup heater runs"
     triggers:
       - trigger: state
-        entity_id: binary_sensor.heating_backup_heater
+        entity_id: binary_sensor.geotherm_heating_backup_heater
         to: "on"
         for:
           minutes: 2
@@ -734,7 +734,7 @@ automation:
             {{ states('sensor.heizung_power') }} W. Slab charging is blocked while it runs,
             because resistive heat delivers far less per kWh than the compressor.
             Outside {{ states('sensor.wheatherstation_outdoor_temperature') }} °C,
-            flow {{ states('sensor.heating_circuit_flow_temp') }} °C.
+            flow {{ states('sensor.geotherm_heating_circuit_flow_temp') }} °C.
     mode: single
 
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
@@ -766,7 +766,7 @@ automation:
             battery {{ states('sensor.victron_battery_soc') }} %,
             return {{ states('sensor.heating_circuit_return_temp_valid') }} °C,
             setpoint would be {{ states('sensor.heating_target_temp') }} °C
-            (setback {{ states('sensor.heating_temp_desired_low') }} °C).
+            (setback {{ states('sensor.geotherm_heating_temp_desired_low') }} °C).
             Phase 1 — observation only, nothing was written to the heat pump.
     mode: single
 
@@ -778,22 +778,22 @@ group:
     name: "Heating PV Boost"
     entities:
       # ebusd telemetry
-      - sensor.heating_hvac_action
-      - sensor.heating_circuit_flow_temp
-      - sensor.heating_circuit_return_temp
-      - sensor.heating_temp_desired_low
-      - sensor.heating_temp_desired
-      - sensor.heating_hvac_mode
-      - sensor.heating_ebusd_scan_status
+      - sensor.geotherm_heating_hvac_action
+      - sensor.geotherm_heating_circuit_flow_temp
+      - sensor.geotherm_heating_circuit_return_temp
+      - sensor.geotherm_heating_temp_desired_low
+      - sensor.geotherm_heating_temp_desired
+      - sensor.geotherm_heating_hvac_mode
+      - sensor.ebusd_heating_ebusd_scan_status
       # ebusd interlock inputs
-      - binary_sensor.heating_cooling_demand
-      - binary_sensor.heating_cooling_request
-      - binary_sensor.heating_cooling_active_uih
-      - binary_sensor.heating_hwc_active
-      - binary_sensor.heating_backup_heater
-      - binary_sensor.heating_ebusd_running
+      - binary_sensor.geotherm_heating_cooling_demand
+      - binary_sensor.geotherm_heating_cooling_request
+      - binary_sensor.geotherm_heating_cooling_active_uih
+      - binary_sensor.geotherm_heating_hwc_active
+      - binary_sensor.geotherm_heating_backup_heater
+      - binary_sensor.ebusd_heating_ebusd_running
       # Loxone comfort signal
-      - binary_sensor.heating_loxone_warm_enough
+      - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors
       - sensor.heating_pv_surplus
       - sensor.heating_circuit_return_temp_valid
