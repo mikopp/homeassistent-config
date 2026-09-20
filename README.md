@@ -40,6 +40,29 @@ MQTT-based monitoring of a Victron solar/battery/grid installation (MPPT charger
 - **Utility meters**: monthly billing meters aligned to the Austrian tariff reset date (1st of month)
 - **Status**: charger/inverter mode detection, system state
 
+### `packages/heating_pv_boost.yaml` — PV Slab Pre-Charging (Vaillant geoTHERM via ebusd)
+
+Uses midday PV surplus to over-charge the underfloor slab, so the house coasts through the evening
+without drawing grid or house battery. The slab is the only thermal store in the system — there is
+no buffer tank — so the heat pump's return temperature reads directly on its charge state.
+
+- **Division of responsibility**: Loxone owns human comfort and publishes one boolean (*is the
+  house warm enough?*); Home Assistant owns energy and decides when to charge; the Vaillant owns
+  the machine (weather compensation, room influence, compressor protection)
+- **Surplus**: PV generation minus house load *excluding the heating circuit*, so the figure does
+  not collapse the moment the boost starts drawing — grid export is unusable here because the
+  battery absorbs surplus first
+- **Setpoint**: derived from `mc/TempDesiredLow`, the only human knob. Nothing is captured or
+  restored, and the target is always absolute so a retry or restart cannot compound it
+- **Interlocks**: cooling (the same hydraulics serve both), hot-water charging (which masks the
+  return temperature), the resistive backup heater, battery state of charge, and the heat pump's
+  own 20-minute compressor restart lock
+- **Never writes `off`** — only `low` or `on`, so the worst failure state is "slightly cool"
+
+*Phase 1 (current): read-only. Every sensor and the full decision are live, but nothing is written
+to the heat pump. See `plans/ebusd-pv-heating-optimization.md` for the rollout and
+`packages/CLAUDE.md` for the verified ebusd register decodes.*
+
 ### `packages/energy.yaml` — Metered Devices for the Energy Dashboard
 MQTT sensors for every individually metered appliance, plus the wallbox abstraction layer.
 
