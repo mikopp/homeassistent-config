@@ -66,7 +66,11 @@ mqtt:
     # confirmed against a real boot's entity registry, so id and name must always match after
     # slugifying; spelling "circuit" out in both keeps that guaranteed rather than relying on
     # a name/id pair staying in sync by hand.) Also the freshness reference for
-    # binary_sensor.heating_ebusd_online, since this topic updates every few seconds.
+    # binary_sensor.heating_ebusd_online — force_update is required for that: the value only
+    # changes while liquid is actually flowing (compressor running, or passive circulation from
+    # another circuit), so a fully-off system keeps republishing the SAME reading. Without
+    # force_update, HA's default no-op suppression would stop bumping last_updated on those
+    # repeats, and the liveness check would falsely read "offline" every time heating sits idle.
     - name: "Heating Circuit Flow Temp"
       unique_id: heating_circuit_flow_temp
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp
@@ -74,6 +78,7 @@ mqtt:
       unit_of_measurement: "°C"
       device_class: temperature
       state_class: measurement
+      force_update: true
       device: *ebusd_geotherm
       value_template: >-
         {% set f = value.split(';') %}
@@ -590,9 +595,11 @@ template:
 # ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
   # ── ebusd MQTT poll-priority registration ─────────────────────────────────
-  # Nine of the ten ebusd registers this feature reads are confirmed (or suspected) to answer a
-  # forced read but not to auto-publish on MQTT without one — ehp/Status is the sole exception,
-  # already broadcasting every few seconds (see the sensor comments above and packages/CLAUDE.md).
+  # All ten ebusd registers this feature reads are confirmed (or suspected) to answer a forced
+  # read but not to auto-publish on MQTT without one. ehp/Status was originally assumed to be the
+  # exception, self-publishing every few seconds — that held only while the compressor was
+  # actively running; idle/passive circulation let it go quiet, so it is now registered like every
+  # other register (see the sensor comments above and packages/CLAUDE.md).
   # Publishing "?N" (N = priority digit 1-9) to a register's ".../get" topic both performs a read
   # AND enables ONGOING automatic polling at that priority going forward — an empty payload to the
   # same topic is a one-time read only. Priority is a relative scheduling weight ("polled every
@@ -629,7 +636,15 @@ automation:
         value_template: "{{ states('sensor.ebusd_heating_ebusd_scan_status') != 'running' }}"
     actions:
       # Tier 1 (priority 3) — the primary numeric decision driver and the signal that masks it
-      # during a DHW cycle.
+      # during a DHW cycle, plus ehp/Status: flow temp, hvac_action, and the liveness reference.
+      # Previously assumed to self-publish unprompted "every few seconds", which only held while
+      # the compressor was actively running — idle/passive circulation let it go quiet far past
+      # the liveness window. Registered explicitly like every other register, for the same
+      # consistent cadence regardless of heating state.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/Status/get"
+          payload: "?3"
       - action: mqtt.publish
         data:
           topic: "ebusd/ehp/HcReturnTemp/get"
