@@ -9,6 +9,21 @@
 6. ALWAYS write comments that describe each part of the implementation in the source code file.
 7. User will deploy via `git pull` on the HA host, NEVER do that yourself
 
+## HA version gate — check before trusting any info
+This repo's running HA version lives in `.HA_VERSION` (major.minor, e.g. `2026.8`). Before applying
+ANY information from internet search, official HA docs, ha-mcp results, or even this repo's own
+existing code/comments — check it's still accurate for that major version. HA changes fast: config
+keys get renamed/removed, integrations get rewritten, YAML syntax shifts across major versions.
+
+- Read `.HA_VERSION` first, at the start of any research into HA behavior/config/docs.
+- When citing docs or web results, prefer version-pinned docs (e.g. `www.home-assistant.io/docs`
+  reflects latest — verify against changelog/release notes if the feature is old or obscure) over
+  version-less blog posts/forum answers, which may predate or postdate this install by years.
+- If a found answer's version isn't stated, say so explicitly and flag it as unverified for this
+  major version rather than presenting it as fact.
+- Existing YAML in this repo reflects the version it was written under — don't assume patterns here
+  are still current best practice without checking; note conflicts instead of silently "fixing" them.
+
 ## MCP usage (read-only)
 The ha-mcp connection is available for DISCOVERY ONLY:
 - Look up entity IDs, device names, areas, and current states
@@ -46,6 +61,32 @@ the global automations/scripts files.
 Current packages:
 - `packages/pergola.yaml` — pergola roof automation (helpers, template sensors, automations, scripts)
 - `packages/airflow_cooling.yaml` — ventilation/free-cooling + humidity flush/drying boost (ComfoConnect)
+
+## Persistent Memory
+- Before starting complex tasks, read and ingest `.claude/learnings.md`.
+- After resolving non-obvious bugs or completing features:
+  1. Open `.claude/learnings.md`.
+  2. If a new pattern emerged, update the "Active Patterns" or "Anti-Patterns" sections.
+  3. Append a dated entry to the "Log" section using the exact markdown schema.
+  4. Keep insights dense, punchy, and actionable. Do not log trivial details.
+
+### NEVER write an unconfirmed learning
+An entry in `.claude/learnings.md` is a claim future sessions will act on without re-deriving it.
+Only write one when the cause is **proven**, not when it is merely plausible.
+
+- **A single green CI run is not proof.** Neither is "the symptom went away after I changed X" —
+  that is correlation on a sample of one, and for an intermittent failure it is worth nothing.
+- Acceptable evidence: a stack trace / thread dump / error naming the mechanism; the relevant
+  source read at the pinned `.HA_VERSION`; a config-check or test failure that reproduces
+  deterministically; a bisect over several runs.
+- If the cause is still a hypothesis, it belongs in the feature's `plans/` file marked as such —
+  not in learnings.
+- When a logged learning is later contradicted, **delete it** (or strike it through and say what
+  disproved it). Do not leave a wrong entry standing next to its correction.
+
+This rule exists because two entries in this file had to be removed as false positives: both were
+plausible mechanisms fitted to one confirming run, and both sent later sessions down wrong paths.
+
 
 ## HA template / helper rules
 

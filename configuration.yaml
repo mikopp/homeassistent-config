@@ -1,6 +1,12 @@
 # Loads default set of integrations. Do not remove.
 default_config:
 
+# Raw state history (states table — history graphs/logbook) purged after 5 days.
+# Does NOT affect the Energy Dashboard: long-term statistics (statistics/statistics_short_term
+# tables) are a separate store, never purged by purge_keep_days, kept indefinitely.
+recorder:
+  purge_keep_days: 5
+
 # Load frontend themes from the themes folder
 frontend:
   themes: !include_dir_merge_named themes

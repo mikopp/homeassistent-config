@@ -83,7 +83,7 @@ input_number:
 
   pergola_pv_conversion_factor:
     name: Pergola PV Conversion Factor
-    # Divisor to convert raw PV watt output (sensor.solar_yield_watts)
+    # Divisor to convert raw PV watt output (sensor.victron_solar_yield_dc_watts)
     # to equivalent W/m² irradiance.
     # Default 3.2 is empirically calibrated for 6× Axitec 440W bifacial panels at ~5–10°
     # tilt, 228° azimuth (bifacial back-gain + near-flat tilt + afternoon-facing geometry).
@@ -279,7 +279,7 @@ template:
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
         # The MPPT Yield/Power topic stops publishing once it sits at 0 at night, so
-        # sensor.solar_yield_watts (expire_after: 120) goes unavailable — the Victron
+        # sensor.victron_solar_yield_dc_watts (expire_after: 120) goes unavailable — the Victron
         # keep-alive uses suppress-republish, so constant-value topics are no longer
         # periodically refreshed. Treat "MPPT topic stale but the rest of the Victron GX
         # still reporting" as 0 W (night), not unavailable; otherwise the sun_down rule
@@ -287,14 +287,18 @@ template:
         # victron_ac_load_total_power tracks live house load, so its availability signals
         # that Victron is alive. Safe by day: pv only feeds the sun_down rule (which also
         # requires solar_radiation == 0) and the max() in pergola_sun_shining.
+        #
+        # Deliberately reads the raw DC entity, not the AC-referenced sensor.solar_yield_watts
+        # (see packages/victron.yaml) — this wrapper feeds a conversion factor calibrated
+        # against true panel output, not an AC-discounted figure.
         state: >
-          {% if states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] %}
-            {{ states('sensor.solar_yield_watts') | float(0) }}
+          {% if states('sensor.victron_solar_yield_dc_watts') not in ['unavailable', 'unknown'] %}
+            {{ states('sensor.victron_solar_yield_dc_watts') | float(0) }}
           {% else %}
             0
           {% endif %}
         availability: >
-          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown']
+          {{ states('sensor.victron_solar_yield_dc_watts') not in ['unavailable', 'unknown']
              or states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
         device_class: power
