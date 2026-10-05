@@ -1607,9 +1607,9 @@ automation:
     description: >
       Runs a 60-minute ventilation boost when outdoor air is dry enough to flush indoor humidity.
       Re-arms SEAMLESSLY ~5 min before the hardware countdown expires (while drying is still
-      needed) so the boost switch never drops — no 30/60-min flip-flop. The boost_expired path
-      remains a fallback for the case where an in-place extend does not take.
-      Stops and notifies when conditions are no longer met.
+      needed) by re-sending boost ON: the unit restarts its timer with the switch staying on —
+      no 30/60-min flip-flop, no notification. The boost_expired path remains a silent fallback
+      if the boost lapsed anyway. Notifies only on a real state change (drying started / stopped).
     mode: single
     trigger:
       - platform: state
@@ -1626,8 +1626,9 @@ automation:
         id: boost_expired
       # Seamless re-arm: number.comfoconnect_pro_boost_time is a LIVE COUNTDOWN of remaining
       # boost minutes. When it drops below 5 (≈5 min before the 60-min run would end) we
-      # re-write it to 60 while the switch is still ON, so the boost never drops and nothing
-      # coupled to switch.comfoconnect_pro_boost flips. Fires only while boost runs.
+      # re-send boost ON while the switch is still ON. Verified on the device: writing the boost
+      # coil ON again restarts the timer at the full duration, so the boost never drops and
+      # nothing coupled to switch.comfoconnect_pro_boost flips. Fires only while boost runs.
       - platform: numeric_state
         entity_id: number.comfoconnect_pro_boost_time
         below: 5
@@ -1656,10 +1657,11 @@ automation:
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
-          # Seamless re-arm: the countdown reached <2 min while a boost is running and drying is
-          # still needed. Re-write boost_time to 60 to extend the SAME run in place — the switch
-          # stays on, so nothing reading switch.comfoconnect_pro_boost (hvac_action, cooling_state,
-          # the controller's boost_ended trigger) flips. No notify: silent internal step.
+          # Seamless re-arm: the countdown reached <5 min while a boost is running and drying is
+          # still needed. Re-send boost ON: the unit restarts its timer at the full duration while
+          # the switch stays on (writing boost_time instead is ignored by the device), so nothing
+          # reading switch.comfoconnect_pro_boost (hvac_action, cooling_state, the controller's
+          # boost_ended trigger) flips. No notify: silent internal step, state is unchanged.
           # Guarded on boost == on so it can never (re)start a stopped boost.
           - conditions:
               - condition: trigger
@@ -1671,11 +1673,9 @@ automation:
                 entity_id: switch.comfoconnect_pro_boost
                 state: "on"
             sequence:
-              - action: number.set_value
+              - action: switch.turn_on
                 target:
-                  entity_id: number.comfoconnect_pro_boost_time
-                data:
-                  value: 60
+                  entity_id: switch.comfoconnect_pro_boost
 
           # Enable boost: drying needed and boost not already running
           - conditions:
@@ -1693,7 +1693,7 @@ automation:
                     entity_id: switch.comfoconnect_pro_boost
                     state: "on"
             sequence:
-              # 60-minute hardware boost; re-armed in place before expiry (see rearm_due branch).
+              # 60-minute hardware boost; re-armed (boost ON re-sent) before expiry, see rearm_due branch.
               - action: number.set_value
                 target:
                   entity_id: number.comfoconnect_pro_boost_time
@@ -1702,13 +1702,21 @@ automation:
               - action: switch.turn_on
                 target:
                   entity_id: switch.comfoconnect_pro_boost
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Humidity Drying Boost"
-                  message: >
-                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
-                    (dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C)
-                    — boost started to flush humid air via free cooling.
+              # A boost_expired re-enable is not a state change (drying was needed throughout):
+              # stay silent and only notify when drying actually starts.
+              - if:
+                  - condition: not
+                    conditions:
+                      - condition: trigger
+                        id: boost_expired
+                then:
+                  - action: notify.mobile_app_greywinds_iphone
+                    data:
+                      title: "Ventilation: Humidity Drying Boost"
+                      message: >
+                        Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
+                        (dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C)
+                        — boost started to flush humid air via free cooling.
 
           # Disable boost: drying no longer needed
           - conditions:

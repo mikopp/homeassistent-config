@@ -16,6 +16,13 @@
 - `select...temperature_profile` also chatters cool↔comfort (6-30 min) in transition windows —
   separate environmental limit-cycle, NOT fixed by the timer change (follow-up C).
 
+## UPDATE (device-verified, Modbus)
+Writing `boost_time` mid-run does NOT extend the boost (device ignores it). Re-sending boost ON
+(coil 6 = 1) on a running boost DOES restart the timer at full duration (verified with a Modbus
+client). The re-arm therefore calls `switch.turn_on` at `boost_time < 5` (no number write, no
+off→on), and the `boost_expired` fallback re-enable is silent (notify only on `drying_needed_on`).
+Steps 2 and 5 below describe the superseded `number.set_value` approach.
+
 ## Goal
 Boost runs a 60-min period and re-arms seamlessly ~2 min before expiry while drying is still
 needed (no switch drop, no `cooling_state` blip). Decouple `hvac_action` from the raw boost

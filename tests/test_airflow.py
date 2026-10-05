@@ -695,23 +695,23 @@ def test_drying_boost_already_running_no_double_enable(home_assistant: HomeAssis
 
 
 def test_drying_boost_rearm_keeps_switch_on(home_assistant: HomeAssistant) -> None:
-    """Countdown drops below 2 while drying still needed + boost on → seamless re-arm.
+    """Countdown drops below 5 while drying still needed + boost on → seamless re-arm.
 
-    The re-arm branch only re-writes number.comfoconnect_pro_boost_time (ignored by the CI stub)
-    and deliberately never toggles switch.comfoconnect_pro_boost, so the switch must stay 'on'.
-    This is exactly what removes the ~30-min off→on flip-flop on the boost switch and on
-    sensor.airflow_cooling_state. The number.set_value cannot be observed on bare stubs, so the
-    assertable guarantee is that the switch is not dropped.
+    The re-arm branch re-sends switch.turn_on on the already-running boost (the device restarts
+    its timer on a repeated ON, verified live) and never turns the switch off, so the switch must
+    stay 'on'. This removes the ~30-min off→on flip-flop on the boost switch and on
+    sensor.airflow_cooling_state. The CI stub ignores the service call, so the assertable
+    guarantee is that the switch is not dropped.
     """
     home_assistant.call_action("input_boolean", "turn_on",
                                {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
     home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "on", {})
     home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
-    # Seed the countdown above the threshold, then drop it below 2 to fire the numeric_state
+    # Seed the countdown above the threshold, then drop it below 5 to fire the numeric_state
     # re-arm trigger (rearm_due).
-    home_assistant.set_state("number.comfoconnect_pro_boost_time", "5", {})
-    home_assistant.set_state("number.comfoconnect_pro_boost_time", "1", {})
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "10", {})
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "4", {})
     # Switch was never turned off by the re-arm branch → stays on (no flip-flop).
     home_assistant.assert_entity_state("switch.comfoconnect_pro_boost", "on", timeout=3)
 
