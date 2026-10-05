@@ -173,7 +173,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
    now requests ongoing polling for all of these automatically on HA start and whenever ebusd
    comes back or finishes a bus scan — a manual `?N` publish should no longer be needed. If a
    topic still never appears after the automation has run at least once (check its trace, since
-   its condition can block a triggered run while `sensor.heating_ebusd_scan_status` reads
+   its condition can block a triggered run while `sensor.ebusd_heating_ebusd_scan_status` reads
    `"running"`), fall back to a manual check: `mosquitto_pub -h <broker> -t
    ebusd/<circuit>/<name>/get -m '?5'` (or `ebusctl -p 5 read -c <circuit> <name>`). If a topic
    never appears at all, the sensor stays `unavailable` — that is the signal; the documented
@@ -195,7 +195,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
 - [x] 5. `README.md` — package section
 - [x] 6. `tests/test_heating_pv_boost.py` — surplus, derived setpoint, DHW mask, interlocks
 - [x] 7. `packages/heating_pv_boost.yaml` — `heating_ebusd_poll_registration` automation: scheduled
-      ebusd poll-priority registration, gated on `sensor.heating_ebusd_scan_status` not reading
+      ebusd poll-priority registration, gated on `sensor.ebusd_heating_ebusd_scan_status` not reading
       `"running"` — closes the "may not auto-publish" gap on 9 of the 10 registers this feature
       reads; see the "Transport" section for Option A (repoint) vs Option B (bridge, recommended)
       for the still-open question of whether `ebusd/#` reaches HA's broker at all
