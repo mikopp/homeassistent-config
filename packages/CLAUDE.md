@@ -114,8 +114,8 @@ ONE-TIME forced read only, no ongoing polling. `automation.heating_ebusd_poll_re
 restart.** ebusd also publishes its own process status to MQTT under `ebusd/global/*` (retained
 topics): `running` (`"true"`/`"false"`, set to `"false"` as an MQTT last-will when ebusd
 disconnects); `scan` (`"OK"` / `"running"` / `"finished"` — its bus/device discovery status);
-`version`; `uptime`; `signal`. `binary_sensor.heating_ebusd_running` and
-`sensor.heating_ebusd_scan_status` (in `packages/heating_pv_boost.yaml`) expose the first two.
+`version`; `uptime`; `signal`. `binary_sensor.ebusd_heating_ebusd_running` and
+`sensor.ebusd_heating_ebusd_scan_status` (in `packages/heating_pv_boost.yaml`) expose the first two.
 
 **Sequencing rule (owner-confirmed): a poll priority must not be registered while `scan` reads
 `"running"`** — ebusd may still be mid-discovery of what's on the bus, so the message catalog a
@@ -123,7 +123,7 @@ registration targets can be incomplete. Register only once `scan` leaves `"runni
 re-register whenever it transitions back to `"running"` and out again (a fresh scan — most likely
 correlated with an ebusd restart, but treated as its own signal regardless of cause).
 `heating_ebusd_poll_registration` gates on this with a single condition
-(`{{ states('sensor.heating_ebusd_scan_status') != 'running' }}`) applied uniformly across all of
+(`{{ states('sensor.ebusd_heating_ebusd_scan_status') != 'running' }}`) applied uniformly across all of
 its triggers, rather than allowlisting one specific resting value — it's undocumented whether
 ebusd's steady state after a scan is `"finished"` or settles back to `"OK"`, and the only state
 that's actually unsafe is `"running"`.

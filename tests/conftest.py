@@ -209,28 +209,28 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
     # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
     # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
-    ha.set_state("sensor.heating_hvac_action", "off", {})
-    ha.set_state("sensor.heating_circuit_flow_temp", "25.2",
+    ha.set_state("sensor.geotherm_heating_hvac_action", "off", {})
+    ha.set_state("sensor.geotherm_heating_circuit_flow_temp", "25.2",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_circuit_return_temp", "24.9",
+    ha.set_state("sensor.geotherm_heating_circuit_return_temp", "24.9",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_temp_desired_low", "21.0",
+    ha.set_state("sensor.geotherm_heating_temp_desired_low", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_temp_desired", "21.0",
+    ha.set_state("sensor.geotherm_heating_temp_desired", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.heating_hvac_mode", "low", {})
+    ha.set_state("sensor.geotherm_heating_hvac_mode", "low", {})
     # ebusd bridge status — "finished" is the steady/safe state (scan not in progress), so the
     # poll-registration automation's condition gate passes by default in tests.
-    ha.set_state("sensor.heating_ebusd_scan_status", "finished", {})
-    ha.set_state("binary_sensor.heating_ebusd_running", "on", {})
+    ha.set_state("sensor.ebusd_heating_ebusd_scan_status", "finished", {})
+    ha.set_state("binary_sensor.ebusd_heating_ebusd_running", "on", {})
     # ebusd interlock inputs — all inactive, so the baseline permits heating.
-    ha.set_state("binary_sensor.heating_cooling_demand", "off", {})
-    ha.set_state("binary_sensor.heating_cooling_request", "off", {})
-    ha.set_state("binary_sensor.heating_cooling_active_uih", "off", {})
-    ha.set_state("binary_sensor.heating_hwc_active", "off", {})
-    ha.set_state("binary_sensor.heating_backup_heater", "off", {})
+    ha.set_state("binary_sensor.geotherm_heating_cooling_demand", "off", {})
+    ha.set_state("binary_sensor.geotherm_heating_cooling_request", "off", {})
+    ha.set_state("binary_sensor.geotherm_heating_cooling_active_uih", "off", {})
+    ha.set_state("binary_sensor.geotherm_heating_hwc_active", "off", {})
+    ha.set_state("binary_sensor.geotherm_heating_backup_heater", "off", {})
     # Loxone comfort signal — "not warm enough", i.e. the house wants heat.
-    ha.set_state("binary_sensor.heating_loxone_warm_enough", "off", {})
+    ha.set_state("binary_sensor.loxone_heating_heating_loxone_warm_enough", "off", {})
 
 
 # ── Shared time-machine fixtures ─────────────────────────────────────────────────────────
