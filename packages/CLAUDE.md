@@ -14,9 +14,11 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
 - **Two actions CANCEL a running boost:** (1) writing ANY preset (`low`/`medium`) via
   `select.select_option`, and (2) turning `auto_mode` **OFF** (airflow lingers high a few minutes, then
   reverts). Turning `auto_mode` **ON** does NOT cancel boost.
-- `number.comfoconnect_pro_boost_time` is a live countdown; **writing it does NOT extend a running
-  boost** in place (the device ignores it) — the value only reaches ~60 again via a switch off→on
-  restart.
+- `number.comfoconnect_pro_boost_time` is a live countdown (Modbus holding register 4, seconds on
+  the wire, minutes in HA); **writing it does NOT extend a running boost** (the device ignores it).
+- **Re-sending boost ON (Modbus coil 6 = 1) while a boost runs RESTARTS the timer at the full
+  duration** — verified on the device. This is the seamless re-arm: `switch.turn_on` on the
+  already-on boost, no off→on, no notification.
 
 ### Template sensor pattern — trigger-based vs state-based
 A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
