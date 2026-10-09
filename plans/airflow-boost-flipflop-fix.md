@@ -22,6 +22,8 @@ Writing `boost_time` mid-run does NOT extend the boost (device ignores it). Re-s
 client). The re-arm therefore calls `switch.turn_on` at `boost_time < 5` (no number write, no
 off→on), and the `boost_expired` fallback re-enable is silent (notify only on `drying_needed_on`).
 Steps 2 and 5 below describe the superseded `number.set_value` approach.
+The `boost_expired` trigger was later removed entirely: only `drying_needed` off→on (re)starts the boost,
+so a manual off sticks until the next drying cycle.
 
 ## Goal
 Boost runs a 60-min period and re-arms seamlessly ~2 min before expiry while drying is still
