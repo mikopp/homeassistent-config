@@ -716,6 +716,38 @@ def test_drying_boost_rearm_keeps_switch_on(home_assistant: HomeAssistant) -> No
     home_assistant.assert_entity_state("switch.comfoconnect_pro_boost", "on", timeout=3)
 
 
+def test_drying_boost_restart_when_already_running_no_error(home_assistant: HomeAssistant) -> None:
+    """drying_needed on while a (manual) boost already runs → restart branch runs, no trace error.
+
+    The enable branch no longer requires the boost to be off: switch.turn_on restarts the timer and
+    adopts the running boost. Service calls are ignored by the CI stubs, so the assertable guarantee
+    is that the switch is not dropped.
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "on", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    _trigger_drying(home_assistant)
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_boost", "on", timeout=3)
+
+
+def test_drying_boost_countdown_during_manual_boost_no_error(home_assistant: HomeAssistant) -> None:
+    """Manual boost (drying off) reaching the countdown threshold → no branch matches, no error.
+
+    rearm_due with drying off hits the no-op default instead of a warning, and the boost is left
+    alone (no re-arm, no stop).
+    """
+    home_assistant.call_action("input_boolean", "turn_on",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    home_assistant.set_state("binary_sensor.airflow_humidity_drying_needed", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "10", {})
+    home_assistant.set_state("number.comfoconnect_pro_boost_time", "4", {})
+    home_assistant.assert_entity_state("switch.comfoconnect_pro_boost", "on", timeout=3)
+
+
 def test_drying_hvac_action_shows_drying(home_assistant: HomeAssistant) -> None:
     """free_cooling=on AND boost=on → automation runs without error (trace only).
 
