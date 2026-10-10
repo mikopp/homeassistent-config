@@ -205,7 +205,7 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
     # Shelly Pro 3EM on the heating circuit (MQTT). Load-bearing for sensor.heating_pv_surplus,
     # which subtracts it so the surplus figure is invariant under the heat pump's own draw.
-    ha.set_state("sensor.heizung_power", "0",
+    ha.set_state("sensor.technikraum_heizung_heizung_power", "0",
                  {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
     # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
     # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
