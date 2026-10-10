@@ -88,6 +88,7 @@ Custom [Lovelace](https://www.home-assistant.io/dashboards/) dashboards in YAML 
 |------|-----|---------|
 | `dashboards/Pergola-management.yaml` | `/pergola-management` | Full pergola control panel: cover positions, sun angles, mode selector, state history |
 | `dashboards/airflow-dashboard.yaml` | `/airflow-monitoring` | Ventilation monitoring: ERV profile, humidity sensors, dew point, boost controls |
+| `dashboards/heating-dashboard.yaml` | `/heating-pv-boost` | Heat pump status, slab boost decision, every `heating_pv_boost` entity, and its settings |
 
 Dashboard element fragments live in `dashboards/elements/` and are included via `!include`.
 
