@@ -12,3 +12,9 @@ updates:
     directory: /.github/workflows
     schedule:
       interval: weekly
+
+  # Pinned HA version used by CI (patch and minor bumps arrive as PRs).
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/ha
+    schedule:
+      interval: weekly

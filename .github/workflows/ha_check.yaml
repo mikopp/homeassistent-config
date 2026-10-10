@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   ha-ci:
-    name: HA Config Check · Template Validation · Automation Tests
+    name: Config Check · Template Validation · Automation Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -26,15 +26,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r .github/workflows/requirements.txt
 
-      # ── 3. Pull the HA image (cached by version) ─────────────────────────────
-      #    Used by the config-check step. The test harness manages its own
-      #    container independently.
+      # ── 3. Pull the pinned HA image (cached by version) ──────────────────────
+      #    The pin lives in .github/ha-versions/ha/Dockerfile (bumped by
+      #    Dependabot). The same image is used for config check and the harness.
+      - name: Resolve pinned HA image
+        run: |
+          image=$(awk '/^FROM /{print $2}' .github/ha-versions/ha/Dockerfile)
+          echo "HA_IMAGE=$image" >> "$GITHUB_ENV"
       - name: Cache Home Assistant Docker image
         uses: actions/cache@v6
         id: docker-cache
         with:
           path: /tmp/ha-docker-cache.tar.gz
-          key: ha-docker-${{ hashFiles('.HA_VERSION') }}
+          key: ha-docker-${{ hashFiles('.github/ha-versions/ha/Dockerfile') }}
 
       - name: Load cached Docker image
         if: steps.docker-cache.outputs.cache-hit == 'true'
@@ -43,8 +47,8 @@ jobs:
       - name: Pull Home Assistant Docker image
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
-          docker save ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
+          docker pull "$HA_IMAGE"
+          docker save "$HA_IMAGE" \
             | gzip > /tmp/ha-docker-cache.tar.gz
 
       # ── 4. Prepare config dir ────────────────────────────────────────────────
@@ -122,7 +126,7 @@ jobs:
         run: |
           output=$(docker run --rm \
             -v "${{ github.workspace }}:/config" \
-            ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
+            "$HA_IMAGE" \
             python -m homeassistant --config /config --script check_config 2>&1)
           echo "$output"
           if echo "$output" | grep -qiE "invalid config|invalid slug|Setup of package.*failed|ERROR"; then
