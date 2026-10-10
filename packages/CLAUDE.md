@@ -203,7 +203,7 @@ return-temperature reading.
   `mc/FloorProtectionLimit` 44 °C, `ehp/ReturnTempMax` 46 °C, `mc/OtShutdownLimit` 15 °C.
 - **No electrical-power or modulation register.** `ehp/Comp` is plain on/off and
   `ActualEnvironmentPower` is thermal display data ("only for graphic display" upstream), so
-  `sensor.heizung_power` (Shelly Pro 3EM) is the only real electrical measurement.
+  `sensor.technikraum_heizung_heizung_power` (Shelly Pro 3EM) is the only real electrical measurement.
 
 ### Heating and cooling are separate mode axes
 

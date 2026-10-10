@@ -37,7 +37,7 @@ def _seed_power_flows(
     ha.set_state("sensor.victron_ac_load_l1", str(house_load / 3), _W)
     ha.set_state("sensor.victron_ac_load_l2", str(house_load / 3), _W)
     ha.set_state("sensor.victron_ac_load_l3", str(house_load / 3), _W)
-    ha.set_state("sensor.heizung_power", str(heating), _W)
+    ha.set_state("sensor.technikraum_heizung_heizung_power", str(heating), _W)
 
 
 def test_surplus_excludes_the_heat_pumps_own_draw(home_assistant: HomeAssistant) -> None:
@@ -77,7 +77,7 @@ def test_surplus_propagates_unavailable_rather_than_fabricating_zero(
     home_assistant: HomeAssistant,
 ) -> None:
     """A GX outage must produce a gap, not a false 'no surplus' that silently blocks charging."""
-    home_assistant.set_state("sensor.heizung_power", "unavailable", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "unavailable", {})
     home_assistant.assert_entity_state("sensor.heating_pv_surplus", "unavailable", timeout=5)
 
 
