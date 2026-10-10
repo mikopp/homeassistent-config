@@ -9,8 +9,14 @@ permissions:
 
 jobs:
   ha-ci:
-    name: HA Config Check · Template Validation · Automation Tests
+    name: HA ${{ matrix.ha }} · Config Check · Template Validation · Automation Tests
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each entry is a directory under .github/ha-versions/ holding a Dockerfile
+        # that pins the HA image. Dependabot bumps those pins.
+        ha: ["ha-2026.10", "ha-2026.9", "ha-2026.8"]
 
     steps:
       # ── 1. Check out the repository ─────────────────────────────────────────
@@ -26,26 +32,30 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r .github/workflows/requirements.txt
 
-      # ── 3. Pull the HA image (cached by version) ─────────────────────────────
-      #    Used by the config-check step. The test harness manages its own
-      #    container independently.
+      # ── 3. Pull the pinned HA image (cached by version) ──────────────────────
+      #    The pin lives in .github/ha-versions/<matrix.ha>/Dockerfile (bumped by
+      #    Dependabot). The same image is used for config check and the harness.
+      - name: Resolve pinned HA image
+        run: |
+          image=$(awk '/^FROM /{print $2}' .github/ha-versions/${{ matrix.ha }}/Dockerfile)
+          echo "HA_IMAGE=$image" >> "$GITHUB_ENV"
       - name: Cache Home Assistant Docker image
         uses: actions/cache@v6
         id: docker-cache
         with:
-          path: /tmp/ha-docker-cache.tar.gz
-          key: ha-docker-${{ hashFiles('.HA_VERSION') }}
+          path: /tmp/ha-docker-cache-${{ matrix.ha }}.tar.gz
+          key: ha-docker-${{ matrix.ha }}-${{ hashFiles(format('.github/ha-versions/{0}/Dockerfile', matrix.ha)) }}
 
       - name: Load cached Docker image
         if: steps.docker-cache.outputs.cache-hit == 'true'
-        run: docker load -i /tmp/ha-docker-cache.tar.gz
+        run: docker load -i /tmp/ha-docker-cache-${{ matrix.ha }}.tar.gz
 
       - name: Pull Home Assistant Docker image
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
-          docker pull ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)
-          docker save ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
-            | gzip > /tmp/ha-docker-cache.tar.gz
+          docker pull "$HA_IMAGE"
+          docker save "$HA_IMAGE" \
+            | gzip > /tmp/ha-docker-cache-${{ matrix.ha }}.tar.gz
 
       # ── 4. Prepare config dir ────────────────────────────────────────────────
       - name: Prepare HA config dir
@@ -122,7 +132,7 @@ jobs:
         run: |
           output=$(docker run --rm \
             -v "${{ github.workspace }}:/config" \
-            ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
+            "$HA_IMAGE" \
             python -m homeassistant --config /config --script check_config 2>&1)
           echo "$output"
           if echo "$output" | grep -qiE "invalid config|invalid slug|Setup of package.*failed|ERROR"; then

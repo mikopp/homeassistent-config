@@ -12,3 +12,30 @@ updates:
     directory: /.github/workflows
     schedule:
       interval: weekly
+
+  # Pinned HA test version 2026.10.x: Dependabot proposes patch bumps only.
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/ha-2026.10
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  # Pinned HA test version 2026.9.x: Dependabot proposes patch bumps only.
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/ha-2026.9
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  # Pinned HA test version 2026.8.x: Dependabot proposes patch bumps only.
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/ha-2026.8
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
