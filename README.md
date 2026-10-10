@@ -109,7 +109,7 @@ Dashboard element fragments live in `dashboards/elements/` and are included via 
 ### `ha_check.yaml` — HA Config Validation + Integration Tests
 Runs on every push. Validates the full configuration and executes the test suite against a live HA Docker instance.
 
-1. Runs as a matrix over three pinned HA versions (`.github/ha-versions/*/Dockerfile`, bumped by Dependabot) and pulls each image (cached); the same image is used for `check_config` and the test harness via `HA_IMAGE`
+1. Pulls the pinned HA Docker image (`.github/ha-versions/ha/Dockerfile`, bumped by Dependabot) and caches it; the same image is used for `check_config` and the test harness via `HA_IMAGE`
 2. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
 3. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
 4. Runs `homeassistant --script check_config` to catch invalid configuration
