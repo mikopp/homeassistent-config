@@ -54,6 +54,30 @@ def test_surplus_excludes_the_heat_pumps_own_draw(home_assistant: HomeAssistant)
     )
 
 
+def test_surplus_uses_ac_referenced_mppt_not_raw_dc(home_assistant: HomeAssistant) -> None:
+    """MPPT 4000 W DC at η 90 % → 3600 W AC; AC PV 1000; house 2500 incl. heat pump 1500.
+
+    Surplus must be (3600 + 1000) − (2500 − 1500) = 3600. Feeding raw DC in would give 4000,
+    overstating free PV by the MultiPlus conversion loss.
+    """
+    # Force η to 90 % (ac_out / dc_in = 9 / 10). Accumulators are re-seeded to 0.0 by the autouse
+    # baseline before each test, so this does not leak into other tests.
+    kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
+    home_assistant.set_state("sensor.victron_multiplus_ac_out_energy", "9.0", kwh)
+    home_assistant.set_state("sensor.victron_multiplus_dc_in_energy", "10.0", kwh)
+    _seed_power_flows(home_assistant, dc_pv=4000, ac_pv=1000, house_load=2500, heating=1500)
+    home_assistant.assert_entity_state(
+        "sensor.solar_yield_watts",
+        lambda s: abs(float(s) - 3600.0) < 1.0,
+        timeout=5,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: abs(float(s) - 3600.0) < 1.0,
+        timeout=5,
+    )
+
+
 def test_surplus_is_unchanged_when_only_the_heat_pump_draw_changes(
     home_assistant: HomeAssistant,
 ) -> None:
