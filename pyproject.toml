@@ -4,3 +4,14 @@
 #   export HOME_ASSISTANT_CONFIG_ROOT=$(pwd)
 addopts = "-v"
 testpaths = ["tests"]
+
+# pytest-timeout: measure ONLY the test function body, not fixture setup/teardown.
+# Default (false) charges session-fixture setup to whichever test triggers it — here that is
+# the harness's `docker` fixture running `docker compose up` for a fresh HA container, which
+# takes 60-90s. With the CI --timeout=90 that tipped over and killed the pergola run inside
+# DockerComposeManager.start() before a single test executed (proven by the thread dump:
+# docker_manager.py:603 -> subprocess.run -> _communicate).
+# A hang during fixture setup is therefore no longer caught by pytest-timeout — the job-level
+# `timeout-minutes: 20` in .github/workflows/ha_check.yaml bounds that case instead, and the
+# hang this instrumentation exists for is in the call phase anyway.
+timeout_func_only = true
