@@ -1,7 +1,7 @@
 # Project Learnings & Gotchas
 
 Evidence grading is explicit throughout. **CONFIRMED** = a stack trace, a source read at the pinned
-`.HA_VERSION`, or a deterministic reproduction. **OBSERVED** = real data from a real run, but with a
+pinned HA version (`.github/ha-versions/ha/Dockerfile`), or a deterministic reproduction. **OBSERVED** = real data from a real run, but with a
 plausible alternative explanation still open. **UNPROVEN** = a hypothesis kept only so it is not
 re-litigated from scratch. Never promote an entry a grade without new evidence. See `CLAUDE.md` →
 "NEVER write an unconfirmed learning".
@@ -48,7 +48,7 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   truth for what a deploy will change; the live system is only useful for values to record
   beforehand and for UI-only state (`.storage`: Energy Dashboard prefs, dashboards, helpers created
   in the UI) that is not in the repo at all.
-- **Verifying HA-version-specific behaviour**: pull the actual source at the pinned `.HA_VERSION` —
+- **Verifying HA-version-specific behaviour**: pull the actual source at the pinned version (Dockerfile `FROM`, not `.HA_VERSION`, which is gone) —
   `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`. This is what CLAUDE.md's "HA version
   gate" operationalises, and it is what turned three of the entries on this page from guesses into
   facts. Docs were ambiguous or silent every time it mattered.

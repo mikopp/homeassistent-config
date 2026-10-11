@@ -397,7 +397,11 @@ template:
       # circuit's own draw (sensor.technikraum_heizung_heizung_power, the Shelly Pro 3EM clamp) makes this figure
       # INVARIANT under our own action, which is what a hysteresis controller needs.
       #
-      # Both PV sources are included: this system has DC-coupled MPPT and an AC-coupled inverter.
+      # Both PV sources are included, and BOTH are AC-referenced before they are added: the MPPT
+      # (DC-coupled) is read via sensor.solar_yield_watts, which victron.yaml defines as
+      # dc_pv × η (MultiPlus inverter efficiency) — the power the house actually receives. The
+      # AC-coupled inverter (sensor.victron_ac_inverter_power) is already AC. Adding raw
+      # sensor.victron_dc_pv_total_power here would count the MultiPlus conversion loss as surplus.
       # The heat pump itself exposes no electrical-power register (EHP00 has a fixed-speed
       # compressor; ActualEnvironmentPower is thermal display data), so the Shelly clamp is the
       # only real electrical measurement and this formula depends on it.
@@ -411,12 +415,12 @@ template:
         # availability guard of their own and read 0 during a GX outage, so this guards on the
         # sources it actually uses. sensor.technikraum_heizung_heizung_power carries expire_after: 120.
         availability: >
-          {{ has_value('sensor.victron_dc_pv_total_power')
+          {{ has_value('sensor.solar_yield_watts')
              and has_value('sensor.victron_ac_inverter_power')
              and has_value('sensor.victron_ac_load_total_power')
              and has_value('sensor.technikraum_heizung_heizung_power') }}
         state: >
-          {% set pv = (states('sensor.victron_dc_pv_total_power') | float)
+          {% set pv = (states('sensor.solar_yield_watts') | float)
                     + (states('sensor.victron_ac_inverter_power') | float) %}
           {% set load_without_heating = (states('sensor.victron_ac_load_total_power') | float)
                                       - (states('sensor.technikraum_heizung_heizung_power') | float) %}

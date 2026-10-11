@@ -10,12 +10,16 @@
 7. User will deploy via `git pull` on the HA host, NEVER do that yourself
 
 ## HA version gate — check before trusting any info
-This repo's running HA version lives in `.HA_VERSION` (major.minor, e.g. `2026.8`). Before applying
+The pinned HA version lives in `.github/ha-versions/ha/Dockerfile` (the `FROM ghcr.io/home-assistant/
+home-assistant:<version>` line; Dependabot bumps it). `.HA_VERSION` was removed in #116 and must not
+be read. CI config check and the test harness both use this image. Before applying
 ANY information from internet search, official HA docs, ha-mcp results, or even this repo's own
 existing code/comments — check it's still accurate for that major version. HA changes fast: config
 keys get renamed/removed, integrations get rewritten, YAML syntax shifts across major versions.
 
-- Read `.HA_VERSION` first, at the start of any research into HA behavior/config/docs.
+- Read the `FROM` line of `.github/ha-versions/ha/Dockerfile` first, at the start of any research into
+  HA behavior/config/docs. The live instance may differ from the pin; check it with ha-mcp
+  (`ha_get_system_health`, `homeassistant.info.version`) when that matters.
 - When citing docs or web results, prefer version-pinned docs (e.g. `www.home-assistant.io/docs`
   reflects latest — verify against changelog/release notes if the feature is old or obscure) over
   version-less blog posts/forum answers, which may predate or postdate this install by years.
@@ -77,7 +81,7 @@ Only write one when the cause is **proven**, not when it is merely plausible.
 - **A single green CI run is not proof.** Neither is "the symptom went away after I changed X" —
   that is correlation on a sample of one, and for an intermittent failure it is worth nothing.
 - Acceptable evidence: a stack trace / thread dump / error naming the mechanism; the relevant
-  source read at the pinned `.HA_VERSION`; a config-check or test failure that reproduces
+  source read at the pinned version (Dockerfile `FROM`); a config-check or test failure that reproduces
   deterministically; a bisect over several runs.
 - If the cause is still a hypothesis, it belongs in the feature's `plans/` file marked as such —
   not in learnings.

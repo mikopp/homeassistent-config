@@ -646,7 +646,7 @@ registry rows survive the restart as permanent `unavailable` clutter until delet
 
 | Orphan | Was | Note |
 |---|---|---|
-| `sensor.victron_battery_power` | `mqtt` | already `unavailable` on the live system — dead branch |
+| `sensor.victron_battery_power` | `mqtt` | **CORRECTED 2026-10-11:** NOT unavailable — live read shows `900` W, `last_updated` current (ha-mcp). Still orphaned by this deploy; the "dead branch" label refers to no config consumer, not to the sensor's state |
 | `sensor.victron_system_losses_power` | `template` | DC-bus balance, superseded by `victron_multiplus_conversion_loss_power` |
 | `sensor.victron_system_losses_energy` | `template` | terminal — nothing consumed it |
 
@@ -839,6 +839,33 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 - [x] `packages/pergola.yaml` repointed to `sensor.victron_solar_yield_dc_watts`
 - [ ] Deployed by user via `git pull` + entity-registry reclaim for the 2 repointed entities
       (see "Revision: repoint instead of duplicate" — NOT a plain Energy Dashboard dropdown swap)
+
+### Status update 2026-10-11 — master merge
+
+- [x] `master` merged into `fix-victron-ac-dc-mixup` (no-commit merge, not committed/pushed). Only
+      conflict: `.github/workflows/ha_check.yaml`. Resolved by keeping the branch's CI changes
+      (background image prefetch, pergola isolation, timeouts) and taking master's pin source:
+      HA image now read from `.github/ha-versions/ha/Dockerfile` (`FROM` line), `.HA_VERSION` gone.
+- [x] `packages/victron.yaml`: master did not touch it — no formula/entity changes needed for the merge.
+- [x] Master's new consumers checked: `packages/heating_pv_boost.yaml` reads only
+      `victron_dc_pv_total_power`, `victron_ac_inverter_power`, `victron_ac_load_total_power`,
+      `victron_grid_power_export`, `victron_battery_soc` — all unchanged by this branch. No
+      `solar_yield_watts` / `victron_battery_power` / `system_losses_*` reads on master.
+- [x] Live HA (ha-mcp, read-only, 2026-10-11): `core-2026.10.1` — matches master's Dockerfile pin, NOT
+      the 2026.8.1 this plan's earlier verifications used. Confirmed live pre-deploy state:
+      `sensor.solar_yield_watts` (mqtt, uid `victron_solar_yield`), `sensor.victron_solar_yield_total_kwh`
+      (mqtt, uid `victron_solar_yield_total_kwh`), `sensor.victron_grid_energy_import` (template,
+      uid `victron_grid_energy_import`) — all match the reclaim table in step 2.
+- [ ] Re-verify the HA-core-dependent claims (trigger restore, integration platform, registry
+      reclaim) against the **2026.10.1** source — the earlier source reads were at 2026.8.1.
+- [ ] Tests not run: no docker in this environment; CI is the only real run.
+- [x] `heating_pv_boost.yaml` `heating_pv_surplus` now uses `sensor.solar_yield_watts` (AC-referenced
+      MPPT, = dc_pv × η) + `victron_ac_inverter_power` instead of raw `victron_dc_pv_total_power`.
+      Availability guard updated. New test `test_surplus_uses_ac_referenced_mppt_not_raw_dc`
+      (η 90 %: expects 3600, raw DC would give 4000). **Depends on this branch being deployed** —
+      on the live pre-deploy system `sensor.solar_yield_watts` is still raw DC.
+- [x] `CLAUDE.MD` HA-version gate and `.claude/learnings.md` pointers now reference the Dockerfile `FROM`
+      pin; `.HA_VERSION` no longer referenced as current.
 
 ## Naming (post-implementation correction)
 

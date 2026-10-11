@@ -642,10 +642,11 @@ template:
       #
       # An earlier design stashed this baseline in a custom `attributes:` key on each consumer,
       # read back via `this.attributes.get(...)`. CI caught that this does not work: verified
-      # against HA 2026.8.1 (this repo's pinned .HA_VERSION) that custom attributes on
+      # against HA 2026.8.1 (the CI pin at the time; the repo now pins 2026.10.1 via
+      # .github/ha-versions/ha/Dockerfile, not re-verified there) that custom attributes on
       # trigger-based template sensors do not reliably round-trip tick-to-tick — traced to
       # home-assistant/core#172847 (trigger-entity restore-state rework, merged 2026-06-24,
-      # weeks before this pinned version) reworking exactly this code path. `this.state`
+      # weeks before the 2026.8.1 pin) reworking exactly this code path. `this.state`
       # self-reference does NOT have this problem — it is the same mechanism the Grid Energy
       # Import/Export accumulators above already rely on successfully — so the baseline is now
       # a dedicated sensor's own state instead of an attribute. See
