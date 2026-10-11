@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   ha-ci:
-    name: HA Config Check · Template Validation · Automation Tests
+    name: Config Check · Template Validation · Automation Tests
     runs-on: ubuntu-latest
     # Hard ceiling on the whole job. Without this, GitHub's default job
     # timeout is 6 hours — so an unbounded hang (e.g. the harness's
@@ -26,7 +26,7 @@ jobs:
 
       # ── 2. Start BOTH image pulls in the background, concurrently ────────────
       #    This job needs two container images:
-      #      * ghcr.io/home-assistant/home-assistant:<.HA_VERSION>  ~655 MB
+      #      * ghcr.io/home-assistant/home-assistant:<Dockerfile FROM>  ~655 MB
       #      * acockburn/appdaemon:latest (Docker Hub)               ~50 MB
       #    Neither can be fetched by any earlier step, and no step between here
       #    and the barrier (step 7) touches either one, so both downloads are
@@ -66,7 +66,7 @@ jobs:
       #      in the store before the pull is fully committed.
       - name: Prefetch container images (background, concurrent)
         run: |
-          HA_IMAGE="ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION)"
+          HA_IMAGE=$(awk '/^FROM /{print $2}' .github/ha-versions/ha/Dockerfile)
           echo "$HA_IMAGE" > /tmp/ha_image_ref
           rm -f /tmp/ha_pull.rc /tmp/appdaemon_pull.rc
 
@@ -136,8 +136,9 @@ jobs:
               domain = dep["domain"]
               name = dep.get("name", domain)
               owner_repo = repo.rstrip("/").removeprefix("https://github.com/")
-              url = f"https://github.com/{owner_repo}/archive/refs/heads/main.tar.gz"
-              print(f"Installing {name} ({domain}) from {repo}")
+              ref = dep.get("ref", "main")
+              url = f"https://github.com/{owner_repo}/archive/refs/heads/{ref}.tar.gz"
+              print(f"Installing {name} ({domain}) from {repo}@{ref}")
               with tempfile.TemporaryDirectory() as tmp:
                   archive = os.path.join(tmp, "component.tar.gz")
                   urllib.request.urlretrieve(url, archive)
@@ -258,7 +259,7 @@ jobs:
       #       session-scoped `docker` fixture before a single test executes.
       #    2. Correctness, and the more important half. Without this the harness
       #       tested whatever Docker Hub's `:stable` resolved to that day, while
-      #       check_config below tested .HA_VERSION — the suite that actually
+      #       check_config below tested the Dockerfile pin — the suite that actually
       #       exercises the templates and automations was not testing the version
       #       that gets deployed. See the HA version gate in CLAUDE.md.
       - name: Tag pinned HA image for the test harness
@@ -270,7 +271,7 @@ jobs:
         run: |
           output=$(docker run --rm \
             -v "${{ github.workspace }}:/config" \
-            ghcr.io/home-assistant/home-assistant:$(cat .HA_VERSION) \
+            "$HA_IMAGE" \
             python -m homeassistant --config /config --script check_config 2>&1)
           echo "$output"
           if echo "$output" | grep -qiE "invalid config|invalid slug|Setup of package.*failed|ERROR"; then

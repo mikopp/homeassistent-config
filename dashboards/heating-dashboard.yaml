@@ -1,0 +1,161 @@
+title: Heating
+views:
+  - title: Overview
+    cards:
+      # ── 1. Heating status ──────────────────────────────────────────────────
+      - type: entities
+        title: Heating Status
+        entities:
+          - entity: sensor.geotherm_heating_hvac_action
+            name: Heat pump is doing (HVAC action)
+          - entity: sensor.geotherm_heating_hvac_mode
+            name: Configured mode (HVAC mode)
+          - entity: sensor.heating_control_state
+            name: Controller state
+          - entity: binary_sensor.heating_season_active
+          - entity: binary_sensor.heating_loxone_warm_enough
+            name: Loxone says warm enough
+          - entity: binary_sensor.heating_dhw_active
+            name: Hot water active (masks return temp)
+          - entity: binary_sensor.heating_cooling_active
+          - entity: binary_sensor.geotherm_heating_backup_heater
+          - entity: binary_sensor.heating_ebusd_online
+          - entity: binary_sensor.heating_loxone_online
+
+      - type: entities
+        title: Temperatures
+        entities:
+          - entity: sensor.geotherm_heating_circuit_flow_temp
+          - entity: sensor.geotherm_heating_circuit_return_temp
+            name: Circuit Return Temp (raw, includes hot water)
+          - entity: sensor.heating_circuit_return_temp_valid
+            name: Circuit Return Temp (valid, hot water masked)
+          - entity: sensor.geotherm_heating_temp_desired_low
+          - entity: sensor.geotherm_heating_temp_desired
+          - entity: sensor.heating_target_temp
+            name: Target Temp (derived, not written in Phase 1)
+
+      - type: history-graph
+        title: Flow and Return
+        hours_to_show: 24
+        entities:
+          - entity: sensor.geotherm_heating_circuit_flow_temp
+          - entity: sensor.heating_circuit_return_temp_valid
+          - entity: sensor.geotherm_heating_hvac_action
+
+      # ── 2. Slab boost status ───────────────────────────────────────────────
+      - type: entities
+        title: Slab Boost
+        entities:
+          - entity: input_boolean.heating_pv_boost_enabled
+          - entity: binary_sensor.heating_slab_mode_wanted
+            name: "Slab charge wanted (Phase 1, observation only)"
+          - entity: sensor.heating_pv_surplus
+          - entity: sensor.victron_battery_soc
+          - entity: schedule.heating_pv_window
+          - entity: sensor.heating_circuit_return_temp_valid
+            name: Return Temp (valid)
+          - entity: input_number.heating_return_temp_max
+            name: Return Temp saturation limit
+
+      - type: gauge
+        entity: sensor.heating_pv_surplus
+        name: PV Surplus
+        min: 0
+        max: 6000
+        needle: true
+        severity:
+          green: 1500
+          yellow: 500
+          red: 0
+
+      - type: history-graph
+        title: Surplus and Decision
+        hours_to_show: 24
+        entities:
+          - entity: sensor.heating_pv_surplus
+          - entity: binary_sensor.heating_slab_mode_wanted
+
+      - type: entities
+        title: PV Surplus Inputs
+        entities:
+          - entity: sensor.victron_dc_pv_total_power
+          - entity: sensor.victron_ac_inverter_power
+          - entity: sensor.victron_ac_load_total_power
+          - entity: sensor.technikraum_heizung_heizung_power
+            name: Heating circuit draw (excluded from load)
+
+      # ── 3. All entities of the implementation ──────────────────────────────
+      - type: entities
+        title: ebusd Telemetry
+        entities:
+          - entity: sensor.geotherm_heating_hvac_action
+          - entity: sensor.geotherm_heating_hvac_mode
+          - entity: sensor.geotherm_heating_circuit_flow_temp
+          - entity: sensor.geotherm_heating_circuit_return_temp
+          - entity: sensor.geotherm_heating_temp_desired_low
+          - entity: sensor.geotherm_heating_temp_desired
+
+      - type: entities
+        title: ebusd Interlock Inputs
+        entities:
+          - entity: binary_sensor.geotherm_heating_cooling_demand
+          - entity: binary_sensor.geotherm_heating_cooling_request
+          - entity: binary_sensor.geotherm_heating_cooling_active_uih
+          - entity: binary_sensor.geotherm_heating_hwc_active
+          - entity: binary_sensor.geotherm_heating_backup_heater
+
+      - type: entities
+        title: ebusd Bridge and Comfort Signal
+        entities:
+          - entity: binary_sensor.ebusd_heating_ebusd_running
+          - entity: sensor.ebusd_heating_ebusd_scan_status
+          - entity: binary_sensor.heating_ebusd_online
+          - entity: binary_sensor.loxone_heating_heating_loxone_warm_enough
+          - entity: binary_sensor.heating_loxone_online
+
+      - type: entities
+        title: Derived Sensors and Gates
+        entities:
+          - entity: sensor.heating_pv_surplus
+          - entity: sensor.heating_circuit_return_temp_valid
+          - entity: sensor.heating_target_temp
+          - entity: sensor.heating_control_state
+          - entity: binary_sensor.heating_season_active
+          - entity: binary_sensor.heating_cooling_active
+          - entity: binary_sensor.heating_dhw_active
+          - entity: binary_sensor.heating_slab_mode_wanted
+
+      - type: tile
+        entity: automation.heating_ebusd_poll_registration
+      - type: tile
+        entity: automation.heating_ebusd_connectivity_changed
+      - type: tile
+        entity: automation.heating_backup_heater_engaged
+      - type: tile
+        entity: automation.heating_slab_charge_decision_changed
+
+      - type: logbook
+        title: Heating Activity
+        hours_to_show: 24
+        entities:
+          - sensor.geotherm_heating_hvac_action
+          - sensor.heating_control_state
+          - binary_sensor.heating_slab_mode_wanted
+          - binary_sensor.heating_dhw_active
+          - binary_sensor.heating_cooling_active
+          - binary_sensor.geotherm_heating_backup_heater
+          - binary_sensor.heating_ebusd_online
+          - sensor.ebusd_heating_ebusd_scan_status
+
+      # ── 4. Settings ────────────────────────────────────────────────────────
+      - type: entities
+        title: Settings
+        entities:
+          - entity: input_boolean.heating_pv_boost_enabled
+          - entity: input_number.heating_boost_offset
+          - entity: input_number.heating_pv_surplus_threshold
+          - entity: input_number.heating_pv_deficit_threshold
+          - entity: input_number.heating_pv_min_battery_soc
+          - entity: input_number.heating_return_temp_max
+          - entity: schedule.heating_pv_window

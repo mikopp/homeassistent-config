@@ -1599,17 +1599,19 @@ automation:
             default: []
 
   # Manages boost when outdoor air is dry enough to flush indoor humidity.
-  # Trigger IDs separate the three entry points so boost_expired can only reach Branch 1
-  # (re-enable), preventing a double disable+notify when the hardware timer fires after
-  # drying_needed already went off.
+  # The boost switch itself is the only state: drying_needed off→on (re)starts the boost, the
+  # countdown re-arms it while it runs, and nothing restarts a boost that was turned off (by the
+  # user or otherwise) until drying_needed goes off and on again.
   - id: airflow_humidity_drying_boost
     alias: "Airflow: Humidity Drying Boost"
     description: >
       Runs a 60-minute ventilation boost when outdoor air is dry enough to flush indoor humidity.
-      Re-arms SEAMLESSLY ~5 min before the hardware countdown expires (while drying is still
-      needed) so the boost switch never drops — no 30/60-min flip-flop. The boost_expired path
-      remains a fallback for the case where an in-place extend does not take.
-      Stops and notifies when conditions are no longer met.
+      drying_needed turning on (re)starts the boost, also adopting one that is already running.
+      While the boost runs and drying is still needed it re-arms SEAMLESSLY ~5 min before the
+      hardware countdown expires by re-sending boost ON: the unit restarts its timer with the
+      switch staying on, no flip-flop, no notification. A boost that is turned off stays off until
+      drying_needed goes off and on again. Notifies only on a real state change (boost started /
+      stopped).
     mode: single
     trigger:
       - platform: state
@@ -1620,14 +1622,11 @@ automation:
         entity_id: binary_sensor.airflow_humidity_drying_needed
         to: "off"
         id: drying_needed_off
-      - platform: state
-        entity_id: switch.comfoconnect_pro_boost
-        to: "off"
-        id: boost_expired
       # Seamless re-arm: number.comfoconnect_pro_boost_time is a LIVE COUNTDOWN of remaining
       # boost minutes. When it drops below 5 (≈5 min before the 60-min run would end) we
-      # re-write it to 60 while the switch is still ON, so the boost never drops and nothing
-      # coupled to switch.comfoconnect_pro_boost flips. Fires only while boost runs.
+      # re-send boost ON while the switch is still ON. Verified on the device: writing the boost
+      # coil ON again restarts the timer at the full duration, so the boost never drops and
+      # nothing coupled to switch.comfoconnect_pro_boost flips. Fires only while boost runs.
       - platform: numeric_state
         entity_id: number.comfoconnect_pro_boost_time
         below: 5
@@ -1656,10 +1655,11 @@ automation:
             timeout: "00:05:00"
             continue_on_timeout: false
       - choose:
-          # Seamless re-arm: the countdown reached <2 min while a boost is running and drying is
-          # still needed. Re-write boost_time to 60 to extend the SAME run in place — the switch
-          # stays on, so nothing reading switch.comfoconnect_pro_boost (hvac_action, cooling_state,
-          # the controller's boost_ended trigger) flips. No notify: silent internal step.
+          # Seamless re-arm: the countdown reached <5 min while a boost is running and drying is
+          # still needed. Re-send boost ON: the unit restarts its timer at the full duration while
+          # the switch stays on (writing boost_time instead is ignored by the device), so nothing
+          # reading switch.comfoconnect_pro_boost (hvac_action, cooling_state, the controller's
+          # boost_ended trigger) flips. No notify: silent internal step, state is unchanged.
           # Guarded on boost == on so it can never (re)start a stopped boost.
           - conditions:
               - condition: trigger
@@ -1671,29 +1671,33 @@ automation:
                 entity_id: switch.comfoconnect_pro_boost
                 state: "on"
             sequence:
-              - action: number.set_value
+              - action: switch.turn_on
                 target:
-                  entity_id: number.comfoconnect_pro_boost_time
-                data:
-                  value: 60
+                  entity_id: switch.comfoconnect_pro_boost
 
-          # Enable boost: drying needed and boost not already running
+          # (Re)start boost: drying_needed turned on, so write boost ON even if a boost already runs
+          # (restarts its timer, adopts a manual boost). A Home Assistant restart only acts when no
+          # boost runs, so it never resets the timer.
           - conditions:
-              - condition: trigger
-                id:
-                  - drying_needed_on
-                  - boost_expired
-                  - ha_start
               - condition: state
                 entity_id: binary_sensor.airflow_humidity_drying_needed
                 state: "on"
-              - condition: not
+              - condition: or
                 conditions:
-                  - condition: state
-                    entity_id: switch.comfoconnect_pro_boost
-                    state: "on"
+                  - condition: trigger
+                    id: drying_needed_on
+                  - condition: and
+                    conditions:
+                      - condition: trigger
+                        id: ha_start
+                      - condition: state
+                        entity_id: switch.comfoconnect_pro_boost
+                        state: "off"
             sequence:
-              # 60-minute hardware boost; re-armed in place before expiry (see rearm_due branch).
+              # Captured before the writes: a restart of a running boost is not a state change.
+              - variables:
+                  boost_was_on: "{{ is_state('switch.comfoconnect_pro_boost', 'on') }}"
+              # 60-minute hardware boost; re-armed (boost ON re-sent) before expiry, see rearm_due branch.
               - action: number.set_value
                 target:
                   entity_id: number.comfoconnect_pro_boost_time
@@ -1702,21 +1706,29 @@ automation:
               - action: switch.turn_on
                 target:
                   entity_id: switch.comfoconnect_pro_boost
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Humidity Drying Boost"
-                  message: >
-                    Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
-                    (dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C)
-                    — boost started to flush humid air via free cooling.
+              - if:
+                  - condition: template
+                    value_template: "{{ not boost_was_on }}"
+                then:
+                  - action: notify.mobile_app_greywinds_iphone
+                    data:
+                      title: "Ventilation: Humidity Drying Boost"
+                      message: >
+                        Indoor humidity {{ states('sensor.airflow_avg_indoor_humidity_5min') }}%
+                        (dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C)
+                        — boost started to flush humid air via free cooling.
 
-          # Disable boost: drying no longer needed
+          # Disable boost: drying no longer needed. Only acts on a running boost, so a boost the
+          # user already turned off produces no "stopped" notification.
           - conditions:
               - condition: trigger
                 id: drying_needed_off
               - condition: state
                 entity_id: binary_sensor.airflow_humidity_drying_needed
                 state: "off"
+              - condition: state
+                entity_id: switch.comfoconnect_pro_boost
+                state: "on"
             sequence:
               - action: switch.turn_off
                 target:
@@ -1726,11 +1738,9 @@ automation:
                   title: "Ventilation: Drying Boost Stopped"
                   message: "Humidity drying conditions no longer met — boost stopped."
 
-        default:
-          - action: system_log.write
-            data:
-              message: "Airflow drying boost: unexpected trigger/state combination — no action"
-              level: warning
+        # No branch matched: desired state already satisfied (e.g. a manual boost reaching the
+        # countdown threshold while drying is off) → no-op (avoids log spam).
+        default: []
 
 # --- GROUP ---
 # All entities belonging to the airflow feature
