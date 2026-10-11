@@ -67,4 +67,6 @@ Current packages:
 - The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
   entities to a device via the UI instead.
 
-> Feature-specific notes live in directory-scoped files (e.g. `packages/CLAUDE.md`).
+> Package-specific notes are progressively loaded: `packages/CLAUDE.md` is an index pointing to one
+> `packages/notes/<package>.md` per package. Read the matching note before touching a package, and put any
+> new package knowledge there (never in this file). Add an index row for every new note.
