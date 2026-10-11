@@ -1044,22 +1044,25 @@ automation:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
-    action:
-      # On HA startup, wait for decision sensors to be available before evaluating.
-      # Real state-change triggers skip this block entirely.
-      # mode: restart ensures a real trigger aborts this wait and runs immediately.
-      - if:
-          - condition: trigger
-            id: ha_start
-        then:
-          - wait_template: >
+      # Startup guard: the ha_start run only proceeds when the decision sensors already have a
+      # value; real state-change triggers always pass. This is a NON-blocking check on purpose —
+      # the previous wait_template (5 min) sat at the head of this queued automation and let every
+      # sensor transition during startup pile up behind it until "Maximum number of runs
+      # exceeded". Skipping is safe: each sensor's own unavailable/unknown → value transition
+      # fires the state triggers above and re-runs the controller as soon as it is evaluable.
+      - condition: or
+        conditions:
+          - condition: not
+            conditions:
+              - condition: trigger
+                id: ha_start
+          - condition: template
+            value_template: >
               {{ has_value('sensor.heating_cooling_indicator') and
                  has_value('binary_sensor.airflow_free_cooling_available') and
                  has_value('binary_sensor.airflow_humidity_flush_needed') and
                  has_value('binary_sensor.airflow_ventilation_low_needed') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
-
+    action:
       # ===== SECTION 1: TEMPERATURE PROFILE (runs even during Away) =====
       - choose:
           # Block 1: Moisture protect OR active heating without free cooling → warm profile.
