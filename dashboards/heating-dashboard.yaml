@@ -13,7 +13,7 @@ views:
           - entity: sensor.heating_control_state
             name: Controller state
           - entity: binary_sensor.heating_season_active
-          - entity: binary_sensor.heating_loxone_warm_enough
+          - entity: binary_sensor.loxone_heating_heating_loxone_warm_enough
             name: Loxone says warm enough
           - entity: binary_sensor.heating_dhw_active
             name: Hot water active (masks return temp)
