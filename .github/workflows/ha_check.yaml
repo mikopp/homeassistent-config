@@ -68,6 +68,10 @@ jobs:
         run: |
           HA_IMAGE=$(awk '/^FROM /{print $2}' .github/ha-versions/ha/Dockerfile)
           echo "$HA_IMAGE" > /tmp/ha_image_ref
+          # Export for later steps too: the config-check step runs `docker run "$HA_IMAGE"`, and a
+          # shell variable set here does not survive the step boundary. Without this it expands to
+          # an empty image name and docker exits 125 before HA ever starts.
+          echo "HA_IMAGE=$HA_IMAGE" >> "$GITHUB_ENV"
           rm -f /tmp/ha_pull.rc /tmp/appdaemon_pull.rc
 
           nohup bash -c "
