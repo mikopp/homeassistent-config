@@ -33,6 +33,9 @@ mqtt:
     #     OMIT expire_after: they legitimately stay constant for hours, so they retain their
     #     last reading instead of going unavailable. Null payloads are already guarded in each
     #     value_template, and total_increasing tolerates the gap with no reset artifact.
+    #   • Every value_template also checks `value_json is defined`: the GX publishes an EMPTY
+    #     (non-JSON) payload when a service disappears, and then `value_json` does not exist at
+    #     all, so `value_json.value is not none` alone raised "'value_json' is undefined".
 
     # ── MPPT Solar DC (solarcharger 279) ─────────────────────────────────────
 
@@ -55,7 +58,7 @@ mqtt:
         model_id: "BPP010300200"
         configuration_url: "http://venus.local"
         suggested_area: "Electrical"
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # Cumulative lifetime yield from the MPPT — never resets, always increasing.
     # Used directly as a solar production source in the HA Energy Dashboard.
@@ -67,7 +70,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:solar-power
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
 
     # ── AC-coupled PV Inverter (pvinverter 20) ────────────────────────────────
     # This inverter generates AC power directly — measured on the AC side.
@@ -81,7 +84,7 @@ mqtt:
       expire_after: 120
       icon: mdi:solar-power-variant
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # Cumulative lifetime AC energy — used as the second solar production source
     # in the HA Energy Dashboard (already AC, no conversion needed).
@@ -93,7 +96,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:solar-power-variant
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
 
     # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
     # Positive = charger mode: AC grid energy flows through MultiPlus to DC bus.
@@ -108,7 +111,7 @@ mqtt:
       expire_after: 120
       icon: mdi:lightning-bolt-circle
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # Total DC PV power aggregated across all MPPTs connected to the GX
     - name: "Victron DC PV Total Power"
@@ -120,7 +123,7 @@ mqtt:
       expire_after: 120
       icon: mdi:solar-power
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # ── Battery (system/0 aggregate) ──────────────────────────────────────────
 
@@ -132,7 +135,7 @@ mqtt:
       device_class: battery
       state_class: measurement
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
 
     # Signed: positive = charging (power into battery), negative = discharging (power from battery)
     - name: "Victron Battery Power"
@@ -144,7 +147,7 @@ mqtt:
       expire_after: 120
       icon: mdi:battery-charging
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # ── Grid — 3-phase via MultiPlus AC-in ────────────────────────────────────
     # Per-phase sensors for phase-balance diagnostics.
@@ -158,7 +161,7 @@ mqtt:
       expire_after: 120
       icon: mdi:transmission-tower
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     - name: "Victron Grid L2 Power"
       unique_id: "victron_grid_l2_power"
@@ -169,7 +172,7 @@ mqtt:
       expire_after: 120
       icon: mdi:transmission-tower
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     - name: "Victron Grid L3 Power"
       unique_id: "victron_grid_l3_power"
@@ -180,7 +183,7 @@ mqtt:
       expire_after: 120
       icon: mdi:transmission-tower
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     # ── AC Consumption per phase (diagnostic) ─────────────────────────────────
     - name: "Victron AC Load L1"
@@ -192,7 +195,7 @@ mqtt:
       expire_after: 120
       icon: mdi:home-lightning-bolt
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     - name: "Victron AC Load L2"
       unique_id: "victron_ac_load_l2"
@@ -203,7 +206,7 @@ mqtt:
       expire_after: 120
       icon: mdi:home-lightning-bolt
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
     - name: "Victron AC Load L3"
       unique_id: "victron_ac_load_l3"
@@ -214,7 +217,7 @@ mqtt:
       expire_after: 120
       icon: mdi:home-lightning-bolt
       device: *victron_device
-      value_template: "{% if value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
 
 
 # ── Derived template sensors ───────────────────────────────────────────────────
