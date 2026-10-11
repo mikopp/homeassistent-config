@@ -1615,7 +1615,11 @@ automation:
       switch staying on, no flip-flop, no notification. A boost that is turned off stays off until
       drying_needed goes off and on again. Notifies only on a real state change (boost started /
       stopped).
-    mode: single
+    # queued (not single): with single, a trigger arriving while a run was still executing was
+    # dropped ("Already running") — a lost drying_needed on/off meant a missed boost start/stop.
+    # Every branch re-reads current state, so processing queued triggers in order is safe.
+    mode: queued
+    max: 5
     trigger:
       - platform: state
         entity_id: binary_sensor.airflow_humidity_drying_needed
@@ -1648,15 +1652,18 @@ automation:
       - condition: state
         entity_id: switch.comfoconnect_pro_away_function
         state: "off"
+      # Startup guard: the ha_start run only proceeds once drying_needed has a value. Non-blocking
+      # on purpose — a 5 min wait here held the run slot and starved real triggers. If skipped,
+      # drying_needed's own unknown/unavailable → on/off transition fires the triggers above.
+      - condition: or
+        conditions:
+          - condition: not
+            conditions:
+              - condition: trigger
+                id: ha_start
+          - condition: template
+            value_template: "{{ has_value('binary_sensor.airflow_humidity_drying_needed') }}"
     action:
-      - if:
-          - condition: trigger
-            id: ha_start
-        then:
-          - wait_template: >
-              {{ has_value('binary_sensor.airflow_humidity_drying_needed') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
       - choose:
           # Seamless re-arm: the countdown reached <5 min while a boost is running and drying is
           # still needed. Re-send boost ON: the unit restarts its timer at the full duration while
