@@ -1044,22 +1044,25 @@ automation:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
-    action:
-      # On HA startup, wait for decision sensors to be available before evaluating.
-      # Real state-change triggers skip this block entirely.
-      # mode: restart ensures a real trigger aborts this wait and runs immediately.
-      - if:
-          - condition: trigger
-            id: ha_start
-        then:
-          - wait_template: >
+      # Startup guard: the ha_start run only proceeds when the decision sensors already have a
+      # value; real state-change triggers always pass. This is a NON-blocking check on purpose —
+      # the previous wait_template (5 min) sat at the head of this queued automation and let every
+      # sensor transition during startup pile up behind it until "Maximum number of runs
+      # exceeded". Skipping is safe: each sensor's own unavailable/unknown → value transition
+      # fires the state triggers above and re-runs the controller as soon as it is evaluable.
+      - condition: or
+        conditions:
+          - condition: not
+            conditions:
+              - condition: trigger
+                id: ha_start
+          - condition: template
+            value_template: >
               {{ has_value('sensor.heating_cooling_indicator') and
                  has_value('binary_sensor.airflow_free_cooling_available') and
                  has_value('binary_sensor.airflow_humidity_flush_needed') and
                  has_value('binary_sensor.airflow_ventilation_low_needed') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
-
+    action:
       # ===== SECTION 1: TEMPERATURE PROFILE (runs even during Away) =====
       - choose:
           # Block 1: Moisture protect OR active heating without free cooling → warm profile.
@@ -1612,7 +1615,11 @@ automation:
       switch staying on, no flip-flop, no notification. A boost that is turned off stays off until
       drying_needed goes off and on again. Notifies only on a real state change (boost started /
       stopped).
-    mode: single
+    # queued (not single): with single, a trigger arriving while a run was still executing was
+    # dropped ("Already running") — a lost drying_needed on/off meant a missed boost start/stop.
+    # Every branch re-reads current state, so processing queued triggers in order is safe.
+    mode: queued
+    max: 5
     trigger:
       - platform: state
         entity_id: binary_sensor.airflow_humidity_drying_needed
@@ -1645,15 +1652,18 @@ automation:
       - condition: state
         entity_id: switch.comfoconnect_pro_away_function
         state: "off"
+      # Startup guard: the ha_start run only proceeds once drying_needed has a value. Non-blocking
+      # on purpose — a 5 min wait here held the run slot and starved real triggers. If skipped,
+      # drying_needed's own unknown/unavailable → on/off transition fires the triggers above.
+      - condition: or
+        conditions:
+          - condition: not
+            conditions:
+              - condition: trigger
+                id: ha_start
+          - condition: template
+            value_template: "{{ has_value('binary_sensor.airflow_humidity_drying_needed') }}"
     action:
-      - if:
-          - condition: trigger
-            id: ha_start
-        then:
-          - wait_template: >
-              {{ has_value('binary_sensor.airflow_humidity_drying_needed') }}
-            timeout: "00:05:00"
-            continue_on_timeout: false
       - choose:
           # Seamless re-arm: the countdown reached <5 min while a boost is running and drying is
           # still needed. Re-send boost ON: the unit restarts its timer at the full duration while

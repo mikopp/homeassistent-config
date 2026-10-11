@@ -688,7 +688,11 @@ automation:
         data:
           topic: "ebusd/mc/OperatingMode/get"
           payload: "?7"
+    # single + silent: at HA start several triggers (start, ebusd running, online, scan finished)
+    # fire within milliseconds. The first run registers all nine priorities, so the duplicates
+    # are redundant — drop them without the "Already running" warning.
     mode: single
+    max_exceeded: silent
 
   # ── NOTIFICATIONS ───────────────────────────────────────────────────────────────
   # Driven off transitions of the reason-based state sensor and the liveness sensors, so a
