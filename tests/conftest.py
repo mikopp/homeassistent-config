@@ -99,6 +99,9 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.heating_pv_deficit_threshold": 500,
         "input_number.heating_pv_min_battery_soc": 70,
         "input_number.heating_return_temp_max": 30,
+        "input_number.heating_indicator_heating_below": 5,
+        "input_number.heating_indicator_passive_cooling_above": 11,
+        "input_number.heating_indicator_active_cooling_above": 16,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
