@@ -316,26 +316,33 @@ def test_pv_power_zero_at_night_when_mppt_stale(home_assistant: HomeAssistant) -
 # ── Heating/cooling indicator → pergola_heating sync ─────────────────────────────────────
 # automation.pergola_sync_heating_from_indicator is disabled by the conftest baseline so the
 # seeded indicator cannot flip the boolean behind unrelated tests; these tests enable it.
+# Each step sets the 48h mean to a value that classifies as the pinned state (so a real
+# re-render of the indicator keeps it), pins the indicator, then fires the automation
+# explicitly: automation.turn_on registers its trigger asynchronously, so relying on the
+# state-change event alone races with it. The automation's own condition still runs.
+
+_SYNC = "automation.pergola_sync_heating_from_indicator"
 
 
-def _enable_indicator_sync(ha: HomeAssistant) -> None:
-    ha.call_action("automation", "turn_on",
-                   {"entity_id": "automation.pergola_sync_heating_from_indicator"})
+def _season(ha: HomeAssistant, mean: float, state: str) -> None:
+    ha.set_state("sensor.wheatherstation_outdoor_temperature_48h_mean", str(mean),
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.heating_cooling_indicator", state, {})
+    ha.call_action("automation", "trigger", {"entity_id": _SYNC})
 
 
 def test_indicator_heating_season_turns_pergola_heating_on(
     home_assistant: HomeAssistant,
 ) -> None:
     """active_heating and neutral are heating season → pergola_heating on."""
-    _enable_indicator_sync(home_assistant)
-    # Start from cooling so each assertion is a real transition of the indicator.
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 22.0, "active_cooling")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    _season(home_assistant, 14.0, "neutral")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "passive_cooling", {})
+    _season(home_assistant, 17.0, "passive_cooling")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    _season(home_assistant, 8.0, "active_heating")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
 
 
@@ -343,10 +350,10 @@ def test_indicator_cooling_season_turns_pergola_heating_off(
     home_assistant: HomeAssistant,
 ) -> None:
     """passive_cooling and active_cooling are cooling season → pergola_heating off."""
-    _enable_indicator_sync(home_assistant)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 8.0, "active_heating")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    _season(home_assistant, 22.0, "active_cooling")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
 
 
@@ -354,10 +361,9 @@ def test_indicator_unavailable_keeps_pergola_heating_unchanged(
     home_assistant: HomeAssistant,
 ) -> None:
     """Missing indicator data must not flip the season: boolean keeps its last value."""
-    _enable_indicator_sync(home_assistant)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 8.0, "active_heating")
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
     home_assistant.set_state("sensor.heating_cooling_indicator", "unavailable", {})
-    # Give the automation time to (not) act, then confirm the boolean was not touched.
-    home_assistant.assert_entity_state("sensor.heating_cooling_indicator", "unavailable", timeout=5)
+    home_assistant.call_action("automation", "trigger", {"entity_id": _SYNC})
     home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)

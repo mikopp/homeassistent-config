@@ -104,9 +104,11 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.heating_pv_deficit_threshold": 500,
         "input_number.heating_pv_min_battery_soc": 70,
         "input_number.heating_return_temp_max": 30,
-        "input_number.heating_indicator_heating_below": 5,
-        "input_number.heating_indicator_passive_cooling_above": 11,
-        "input_number.heating_indicator_active_cooling_above": 16,
+        # Production values for the indicator thresholds (heating below / passive cooling
+        # above / active cooling above).
+        "input_number.heating_indicator_heating_below": 12,
+        "input_number.heating_indicator_passive_cooling_above": 16,
+        "input_number.heating_indicator_active_cooling_above": 20,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
@@ -163,6 +165,9 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "mm"})
     ha.set_state("sensor.wheatherstation_rain_rate", "0",
                  {"unit_of_measurement": "mm/h"})
+    # 14 °C classifies as "neutral" (12 < 14 < 16) — consistent with the seeded indicator state
+    # below, so a real re-render of sensor.heating_cooling_indicator (triggered by a helper
+    # change) cannot flip the seed to another season behind unrelated tests.
     ha.set_state("sensor.wheatherstation_outdoor_temperature_48h_mean", "14.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     # Sun-shining binary_sensor — seeded on so evaluate_state Rule 6 (not_enough_sun)

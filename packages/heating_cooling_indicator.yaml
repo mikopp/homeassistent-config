@@ -28,7 +28,7 @@ sensor:
 # --- SETTINGS ---
 # The three main outdoor-temperature thresholds (48h mean). Hysteresis is NOT a setting: it is
 # fixed at 1 °C relative to each threshold inside the template. No `initial:` — set the values
-# once in the UI after deploy (5 / 11 / 16).
+# once in the UI after deploy (chosen values: 12 / 16 / 20).
 input_number:
   # Mean at or below this → active_heating.
   heating_indicator_heating_below:

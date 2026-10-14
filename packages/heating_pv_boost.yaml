@@ -407,15 +407,19 @@ template:
         device_class: power
         state_class: measurement
         icon: mdi:solar-power
-        # Unavailable ONLY when there is no Victron/Shelly data to compute from: the house load
-        # (the Victron "is the GX alive" signal) and the heating clamp must both be present.
+        # Unavailable ONLY when there is no Victron/Shelly data to compute from: the three Victron
+        # load phases (the "is the GX alive" signal) and the heating clamp must all be present.
+        # The phases are checked directly because sensor.victron_ac_load_total_power sums them
+        # with float(0) and therefore reads 0 W, never unavailable, when the GX is down.
         # sensor.technikraum_heizung_heizung_power carries expire_after: 120.
         # A missing PV source is NOT an outage: the AC inverter sensor goes unavailable at night
         # when the inverter sleeps, and the MPPT can too. That means "no PV", i.e. 0 W, so each
         # PV term falls back to 0 (deliberate — the repo's no-default rule is about masking
         # config errors; here unavailable is a legitimate "nothing generating" state).
         availability: >
-          {{ has_value('sensor.victron_ac_load_total_power')
+          {{ has_value('sensor.victron_ac_load_l1')
+             and has_value('sensor.victron_ac_load_l2')
+             and has_value('sensor.victron_ac_load_l3')
              and has_value('sensor.technikraum_heizung_heizung_power') }}
         state: >
           {% set dc_pv = states('sensor.victron_dc_pv_total_power') | float(0) %}
