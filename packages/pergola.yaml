@@ -1289,8 +1289,12 @@ automation:
         value_template: >
           {{ states('sensor.heating_cooling_indicator') in
              ['active_heating', 'neutral', 'passive_cooling', 'active_cooling'] }}
+    # Both seasons are named explicitly and there is no `default:` branch: a manual run
+    # ("Run actions" / automation.trigger skips the condition above by default) while the
+    # indicator is unavailable/unknown must leave the boolean untouched, not turn it off.
     actions:
       - choose:
+          # Heating season → let sun through.
           - conditions:
               - condition: state
                 entity_id: sensor.heating_cooling_indicator
@@ -1301,10 +1305,17 @@ automation:
               - action: input_boolean.turn_on
                 target:
                   entity_id: input_boolean.pergola_heating
-        default:
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.pergola_heating
+          # Cooling season → block sun.
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state:
+                  - passive_cooling
+                  - active_cooling
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.pergola_heating
     mode: restart
 
 # ─────────────────────────────────────────────────────────────────────────────────────

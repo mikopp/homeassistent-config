@@ -17,6 +17,21 @@ from ha_integration_test_harness import HomeAssistant
 
 _W = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
 _C = {"unit_of_measurement": "°C", "device_class": "temperature"}
+_MEAN = "sensor.wheatherstation_outdoor_temperature_48h_mean"
+_IND = "sensor.heating_cooling_indicator"
+
+
+def _drive_season(ha: HomeAssistant, mean: float, expected: str) -> None:
+    """Move the indicator through its real input (48h mean) and wait until it shows `expected`.
+
+    The indicator is never pinned with set_state: it reads its own previous state (`this`), so
+    HA re-renders it right after any external write and walks it back to what the mean says.
+    Thresholds are 12 / 16 / 20 (conftest baseline). Hysteresis advances one step per render;
+    HA allows the triggering render plus two self re-renders, so one mean change moves the
+    indicator at most 3 steps.
+    """
+    ha.set_state(_MEAN, str(mean), _C)
+    ha.assert_entity_state(_IND, expected, timeout=5)
 
 
 def _seed_power_flows(
@@ -110,7 +125,7 @@ def test_target_temp_is_setback_plus_one_in_heating_season(
 ) -> None:
     """Season neutral (seeded) counts as heating season → TempDesiredLow + 1."""
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "21.0", _C)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    _drive_season(home_assistant, 14.0, "neutral")
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
         lambda s: abs(float(s) - 22.0) < 0.01,
@@ -123,7 +138,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
 ) -> None:
     """Out of heating season the setpoint collapses onto the setback value, so the circuit idles."""
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "21.0", _C)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    _drive_season(home_assistant, 22.0, "active_cooling")  # neutral → active_cooling (2 steps)
     home_assistant.assert_entity_state("binary_sensor.heating_season_active", "off", timeout=5)
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
@@ -134,7 +149,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
 
 def test_target_temp_tracks_a_changed_setback(home_assistant: HomeAssistant) -> None:
     """TempDesiredLow is the only human knob — moving it must move the derived setpoint."""
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    _drive_season(home_assistant, 8.0, "active_heating")  # neutral → active_heating (1 step)
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "20.0", _C)
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
