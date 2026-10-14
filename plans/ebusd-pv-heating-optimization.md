@@ -199,6 +199,9 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       `"running"` — closes the "may not auto-publish" gap on 9 of the 10 registers this feature
       reads; see the "Transport" section for Option A (repoint) vs Option B (bridge, recommended)
       for the still-open question of whether `ebusd/#` reaches HA's broker at all
+- [x] 7a. `sensor.heating_pv_surplus` fix: clamp at 0 (was `-house_load` with no sun); missing PV
+      sources count as 0 W; unavailable only when Victron load or the heating clamp is unavailable.
+      Tests added in `tests/test_heating_pv_boost.py`. Not yet run locally / deployed.
 - [ ] 8. Observe for several days; calibrate the return-temp saturation threshold, validate the
       polling priority tiers against real cadence, and confirm whether ebusd's steady scan-status
       value is `"finished"` or `"OK"`

@@ -407,20 +407,24 @@ template:
         device_class: power
         state_class: measurement
         icon: mdi:solar-power
-        # Propagate unavailable rather than fabricating a 0: victron_grid_power_* have no
-        # availability guard of their own and read 0 during a GX outage, so this guards on the
-        # sources it actually uses. sensor.technikraum_heizung_heizung_power carries expire_after: 120.
+        # Unavailable ONLY when there is no Victron/Shelly data to compute from: the house load
+        # (the Victron "is the GX alive" signal) and the heating clamp must both be present.
+        # sensor.technikraum_heizung_heizung_power carries expire_after: 120.
+        # A missing PV source is NOT an outage: the AC inverter sensor goes unavailable at night
+        # when the inverter sleeps, and the MPPT can too. That means "no PV", i.e. 0 W, so each
+        # PV term falls back to 0 (deliberate — the repo's no-default rule is about masking
+        # config errors; here unavailable is a legitimate "nothing generating" state).
         availability: >
-          {{ has_value('sensor.victron_dc_pv_total_power')
-             and has_value('sensor.victron_ac_inverter_power')
-             and has_value('sensor.victron_ac_load_total_power')
+          {{ has_value('sensor.victron_ac_load_total_power')
              and has_value('sensor.technikraum_heizung_heizung_power') }}
         state: >
-          {% set pv = (states('sensor.victron_dc_pv_total_power') | float)
-                    + (states('sensor.victron_ac_inverter_power') | float) %}
+          {% set dc_pv = states('sensor.victron_dc_pv_total_power') | float(0) %}
+          {% set ac_pv = states('sensor.victron_ac_inverter_power') | float(0) %}
           {% set load_without_heating = (states('sensor.victron_ac_load_total_power') | float)
                                       - (states('sensor.technikraum_heizung_heizung_power') | float) %}
-          {{ (pv - load_without_heating) | round(0) }}
+          {# Surplus is what PV has left over; with no sun the balance is negative, which is a
+             deficit, not a surplus — clamp so the sensor reads 0 instead of -house_load. #}
+          {{ [dc_pv + ac_pv - load_without_heating, 0] | max | round(0) }}
 
       # ── Return temperature, masked during hot-water charging ──────────────
       # While the heat pump is making hot water, its water temperatures reflect the DHW circuit

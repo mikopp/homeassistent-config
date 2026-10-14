@@ -73,12 +73,36 @@ def test_surplus_is_unchanged_when_only_the_heat_pump_draw_changes(
     )
 
 
-def test_surplus_propagates_unavailable_rather_than_fabricating_zero(
+def test_surplus_propagates_unavailable_when_no_victron_load_data(
     home_assistant: HomeAssistant,
 ) -> None:
-    """A GX outage must produce a gap, not a false 'no surplus' that silently blocks charging."""
-    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "unavailable", {})
+    """No load data (GX outage) must produce a gap, not a false 'no surplus'."""
+    for phase in ("l1", "l2", "l3"):
+        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
     home_assistant.assert_entity_state("sensor.heating_pv_surplus", "unavailable", timeout=5)
+
+
+def test_surplus_is_zero_not_negative_without_sun(home_assistant: HomeAssistant) -> None:
+    """Night: PV 0, house load 500 → balance is -500, surplus must read 0."""
+    _seed_power_flows(home_assistant, dc_pv=0, ac_pv=0, house_load=500, heating=0)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
+
+
+def test_surplus_is_zero_when_inverter_sensor_unavailable(
+    home_assistant: HomeAssistant,
+) -> None:
+    """Inverter sleeps at night → its sensor is unavailable; surplus is 0, not unavailable."""
+    _seed_power_flows(home_assistant, dc_pv=11, ac_pv=0, house_load=500, heating=80)
+    home_assistant.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
 
 
 def test_target_temp_is_setback_plus_one_in_heating_season(
