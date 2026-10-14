@@ -66,6 +66,11 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
     """Reset all pergola and airflow input helpers to known-good values before each test."""
     ha = home_assistant
     ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_automatic_enabled"})
+    # The indicator→pergola_heating sync automation is disabled by default so the baseline
+    # indicator seed ("neutral" = heating season) cannot flip pergola_heating behind the tests.
+    # Its own tests turn it on explicitly.
+    ha.call_action("automation", "turn_off",
+                   {"entity_id": "automation.pergola_sync_heating_from_indicator"})
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.pergola_heating"})
     ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_cooling_optimized"})
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
