@@ -411,6 +411,9 @@ template:
         # load phases (the "is the GX alive" signal) and the heating clamp must all be present.
         # The phases are checked directly because sensor.victron_ac_load_total_power sums them
         # with float(0) and therefore reads 0 W, never unavailable, when the GX is down.
+        # The total itself is ALSO guarded: right after a config reload it can still be
+        # unavailable while the phases already have values, and the state template reads it with a
+        # bare `| float` (no default, by design), which would log a TemplateError.
         # sensor.technikraum_heizung_heizung_power carries expire_after: 120.
         # A missing PV source is NOT an outage: the AC inverter sensor goes unavailable at night
         # when the inverter sleeps, and the MPPT can too. That means "no PV", i.e. 0 W, so each
@@ -420,6 +423,7 @@ template:
           {{ has_value('sensor.victron_ac_load_l1')
              and has_value('sensor.victron_ac_load_l2')
              and has_value('sensor.victron_ac_load_l3')
+             and has_value('sensor.victron_ac_load_total_power')
              and has_value('sensor.technikraum_heizung_heizung_power') }}
         state: >
           {% set dc_pv = states('sensor.victron_dc_pv_total_power') | float(0) %}
