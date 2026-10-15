@@ -159,3 +159,27 @@ views:
           - entity: input_number.heating_pv_min_battery_soc
           - entity: input_number.heating_return_temp_max
           - entity: schedule.heating_pv_window
+
+      # ── 5. Heating/cooling indicator settings ──────────────────────────────
+      # Outdoor 48h mean thresholds. Hysteresis is fixed (1 °C); order is enforced in the template.
+      - type: entities
+        title: Indicator Settings
+        entities:
+          - entity: sensor.heating_cooling_indicator
+            name: Current mode
+          - entity: sensor.wheatherstation_outdoor_temperature_48h_mean
+            name: Outdoor 48h mean
+          - entity: input_number.heating_indicator_heating_below
+            name: Heating below
+          - entity: input_number.heating_indicator_passive_cooling_above
+            name: Passive cooling above
+          - entity: input_number.heating_indicator_active_cooling_above
+            name: Active cooling above
+          # Thresholds actually used. Differs from the box above when the order was violated and
+          # the value got clamped (passive >= heating + 2, active >= passive + 2).
+          - type: section
+            label: Effective thresholds (clamped to keep the order)
+          - entity: sensor.heating_indicator_passive_cooling_effective
+            name: Passive cooling above (effective)
+          - entity: sensor.heating_indicator_active_cooling_effective
+            name: Active cooling above (effective)
