@@ -193,7 +193,11 @@ mqtt:
         name: "Washer"
         manufacturer: "Loxone"
         suggested_area: "Technikraum"
-      value_template: "{{ value | float | round(3) }}"
+      # All Loxone value_templates below: Loxone sometimes publishes an EMPTY payload. A bare
+      # `| float` raises on '' (WARNING per message), so pass an empty payload through as ''.
+      # The MQTT sensor ignores an empty state for numeric sensors (debug log only) and keeps the
+      # last value — the same end state as before, minus the warning. Real numbers are unchanged.
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
     # Cumulative lifetime energy (kWh). Loxone updates it at least every 5 min
     # while it is changing (i.e. while drawing); no heartbeat during idle.
@@ -206,7 +210,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:lightning-bolt
       device: *loxone_washer
-      value_template: "{{ value | float | round(3) }}"
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
     # ── Loxone Tumble Dryer ────────────────────────────────────────────────────
     # NB: topic uses a hyphen (loxone/tumble-dry/*); HA ids use underscores.
@@ -223,7 +227,7 @@ mqtt:
         name: "Tumble Dryer"
         manufacturer: "Loxone"
         suggested_area: "Technikraum"
-      value_template: "{{ value | float | round(3) }}"
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
     - name: "Tumble Dryer Energy"
       unique_id: "loxone_tumble_dry_energy"
@@ -233,7 +237,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:lightning-bolt
       device: *loxone_tumble_dry
-      value_template: "{{ value | float | round(3) }}"
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
     # ── Loxone Dishwasher ──────────────────────────────────────────────────────
     - name: "Dishwasher Power"
@@ -249,7 +253,7 @@ mqtt:
         name: "Dishwasher"
         manufacturer: "Loxone"
         suggested_area: "Kitchen"
-      value_template: "{{ value | float | round(3) }}"
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
     - name: "Dishwasher Energy"
       unique_id: "loxone_dishwasher_energy"
@@ -259,7 +263,7 @@ mqtt:
       state_class: total_increasing
       icon: mdi:lightning-bolt
       device: *loxone_dishwasher
-      value_template: "{{ value | float | round(3) }}"
+      value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
   binary_sensor:
 
