@@ -58,6 +58,33 @@ def pytest_collection_modifyitems(items: list) -> None:
     items.sort(key=sort_key)
 
 
+# ── Default weather entity ───────────────────────────────────────────────────────────────
+# A fresh HA instance onboards a default weather entity (Met.no) whose entity_id is derived from
+# the location name (e.g. weather.forecast_home), not the weather.home that packages/ reference
+# (heating_cooling_indicator's 48h forecast mean). Rename it once per session so the
+# weather.get_forecasts call resolves in CI exactly as it does on the live instance.
+_WEATHER_ENTITY_ID = "weather.home"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def default_weather_entity_id(home_assistant: HomeAssistant) -> None:
+    """Rename the default weather entity to weather.home (no-op if already named so / absent)."""
+    listing = home_assistant._ws_send_receive({"id": 1, "type": "config/entity_registry/list"})
+    weather_ids = [
+        entry["entity_id"]
+        for entry in listing.get("result", [])
+        if entry["entity_id"].startswith("weather.")
+    ]
+    if not weather_ids or _WEATHER_ENTITY_ID in weather_ids:
+        return
+    home_assistant._ws_send_receive({
+        "id": 1,
+        "type": "config/entity_registry/update",
+        "entity_id": weather_ids[0],
+        "new_entity_id": _WEATHER_ENTITY_ID,
+    })
+
+
 # ── Per-test baseline fixtures ───────────────────────────────────────────────────────────
 
 
