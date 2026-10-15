@@ -122,6 +122,48 @@ template:
             {% else %}active_cooling{% endif %}
           {% endif %}
 
+  # --- FORECAST 48h MEAN ---
+  # Mean of the hourly outdoor-temperature forecast for the next 48 h (weather.home), refreshed
+  # every hour. Counterpart of the measured 48h mean above; NOT wired into the indicator yet.
+  # The forecast is not an attribute any more (removed in HA 2024.3): it is only available as the
+  # response of the weather.get_forecasts action, so this has to be a trigger-based template.
+  - triggers:
+      - trigger: time_pattern
+        minutes: "0"
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: weather.get_forecasts
+        target:
+          entity_id: weather.home
+        data:
+          type: hourly
+        response_variable: forecast
+    sensor:
+      - name: "Weatherstation Outdoor Temperature 48h Forecast Mean"
+        unique_id: wheatherstation_outdoor_temperature_48h_forecast_mean
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-lines
+        # Only forecast hours from now until now + 48 h are averaged. Fewer than 48 usable hours
+        # (provider returned a short/empty forecast) → "unknown" rather than a skewed mean.
+        state: >
+          {% set until = now() + timedelta(hours=48) %}
+          {% set from_ = now() - timedelta(hours=1) %}
+          {% set ns = namespace(temps=[]) %}
+          {% for hour in forecast['weather.home'].forecast %}
+            {% set t = as_datetime(hour.datetime) %}
+            {% if hour.temperature is number and t >= from_ and t < until %}
+              {% set ns.temps = ns.temps + [hour.temperature] %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.temps | length >= 48 %}
+            {{ (ns.temps | sum / ns.temps | length) | round(1) }}
+          {% else %}
+            {{ none }}
+          {% endif %}
+
 # --- GROUP ---
 # All entities belonging to the heating_cooling_indicator feature
 group:
@@ -132,6 +174,8 @@ group:
       - sensor.wheatherstation_outdoor_temperature_15min
       # Statistics sensor (48h mean)
       - sensor.wheatherstation_outdoor_temperature_48h_mean
+      # Forecast 48h mean (weather.home, hourly)
+      - sensor.wheatherstation_outdoor_temperature_48h_forecast_mean
       # Template sensor (heating/cooling state)
       - sensor.heating_cooling_indicator
       # Effective (clamped) thresholds
