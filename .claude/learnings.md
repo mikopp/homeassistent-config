@@ -52,6 +52,14 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`. This is what CLAUDE.md's "HA version
   gate" operationalises, and it is what turned three of the entries on this page from guesses into
   facts. Docs were ambiguous or silent every time it mattered.
+- **MQTT sensor `value_template` + empty payload** — CONFIRMED at 2026.10.1 (source excerpt of
+  `components/mqtt/sensor.py::_update_state` via WebFetch, corroborated by the sensor.mqtt docs): on
+  a sensor with `device_class`/`unit_of_measurement`/`state_class`, a rendered `''` is IGNORED
+  (debug log only, last value kept); a rendered `'None'` sets the state to `unknown`. A bare
+  `| float` on an empty payload RAISES (WARNING per message). So guard with
+  `{{ '' if value | trim == '' else value | float | round(3) }}` to keep the last value; use `none`
+  only when `unknown` is actually wanted (it is NOT for idle appliances without `expire_after`).
+  Applied to the Loxone appliance sensors in `packages/energy.yaml`.
 
 ### Test Harness
 - **Step the mocked clock with `fast_forward(timedelta(...))`, never `jump_to_next(hour=...)`,
