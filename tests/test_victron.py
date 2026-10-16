@@ -184,6 +184,21 @@ def test_battery_ac_power_grid_exporting(home_assistant: HomeAssistant) -> None:
     home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 0.0, timeout=5)
 
 
+def test_pv_net_and_surplus_are_ac_referenced(home_assistant: HomeAssistant) -> None:
+    """MPPT 4000 W DC at η 90 % → 3600 W AC; AC PV 1000; house load 2500 → net 2100 = surplus 2100."""
+    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
+    _seed(home_assistant, dc_pv=4000, ac_inverter=1000, ac_l1=2500)
+    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == 2100, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 2100, timeout=5)
+
+
+def test_pv_surplus_clamps_at_zero_but_net_stays_signed(home_assistant: HomeAssistant) -> None:
+    """PV short of load: dc_pv=500 + ac_pv=0 (η 100 %), load 1200 → net −700, surplus 0."""
+    _seed(home_assistant, dc_pv=500, ac_l1=1200)
+    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == -700, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 0, timeout=5)
+
+
 # ── Night scenario test ───────────────────────────────────────────────────────
 
 

@@ -97,6 +97,32 @@ def test_surplus_is_unchanged_when_only_the_heat_pump_draw_changes(
     )
 
 
+def test_surplus_keeps_the_deficit_when_adding_the_heat_pump_back(
+    home_assistant: HomeAssistant,
+) -> None:
+    """PV 2000, house 2500 incl. heat pump 1500 → free PV is 2000 − 1000 = 1000, not 1500.
+
+    A pre-clamped whole-house surplus (0) plus the heating draw (1500) would overstate it, which is
+    why the heating sensor builds on the signed sensor.victron_pv_net_power.
+    """
+    _seed_power_flows(home_assistant, dc_pv=2000, ac_pv=0, house_load=2500, heating=1500)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: abs(float(s) - 1000.0) < 1.0,
+        timeout=5,
+    )
+
+
+def test_surplus_clamps_at_zero(home_assistant: HomeAssistant) -> None:
+    """PV 500, non-heating load 1000 → free PV would be −500; reported as 0."""
+    _seed_power_flows(home_assistant, dc_pv=500, ac_pv=0, house_load=2500, heating=1500)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
+
+
 def test_surplus_propagates_unavailable_rather_than_fabricating_zero(
     home_assistant: HomeAssistant,
 ) -> None:

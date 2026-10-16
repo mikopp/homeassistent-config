@@ -849,10 +849,9 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
       that used to share this branch ships separately (`ci/test-speedups`). The workflow is
       therefore NOT touched here; HA image pin is master's `.github/ha-versions/ha/Dockerfile`.
 - [x] `packages/victron.yaml`: master did not touch it — no formula/entity changes needed for the merge.
-- [x] Master's new consumers checked: `packages/heating_pv_boost.yaml` reads only
-      `victron_dc_pv_total_power`, `victron_ac_inverter_power`, `victron_ac_load_total_power`,
-      `victron_grid_power_export`, `victron_battery_soc` — all unchanged by this branch. No
-      `solar_yield_watts` / `victron_battery_power` / `system_losses_*` reads on master.
+- [x] Master's new consumers checked: `packages/heating_pv_boost.yaml` originally read
+      `victron_dc_pv_total_power` (raw DC) in `heating_pv_surplus`; that is now replaced (see the
+      `heating_pv_surplus` item below). Its other reads (`victron_battery_soc`, etc.) are unchanged.
 - [x] Live HA (ha-mcp, read-only, 2026-10-11): `core-2026.10.1` — matches master's Dockerfile pin, NOT
       the 2026.8.1 this plan's earlier verifications used. Confirmed live pre-deploy state:
       `sensor.solar_yield_watts` (mqtt, uid `victron_solar_yield`), `sensor.victron_solar_yield_total_kwh`
@@ -861,11 +860,16 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 - [ ] Re-verify the HA-core-dependent claims (trigger restore, integration platform, registry
       reclaim) against the **2026.10.1** source — the earlier source reads were at 2026.8.1.
 - [ ] Tests not run: no docker in this environment; CI is the only real run.
-- [x] `heating_pv_boost.yaml` `heating_pv_surplus` now uses `sensor.solar_yield_watts` (AC-referenced
-      MPPT, = dc_pv × η) + `victron_ac_inverter_power` instead of raw `victron_dc_pv_total_power`.
-      Availability guard updated. New test `test_surplus_uses_ac_referenced_mppt_not_raw_dc`
-      (η 90 %: expects 3600, raw DC would give 4000). **Depends on this branch being deployed** —
-      on the live pre-deploy system `sensor.solar_yield_watts` is still raw DC.
+- [x] Whole-house PV balance now lives in `packages/victron.yaml`:
+      `sensor.victron_pv_net_power` = `solar_yield_watts` (MPPT, dc_pv × η) + `victron_ac_inverter_power`
+      − `victron_ac_load_total_power` (signed), and `sensor.victron_pv_surplus_power` = max(0, net).
+      `heating_pv_surplus` = max(0, `victron_pv_net_power` + heating-circuit draw). It deliberately
+      adds the heating draw to the SIGNED net, not the clamped surplus: clamping first would lose the
+      deficit and overstate free PV. Tests: `test_pv_net_and_surplus_are_ac_referenced`,
+      `test_pv_surplus_clamps_at_zero_but_net_stays_signed` (test_victron.py),
+      `test_surplus_uses_ac_referenced_mppt_not_raw_dc`, `test_surplus_keeps_the_deficit_when_adding_the_heat_pump_back`,
+      `test_surplus_clamps_at_zero` (test_heating_pv_boost.py). **Depends on this branch being
+      deployed** — on the live pre-deploy system `sensor.solar_yield_watts` is still raw DC.
 - [x] Docs: `CLAUDE.MD` HA-version gate and `.claude/learnings.md` live in the CI / test-speedups PR.
       This branch is stacked on that PR and must be rebased onto `master` after it merges; its CI
       only means anything with the HTTP shim and timeouts in place.

@@ -403,6 +403,44 @@ template:
         availability: >
           {{ states('sensor.victron_dc_pv_total_power') not in ['unavailable', 'unknown'] }}
 
+      # ── PV net power / PV surplus (whole-house, AC-referenced) ───────────────
+      # Total PV the house does not consume, on the AC side of the MultiPlus:
+      #     net = solar_ac (MPPT, dc_pv × η) + ac_pv (AC-coupled inverter) − ac_load
+      # Both PV terms are AC watts; ac_load is everything the house draws on the AC bus,
+      # including anything the battery or grid then covers or absorbs.
+      #
+      # Two sensors, because a clamp loses information:
+      #   - victron_pv_net_power     signed (negative = PV short of load). Building block for
+      #                              consumers that add a load back (packages/heating_pv_boost.yaml
+      #                              adds its own draw back — clamping first would overstate it).
+      #   - victron_pv_surplus_power the same, clamped at 0. The "how much PV is spare" figure.
+      - name: "Victron PV Net Power"
+        unique_id: victron_pv_net_power
+        state: >
+          {% set solar_ac = states('sensor.solar_yield_watts') | float %}
+          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float %}
+          {% set ac_load  = states('sensor.victron_ac_load_total_power') | float %}
+          {{ (solar_ac + ac_pv - ac_load) | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        availability: >
+          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown']
+          and states('sensor.victron_ac_inverter_power') not in ['unavailable', 'unknown']
+          and states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown'] }}
+
+      - name: "Victron PV Surplus Power"
+        unique_id: victron_pv_surplus_power
+        state: >
+          {{ [states('sensor.victron_pv_net_power') | float, 0] | max }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        availability: >
+          {{ states('sensor.victron_pv_net_power') not in ['unavailable', 'unknown'] }}
+
       # ── Energy Dashboard battery power sensor ────────────────────────────────
       # HA house-centric convention: positive = discharging (battery contributing to home),
       # negative = charging.
