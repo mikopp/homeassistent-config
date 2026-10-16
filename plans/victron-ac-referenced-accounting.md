@@ -912,6 +912,37 @@ statistics already compiled with the low η are not rewritten.
 - [ ] CI green
 - [ ] Deployed + η accumulators re-seeded by user
 
+### Status update 2026-10-16 (late) — SOC / PV counters `unknown` after a YAML reload
+
+- **Observed (live, HA 2026.10.1):** after the user reloaded YAML (not a restart),
+  `sensor.victron_battery_soc`, `sensor.victron_solar_yield_dc_total_kwh` and
+  `sensor.victron_ac_inverter_energy_total_kwh` read `unknown`. The three sensors that carry
+  slow/constant values and deliberately had NO `expire_after`.
+- **Why the startup publish did not help:** the "Initial Full Publish" automation triggers on the
+  `homeassistant` `start` event, which a YAML reload does not fire; and the keep-alive is
+  `suppress-republish`, so an UNCHANGED value is never re-sent. (Reading, not yet reproduced.)
+- **Verified in source (components/mqtt/sensor.py at tag 2026.10.1):** an MQTT sensor restores its
+  last value after a restart only when `expire_after > 0` and its `last_changed + expire_after` is
+  still in the future. So "no expire_after, to keep the last reading" was backwards: it is exactly
+  what loses the reading. Not verified: that the restore also applies on a *reload* (the source
+  read only shows the restart path), so reload behaviour is unproven.
+- **Change:** `victron_battery_soc` `expire_after: 86400` (BMS steps 0.1 %, changes constantly);
+  `victron_solar_yield_dc_total_kwh` and `victron_ac_inverter_energy_total_kwh`
+  `expire_after: 604800` (constant overnight / on dark days). Policy comment at the top of
+  `packages/victron.yaml` corrected.
+- **Side effects:** past the window a sensor reads `unavailable` instead of holding. The counter
+  baseline sensors already hold their last value on unavailable sources, so accumulation is
+  unaffected.
+- **Not in this change (proposed, awaiting approval):** a second trigger on the
+  `event_mqtt_reloaded` bus event for the full-publish automation. The source suggests
+  `hass.bus.async_fire(f"event_{DOMAIN}_reloaded")`, but the resolved string was not confirmed.
+- **Immediate workaround on the host:** `mqtt.publish` topic `R/c0619ab4c19e/keepalive`, empty
+  payload, forces one full snapshot.
+
+- [x] Implemented on branch `fix/victron-restore-slow-sensors`
+- [ ] CI green
+- [ ] Deployed; confirm SOC survives a restart
+
 ### Status update 2026-10-11 — master merge
 
 - [x] Feature rebuilt as one commit on top of current `master` (a1ddd6d); the CI / test-suite work
