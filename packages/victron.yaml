@@ -414,11 +414,16 @@ template:
       #                              consumers that add a load back (packages/heating_pv_boost.yaml
       #                              adds its own draw back — clamping first would overstate it).
       #   - victron_pv_surplus_power the same, clamped at 0. The "how much PV is spare" figure.
+      #
+      # Availability follows the load side only: the three phases (the "is the GX alive" signal —
+      # the total sums them with float(0) and would otherwise read 0 W during an outage) and the
+      # total. A missing PV source is NOT an outage — the AC inverter sleeps at night and the MPPT
+      # can go unavailable too — so each PV term falls back to 0 W ("nothing generating").
       - name: "Victron PV Net Power"
         unique_id: victron_pv_net_power
         state: >
-          {% set solar_ac = states('sensor.solar_yield_watts') | float %}
-          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float %}
+          {% set solar_ac = states('sensor.solar_yield_watts') | float(0) %}
+          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float(0) %}
           {% set ac_load  = states('sensor.victron_ac_load_total_power') | float %}
           {{ (solar_ac + ac_pv - ac_load) | round(0) }}
         unit_of_measurement: "W"
@@ -426,8 +431,9 @@ template:
         state_class: measurement
         icon: mdi:solar-power
         availability: >
-          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown']
-          and states('sensor.victron_ac_inverter_power') not in ['unavailable', 'unknown']
+          {{ states('sensor.victron_ac_load_l1') not in ['unavailable', 'unknown']
+          and states('sensor.victron_ac_load_l2') not in ['unavailable', 'unknown']
+          and states('sensor.victron_ac_load_l3') not in ['unavailable', 'unknown']
           and states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown'] }}
 
       - name: "Victron PV Surplus Power"

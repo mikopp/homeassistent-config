@@ -17,6 +17,21 @@ from ha_integration_test_harness import HomeAssistant
 
 _W = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
 _C = {"unit_of_measurement": "°C", "device_class": "temperature"}
+_MEAN = "sensor.wheatherstation_outdoor_temperature_48h_mean"
+_IND = "sensor.heating_cooling_indicator"
+
+
+def _drive_season(ha: HomeAssistant, mean: float, expected: str) -> None:
+    """Move the indicator through its real input (48h mean) and wait until it shows `expected`.
+
+    The indicator is never pinned with set_state: it reads its own previous state (`this`), so
+    HA re-renders it right after any external write and walks it back to what the mean says.
+    Thresholds are 12 / 16 / 20 (conftest baseline). Hysteresis advances one step per render;
+    HA allows the triggering render plus two self re-renders, so one mean change moves the
+    indicator at most 3 steps.
+    """
+    ha.set_state(_MEAN, str(mean), _C)
+    ha.assert_entity_state(_IND, expected, timeout=5)
 
 
 def _seed_power_flows(
@@ -123,12 +138,36 @@ def test_surplus_clamps_at_zero(home_assistant: HomeAssistant) -> None:
     )
 
 
-def test_surplus_propagates_unavailable_rather_than_fabricating_zero(
+def test_surplus_propagates_unavailable_when_no_victron_load_data(
     home_assistant: HomeAssistant,
 ) -> None:
-    """A GX outage must produce a gap, not a false 'no surplus' that silently blocks charging."""
-    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "unavailable", {})
+    """No load data (GX outage) must produce a gap, not a false 'no surplus'."""
+    for phase in ("l1", "l2", "l3"):
+        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
     home_assistant.assert_entity_state("sensor.heating_pv_surplus", "unavailable", timeout=5)
+
+
+def test_surplus_is_zero_not_negative_without_sun(home_assistant: HomeAssistant) -> None:
+    """Night: PV 0, house load 500 → balance is -500, surplus must read 0."""
+    _seed_power_flows(home_assistant, dc_pv=0, ac_pv=0, house_load=500, heating=0)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
+
+
+def test_surplus_is_zero_when_inverter_sensor_unavailable(
+    home_assistant: HomeAssistant,
+) -> None:
+    """Inverter sleeps at night → its sensor is unavailable; surplus is 0, not unavailable."""
+    _seed_power_flows(home_assistant, dc_pv=11, ac_pv=0, house_load=500, heating=80)
+    home_assistant.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
 
 
 def test_target_temp_is_setback_plus_one_in_heating_season(
@@ -136,7 +175,7 @@ def test_target_temp_is_setback_plus_one_in_heating_season(
 ) -> None:
     """Season neutral (seeded) counts as heating season → TempDesiredLow + 1."""
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "21.0", _C)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "neutral", {})
+    _drive_season(home_assistant, 14.0, "neutral")
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
         lambda s: abs(float(s) - 22.0) < 0.01,
@@ -149,7 +188,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
 ) -> None:
     """Out of heating season the setpoint collapses onto the setback value, so the circuit idles."""
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "21.0", _C)
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_cooling", {})
+    _drive_season(home_assistant, 22.0, "active_cooling")  # neutral → active_cooling (2 steps)
     home_assistant.assert_entity_state("binary_sensor.heating_season_active", "off", timeout=5)
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",
@@ -160,7 +199,7 @@ def test_target_temp_falls_back_to_setback_out_of_season(
 
 def test_target_temp_tracks_a_changed_setback(home_assistant: HomeAssistant) -> None:
     """TempDesiredLow is the only human knob — moving it must move the derived setpoint."""
-    home_assistant.set_state("sensor.heating_cooling_indicator", "active_heating", {})
+    _drive_season(home_assistant, 8.0, "active_heating")  # neutral → active_heating (1 step)
     home_assistant.set_state("sensor.geotherm_heating_temp_desired_low", "20.0", _C)
     home_assistant.assert_entity_state(
         "sensor.heating_target_temp",

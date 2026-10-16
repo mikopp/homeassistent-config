@@ -199,6 +199,19 @@ def test_pv_surplus_clamps_at_zero_but_net_stays_signed(home_assistant: HomeAssi
     home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 0, timeout=5)
 
 
+def test_pv_net_treats_unavailable_pv_as_zero_but_load_outage_as_unavailable(
+    home_assistant: HomeAssistant,
+) -> None:
+    """Night: inverter asleep (unavailable) → PV 0 W, net = −load. GX outage (phases gone) → unavailable."""
+    _seed(home_assistant, ac_l1=500)
+    home_assistant.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == -500, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 0, timeout=5)
+    for phase in ("l1", "l2", "l3"):
+        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.victron_pv_net_power", "unavailable", timeout=5)
+
+
 # ── Night scenario test ───────────────────────────────────────────────────────
 
 

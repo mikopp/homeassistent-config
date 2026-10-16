@@ -58,6 +58,33 @@ def pytest_collection_modifyitems(items: list) -> None:
     items.sort(key=sort_key)
 
 
+# ── Default weather entity ───────────────────────────────────────────────────────────────
+# A fresh HA instance onboards a default weather entity (Met.no) whose entity_id is derived from
+# the location name (e.g. weather.forecast_home), not the weather.home that packages/ reference
+# (heating_cooling_indicator's 48h forecast mean). Rename it once per session so the
+# weather.get_forecasts call resolves in CI exactly as it does on the live instance.
+_WEATHER_ENTITY_ID = "weather.home"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def default_weather_entity_id(home_assistant: HomeAssistant) -> None:
+    """Rename the default weather entity to weather.home (no-op if already named so / absent)."""
+    listing = home_assistant._ws_send_receive({"id": 1, "type": "config/entity_registry/list"})
+    weather_ids = [
+        entry["entity_id"]
+        for entry in listing.get("result", [])
+        if entry["entity_id"].startswith("weather.")
+    ]
+    if not weather_ids or _WEATHER_ENTITY_ID in weather_ids:
+        return
+    home_assistant._ws_send_receive({
+        "id": 1,
+        "type": "config/entity_registry/update",
+        "entity_id": weather_ids[0],
+        "new_entity_id": _WEATHER_ENTITY_ID,
+    })
+
+
 # ── Per-test baseline fixtures ───────────────────────────────────────────────────────────
 
 
@@ -66,6 +93,11 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
     """Reset all pergola and airflow input helpers to known-good values before each test."""
     ha = home_assistant
     ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_automatic_enabled"})
+    # The indicator→pergola_heating sync automation is disabled by default so the baseline
+    # indicator seed ("neutral" = heating season) cannot flip pergola_heating behind the tests.
+    # Its own tests turn it on explicitly.
+    ha.call_action("automation", "turn_off",
+                   {"entity_id": "automation.pergola_sync_heating_from_indicator"})
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.pergola_heating"})
     ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_cooling_optimized"})
     ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
@@ -99,6 +131,11 @@ def baseline_inputs(home_assistant: HomeAssistant) -> None:
         "input_number.heating_pv_deficit_threshold": 500,
         "input_number.heating_pv_min_battery_soc": 70,
         "input_number.heating_return_temp_max": 30,
+        # Production values for the indicator thresholds (heating below / passive cooling
+        # above / active cooling above).
+        "input_number.heating_indicator_heating_below": 12,
+        "input_number.heating_indicator_passive_cooling_above": 16,
+        "input_number.heating_indicator_active_cooling_above": 20,
     }.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
@@ -176,6 +213,9 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
                  {"unit_of_measurement": "mm"})
     ha.set_state("sensor.wheatherstation_rain_rate", "0",
                  {"unit_of_measurement": "mm/h"})
+    # 14 °C classifies as "neutral" (12 < 14 < 16) — consistent with the seeded indicator state
+    # below, so a real re-render of sensor.heating_cooling_indicator (triggered by a helper
+    # change) cannot flip the seed to another season behind unrelated tests.
     ha.set_state("sensor.wheatherstation_outdoor_temperature_48h_mean", "14.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     # Sun-shining binary_sensor — seeded on so evaluate_state Rule 6 (not_enough_sun)

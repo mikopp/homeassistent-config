@@ -52,6 +52,14 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`. This is what CLAUDE.md's "HA version
   gate" operationalises, and it is what turned three of the entries on this page from guesses into
   facts. Docs were ambiguous or silent every time it mattered.
+- **MQTT sensor `value_template` + empty payload** — CONFIRMED at 2026.10.1 (source excerpt of
+  `components/mqtt/sensor.py::_update_state` via WebFetch, corroborated by the sensor.mqtt docs): on
+  a sensor with `device_class`/`unit_of_measurement`/`state_class`, a rendered `''` is IGNORED
+  (debug log only, last value kept); a rendered `'None'` sets the state to `unknown`. A bare
+  `| float` on an empty payload RAISES (WARNING per message). So guard with
+  `{{ '' if value | trim == '' else value | float | round(3) }}` to keep the last value; use `none`
+  only when `unknown` is actually wanted (it is NOT for idle appliances without `expire_after`).
+  Applied to the Loxone appliance sensors in `packages/energy.yaml`.
 
 ### Test Harness
 - **Step the mocked clock with `fast_forward(timedelta(...))`, never `jump_to_next(hour=...)`,
@@ -104,6 +112,20 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   production YAML.**
 
 ### Test Harness
+- **Pinning a self-referencing template sensor with `set_state()`** (any template that reads
+  `this.state`, e.g. `sensor.heating_cooling_indicator`'s hysteresis) — the pinned state does not
+  stick. CONFIRMED at 2026.10.1 (`components/template/template_entity.py` `_handle_results`): `this`
+  is tracked, so the entity re-renders on its OWN state change, up to `len(_template_attrs)` times
+  in a row (state + availability = 2 here) before the "Template loop detected" guard stops it. Each
+  re-render recomputes from the real inputs, so a hysteresis ladder walks one step per render
+  toward what the inputs say (CI: pinned `active_cooling` with a 14 °C mean became `neutral`).
+  Fix: drive the real input (the 48h mean) and assert the template reached the expected state.
+  One input change moves it at most 1 + 2 steps.
+- **`automation.trigger` skips the automation's conditions by default** — `skip_condition`
+  defaults to `True` (CONFIRMED, `components/automation/__init__.py` at 2026.10.1). A test that
+  fires an automation explicitly to check a condition guard must pass `skip_condition: False`.
+  Production consequence: never rely on `conditions:` alone to keep a `choose` `default:` from
+  running on bad data — a manual "Run actions" also skips them; name every acted-on case explicitly.
 - **Harness calls that can block forever — CONFIRMED by a pytest-timeout thread dump.**
   `ha_integration_test_harness` v0.11.0 calls `requests.get/post/delete` with no `timeout=`, so an
   HA container that accepts the TCP connection but never answers blocks the process forever (dump:
@@ -184,3 +206,13 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   `timeout_func_only`), and the airflow reload helper's clock jump was secretly supplying the delay
   crossing that two other tests depended on. Also cut ~11 days of pointless mocked-clock travel out
   of `test_victron.py` by replacing 20 `jump_to_next(hour=...)` calls with 11 `fast_forward` calls.
+
+### 2026-10-14 — heating/cooling indicator thresholds + pergola season sync (PR #123)
+- **Task:** Made the indicator thresholds settings and synced `pergola_heating` from the indicator;
+  CI stayed red after a first "race-free tests" fix.
+- **Learning:** Both remaining failures were HA semantics, not timing: a `this`-reading template
+  re-renders itself after an external `set_state()` and walks its hysteresis back toward its inputs,
+  and `automation.trigger` skips conditions unless `skip_condition: false`. Tests now drive the 48h
+  mean and assert the indicator's real state; the sync automation names both seasons explicitly
+  with no `default:`. `tests/test_airflow.py` still pins the indicator via `set_state()` ~30× and
+  passes only because the seeded mean happens to keep those states — latent fragility.

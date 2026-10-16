@@ -199,6 +199,14 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       `"running"` — closes the "may not auto-publish" gap on 9 of the 10 registers this feature
       reads; see the "Transport" section for Option A (repoint) vs Option B (bridge, recommended)
       for the still-open question of whether `ebusd/#` reaches HA's broker at all
+- [x] 7a. `sensor.heating_pv_surplus` fix: clamp at 0 (was `-house_load` with no sun); missing PV
+      sources count as 0 W; unavailable only when Victron load or the heating clamp is unavailable.
+      Tests added in `tests/test_heating_pv_boost.py`. Not yet run locally / deployed.
+- [x] 7b. Indicator thresholds as `input_number` settings (+ `*_effective` clamp sensors) and
+      `automation.pergola_sync_heating_from_indicator` (PR #123). CI fixes: the sync automation
+      names both seasons explicitly (no `default:` that turned the boolean off when run with the
+      indicator unavailable); season tests drive the 48h mean and assert the indicator instead of
+      pinning it with `set_state()` (it re-renders itself via `this`). Awaiting green CI / deploy.
 - [ ] 8. Observe for several days; calibrate the return-temp saturation threshold, validate the
       polling priority tiers against real cadence, and confirm whether ebusd's steady scan-status
       value is `"finished"` or `"OK"`

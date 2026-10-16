@@ -412,13 +412,18 @@ template:
         device_class: power
         state_class: measurement
         icon: mdi:solar-power
-        # Propagate unavailable rather than fabricating a 0: victron_grid_power_* have no
-        # availability guard of their own and read 0 during a GX outage, so this guards on the
-        # sources it actually uses. sensor.technikraum_heizung_heizung_power carries expire_after: 120.
+        # Unavailable ONLY when there is no Victron/Shelly data to compute from.
+        # sensor.victron_pv_net_power (packages/victron.yaml) carries the Victron side of that:
+        # it is unavailable when the GX is down (load phases/total missing) and treats a missing
+        # PV source as 0 W (the AC inverter sleeps at night, the MPPT can too — "nothing
+        # generating", not an outage). sensor.technikraum_heizung_heizung_power carries
+        # expire_after: 120.
         availability: >
           {{ has_value('sensor.victron_pv_net_power')
              and has_value('sensor.technikraum_heizung_heizung_power') }}
         state: >
+          {# Add our own draw back to the signed whole-house net, then clamp: with no sun the
+             balance is negative, which is a deficit, not a surplus. #}
           {% set net = (states('sensor.victron_pv_net_power') | float)
                      + (states('sensor.technikraum_heizung_heizung_power') | float) %}
           {{ [net, 0] | max | round(0) }}
