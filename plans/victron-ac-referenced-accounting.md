@@ -843,6 +843,22 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 - [ ] Deployed by user via `git pull` + entity-registry reclaim for the 2 repointed entities
       (see "Revision: repoint instead of duplicate" — NOT a plain Energy Dashboard dropdown swap)
 
+### Status update 2026-10-16 — post-deploy findings
+
+- [x] Deploy done on the live host (full restart, 4 registry reclaims, orphan cleanup).
+- [x] **Bug found live:** the two new raw-DC MQTT sensors (`victron_solar_yield_dc_watts`,
+      `_dc_total_kwh`) had no `default_entity_id`, so HA created them as
+      `sensor.technikraum_victron_energy_system_…`. Every consumer (pergola PV wrapper, solar AC
+      total, baseline, battery energy) read the unprefixed IDs, so pergola PV read 0 W and the
+      AC solar total stayed at 0. Fixed live by renaming both in the UI; `default_entity_id` is
+      added in YAML so a rebuilt registry gets the right IDs (no effect on the existing entities).
+- [x] **Statistics step on first restart:** `sensor: platform: integration` is `state_class: total`
+      (not `total_increasing`) and starts from 0 when it replaces the old template sensor, so the
+      compiled sum stepped down by the old total (279.229 kWh import, 2869.461 kWh export).
+      Corrected in the UI (Developer Tools → Statistics → adjust the 15:10 slot's *change* to
+      0.001). The earlier runbook claim of "no negative spike" was wrong.
+- [ ] η, loss accounting and battery-out still need real inverting time to verify.
+
 ### Status update 2026-10-11 — master merge
 
 - [x] Feature rebuilt as one commit on top of current `master` (a1ddd6d); the CI / test-suite work
