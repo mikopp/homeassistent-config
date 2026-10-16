@@ -79,11 +79,11 @@ views:
       - type: entities
         title: PV Surplus Inputs
         entities:
-          - entity: sensor.victron_dc_pv_total_power
-          - entity: sensor.victron_ac_inverter_power
-          - entity: sensor.victron_ac_load_total_power
+          - entity: sensor.victron_pv_net_power
+            name: Whole-house PV net (AC-referenced, signed)
+          - entity: sensor.victron_pv_surplus_power
           - entity: sensor.technikraum_heizung_heizung_power
-            name: Heating circuit draw (excluded from load)
+            name: Heating circuit draw (added back)
 
       # ── 3. All entities of the implementation ──────────────────────────────
       - type: entities
