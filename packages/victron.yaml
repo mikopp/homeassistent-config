@@ -330,18 +330,23 @@ template:
       - name: "Victron MultiPlus AC Net Power"
         unique_id: victron_multiplus_ac_net_power
         state: >
+          {# ac_pv | float(0): the AC PV inverter's MQTT sensor expires (expire_after: 120) when
+             it sleeps at night. Expired means "not generating" = 0 W, NOT a GX outage. Making this
+             sensor unavailable took battery_ac_power / conversion_loss_power down with it (the
+             Energy Dashboard then showed ~0 W power usage) and froze the η ac_out accumulator
+             while dc_in kept counting, dragging η down. #}
           {% set ac_load  = states('sensor.victron_ac_load_total_power') | float %}
           {% set grid_net = states('sensor.victron_grid_total_power') | float %}
-          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float %}
+          {% set ac_pv    = states('sensor.victron_ac_inverter_power') | float(0) %}
           {{ (ac_load - grid_net - ac_pv) | round(0) }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
         icon: mdi:sync
+        # Load and grid only: those are the "GX is alive" signals. PV is deliberately NOT here.
         availability: >
           {{ states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown']
-          and states('sensor.victron_grid_total_power') not in ['unavailable', 'unknown']
-          and states('sensor.victron_ac_inverter_power') not in ['unavailable', 'unknown'] }}
+          and states('sensor.victron_grid_total_power') not in ['unavailable', 'unknown'] }}
 
       # ── Inverter efficiency (η) — long-run accumulated ratio ─────────────────
       # η = (AC energy delivered while inverting) / (DC energy consumed while inverting).
@@ -400,16 +405,19 @@ template:
       - name: "Victron Solar Yield AC Watts"
         unique_id: victron_solar_yield
         default_entity_id: sensor.solar_yield_watts
+        # No availability: template. The only input that can disappear is the MPPT total, and
+        # its MQTT sensor expires (expire_after: 120) when the MPPT stops publishing at night —
+        # that means "no solar" = 0 W, not a fault. Going unavailable here cascaded into
+        # ac_net_power -> battery_ac_power and blanked the Energy Dashboard's power usage.
+        # η is always numeric by design (see its comment), so this always renders.
         state: >
-          {% set dc_pv = states('sensor.victron_dc_pv_total_power') | float %}
+          {% set dc_pv = states('sensor.victron_dc_pv_total_power') | float(0) %}
           {% set eta   = (states('sensor.victron_multiplus_conversion_efficiency') | float) / 100 %}
           {{ (dc_pv * eta) | round(0) }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
         icon: mdi:solar-power
-        availability: >
-          {{ states('sensor.victron_dc_pv_total_power') not in ['unavailable', 'unknown'] }}
 
       # ── PV net power / PV surplus (whole-house, AC-referenced) ───────────────
       # Total PV the house does not consume, on the AC side of the MultiPlus:

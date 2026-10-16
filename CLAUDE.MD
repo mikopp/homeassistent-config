@@ -8,6 +8,11 @@
 5. ALWAYS summarize what was done before asking for next steps
 6. ALWAYS write comments that describe each part of the implementation in the source code file.
 7. User will deploy via `git pull` on the HA host, NEVER do that yourself
+8. ALL files use LF (Linux) line endings — never CRLF. The dev machine is Windows, so be careful:
+   Python `open(p, 'w')` and PowerShell `Set-Content`/`Out-File` write CRLF by default. Use
+   `open(p, 'w', newline='\n')` / `open(p, 'rb'/'wb')`, or the Edit/Write tools. Before committing run
+   `git ls-files --eol` (nothing may show `w/crlf` or `i/crlf`). A CRLF write turns the whole file
+   into one giant diff. Enforced by `.gitattributes` (`eol=lf`) and `.editorconfig`.
 
 ## HA version gate — check before trusting any info
 The pinned HA version lives in the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag

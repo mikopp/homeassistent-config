@@ -1,0 +1,2 @@
+# Force LF in the repo AND in the working tree (dev machine is Windows).
+* text=auto eol=lf

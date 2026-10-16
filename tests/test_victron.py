@@ -212,6 +212,67 @@ def test_pv_net_treats_unavailable_pv_as_zero_but_load_outage_as_unavailable(
     home_assistant.assert_entity_state("sensor.victron_pv_net_power", "unavailable", timeout=5)
 
 
+def _expire_pv(ha: HomeAssistant) -> None:
+    """Simulate night: both PV MQTT sensors hit expire_after and go unavailable.
+
+    _seed() only ever writes numeric strings ("0"), which is why the original chain
+    (solar_yield_watts -> ac_net_power -> battery_ac_power) was never exercised with
+    unavailable PV and the regression shipped.
+    """
+    ha.set_state("sensor.victron_dc_pv_total_power", "unavailable", {})
+    ha.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
+
+
+def test_battery_power_chain_survives_expired_pv_at_night(home_assistant: HomeAssistant) -> None:
+    """Night, PV sensors expired: load 351, grid 12 → ac_net 339, solar 0, battery +339 W.
+
+    Regression: these sensors used to go unavailable with the PV sensors, so the Energy
+    Dashboard's power usage (solar + AC PV + battery + grid) collapsed to just the grid term.
+    """
+    _seed(home_assistant, grid_l1=12, ac_l1=351)
+    _expire_pv(home_assistant)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 339, timeout=5)
+    home_assistant.assert_entity_state("sensor.solar_yield_watts", lambda s: float(s) == 0, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 339, timeout=5)
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) >= 0, timeout=5
+    )
+
+
+def test_battery_power_chain_still_unavailable_on_gx_outage(home_assistant: HomeAssistant) -> None:
+    """GX outage (load phases gone) must still read unavailable even though PV now falls back to 0."""
+    _seed(home_assistant, grid_l1=12, ac_l1=351)
+    _expire_pv(home_assistant)
+    for phase in ("l1", "l2", "l3"):
+        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", "unavailable", timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", "unavailable", timeout=5)
+
+
+def test_eta_accumulators_keep_pace_when_ac_pv_expired(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """AC PV asleep: ac_out must still integrate alongside dc_in, or η drifts down every night.
+
+    load 351, grid 12 → ac_net 339 W (ac_out +339/60000); vebus_dc −345 W (dc_in +345/60000).
+    """
+    _reset_energy(home_assistant)
+    _seed(home_assistant, grid_l1=12, ac_l1=351, vebus_dc=-345)
+    _expire_pv(home_assistant)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 339, timeout=5)
+    time_machine.fast_forward(timedelta(minutes=1))
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_ac_out_energy",
+        lambda s: abs(float(s) - 339 / 60000) < 0.001,
+        timeout=TICK_TIMEOUT,
+    )
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_dc_in_energy",
+        lambda s: abs(float(s) - 345 / 60000) < 0.001,
+        timeout=TICK_TIMEOUT,
+    )
+
+
 # ── Night scenario test ───────────────────────────────────────────────────────
 
 
