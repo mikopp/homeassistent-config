@@ -52,6 +52,10 @@ mqtt:
     # Instantaneous DC power from panels, straight off the MPPT.
     - name: "Victron Solar Yield DC Watts"
       unique_id: "victron_solar_yield_dc_watts"
+      # default_entity_id pins the entity ID. Without it HA derives the ID from area + device +
+      # name (it landed as sensor.technikraum_victron_energy_system_victron_solar_yield_dc_*),
+      # which nothing in this repo reads. Only applies when the entity is first created.
+      default_entity_id: sensor.victron_solar_yield_dc_watts
       state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/Power"
       unit_of_measurement: "W"
       device_class: power
@@ -74,6 +78,10 @@ mqtt:
     # Dashboard's own source (see the note above).
     - name: "Victron Solar Yield DC Total kWh"
       unique_id: "victron_solar_yield_dc_total_kwh"
+      # default_entity_id pins the entity ID. Without it HA derives the ID from area + device +
+      # name (it landed as sensor.technikraum_victron_energy_system_victron_solar_yield_dc_*),
+      # which nothing in this repo reads. Only applies when the entity is first created.
+      default_entity_id: sensor.victron_solar_yield_dc_total_kwh
       state_topic: "N/c0619ab4c19e/solarcharger/279/Yield/System"
       unit_of_measurement: "kWh"
       device_class: energy
