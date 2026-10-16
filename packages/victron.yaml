@@ -30,9 +30,15 @@ mqtt:
     #     but still flip unavailable on a real GX outage, so the per-minute energy accumulators
     #     correctly fall back to float(0) and stop integrating a stale value.
     #   • Energy counters (total_increasing) and slow diagnostics (SOC, voltages, current)
-    #     OMIT expire_after: they legitimately stay constant for hours, so they retain their
-    #     last reading instead of going unavailable. Null payloads are already guarded in each
-    #     value_template, and total_increasing tolerates the gap with no reset artifact.
+    #     legitimately stay constant for hours. A MISSING expire_after is NOT harmless though:
+    #     an MQTT sensor only restores its last value after a restart when expire_after is set
+    #     (verified in components/mqtt/sensor.py at 2026.10.1: restore requires expire_after > 0
+    #     and last_changed within that window). Without it the sensor is `unknown` until the GX
+    #     publishes a CHANGED value, which suppress-republish may not do for hours. So these use a
+    #     LONG expire_after (victron_battery_soc 24 h, the PV lifetime counters 7 d): long enough
+    #     to never falsely expire, but present so the last reading survives a restart.
+    #     Null payloads are already guarded in each value_template, and total_increasing
+    #     tolerates the gap with no reset artifact.
     #   • Every value_template also checks `value_json is defined`: the GX publishes an EMPTY
     #     (non-JSON) payload when a service disappears, and then `value_json` does not exist at
     #     all, so `value_json.value is not none` alone raised "'value_json' is undefined".
@@ -86,6 +92,10 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
+      # 7 d: only changes while the MPPT produces, so it is constant overnight / on dark days.
+      # expire_after is what makes HA restore the last value after a restart (see the policy note
+      # at the top of this file); the window is long enough that it never falsely expires.
+      expire_after: 604800
       icon: mdi:solar-power
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -112,6 +122,8 @@ mqtt:
       unit_of_measurement: "kWh"
       device_class: energy
       state_class: total_increasing
+      # 7 d, same reasoning as victron_solar_yield_dc_total_kwh: constant while the inverter sleeps.
+      expire_after: 604800
       icon: mdi:solar-power-variant
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
@@ -152,6 +164,11 @@ mqtt:
       unit_of_measurement: "%"
       device_class: battery
       state_class: measurement
+      # 24 h: the BMS reports 0.1 % steps, so SOC changes constantly in practice. expire_after is
+      # what makes HA restore the last value after a restart / MQTT reload instead of showing
+      # `unknown` until the GX next publishes a CHANGED value (suppress-republish never re-sends
+      # an unchanged one). Past 24 h without a change it reads unavailable, which is acceptable.
+      expire_after: 86400
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
 
