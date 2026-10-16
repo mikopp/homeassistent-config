@@ -859,6 +859,59 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
       0.001). The earlier runbook claim of "no negative spike" was wrong.
 - [ ] η, loss accounting and battery-out still need real inverting time to verify.
 
+### Status update 2026-10-16 (evening) — regression: PV expiry made power sensors unavailable at night
+
+Found live via ha-mcp (read-only), HA 2026.10.1, ~20:20 local (after sunset):
+
+- **Symptom:** Energy Dashboard "Power usage" reads ~0 W while the house draws ~350 W from the
+  battery. Only after #121.
+- **Observed:** `sensor.victron_dc_pv_total_power` (expired 18:40) and
+  `sensor.victron_ac_inverter_power` (expired 20:09) are `unavailable` — both are MQTT sensors
+  with `expire_after: 120`, so this is the designed behaviour once the MPPT / AC PV inverter stop
+  publishing. Downstream, `sensor.solar_yield_watts`, `sensor.victron_multiplus_ac_net_power`,
+  `sensor.victron_battery_ac_power` and `sensor.victron_multiplus_conversion_loss_power` were
+  all `unavailable` too.
+- **Cause (read from the `75cef44` diff):** before #121 `victron_battery_ac_power` was
+  `ac_load - grid - dc_pv - ac_pv`, every term `| float(0)`, no `availability:` — an expired PV
+  sensor simply read 0 and the battery sensor stayed up. #121 made the new chain
+  (`solar_yield_watts` → `ac_net_power` → `battery_ac_power` / `conversion_loss_power`) require the
+  PV sensors in `availability:`. The dashboard's power-usage sum (solar + AC PV + battery + grid)
+  then only had grid (~12 W) left.
+  `victron_pv_net_power` already had the correct pattern (PV terms `float(0)`, availability on the
+  load side only) — it was just not applied to the rest.
+- **Second, related bug (same root cause):** the η accumulators. `victron_multiplus_ac_out_energy`
+  integrates `ac_net_power` with `float(0)` (so it freezes while `ac_net_power` is unavailable)
+  while `victron_multiplus_dc_in_energy` keeps integrating `vebus_dc_power`. Observed live:
+  `ac_out` frozen at 1.508 kWh since 20:09 while `dc_in` kept rising +0.006 kWh/min;
+  `victron_multiplus_conversion_efficiency` = 1.508 / 2.529 = **59.6 %** (a MultiPlus is
+  ~90–95 %). η feeds `solar_yield_watts`, `victron_solar_yield_total_kwh` and the battery in/out
+  residual, so every time the AC PV inverter sleeps, η drifts down and solar is under-counted.
+  (Mechanism = code read + the observed frozen/rising accumulators; not yet checked against the
+  multi-day η history.)
+
+**Fix (this change):** an expired PV sensor means "not generating", not "GX outage":
+- `victron_multiplus_ac_net_power`: `ac_pv` read with `| float(0)`; `availability:` keeps only
+  `ac_load_total_power` and `grid_total_power` (the real GX-alive signals).
+- `solar_yield_watts`: `dc_pv` read with `| float(0)`; the PV-based `availability:` removed (η is
+  always numeric by design, so the sensor can no longer go unavailable).
+- `battery_ac_power` / `conversion_loss_power`: unchanged — they inherit availability and now stay
+  up. The η accumulators now keep integrating both sides in the same tick.
+- Deliberately deviates from the repo's "no `float(default)`" rule for these two PV reads; each
+  has an inline comment saying why (same justification already used by `victron_pv_net_power`).
+- Tests: new cases seed `unavailable` PV (the existing `_seed` only ever used `"0"`, which is why
+  CI never saw this).
+
+**Manual step after deploy (not done by the PR):** `victron_multiplus_ac_out_energy` /
+`_dc_in_energy` carry the skewed history, so η stays wrong until they are re-seeded. Reset both
+to 0 (or to a consistent pair, e.g. dc_in = ac_out / 0.93) in Developer Tools → States / the
+entity settings, then let η re-converge (bootstrap 100 % until dc_in ≥ 1 kWh). Energy Dashboard
+statistics already compiled with the low η are not rewritten.
+
+- [x] Plan updated
+- [ ] Implemented on branch `fix/victron-pv-expiry-availability`
+- [ ] CI green
+- [ ] Deployed + η accumulators re-seeded by user
+
 ### Status update 2026-10-11 — master merge
 
 - [x] Feature rebuilt as one commit on top of current `master` (a1ddd6d); the CI / test-suite work
