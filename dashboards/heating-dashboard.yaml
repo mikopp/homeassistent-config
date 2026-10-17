@@ -17,6 +17,8 @@ views:
             name: Loxone says warm enough
           - entity: binary_sensor.heating_dhw_active
             name: Hot water active (masks return temp)
+          - entity: binary_sensor.heating_compressor_active
+            name: Compressor running (Shelly > 500 W)
           - entity: binary_sensor.heating_cooling_active
           - entity: binary_sensor.geotherm_heating_backup_heater
           - entity: binary_sensor.heating_ebusd_online
@@ -124,6 +126,7 @@ views:
           - entity: binary_sensor.heating_season_active
           - entity: binary_sensor.heating_cooling_active
           - entity: binary_sensor.heating_dhw_active
+          - entity: binary_sensor.heating_compressor_active
           - entity: binary_sensor.heating_slab_mode_wanted
 
       - type: tile
@@ -143,6 +146,7 @@ views:
           - sensor.heating_control_state
           - binary_sensor.heating_slab_mode_wanted
           - binary_sensor.heating_dhw_active
+          - binary_sensor.heating_compressor_active
           - binary_sensor.heating_cooling_active
           - binary_sensor.geotherm_heating_backup_heater
           - binary_sensor.heating_ebusd_online
