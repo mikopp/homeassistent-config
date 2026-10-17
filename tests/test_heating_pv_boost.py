@@ -170,6 +170,47 @@ def test_surplus_is_zero_when_inverter_sensor_unavailable(
     )
 
 
+def test_surplus_is_zero_at_night_even_when_heater_leads_the_victron_load(
+    home_assistant: HomeAssistant,
+) -> None:
+    """Compressor starts at night: Shelly already reads 1562 W, Victron load still shows 500 W.
+
+    net = (0 − 500) + 1562 = +1062 would be a false surplus (seen live: 1232 W at 00:17:44, gone
+    ~2 s later). Capped at PV generation (0), it must stay 0.
+    """
+    _seed_power_flows(home_assistant, dc_pv=0, ac_pv=0, house_load=500, heating=1562)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: float(s) == 0.0,
+        timeout=5,
+    )
+
+
+def test_surplus_never_exceeds_pv_generation(home_assistant: HomeAssistant) -> None:
+    """PV 1000 W, Victron load lagging at 500 W while the heater already reads 1800 W.
+
+    The raw sum is 1000 − 500 + 1800 = 2300 W; only 1000 W of PV exists, so that is the ceiling.
+    """
+    _seed_power_flows(home_assistant, dc_pv=1000, ac_pv=0, house_load=500, heating=1800)
+    home_assistant.assert_entity_state(
+        "sensor.heating_pv_surplus",
+        lambda s: abs(float(s) - 1000.0) < 1.0,
+        timeout=5,
+    )
+
+
+def test_compressor_active_follows_the_shelly_clamp(home_assistant: HomeAssistant) -> None:
+    """~83 W is idle circulation (off); ~1.8 kW is a compressor run (on); the clamp gone → unavailable."""
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "83", _W)
+    home_assistant.assert_entity_state("binary_sensor.heating_compressor_active", "off", timeout=5)
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "1800", _W)
+    home_assistant.assert_entity_state("binary_sensor.heating_compressor_active", "on", timeout=5)
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "unavailable", {})
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_active", "unavailable", timeout=5
+    )
+
+
 def test_target_temp_is_setback_plus_one_in_heating_season(
     home_assistant: HomeAssistant,
 ) -> None:

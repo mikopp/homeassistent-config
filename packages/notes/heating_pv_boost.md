@@ -89,9 +89,17 @@ the standalone registers (`25.19;1.266;1.682;off;00`). `hcmode`: `0=off 1=coolin
 `ok|circuit|cutoff`. Reads on demand; ongoing polling is now registered automatically (priority 3)
 by `automation.heating_ebusd_poll_registration` in `packages/heating_pv_boost.yaml` rather than
 needing a manual `?5` publish — see that automation and the "Poll-priority registration" section
-below. Not yet live-confirmed to actually publish as a result — whether `ebusd/#` reaches HA's
-broker at all is still an open item in `plans/ebusd-pv-heating-optimization.md`'s Status
-checklist, so the mechanism changed but the outcome isn't verified yet.
+below. **Live-confirmed 2026-10-17:** `ebusd/#` reaches HA's broker, this register publishes every
+30–85 s, and the registration automation repopulates the `mc/*` sensors within ~1–2 s of each HA
+restart (see the plan's Observations). Unchanged registers are not re-reported, so the poll rate of
+slow registers (`TempDesiredLow` etc.) cannot be read back from HA.
+
+**Compressor activity is read from the Shelly clamp, not ebus.** `hcmode` stays `heat` while the
+circulation pump idles between compressor runs, so it cannot tell "compressor running" apart.
+`binary_sensor.heating_compressor_active` uses `sensor.technikraum_heizung_heizung_power` > 500 W
+(idle circulation ~83 W, standby ~9 W, heating ~1.8 kW, hot water ~3.5 kW — owner-confirmed /
+measured). Loxone's own status logic additionally uses `ehp/ActualEnvironmentPower` (> 1 → active)
+and `ehp/Hc1Pump`; HA deliberately does not poll those.
 
 `mc/Status0a` = `flowtemp;mixer;pump;onoff;flowtempdesired`.
 `mc/Status` = `flowtempdesired;onoff;flowtemp;tempdesired` — no modulation field; field 3 is a

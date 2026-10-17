@@ -201,20 +201,75 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       for the still-open question of whether `ebusd/#` reaches HA's broker at all
 - [x] 7a. `sensor.heating_pv_surplus` fix: clamp at 0 (was `-house_load` with no sun); missing PV
       sources count as 0 W; unavailable only when Victron load or the heating clamp is unavailable.
-      Tests added in `tests/test_heating_pv_boost.py`. Not yet run locally / deployed.
+      Tests added in `tests/test_heating_pv_boost.py`. Deployed; clamp confirmed live 2026-10-17
+      (reads 0 with no PV). Residual night-time transient spikes: see Observations, finding 2.
 - [x] 7b. Indicator thresholds as `input_number` settings (+ `*_effective` clamp sensors) and
       `automation.pergola_sync_heating_from_indicator` (PR #123). CI fixes: the sync automation
       names both seasons explicitly (no `default:` that turned the boolean off when run with the
       indicator unavailable); season tests drive the 48h mean and assert the indicator instead of
-      pinning it with `set_state()` (it re-renders itself via `this`). Awaiting green CI / deploy.
-- [ ] 8. Observe for several days; calibrate the return-temp saturation threshold, validate the
-      polling priority tiers against real cadence, and confirm whether ebusd's steady scan-status
-      value is `"finished"` or `"OK"`
+      pinning it with `set_state()` (it re-renders itself via `this`). Deployed; the indicator reads
+      `active_heating` live and `binary_sensor.heating_season_active` follows it.
+- [x] 7c. Transport + poll registration confirmed live (2026-10-17): `ebusd/#` reaches HA's broker,
+      all registers this feature reads publish, and `heating_ebusd_poll_registration` fires on each
+      HA restart (scan → `finished`) and repopulates the `mc/*`/cooling sensors within ~1–2 s.
+      ebusd's steady scan-status value is `"finished"` (never saw `"OK"`).
+- [ ] 8. Observe for several days; calibrate the return-temp saturation threshold and validate the
+      polling priority tiers against real cadence. PARTLY DONE: scan-status value settled
+      (`"finished"`). BLOCKED on `input_boolean.heating_pv_boost_enabled` being off, so
+      `slab_mode_wanted` has produced no decision data yet. Return-temp calibration also needs a real
+      boost (return only reached ~24 °C in ordinary heating cycles; the 28 °C threshold is untested).
+      Tier cadence only partly measurable: `HcReturnTemp` updates every 30–85 s; unchanged registers
+      (`TempDesiredLow` etc.) are not re-reported, so their poll rate cannot be read from HA.
+- [x] 8a. Fix `sensor.heating_pv_surplus` night-time transient spikes (see Observations, finding 2):
+      result capped at real PV generation (`solar_yield_watts` + `victron_ac_inverter_power`) so
+      "no PV ⇒ no surplus" holds regardless of the Shelly-vs-Victron update skew. Tests added.
+      Awaiting deploy; verify no night-time surplus > 0 afterwards.
+- [x] 8b. Phase 2 prerequisite: `binary_sensor.heating_compressor_active` (Shelly clamp > 500 W) —
+      owner chose the Shelly as the source, so no new ebus register or MQTT topic. Tests added.
+      Not yet used by the decision; Phase 2 consumes it. `Hc1Pump` still unread (open question in
+      Observations, finding 4).
+- [ ] 8c. Set `input_number.heating_pv_min_battery_soc` to 50 (UI, user). The current 30 equals the
+      Victron's own floor, so the gate never blocked.
 - [ ] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode
 - [ ] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
 - [ ] 11. Phase 2 — comfort control (`low`/`on` + derived setpoint)
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
+
+## Observations (2026-10-17, ~46 h of live data, boost disabled)
+
+Source: ha-mcp read-only queries (history, statistics, traces). Graded: CONFIRMED = read directly from
+recorded data; OBSERVED = real data with an alternative explanation still open.
+
+1. **Read path works (CONFIRMED).** All entities live, no ebusd/heating log errors. The DHW mask
+   `delay_off` ends exactly 25:00 after the generator leaves `water` (17:25:37 → 17:50:37).
+   `warm_enough` is the exact inverse of `mc/OperatingMode` (`on` ⇔ `warm_enough` off), lagging ~1.8 s,
+   i.e. Loxone still writes the mode (step 9 pending) and publishes the boolean right after.
+2. **Surplus transient spikes at night (CONFIRMED).** 2026-10-17 00:17:44: Shelly heater power jumped
+   155 → 1563 W at :44.689 while `victron_pv_net_power` was still −331 W and only reached −2220 W
+   by :48 (Victron load ramps over ~4 s, per-phase updates). `heating_pv_surplus` = net + heater
+   therefore read 1232 W with no sun, falling to 0 by :46.6. `victron_pv_net_power` itself is
+   correct (never positive); the artefact is purely the sum of two sources with different latency.
+   Harmless to `slab_mode_wanted` (15 min `delay_on`) but wrong for any undebounced consumer.
+   Fix direction: `min(net + heater, PV generation)`.
+3. **SOC gate was a no-op (CONFIRMED).** Battery sat at exactly 30 % from ~04:00 to 09:00 on 10-17
+   (the Victron floor) and the gate is `soc < 30`. Owner sets the helper to 50.
+4. **Machine activity vs `hvac_action` (owner-supplied Loxone logic).** Loxone derives its status from
+   `ehp/Status` hcmode plus two more registers: `heat` + `ehp/ActualEnvironmentPower` > 1 → heating
+   active; `heat` + power 0 → heating passive; `water` → hot water; `off` + `ehp/Hc1Pump` = 1 →
+   circulation pump; `off` + pump 0 → off. A Loxone `on` mode is a permission, not a command; the
+   compressor runs on the machine's own schedule and the pump circulates between runs. HA currently
+   sees only hcmode, so `heat`/`off` cannot tell compressor from circulation. Open: recorded Shelly
+   power shows ~83 W in `heat` (idle) and ~9 W in `off`, which does not obviously match "pump runs
+   while `off`" — needs `Hc1Pump` read live to reconcile.
+5. **Heating draw (owner-confirmed).** Heating never exceeds ~2 kW, usually ~1.8 kW, so the 2000 W
+   start threshold is right. (Hourly maxima of 2.0–2.6 kW in statistics were start-up peaks; DHW
+   ~3.5 kW.) 10-16 never reached 2 kW for 15 min; 10-17 morning would have started ~09:15.
+6. **Restart behaviour (CONFIRMED).** `slab_mode_wanted` goes unavailable → unknown, then `off` after
+   the 20 min `delay_off` (20:48 restart → `off` 21:11). Phase 3 must treat `unknown` as off.
+7. **Possible outdoor shutdown (OBSERVED, one day).** 10-17 `hvac_action` `off` 13:52–17:00 matched
+   outdoor ≥ 15 °C (`mc/OtShutdownLimit`); 10-16 14:43–16:11 `off` at ~13 °C is unexplained. Whether
+   a boost is honoured above 15 °C is untested — check on the first armed sunny day.
 
 ### Checks run locally
 
