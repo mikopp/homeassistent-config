@@ -37,6 +37,9 @@ from ha_integration_test_harness import HomeAssistant, TimeMachine
 # immediately and gain nothing from waiting.
 TICK_TIMEOUT = 30
 
+# Fixed DC bus voltage used by _seed() to turn a "Multi DC power in W" into a Multi DC current.
+VEBUS_TEST_VOLTS = 50
+
 
 def _seed(
     ha: HomeAssistant,
@@ -57,7 +60,13 @@ def _seed(
     ha.set_state("sensor.victron_grid_l1_power", str(int(grid_l1)), attrs_w)
     ha.set_state("sensor.victron_grid_l2_power", str(int(grid_l2)), attrs_w)
     ha.set_state("sensor.victron_grid_l3_power", str(int(grid_l3)), attrs_w)
-    ha.set_state("sensor.victron_vebus_dc_power", str(int(vebus_dc)), attrs_w)
+    # vebus_dc = true Multi DC power in W (+ charging, − inverting). sensor.victron_multiplus_dc_power
+    # is a template of battery voltage × Multi DC current, so seed a fixed 50 V and current = W/50:
+    # V × I then equals vebus_dc exactly and every vebus_dc-based assertion keeps its meaning.
+    ha.set_state("sensor.victron_battery_voltage", str(VEBUS_TEST_VOLTS),
+                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
+    ha.set_state("sensor.victron_vebus_dc_current", str(vebus_dc / VEBUS_TEST_VOLTS),
+                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
     ha.set_state("sensor.victron_dc_pv_total_power", str(int(dc_pv)), attrs_w)
     ha.set_state("sensor.victron_ac_inverter_power", str(int(ac_inverter)), attrs_w)
     ha.set_state("sensor.victron_solar_yield_dc_watts", str(int(solar_dc)),
@@ -556,6 +565,59 @@ def test_conversion_loss_clamped_to_zero(home_assistant: HomeAssistant) -> None:
     _seed(home_assistant)
     home_assistant.assert_entity_state(
         "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 0.0, timeout=5
+    )
+
+
+def _seed_multiplus_dc(ha: HomeAssistant, *, volts: str, amps: str) -> None:
+    """Seed the two raw inputs of sensor.victron_multiplus_dc_power directly (V and A)."""
+    ha.set_state("sensor.victron_battery_voltage", volts,
+                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
+    ha.set_state("sensor.victron_vebus_dc_current", amps,
+                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
+
+
+def test_multiplus_dc_power_inverting_is_negative(home_assistant: HomeAssistant) -> None:
+    """Real snapshot 2026-10-17: 52.5 V × −8.1 A = −425 W (the AC-derived topic said −337 W)."""
+    _seed_multiplus_dc(home_assistant, volts="52.5", amps="-8.1")
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_dc_power", lambda s: float(s) == -425, timeout=5
+    )
+
+
+def test_multiplus_dc_power_charging_is_positive(home_assistant: HomeAssistant) -> None:
+    """52.5 V × +20 A = +1050 W, same sign convention as the old vebus power (+ = charging)."""
+    _seed_multiplus_dc(home_assistant, volts="52.5", amps="20")
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_dc_power", lambda s: float(s) == 1050, timeout=5
+    )
+
+
+def test_multiplus_dc_power_expired_current_reads_zero(home_assistant: HomeAssistant) -> None:
+    """The current sensor expires when the GX stops re-publishing an unchanged value → 0 W, not unavailable."""
+    _seed_multiplus_dc(home_assistant, volts="52.5", amps="unavailable")
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_dc_power", lambda s: float(s) == 0, timeout=5
+    )
+
+
+def test_multiplus_dc_power_unavailable_without_voltage(home_assistant: HomeAssistant) -> None:
+    """No voltage → no power, and the loss sensor that consumes it follows."""
+    _seed_multiplus_dc(home_assistant, volts="unavailable", amps="-8.1")
+    home_assistant.assert_entity_state("sensor.victron_multiplus_dc_power", "unavailable", timeout=5)
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_conversion_loss_power", "unavailable", timeout=5
+    )
+
+
+def test_conversion_loss_realistic_from_true_dc(home_assistant: HomeAssistant) -> None:
+    """Real snapshot: ac_load 351, grid 12 → mp_ac_net 339; 52.5 V × −8.1 A = −425 W DC → loss 86 W.
+
+    Regression guard for the bug this replaced: with the AC-derived Dc/Vebus/Power the loss read ~0.
+    """
+    _seed(home_assistant, ac_l1=351, grid_l1=12)
+    _seed_multiplus_dc(home_assistant, volts="52.5", amps="-8.1")
+    home_assistant.assert_entity_state(
+        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 86, timeout=5
     )
 
 

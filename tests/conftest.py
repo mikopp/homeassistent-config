@@ -160,7 +160,12 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # Victron MQTT sensors — all power sensors at 0 W so template sensors start
     # at 0 and energy accumulators do not advance during unrelated tests.
     attrs_w = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
-    ha.set_state("sensor.victron_vebus_dc_power", "0", attrs_w)
+    # Multi DC power is a template of battery voltage × Multi DC current (packages/victron.yaml);
+    # 50 V × 0 A = 0 W keeps η at its 100 % bootstrap in every test.
+    ha.set_state("sensor.victron_battery_voltage", "50",
+                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
+    ha.set_state("sensor.victron_vebus_dc_current", "0",
+                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
     ha.set_state("sensor.victron_dc_pv_total_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l1_power", "0", attrs_w)
     ha.set_state("sensor.victron_grid_l2_power", "0", attrs_w)
