@@ -23,5 +23,5 @@ Do not read the notes of packages you are not touching.
 | `energy.yaml` | `notes/energy.md` | touching Energy Dashboard sensors or wallbox/PV wrappers |
 | `heating_pv_boost.yaml` | `notes/heating_pv_boost.md` | touching ebusd/Vaillant registers, poll registration, or heating/cooling control |
 | `pergola.yaml` | — (none yet) | — |
-| `victron.yaml` | — (none yet) | — |
+| `victron.yaml` | `notes/victron.md` | touching Victron MQTT topics, the Multi DC/AC power chain, η or conversion loss |
 | `heating_cooling_indicator.yaml` | — (none yet) | — |
