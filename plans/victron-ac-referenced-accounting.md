@@ -33,9 +33,11 @@ Consequences today:
 
 ### What the investigation established
 
-Victron publishes **no** AC-side battery or AC-side DC-PV topic. `system/0/Dc/Vebus/Power` is always
-DC (systemcalc computes it as `/Dc/0/Voltage × /Dc/0/Current` off the vebus service — one code path,
-no ESS/mode branch). The AC-referencing must therefore be derived.
+Victron publishes **no** AC-side battery or AC-side DC-PV topic. ~~`system/0/Dc/Vebus/Power` is
+always DC (systemcalc computes it as `/Dc/0/Voltage × /Dc/0/Current`)~~ **— DISPROVEN 2026-10-17:**
+on this system `Dc/Vebus/Power` follows the AC side (−337 W while V × I = 425 W; VRM shows the same
+mismatch). The true DC power is `Dc/Vebus/Current` × battery voltage — see
+`plans/victron-multiplus-true-dc-power.md`. The AC-referencing must therefore be derived.
 
 Tracing `Ac/Consumption` in `dbus-systemcalc-py` gives
 `(grid − vebus ActiveIn + pv_on_grid) + vebus Ac/Out + pv_on_output`. This system has **no separate
@@ -942,6 +944,56 @@ statistics already compiled with the low η are not rewritten.
 - [x] Implemented on branch `fix/victron-restore-slow-sensors`
 - [ ] CI green
 - [ ] Deployed; confirm SOC survives a restart
+
+### Status update 2026-10-17 — ~24 h post-deploy check (ha-mcp, read-only, HA 2026.10.1)
+
+Verified live (evening, ~20:05 local, after sunset):
+- [x] Power identity holds: load 475 = solar 0 + AC PV 0 + grid 15 + battery_ac 460.
+- [x] Night-time PV expiry fix works: `victron_dc_pv_total_power` / `solar_yield_dc_watts` are
+      `unavailable` (expected), yet `solar_yield_watts`, `ac_net_power`, `battery_ac_power`,
+      `conversion_loss_power` all numeric.
+- [x] Energy identity closes over 26 h: sources (AC solar 3.026 + AC PV 11.956 + grid net 42.97 +
+      battery out−in −2.522 = 55.43 kWh) vs ∫`victron_ac_load_total_power` hourly means 55.02 kWh
+      (+~0.04 partial hour) — 0.7 % apart.
+- [x] No ERROR from the victron package in the system log except one `float` without default on
+      `eta` in `solar_yield_watts` at the YAML reload (efficiency transiently unavailable).
+- [x] SOC / DC counter available (expire_after change).
+
+Findings (open):
+- **η still contaminated by the pre-fix skew.** Accumulators were not re-seeded: cumulative η rose
+  59.6 % → 88.7 % only by dilution. Marginal η since the fix ≈ 96 % (Δdc_in 7.477, Δac_out 7.209).
+  Effect: AC solar today 3.03 kWh vs 3.78 kWh DC delta (80 %) — about 0.6 kWh under-counted,
+  mirrored in battery-in. Manual re-seed of `victron_multiplus_ac_out_energy` / `_dc_in_energy` still
+  pending (see the 2026-10-16 evening section).
+- **Measured conversion loss ≈ 0.** `ac_net_power` ≈ −`vebus_dc_power` to within ~1 W at 2.5 kW
+  inverting and 1.9 kW charging (loss 6–19 W mean per hour, `conversion_loss_energy` 0.139 kWh).
+  A MultiPlus loses several %. Hypothesis (unverified): `Dc/Vebus/Power` is not true DC, or the AC
+  inputs are derived from it — the premise "6 % loss visible" is not showing. Cross-check
+  against VRM / battery V×I before trusting η or the loss sensors.
+- Unrelated log noise: `mqtt.number` "Payload 'null' is not a Number" ×212 since deploy (entity
+  not identified); `weather.home` missing for a service call at ~16:00.
+
+Update 2026-10-17 (evening) — problem 2 explained from a VRM screenshot (user), not yet from raw MQTT:
+- [x] η accumulators re-seeded to 0 by user; both rising in step, η = 100 % bootstrap.
+- VRM at one instant: grid −16, AC loads 380, battery monitor **−488 W**, "Inverter AC/DC"
+  52.46 V × −8.8 A shown as **−397 W**. `ac_net` = 380 + 16 = 396 ≈ −397, but V×I = 462 W.
+  So `system/0/Dc/Vebus/Power` (our `victron_vebus_dc_power`) is **not** the Multi's true DC power
+  (the plan's "systemcalc computes V×I, always DC" claim is contradicted here) — it tracks the AC
+  net. That is why measured conversion loss ≈ 0 and η-from-accumulators is meaningless as built.
+- The real DC side is the battery monitor (`system/0/Dc/Battery/Power`, + = charging), whose
+  subscription was deleted with the "dead chain" cleanup. Proposed (NOT approved, NOT implemented):
+  DC power into the Multi `D = dc_pv − batt_p`; loss `= max(D − ac_net, 0)` (one formula for both
+  directions); η accumulators use `max(D, 0)` instead of `max(−vebus_dc, 0)`. Loss then includes
+  other DC loads (~26 W in the screenshot), so it is an upper bound on pure Multi loss.
+- **Confirmed via MQTT listen (user screenshots, one snapshot, not perfectly synced):**
+  `system/0/Dc/Vebus/Current` = −8.1 A, `Dc/Battery/Voltage` = 52.5 V → V×I = 425 W, but
+  `Dc/Vebus/Power` = −337 W. `Dc/Battery/Power` = −435 W (= 52.5 × −8.3 A, i.e. true DC, ~10 W more
+  than the Multi's current). VRM agrees: battery −399 W (52.50 V × −7.6 A) vs "Inverter AC/DC"
+  −302 W at 52.48 V × −7.7 A (= 404 W). So `Dc/Vebus/Power` ≠ V×I — it follows the AC side;
+  Vebus Current and Battery Voltage are the true DC values. Revised proposal: true Multi DC power
+  = `system/0/Dc/Vebus/Current` × battery voltage (both MQTT), replacing `Dc/Vebus/Power` as the
+  DC reference — existing loss/η formulas then work unchanged (same sign convention). Expect
+  load-dependent η (~80 % at ~350 W, higher at kW loads; three Multi devices idle-draw adds up).
 
 ### Status update 2026-10-11 — master merge
 

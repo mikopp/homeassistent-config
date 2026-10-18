@@ -16,7 +16,9 @@
 # Energy flow overview:
 #   DC bus: MPPT → VEBus (MultiPlus) ↔ Battery
 #   AC bus: VEBus output ↔ Grid ↔ AC-coupled PV inverter ↔ Loads
-#   VEBus DC power sign: positive = charger mode (AC→DC), negative = inverter mode (DC→AC)
+#   MultiPlus DC power sign (sensor.victron_multiplus_dc_power): positive = charger mode (AC→DC),
+#   negative = inverter mode (DC→AC). It is built from the Multi's DC current × battery voltage —
+#   NOT from system/0/Dc/Vebus/Power, which follows the AC side (plans/victron-multiplus-true-dc-power.md).
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -25,12 +27,13 @@ mqtt:
     # expire_after policy (see the Venus OS keep-alive automation at the bottom of this file):
     #   The GX keep-alive uses "suppress-republish", so only value-CHANGE updates arrive —
     #   constant topics are no longer periodically re-published.
-    #   • Power sensors that fluctuate (grid L1/2/3, AC load L1/2/3, vebus/dc-pv/battery/
+    #   • Power sensors that fluctuate (grid L1/2/3, AC load L1/2/3, vebus DC current/dc-pv/
     #     ac-inverter power, solar yield W) KEEP expire_after: 120. They never falsely expire,
     #     but still flip unavailable on a real GX outage, so the per-minute energy accumulators
     #     correctly fall back to float(0) and stop integrating a stale value.
     #   • Energy counters (total_increasing) and slow diagnostics (SOC, voltages, current)
-    #     legitimately stay constant for hours. A MISSING expire_after is NOT harmless though:
+    #     (battery voltage included) legitimately stay constant for hours. A MISSING expire_after
+    #     is NOT harmless though:
     #     an MQTT sensor only restores its last value after a restart when expire_after is set
     #     (verified in components/mqtt/sensor.py at 2026.10.1: restore requires expire_after > 0
     #     and last_changed within that window). Without it the sensor is `unknown` until the GX
@@ -128,20 +131,26 @@ mqtt:
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(3) }}{% endif %}"
 
-    # ── VEBus / MultiPlus 2 — DC bus conversion flow (system/0 aggregate) ─────
-    # Positive = charger mode: AC grid energy flows through MultiPlus to DC bus.
-    # Negative = inverter mode: DC bus energy flows through MultiPlus to AC loads.
-    # Used to attribute AC output between MPPT and battery sources (see templates).
-    - name: "Victron VEBus DC Power"
-      unique_id: "victron_vebus_dc_power"
-      state_topic: "N/c0619ab4c19e/system/0/Dc/Vebus/Power"
-      unit_of_measurement: "W"
-      device_class: power
+    # ── VEBus / MultiPlus 2 — DC current of the conversion stage (system/0 aggregate) ──
+    # The Multi's own DC current: negative = inverter mode (DC bus → MultiPlus → AC loads),
+    # positive = charger mode. This is real DC. The sibling topic system/0/Dc/Vebus/Power is NOT
+    # used: measured 2026-10-17 it does not equal V × I (−337 W vs 52.5 V × −8.1 A = 425 W) and
+    # tracks the AC-side net power instead, which made the conversion loss read ~0 W and η
+    # meaningless. sensor.victron_multiplus_dc_power (template section) = this current × battery
+    # voltage. See plans/victron-multiplus-true-dc-power.md.
+    - name: "Victron VEBus DC Current"
+      unique_id: "victron_vebus_dc_current"
+      # default_entity_id pins the entity ID. Without it HA derives the ID from area + device +
+      # name (the #126 bug), and the template sensor below would read a non-existent ID.
+      default_entity_id: sensor.victron_vebus_dc_current
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Vebus/Current"
+      unit_of_measurement: "A"
+      device_class: current
       state_class: measurement
       expire_after: 120
-      icon: mdi:lightning-bolt-circle
+      icon: mdi:current-dc
       device: *victron_device
-      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(0) }}{% endif %}"
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(2) }}{% endif %}"
 
     # Total DC PV power aggregated across all MPPTs connected to the GX
     - name: "Victron DC PV Total Power"
@@ -171,6 +180,22 @@ mqtt:
       expire_after: 86400
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(1) }}{% endif %}"
+
+    # DC bus voltage as seen by the BMS. Second factor of sensor.victron_multiplus_dc_power; it
+    # differs from the Multi's terminal voltage by ~0.02 V (52.50 vs 52.48 in VRM), ≈ 0.04 %.
+    # Moves in small steps and can sit unchanged for a while, so it gets the same 24 h
+    # expire_after as the SOC above (restore after restart; no false expiry between publishes).
+    - name: "Victron Battery Voltage"
+      unique_id: "victron_battery_voltage"
+      default_entity_id: sensor.victron_battery_voltage
+      state_topic: "N/c0619ab4c19e/system/0/Dc/Battery/Voltage"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      expire_after: 86400
+      icon: mdi:flash-triangle-outline
+      device: *victron_device
+      value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(2) }}{% endif %}"
 
     # ── Grid — 3-phase via MultiPlus AC-in ────────────────────────────────────
     # Per-phase sensors for phase-balance diagnostics.
@@ -342,8 +367,8 @@ template:
       #
       # Sign: POSITIVE = inverting (DC → AC, Multi delivering to the AC bus)
       #       NEGATIVE = charging  (AC → DC, Multi drawing from the AC bus)
-      # NOTE this is the OPPOSITE convention to sensor.victron_vebus_dc_power, which is positive
-      # when charging. Every consumer of this sensor below accounts for that.
+      # NOTE this is the OPPOSITE convention to sensor.victron_multiplus_dc_power, which is
+      # positive when charging. Every consumer of this sensor below accounts for that.
       - name: "Victron MultiPlus AC Net Power"
         unique_id: victron_multiplus_ac_net_power
         state: >
@@ -364,6 +389,37 @@ template:
         availability: >
           {{ states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown']
           and states('sensor.victron_grid_total_power') not in ['unavailable', 'unknown'] }}
+
+      # ── MultiPlus conversion stage, DC side ──────────────────────────────────
+      # True DC power of the Multi = battery voltage × the Multi's own DC current. Replaces
+      # system/0/Dc/Vebus/Power, which follows the AC side (see the comment at
+      # sensor.victron_vebus_dc_current and plans/victron-multiplus-true-dc-power.md). Using the
+      # Multi's current rather than Dc/Battery/Power keeps other DC loads (MPPT, GX, …) out of the
+      # conversion loss, and already includes MPPT flow, so no dc_pv term is needed.
+      #
+      # Sign: POSITIVE = charging (AC → DC), NEGATIVE = inverting (DC → AC) — Victron reports the
+      # Multi current negative while discharging. OPPOSITE to victron_multiplus_ac_net_power, so
+      # loss = -(ac_net + dc) in both directions (see the loss sensor below).
+      - name: "Victron MultiPlus DC Power"
+        unique_id: victron_multiplus_dc_power
+        default_entity_id: sensor.victron_multiplus_dc_power
+        state: >
+          {# current | float(0): the Multi current is a fluctuating MQTT sensor with
+             expire_after: 120 and the GX does not re-publish an unchanged value, so an expired
+             current means "no DC current flowing" = 0 A, not an outage. Same reasoning as the
+             expired PV sensors in victron_multiplus_ac_net_power. A real GX outage is still caught:
+             every consumer pairs this with ac_net_power, which needs ac_load and grid. This
+             deliberately deviates from the "no float(default)" rule. #}
+          {% set volt = states('sensor.victron_battery_voltage') | float %}
+          {% set amps = states('sensor.victron_vebus_dc_current') | float(0) %}
+          {{ (volt * amps) | round(0) }}
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:lightning-bolt-circle
+        # Voltage only (24 h expire_after, so true unless the GX has been gone for a day).
+        availability: >
+          {{ states('sensor.victron_battery_voltage') not in ['unavailable', 'unknown'] }}
 
       # ── Inverter efficiency (η) — long-run accumulated ratio ─────────────────
       # η = (AC energy delivered while inverting) / (DC energy consumed while inverting).
@@ -512,11 +568,12 @@ template:
           and states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] }}
 
       # ── MultiPlus conversion loss ─────────────────────────────────────────────
-      # Loss of the AC↔DC conversion stage itself. mp_ac_net and vebus_dc carry OPPOSITE sign
-      # conventions, so both directions collapse to one branchless formula:
-      #   inverting  (mp_ac_net > 0, vebus_dc < 0):  loss = (-vebus_dc) - mp_ac_net
-      #   charging   (mp_ac_net < 0, vebus_dc > 0):  loss = (-mp_ac_net) - vebus_dc
-      #                              both equal ->    loss = -(mp_ac_net + vebus_dc)
+      # Loss of the AC↔DC conversion stage itself. mp_ac_net and mp_dc (the true DC power,
+      # sensor.victron_multiplus_dc_power) carry OPPOSITE sign conventions, so both directions
+      # collapse to one branchless formula:
+      #   inverting  (mp_ac_net > 0, mp_dc < 0):  loss = (-mp_dc) - mp_ac_net
+      #   charging   (mp_ac_net < 0, mp_dc > 0):  loss = (-mp_ac_net) - mp_dc
+      #                              both equal ->    loss = -(mp_ac_net + mp_dc)
       #
       # Clamped to ≥ 0: the AC- and DC-side measurements are sampled independently, so during
       # fast load steps the raw difference can go briefly negative.
@@ -524,15 +581,15 @@ template:
         unique_id: victron_multiplus_conversion_loss_power
         state: >
           {% set mp_ac_net = states('sensor.victron_multiplus_ac_net_power') | float %}
-          {% set vebus_dc  = states('sensor.victron_vebus_dc_power') | float %}
-          {{ [-(mp_ac_net + vebus_dc), 0] | max | round(0) }}
+          {% set mp_dc     = states('sensor.victron_multiplus_dc_power') | float %}
+          {{ [-(mp_ac_net + mp_dc), 0] | max | round(0) }}
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
         icon: mdi:fire
         availability: >
           {{ states('sensor.victron_multiplus_ac_net_power') not in ['unavailable', 'unknown']
-          and states('sensor.victron_vebus_dc_power') not in ['unavailable', 'unknown'] }}
+          and states('sensor.victron_multiplus_dc_power') not in ['unavailable', 'unknown'] }}
 
 
 # ── Energy accumulation (W → kWh, trigger-based) ──────────────────────────────
@@ -554,7 +611,8 @@ template:
       # ── Inverter efficiency (η) accumulators ─────────────────────────────────
       # Only the INVERTING direction is accumulated (both half-waves clamped at 0):
       #   ac_out += max( mp_ac_net, 0) / 60000   AC delivered by the Multi
-      #   dc_in  += max(-vebus_dc,  0) / 60000   DC consumed by the Multi (vebus_dc is negative
+      #   dc_in  += max(-mp_dc,     0) / 60000   DC consumed by the Multi (mp_dc =
+      #                                          sensor.victron_multiplus_dc_power is negative
       #                                          while inverting — see the sign-convention note
       #                                          on victron_multiplus_ac_net_power above)
       # Charging is excluded on purpose: charge efficiency differs from discharge efficiency, and
@@ -572,7 +630,7 @@ template:
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_vebus_dc_power') | float(0)), 0] | max / 60000)) | round(3) }}"
+        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_multiplus_dc_power') | float(0)), 0] | max / 60000)) | round(3) }}"
 
       # ── Solar yield in AC kWh — REPOINTED (was raw MQTT DC passthrough) ──────
       # unique_id/entity_id UNCHANGED (victron_solar_yield_total_kwh /
