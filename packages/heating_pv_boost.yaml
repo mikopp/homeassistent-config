@@ -426,7 +426,14 @@ template:
              balance is negative, which is a deficit, not a surplus. #}
           {% set net = (states('sensor.victron_pv_net_power') | float)
                      + (states('sensor.technikraum_heizung_heizung_power') | float) %}
-          {{ [net, 0] | max | round(0) }}
+          {# Cap at what PV is actually generating (the same two AC terms victron_pv_net_power
+             uses). The Shelly clamp updates ~2-4 s BEFORE the Victron load catches up, so when
+             the compressor starts the sum briefly reads "heater draw − old load" — live
+             2026-10-17 00:17:44: 1232 W at night, gone ~2 s later. Surplus can never exceed
+             generation, so this makes "no PV => no surplus" hold whatever the skew. #}
+          {% set pv = (states('sensor.solar_yield_watts') | float(0))
+                    + (states('sensor.victron_ac_inverter_power') | float(0)) %}
+          {{ [[net, pv] | min, 0] | max | round(0) }}
 
       # ── Return temperature, masked during hot-water charging ──────────────
       # While the heat pump is making hot water, its water temperatures reflect the DHW circuit
@@ -535,6 +542,20 @@ template:
         state: >
           {{ is_state('sensor.geotherm_heating_hvac_action', 'water')
              or is_state('binary_sensor.geotherm_heating_hwc_active', 'on') }}
+
+      # ── Compressor activity ───────────────────────────────────────────────
+      # The ebus hcmode ("heat") only says the generator is in heating mode — it stays "heat"
+      # while the circulation pump idles between compressor runs. Whether the compressor is
+      # actually running is read from the Shelly clamp instead, which needs no extra ebus
+      # register: measured idle circulation is ~83 W (standby ~9 W), a heating run ~1.8 kW, hot
+      # water ~3.5 kW. 500 W sits well clear of both ends. Covers ANY compressor run (heating or
+      # hot water) — combine with sensor.geotherm_heating_hvac_action to tell them apart.
+      - name: "Heating Compressor Active"
+        unique_id: heating_compressor_active
+        device_class: running
+        icon: mdi:heat-pump
+        availability: "{{ has_value('sensor.technikraum_heizung_heizung_power') }}"
+        state: "{{ (states('sensor.technikraum_heizung_heizung_power') | float) > 500 }}"
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -828,6 +849,7 @@ group:
       - binary_sensor.heating_season_active
       - binary_sensor.heating_cooling_active
       - binary_sensor.heating_dhw_active
+      - binary_sensor.heating_compressor_active
       - binary_sensor.heating_ebusd_online
       - binary_sensor.heating_loxone_online
       - binary_sensor.heating_slab_mode_wanted
