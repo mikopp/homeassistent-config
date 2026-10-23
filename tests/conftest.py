@@ -256,10 +256,15 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     # flush sensor's Branch 1 and Branch 2 collapse; branch-distinguishing tests set max_humidity=60.
     ha.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
     ha.set_state("binary_sensor.airflow_humidity_drying_needed", "off", {})
-    # Heat-protection guard + combined low intent (moisture OR heat) — start clean so Section 2's
-    # medium/restore branches (which require the combined low OFF) are not blocked by a stale value.
+    # Heat-protection guard + combined low intent (moisture OR heat) — start clean so the decision
+    # (sensor.airflow_cooling_state) does not pick up a stale low guard from a previous test.
     ha.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "off", {})
     ha.set_state("binary_sensor.airflow_ventilation_low_needed", "off", {})
+    # Remaining inputs of sensor.airflow_cooling_state (the single decision): its availability
+    # requires every indicator to hold a value, and these two would otherwise sit 'unknown' after
+    # boot until their 10-min delay elapses.
+    ha.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
+    ha.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
     ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
                  {"unit_of_measurement": "°C", "device_class": "temperature"})
     ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
