@@ -45,3 +45,7 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 - Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
   a change is required to fix a specific defect.
 
+- Section 2's free-cooling owner is `sensor.airflow_cooling_state == free_cooling` (cool profile
+  actually chosen for free cooling), **not** raw `binary_sensor.airflow_free_cooling_available`,
+  which is season-agnostic and would raise the rate during active heating. The controller
+  re-triggers on `sensor.airflow_cooling_state` because it settles only after Section 1's write.

@@ -1001,6 +1001,11 @@ automation:
       - platform: state
         entity_id: binary_sensor.airflow_free_cooling_available
         id: free_cooling_changed
+      # Section 2 keys its free-cooling medium bump on the derived cooling state, which settles
+      # only AFTER Section 1 writes the profile (template re-render) — re-run when it changes.
+      - platform: state
+        entity_id: sensor.airflow_cooling_state
+        id: cooling_state_changed
       - platform: state
         entity_id: binary_sensor.airflow_humidity_flush_needed
         id: flush_changed
@@ -1060,6 +1065,7 @@ automation:
             value_template: >
               {{ has_value('sensor.heating_cooling_indicator') and
                  has_value('binary_sensor.airflow_free_cooling_available') and
+                 has_value('sensor.airflow_cooling_state') and
                  has_value('binary_sensor.airflow_humidity_flush_needed') and
                  has_value('binary_sensor.airflow_ventilation_low_needed') }}
     action:
@@ -1381,6 +1387,12 @@ automation:
       # Desired state is a priority function of the decision sensors:
       #   low_needed (combined: moisture OR heat) → auto_mode OFF, preset low
       #   free OR flush                           → auto_mode OFF, preset medium   (boost rides on top)
+      #
+      # "free" here means sensor.airflow_cooling_state == free_cooling — i.e. the cool profile is
+      # actually active for free cooling (Section 1 chose it) — NOT the raw
+      # binary_sensor.airflow_free_cooling_available. The raw sensor is season-agnostic and only
+      # says outdoor air *could* cool; keying on it bumped the rate during active heating while
+      # the profile was warm.
       #   otherwise                               → auto_mode ON  (hand back to ComfoConnect schedule)
       #
       # AIRFLOW-INCREASE INVARIANTS (this section is the ONLY place that raises the fan rate):
@@ -1482,7 +1494,8 @@ automation:
               # than jump manual-low → manual-medium directly. Turning auto_mode ON re-fires this
               # controller via the auto_mode_on trigger; on that re-run the Medium branch (now
               # auto==on) forces medium with a truthful message. No notify — internal routing step.
-              # Requires (free OR flush) ON so the all-clear case is left to the Restore branch below.
+              # Requires (cooling_state free_cooling OR flush) so the all-clear case is left to the
+              # Restore branch below.
               # Boost-gated for symmetry so it never flips auto while boost owns the level.
               - conditions:
                   - condition: state
@@ -1500,8 +1513,8 @@ automation:
                   - condition: or
                     conditions:
                       - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "on"
+                        entity_id: sensor.airflow_cooling_state
+                        state: "free_cooling"
                       - condition: state
                         entity_id: binary_sensor.airflow_humidity_flush_needed
                         state: "on"
@@ -1510,7 +1523,7 @@ automation:
                     target:
                       entity_id: switch.comfoconnect_pro_auto_mode
 
-              # Medium: free cooling or humidity flush wants more air exchange.
+              # Medium: active free cooling (cooling_state) or humidity flush wants more air exchange.
               # GUARDS (see Section 2 header invariants): requires the COMBINED low intent OFF, so this
               # increase inherits both protections — moisture_low off AND heat_low off. Two legs:
               #   • free-cooling leg (a COOLING increase): heat_low off ⇒ real outdoor < indoor, and
@@ -1539,8 +1552,8 @@ automation:
                   - condition: or
                     conditions:
                       - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "on"
+                        entity_id: sensor.airflow_cooling_state
+                        state: "free_cooling"
                       - condition: state
                         entity_id: binary_sensor.airflow_humidity_flush_needed
                         state: "on"
@@ -1568,19 +1581,21 @@ automation:
                           Humidity flush active — preset bumped from auto schedule to Medium
                           for faster moisture exchange.
                         {% else %}
-                          Free cooling available — preset bumped from auto schedule to Medium
+                          Free cooling active — preset bumped from auto schedule to Medium
                           for faster air exchange.
                         {% endif %}
 
-              # Restore: no owner active (low off, free off, flush off). Hand control back to the
+              # Restore: no owner active (low off, cooling_state ≠ free_cooling, flush off). Hand control back to the
               # ComfoConnect schedule, but only if WE had taken it (auto_mode currently off).
               - conditions:
                   - condition: state
                     entity_id: binary_sensor.airflow_ventilation_low_needed
                     state: "off"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_free_cooling_available
-                    state: "off"
+                  - condition: not
+                    conditions:
+                      - condition: state
+                        entity_id: sensor.airflow_cooling_state
+                        state: "free_cooling"
                   - condition: state
                     entity_id: binary_sensor.airflow_humidity_flush_needed
                     state: "off"
