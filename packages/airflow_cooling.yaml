@@ -1069,8 +1069,11 @@ automation:
           # Case A: indoor dew below the min-humidity-derived dew (at target_temp) AND not cooling
           #         season — dry air, retain moisture. A stable, temperature-independent threshold.
           #         Cooling season is exempt: indoor moisture naturally dips below min in summer.
-          # Case B: active heating + free cooling unavailable AND no humidity flush pending —
-          #         heating season, no free exchange. The flush guard yields to Block 2 when
+          # Case B: active heating AND no humidity flush pending — heating season. Deliberately NOT
+          #         gated on free cooling: Block 2A vetoes free cooling in active_heating, so a
+          #         free-cooling guard here left `cool` with no owner and no releaser (Block 3/4 also
+          #         skip active_heating) — the bypass stayed open all heating season whenever the
+          #         room sat within the free-cooling Schmitt band. The flush guard yields to Block 2 when
           #         indoor moisture is above max (Branch 1), the higher-priority safety action;
           #         dry-air retention (Case A) is unaffected (dew_min < dew_max, so Case A and a
           #         flush can never both be true).
@@ -1100,9 +1103,6 @@ automation:
                         entity_id: sensor.heating_cooling_indicator
                         state: "active_heating"
                       - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "off"
-                      - condition: state
                         entity_id: binary_sensor.airflow_humidity_flush_needed
                         state: "off"
               - condition: not
@@ -1127,7 +1127,7 @@ automation:
                       Indoor dew {{ dew | float }}°C below min-dew {{ dew_min | float }}°C
                       (≈{{ rh }}% RH, non-cooling season) — profile set to Warm to retain moisture.
                     {% else %}
-                      Active heating, free cooling unavailable — profile set to Warm.
+                      Active heating season — profile set to Warm.
                     {% endif %}
 
           # Block 2: Free cooling (any non-heating season) OR humidity flush → cool profile.
