@@ -33,19 +33,34 @@ within ~1 debounce after restart, and restoring preserves the 10-min delay + `th
 hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unknown`), **not**
 *restart* (comes up with a restored value), so it does not protect against restart-stale.
 
+## Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
+- **Indicators feed only the decision; consumers read only the decision.** The indicators
+  (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
+  `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
+  `sensor.airflow_cooling_state` and of nothing that writes the device. The controller, the drying
+  boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
+  attributes. Never wire an indicator straight into an automation again — that is how active heating
+  got free cooling (2026-10-23): each consumer re-implemented its own season rule and they disagreed.
+- The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
+  applying it cannot change it. Priority/season rules live in one place:
+  `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
+  template entities cannot share variables between state and attributes at 2026.10.1 — entity
+  `variables` render once at setup).
+- It is **state-based** (derives from slow binaries; see the trigger-vs-state rule above) and
+  unavailable unless every indicator has a value — the automations then no-op.
+- CI gotcha: in the test harness the trigger-based indicators have no internal state (their 10-min
+  delay never elapsed), so changing one of their trigger inputs (season, dew) re-renders them to
+  `unknown` over a REST-seeded value. Seed season/dew first, then the indicators
+  (`_seed_indicators` in `tests/test_airflow.py`).
+
 ## Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
-- Gate preset/auto ownership on the **stable intent sensors** (`drying_needed` ⊇ `flush_needed`), NOT
-  the boost/auto switches, which flap during boost expiry/re-enable races.
+- Gate preset/auto ownership on the **decision** (`ventilation` attribute — boost ⊂ flush intent),
+  NOT the boost/auto switches, which flap during boost expiry/re-enable races.
 - While a boost is intended/running: write **no preset** and only ever turn `auto_mode` **ON** (or do
   nothing). The boost-owner branch is first in the `choose` and matches on the intent, so the `choose`
   EXITS there and the Low/Medium branches (which turn auto off / write a preset) can never cancel the
   boost. Boost gives HIGH meanwhile, so the underlying preset is moot until boost ends.
-- Force `preset=medium, auto=off` only when `drying off`, `flush on`, and the schedule is holding
+- Force `preset=medium, auto=off` only when medium is decided and the schedule is holding
   `preset=low`; `auto=on, preset=medium` is the preferred state and must not be re-forced.
 - Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
   a change is required to fix a specific defect.
-
-- Section 2's free-cooling owner is `sensor.airflow_cooling_state == free_cooling` (cool profile
-  actually chosen for free cooling), **not** raw `binary_sensor.airflow_free_cooling_available`,
-  which is season-agnostic and would raise the rate during active heating. The controller
-  re-triggers on `sensor.airflow_cooling_state` because it settles only after Section 1's write.

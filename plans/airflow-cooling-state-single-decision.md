@@ -90,14 +90,27 @@ each import it and pick their field. All three render from the same inputs in th
 Indicators keep their own logic (debounce, Schmitt, mutual exclusivity); only their consumers change.
 
 ## Steps & status
-- [ ] 1. Add `custom_templates/airflow_decision.jinja` + rewrite `sensor.airflow_cooling_state`
-       (state + `profile` / `ventilation` attributes, availability, icon).
-- [ ] 2. Controller Section 1: replace Blocks 1–5 with one "apply `profile` attribute" step + notify.
-- [ ] 3. Controller Section 2: key every branch on the `ventilation` attribute.
-- [ ] 4. Drying boost automation: trigger/conditions on `ventilation == boost`.
-- [ ] 5. Climate `hvac_action_template`: read `cooling_state` instead of the indicators.
-- [ ] 6. Tests (`tests/test_airflow.py`): rewrite `cooling_state` tests to seed indicators (not
-       hvac_action); add decision-table cases incl. the 2026-10-23 scenario (active_heating + free
-       ON → `heating`, warm, auto); adapt controller/boost tests to the new inputs; run locally.
-- [ ] 7. Update `packages/notes/airflow_cooling.md`, `plans/airflow-cooling-architecture.md`,
-       `.claude/learnings.md`; dashboard unchanged (already shows `cooling_state`).
+- [x] 1. `custom_templates/airflow_decision.jinja` + `sensor.airflow_cooling_state` rewritten (state +
+       `profile` / `ventilation` attributes; availability requires every indicator). Disabled
+       automation → profile/ventilation `off` (not `none`: the strict template test treats `none` as
+       a sentinel).
+- [x] 2. Controller Section 1: Blocks 1–5 replaced by "write `profile` if different" + notify.
+       New trigger: the device reporting a profile on its own (reconnect / manual change) re-asserts
+       the decision; indicator triggers replaced by one trigger on the decision.
+- [x] 3. Controller Section 2: every branch keyed on `ventilation`; boost-switch guard, Away and
+       idempotency guards kept.
+- [x] 4. Drying boost: attribute triggers on `ventilation` (to/from `boost`); stop only on a real
+       non-boost decision (an unavailable decision never stops a boost).
+- [x] 5. Climate `hvac_action_template` reads the decision.
+- [x] 6. Tests: decision-table tests (`test_decision_*`) incl. the 2026-10-23 scenario; controller,
+       boost and hvac tests re-pointed at the decision; Block 1–5 tests removed. conftest seeds
+       `free_cooling_available` and `moisture_ventilation_low_needed`. Local run with the pinned image
+       2026.10.1: full non-pergola suite 172 passed / 1 skipped (baseline before the change: 190 / 1);
+       HA `check_config` clean; yamllint clean (pre-existing warnings only).
+- [x] 7. Notes, architecture doc (§3, §6, §7, §8, §10, §11), learnings, CLAUDE.MD updated.
+
+## Deploy notes
+- `git pull`, then **restart** HA (a YAML reload does not load a new `custom_templates/` file;
+  `homeassistant.reload_custom_templates` + template reload also works).
+- After a reload the trigger-based indicators can sit `unknown` until their self-trigger / next input
+  change; the decision is `unavailable` meanwhile and the automations do nothing (by design).
