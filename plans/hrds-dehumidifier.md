@@ -8,11 +8,11 @@
 
 | Step | State |
 |------|-------|
-| 0. Plan revision 2 (this file) | done, awaiting approval |
+| 0. Plan revision 2 (this file), incl. hot-water pause | done, awaiting approval |
 | 1. Pre-implementation checks on the live system (below) | open |
 | 2. `climate_common.yaml` extraction + `airflow_cooling.yaml` repoint (regression gate: airflow tests) | open |
 | 3. `airflow_cooling.yaml`: dehumidify hold (preset medium + moisture bypass), boost gating | open |
-| 4. `hrds_dehumidifier.yaml` + `packages/notes/hrds_dehumidifier.md` + tests | open |
+| 4. `hrds_dehumidifier.yaml` + `packages/notes/hrds_dehumidifier.md` + `heating_dhw_running` split in `heating_pv_boost.yaml` + tests | open |
 | 5. Migration runbook on deploy day (user) | open |
 | 6. Dry run on the device (user) | open |
 
@@ -72,7 +72,7 @@ Q350 delivers medium airflow and the moisture-minimising bypass setting while th
 
 | Owner | Writes | Reads from the other |
 |-------|--------|----------------------|
-| `hrds_dehumidifier.yaml` | `switch.dehumidify` (and `switch.unit_on_off` on only) — nothing else | `binary_sensor.airflow_free_cooling_available`, `binary_sensor.airflow_humidity_drying_needed`, `sensor.heating_cooling_indicator` |
+| `hrds_dehumidifier.yaml` | `switch.dehumidify` (and `switch.unit_on_off` on only) — nothing else | `binary_sensor.airflow_free_cooling_available`, `binary_sensor.airflow_humidity_drying_needed`, `sensor.heating_cooling_indicator`, `binary_sensor.heating_dhw_running` + `binary_sensor.heating_compressor_active` (heating package) |
 | `airflow_cooling.yaml` (`airflow_ventilation_controller`, `airflow_humidity_drying_boost`) | every Comfo output: profile, preset, auto_mode, boost | `binary_sensor.hrds_dehumidify_active` |
 
 No entity is written by both. No template sensor cycle: no airflow decision sensor reads an HRDS
@@ -125,6 +125,18 @@ New (revision 2, from the user's instructions — confirm the ones marked *propo
 16. **Season.** No HRDS dehumidify in `active_heating` at all (brine circuit: active winter DEU is
     forbidden, HB 3.8.7; the integration's brine guard also refuses it). This tightens Decision 7:
     in heating season the above-max branch does not run either.
+17. **Pause while the heat pump makes hot water.** While the geoTHERM charges the hot-water tank,
+    the HRDS is switched off **at once** (the minimum runtime does not hold it), so
+    `hrds_dehumidify_active` clears and airflow goes back to its normal logic. When the hot-water
+    charge ends and dehumidify is still needed (window, humidity), the HRDS starts again with a fresh
+    minimum runtime. The signal is the heating package's hot-water detection **without** the 25-min
+    tail of `heating_dhw_active` (that tail exists only to mask the return-temperature reading), so
+    the HRDS resumes as soon as the charge ends.
+    Fail-safe when ebusd gives no answer: treat a running compressor
+    (`binary_sensor.heating_compressor_active`, Shelly clamp, independent of ebusd) as possibly
+    hot water and pause; with the compressor off there can be no hot-water charge.
+    Related handbook note: on a heat-pump circuit with hot-water priority the handbook opens the
+    HRDS `OFF` input during hot water (HB 3.8.6); here the same is done over Modbus.
 
 ---
 
@@ -209,31 +221,51 @@ device prefix — check 1): `switch.dehumidify`, `switch.unit_on_off`,
 - `binary_sensor.hrds_indoor_above_max` — trigger-based Schmitt: on at
   `climate_indoor_dew_5min ≥ climate_dew_point_max`, off at `≤ max − hrds_off_dew_diff`.
 - `binary_sensor.hrds_indoor_above_target` — same on `climate_dew_point_target`.
+- `binary_sensor.hrds_paused_for_hot_water` — **state-based** (Decision 17):
+  `heating_dhw_running` on, **or** `heating_dhw_running` has no value **and**
+  `heating_compressor_active` on. No delay of its own: the ebus hot-water state does not flap, and
+  the restart of the HRDS takes 6.5–8 min to reach the compressor anyway.
 - `binary_sensor.hrds_dehumidify_needed` — **state-based** (inputs are binaries only; notes rule):
   ```
   window   = climate_boost_schedule_active                      # Decision 10
   season   = heating_cooling_indicator != active_heating        # Decision 16
+  hot_wtr  = hrds_paused_for_hot_water                          # Decision 17
   urgent   = hrds_indoor_above_max                              # beats free cooling and boost
   opportun = hrds_indoor_above_target and hrds_pv_surplus_available
              and not airflow_free_cooling_available             # Decision 8
              and not airflow_humidity_drying_needed             # Decision 14
-  needed   = window and season and (urgent or opportun)
+  needed   = window and season and not hot_wtr and (urgent or opportun)
   ```
 - `binary_sensor.hrds_dehumidify_active` — **state-based**, the signal the airflow automations key
   on: `switch.dehumidify` on **or** `binary_sensor.recirculation_active` on. Covers our request from
   the moment it is written (before the fan starts) and any dehumidify or INT from elsewhere (manual,
   climate entity) while the unit actually recirculates. Unknown/unavailable → off.
 - `sensor.hrds_state` — `off` / `outside_window` / `idle` / `dehumidify_max` / `dehumidify_pv` /
-  `min_runtime` / `blocked` (brine guard, operation gate or refused write), for the dashboard.
+  `min_runtime` / `paused_hot_water` / `blocked` (brine guard, operation gate or refused write), for
+  the dashboard.
+
+**Heating package edit (`packages/heating_pv_boost.yaml`, behaviour-neutral):** split the
+expression of `binary_sensor.heating_dhw_active` into a new state-based
+`binary_sensor.heating_dhw_running` (`geotherm_heating_hvac_action == water` or
+`geotherm_heating_hwc_active` on, **no** delay) and let `heating_dhw_active` read it with its
+existing 25-min `delay_off`. One definition of "hot water is being made"; the heating logic and its
+tests do not change.
 
 **Automation `hrds_dehumidify_controller`** (`mode: queued`, gated by `hrds_automatic_enabled`;
-triggers: `hrds_dehumidify_needed` change, `timer.finished`, HA start):
+triggers: `hrds_dehumidify_needed` change, `hrds_paused_for_hot_water` change, `timer.finished`,
+HA start):
 - **Start** (need on, `switch.dehumidify` off): `switch.unit_on_off` on if off; `switch.dehumidify`
   on; start `timer.hrds_min_runtime`; notify. The integration's `check_write_allowed` (operation
   gate, PH28, brine guard, season) may refuse the write: `continue_on_error`, report `blocked` and
   notify once, no retry loop.
 - **Stop** (need off, `switch.dehumidify` on): only when the timer is idle; otherwise the
   `timer.finished` trigger re-evaluates. `switch.dehumidify` off; unit stays on (Decision 15).
+- **Hot-water pause** (first branch; `hrds_paused_for_hot_water` on, `switch.dehumidify` on):
+  `switch.dehumidify` off **immediately**, cancel `timer.hrds_min_runtime`. The unit's own compressor
+  minimum on time `PE02` still applies inside the unit. No notification (hot water runs daily);
+  `sensor.hrds_state` shows `paused_hot_water`.
+- **Resume:** nothing special — when the pause clears, `hrds_dehumidify_needed` turns on again if
+  the window and humidity still call for it, and the Start branch runs (new timer).
 - Writes only on a state difference (integration invariant: no periodic writes, ADR-0006/0023).
 - Never touches `switch.integration_request` (cooling stays the Comfo's job).
 
@@ -248,6 +280,10 @@ triggers: `hrds_dehumidify_needed` change, `timer.finished`, HA start):
 5. Indoor dew falls below `max − hrds_off_dew_diff` (or the window closes) → stop once the timer is
    idle → `hrds_dehumidify_active` off after the fan's run-on (≈1–2 min, T19) → airflow re-derives
    its normal state (here: back to LOW + warm).
+
+Hot-water interruption during step 4: `heating_dhw_running` on → `switch.dehumidify` off at once →
+`hrds_dehumidify_active` off after the run-on → airflow back to its normal state (LOW + warm here,
+or a pending drying boost) → hot-water charge ends → need on again → back to step 2.
 
 ---
 
@@ -271,6 +307,8 @@ Still structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_tar
 | I13 | **Window ends mid-run.** | Run finishes `hrds_min_runtime`, then stops (at most one runtime past the window) |
 | I14 | **Moisture outside the window.** Above max at night, no HRDS | Accepted (Decision 10); airflow flush/low still act |
 | I15 | **Bypass vs Comfo's own logic.** `cool` lets the bypass open, it does not force it: the Q350 opens it only when that cools | Best effort. Observe with `sensor.airflow_bypass_estimation` in the dry run. When the intake is drier but warmer, the bypass stays closed and some indoor moisture is recovered — unavoidable without a forced-bypass control |
+| I16 | **Hot-water pause cycles the HRDS.** Each hot-water charge stops a run and restarts it afterwards, airflow switches medium → normal → medium | Accepted (Decision 17). A charge lasts much longer than the HRDS start and stop (≈8 min, ≈2 min), and the airflow side only re-derives its state. If the hot-water detection ever flaps, add a short `delay_off` on `hrds_paused_for_hot_water` |
+| I17 | **ebusd offline.** `heating_dhw_running` has no value | Fail-safe through the Shelly clamp: compressor on → pause; compressor off → no hot water possible, run normally |
 
 ---
 
@@ -288,7 +326,10 @@ Still structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_tar
 - **Edit:** `tests/conftest.py`, `tests/test_airflow.py`; **new** `tests/test_hrds.py` (+ innova_hrds
   stubs).
 - **Edit:** `dashboards/airflow-dashboard.yaml` — renamed ids (an HRDS card is out of scope).
-- Not touched: `packages/energy.yaml`, `packages/victron.yaml`, `packages/heating_pv_boost.yaml`.
+- **Edit:** `packages/heating_pv_boost.yaml` — new `binary_sensor.heating_dhw_running` (undelayed),
+  `heating_dhw_active` reads it (behaviour unchanged); one line in `packages/notes/heating_pv_boost.md`
+  naming the two signals; `tests/test_heating_pv_boost.py` as the regression gate.
+- Not touched: `packages/energy.yaml`, `packages/victron.yaml`.
 
 ### Rename map (Decision 4)
 
@@ -317,6 +358,9 @@ The fan questions of revision 1 are settled (T16, T22–T28). What is left:
 4. **HRDS draw:** an estimate for `hrds_power_demand` (handbook technical data, or a clamp reading).
 5. **Bypass response:** with profile `warm` vs `cool` during a run, does
    `sensor.airflow_bypass_estimation` move as expected?
+6. **Hot-water signal:** across one hot-water charge, confirm `geotherm_heating_hvac_action` reads
+   `water` and `geotherm_heating_hwc_active` turns on and off with the charge (and does not just mean
+   "hot-water circuit enabled"). Note the typical charge length.
 
 ## Migration — history-preserving rename via `ha_mcp` (deploy day)
 
@@ -344,7 +388,13 @@ set the new `hrds_*` helpers; (5) verify continuous history and no orphaned `air
    - Schmitt: stays on between trigger and `trigger − hrds_off_dew_diff`;
    - min runtime: need clears with the timer active → no stop until `timer.finished`;
    - PV add-back: surplus stays above demand while the compressor runs;
-   - `hrds_dehumidify_active` on from `switch.dehumidify` or `recirculation_active`, off on unknown.
+   - `hrds_dehumidify_active` on from `switch.dehumidify` or `recirculation_active`, off on unknown;
+   - hot water: `heating_dhw_running` on mid-run → dehumidify off at once even with the timer
+     active, timer cancelled; off again → dehumidify back on while still needed; no restart if the
+     window closed meanwhile; `heating_dhw_running` unknown + compressor on → paused, + compressor
+     off → not paused.
+   - `tests/test_heating_pv_boost.py`: `heating_dhw_active` still keeps its 25-min tail;
+     `heating_dhw_running` follows the inputs with no delay.
 2. **Unit tests — `tests/test_airflow.py`:**
    - active on → auto off + medium from each prior state (auto, low, boost running → cancelled,
      heat_low, moisture_low); Away → preset untouched;
