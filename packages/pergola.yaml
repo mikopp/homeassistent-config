@@ -26,8 +26,10 @@ input_boolean:
 
 
   # Heating indicator: on = heating season (let sun through), off = cooling season (block sun).
-  # Can be toggled by the user in the HA UI or written via the HA REST API by an external
-  # system (e.g. Loxone). Does NOT affect state machine transitions — only the cover formula.
+  # Driven by automation.pergola_sync_heating_from_indicator from sensor.heating_cooling_indicator
+  # (on for active_heating/neutral, off for passive_cooling/active_cooling). A manual toggle in
+  # the HA UI or a write via the REST API is overwritten at the next indicator change or HA
+  # start. Does NOT affect state machine transitions — only the cover formula.
   pergola_heating:
     name: Pergola Heating
     icon: mdi:radiator
@@ -83,7 +85,7 @@ input_number:
 
   pergola_pv_conversion_factor:
     name: Pergola PV Conversion Factor
-    # Divisor to convert raw PV watt output (sensor.solar_yield_watts)
+    # Divisor to convert raw PV watt output (sensor.victron_solar_yield_dc_watts)
     # to equivalent W/m² irradiance.
     # Default 3.2 is empirically calibrated for 6× Axitec 440W bifacial panels at ~5–10°
     # tilt, 228° azimuth (bifacial back-gain + near-flat tilt + afternoon-facing geometry).
@@ -279,7 +281,7 @@ template:
       - name: "Pergola PV Power"
         unique_id: pergola_pv_power
         # The MPPT Yield/Power topic stops publishing once it sits at 0 at night, so
-        # sensor.solar_yield_watts (expire_after: 120) goes unavailable — the Victron
+        # sensor.victron_solar_yield_dc_watts (expire_after: 120) goes unavailable — the Victron
         # keep-alive uses suppress-republish, so constant-value topics are no longer
         # periodically refreshed. Treat "MPPT topic stale but the rest of the Victron GX
         # still reporting" as 0 W (night), not unavailable; otherwise the sun_down rule
@@ -287,14 +289,18 @@ template:
         # victron_ac_load_total_power tracks live house load, so its availability signals
         # that Victron is alive. Safe by day: pv only feeds the sun_down rule (which also
         # requires solar_radiation == 0) and the max() in pergola_sun_shining.
+        #
+        # Deliberately reads the raw DC entity, not the AC-referenced sensor.solar_yield_watts
+        # (see packages/victron.yaml) — this wrapper feeds a conversion factor calibrated
+        # against true panel output, not an AC-discounted figure.
         state: >
-          {% if states('sensor.solar_yield_watts') not in ['unavailable', 'unknown'] %}
-            {{ states('sensor.solar_yield_watts') | float(0) }}
+          {% if states('sensor.victron_solar_yield_dc_watts') not in ['unavailable', 'unknown'] %}
+            {{ states('sensor.victron_solar_yield_dc_watts') | float(0) }}
           {% else %}
             0
           {% endif %}
         availability: >
-          {{ states('sensor.solar_yield_watts') not in ['unavailable', 'unknown']
+          {{ states('sensor.victron_solar_yield_dc_watts') not in ['unavailable', 'unknown']
              or states('sensor.victron_ac_load_total_power') not in ['unavailable', 'unknown'] }}
         unit_of_measurement: "W"
         device_class: power
@@ -1260,6 +1266,61 @@ automation:
                   slat_angle: "{{ states('sensor.pergola_slat_angle') | float(90) }}"
     mode: queued
     max: 3
+
+  # ── Heating/cooling season sync ───────────────────────────────────────────────────
+  # Drives input_boolean.pergola_heating from sensor.heating_cooling_indicator, so the pergola
+  # follows the same seasonal classification as the ventilation and the heat pump.
+  # Heating season = active_heating OR neutral (same gate as binary_sensor.heating_season_active
+  # in packages/heating_pv_boost.yaml); passive_cooling / active_cooling = cooling season.
+  # The boolean's own state-change trigger in pergola_state_manager re-evaluates the state
+  # machine, so nothing else is needed here. While the indicator is unavailable/unknown the
+  # boolean is left at its last value (never flip the season on missing data).
+  # Manual toggles of the boolean are overwritten at the next indicator change or HA start.
+  - id: 'pergola_sync_heating_from_indicator'
+    alias: 'Pergola: Sync Heating From Indicator'
+    description: >
+      Sets pergola_heating on in heating season (active_heating, neutral) and off in cooling
+      season (passive_cooling, active_cooling), following sensor.heating_cooling_indicator.
+    triggers:
+      - trigger: state
+        entity_id: sensor.heating_cooling_indicator
+      # HA start: the indicator is restored/recomputed, but the boolean may be stale.
+      - trigger: homeassistant
+        event: start
+    conditions:
+      # Only act on a real classification.
+      - condition: template
+        value_template: >
+          {{ states('sensor.heating_cooling_indicator') in
+             ['active_heating', 'neutral', 'passive_cooling', 'active_cooling'] }}
+    # Both seasons are named explicitly and there is no `default:` branch: a manual run
+    # ("Run actions" / automation.trigger skips the condition above by default) while the
+    # indicator is unavailable/unknown must leave the boolean untouched, not turn it off.
+    actions:
+      - choose:
+          # Heating season → let sun through.
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state:
+                  - active_heating
+                  - neutral
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.pergola_heating
+          # Cooling season → block sun.
+          - conditions:
+              - condition: state
+                entity_id: sensor.heating_cooling_indicator
+                state:
+                  - passive_cooling
+                  - active_cooling
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.pergola_heating
+    mode: restart
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # SCRIPTS

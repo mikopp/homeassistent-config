@@ -1,31 +1,27 @@
-# Packages — Feature-specific Claude notes
+# Packages — progressive-loading index
 
-Directory-scoped knowledge for individual feature packages. Keep the root `CLAUDE.md` general; put
-package-specific hardware quirks and design rules here.
+This file is intentionally a thin index. Package-specific knowledge (hardware quirks, design rules,
+verified register decodes) lives in **one file per package** under `packages/notes/`, so it is not
+paid for in context unless you actually work on that package.
 
-## airflow_cooling.yaml — ComfoConnect ventilation
+## Rule for agents
+**Before reading or editing `packages/<name>.yaml`, read `packages/notes/<name>.md` if it exists.**
+Do not read the notes of packages you are not touching.
 
-### Boost/preset hardware model
-Hardware behaviour of the ComfoConnect unit, relied on by the airflow automations:
-- A running **boost** is identified by `switch.comfoconnect_pro_boost` (and the stable `drying_needed`
-  intent) — **never** by `preset==high`. Boost only *reports* `high` as a side effect.
-- Boost delivers HIGH airflow and **coexists with `auto_mode` ON**. On boost end the preset returns to
-  its pre-boost value.
-- **Two actions CANCEL a running boost:** (1) writing ANY preset (`low`/`medium`) via
-  `select.select_option`, and (2) turning `auto_mode` **OFF** (airflow lingers high a few minutes, then
-  reverts). Turning `auto_mode` **ON** does NOT cancel boost.
-- `number.comfoconnect_pro_boost_time` is a live countdown; **writing it does NOT extend a running
-  boost** in place (the device ignores it) — the value only reaches ~60 again via a switch off→on
-  restart.
+## Rule for adding/changing notes (applies to every future package)
+- Package-specific knowledge goes in `packages/notes/<name>.md` (same basename as the YAML file).
+  **Never add it to this file or to the root `CLAUDE.MD`.**
+- When you create a new `packages/<name>.yaml` and have notes worth keeping, create
+  `packages/notes/<name>.md` and add a row to the index below (one line: when to read it).
+- Keep this file to the index and these rules only.
 
-### Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
-- Gate preset/auto ownership on the **stable intent sensors** (`drying_needed` ⊇ `flush_needed`), NOT
-  the boost/auto switches, which flap during boost expiry/re-enable races.
-- While a boost is intended/running: write **no preset** and only ever turn `auto_mode` **ON** (or do
-  nothing). The boost-owner branch is first in the `choose` and matches on the intent, so the `choose`
-  EXITS there and the Low/Medium branches (which turn auto off / write a preset) can never cancel the
-  boost. Boost gives HIGH meanwhile, so the underlying preset is moot until boost ends.
-- Force `preset=medium, auto=off` only when `drying off`, `flush on`, and the schedule is holding
-  `preset=low`; `auto=on, preset=medium` is the preferred state and must not be re-forced.
-- Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
-  a change is required to fix a specific defect.
+## Index
+
+| Package | Notes | Read when… |
+|---|---|---|
+| `airflow_cooling.yaml` | `notes/airflow_cooling.md` | touching ComfoConnect boost/preset/auto logic or the ventilation controller |
+| `energy.yaml` | `notes/energy.md` | touching Energy Dashboard sensors or wallbox/PV wrappers |
+| `heating_pv_boost.yaml` | `notes/heating_pv_boost.md` | touching ebusd/Vaillant registers, poll registration, or heating/cooling control |
+| `pergola.yaml` | — (none yet) | — |
+| `victron.yaml` | `notes/victron.md` | touching Victron MQTT topics, the Multi DC/AC power chain, η or conversion loss |
+| `heating_cooling_indicator.yaml` | — (none yet) | — |

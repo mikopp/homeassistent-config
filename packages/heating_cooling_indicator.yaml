@@ -25,36 +25,143 @@ sensor:
     state_characteristic: mean
     sampling_size: 192
     max_age: "48:00:00"
+# --- SETTINGS ---
+# The three main outdoor-temperature thresholds (48h mean). Hysteresis is NOT a setting: it is
+# fixed at 1 °C relative to each threshold inside the template. No `initial:` — set the values
+# once in the UI after deploy (chosen values: 12 / 16 / 20).
+input_number:
+  # Mean at or below this → active_heating.
+  heating_indicator_heating_below:
+    name: "Indicator: Heating below"
+    min: 5
+    max: 25
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:radiator
+    mode: box
+
+  # Mean at or above this → passive_cooling (clamped to heating + 2 in the template).
+  heating_indicator_passive_cooling_above:
+    name: "Indicator: Passive cooling above"
+    min: 5
+    max: 25
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:weather-sunny
+    mode: box
+
+  # Mean at or above this → active_cooling (clamped to passive cooling + 2 in the template).
+  heating_indicator_active_cooling_above:
+    name: "Indicator: Active cooling above"
+    min: 5
+    max: 25
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:snowflake
+    mode: box
+
 template:
   - sensor:
+      # Thresholds actually in use. The order heating < passive < active is enforced here: each
+      # threshold is raised to at least 2 °C above the previous one, so the 1 °C hysteresis bands
+      # can never overlap whatever was typed in. Shown on the dashboard so a clamp is visible
+      # (effective value differs from the box above it).
+      - name: "Heating Indicator Passive Cooling Effective"
+        unique_id: heating_indicator_passive_cooling_effective
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {{ [states('input_number.heating_indicator_passive_cooling_above') | float,
+              states('input_number.heating_indicator_heating_below') | float + 2] | max }}
+
+      - name: "Heating Indicator Active Cooling Effective"
+        unique_id: heating_indicator_active_cooling_effective
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% set cool = [states('input_number.heating_indicator_passive_cooling_above') | float,
+                         states('input_number.heating_indicator_heating_below') | float + 2] | max %}
+          {{ [states('input_number.heating_indicator_active_cooling_above') | float,
+              cool + 2] | max }}
+
       - name: "Heating Cooling Indicator"
         unique_id: heating_cooling_indicator
         # Prevents cascade jumps during config reload: when the 48h mean is
         # unavailable, the indicator becomes unavailable too instead of computing
         # from float(0) and cycling through spurious states.
         availability: >
-          {{ states('sensor.wheatherstation_outdoor_temperature_48h_mean')
-             not in ['unavailable', 'unknown'] }}
+          {{ has_value('sensor.wheatherstation_outdoor_temperature_48h_mean')
+             and has_value('sensor.heating_indicator_passive_cooling_effective')
+             and has_value('sensor.heating_indicator_active_cooling_effective') }}
         state: >
           {% set temp = states('sensor.wheatherstation_outdoor_temperature_48h_mean') | float(0) %}
           {% set current = this.state %}
+          {# Thresholds: heating comes straight from its helper; passive/active come from the
+             "effective" sensors below, which already enforce heating < passive < active. #}
+          {% set heat = states('input_number.heating_indicator_heating_below') | float %}
+          {% set cool = states('sensor.heating_indicator_passive_cooling_effective') | float %}
+          {% set active = states('sensor.heating_indicator_active_cooling_effective') | float %}
+          {# Hysteresis is fixed and relative to each threshold: 1 °C. #}
           {% if current == 'active_heating' %}
-            {% if temp >= 6 %}neutral{% else %}active_heating{% endif %}
+            {% if temp >= heat + 1 %}neutral{% else %}active_heating{% endif %}
           {% elif current == 'neutral' %}
-            {% if temp <= 5 %}active_heating
-            {% elif temp >= 11 %}passive_cooling
+            {% if temp <= heat %}active_heating
+            {% elif temp >= cool %}passive_cooling
             {% else %}neutral{% endif %}
           {% elif current == 'passive_cooling' %}
-            {% if temp <= 10 %}neutral
-            {% elif temp >= 16 %}active_cooling
+            {% if temp <= cool - 1 %}neutral
+            {% elif temp >= active %}active_cooling
             {% else %}passive_cooling{% endif %}
           {% elif current == 'active_cooling' %}
-            {% if temp <= 15 %}passive_cooling{% else %}active_cooling{% endif %}
+            {% if temp <= active - 1 %}passive_cooling{% else %}active_cooling{% endif %}
           {% else %}
-            {% if temp <= 5.5 %}active_heating
-            {% elif temp < 10.5 %}neutral
-            {% elif temp < 15.5 %}passive_cooling
+            {# Cold start (no previous state): classify at the midpoint of each hysteresis band. #}
+            {% if temp <= heat + 0.5 %}active_heating
+            {% elif temp < cool - 0.5 %}neutral
+            {% elif temp < active - 0.5 %}passive_cooling
             {% else %}active_cooling{% endif %}
+          {% endif %}
+
+  # --- FORECAST 48h MEAN ---
+  # Mean of the hourly outdoor-temperature forecast for the next 48 h (weather.home), refreshed
+  # every hour. Counterpart of the measured 48h mean above; NOT wired into the indicator yet.
+  # The forecast is not an attribute any more (removed in HA 2024.3): it is only available as the
+  # response of the weather.get_forecasts action, so this has to be a trigger-based template.
+  - triggers:
+      - trigger: time_pattern
+        minutes: "0"
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: weather.get_forecasts
+        target:
+          entity_id: weather.home
+        data:
+          type: hourly
+        response_variable: forecast
+    sensor:
+      - name: "Weatherstation Outdoor Temperature 48h Forecast Mean"
+        unique_id: wheatherstation_outdoor_temperature_48h_forecast_mean
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-lines
+        # Only forecast hours from now until now + 48 h are averaged. Fewer than 48 usable hours
+        # (provider returned a short/empty forecast) → "unknown" rather than a skewed mean.
+        state: >
+          {% set until = now() + timedelta(hours=48) %}
+          {% set from_ = now() - timedelta(hours=1) %}
+          {% set ns = namespace(temps=[]) %}
+          {% for hour in forecast['weather.home'].forecast %}
+            {% set t = as_datetime(hour.datetime) %}
+            {% if hour.temperature is number and t >= from_ and t < until %}
+              {% set ns.temps = ns.temps + [hour.temperature] %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.temps | length >= 48 %}
+            {{ (ns.temps | sum / ns.temps | length) | round(1) }}
+          {% else %}
+            {{ none }}
           {% endif %}
 
 # --- GROUP ---
@@ -67,5 +174,14 @@ group:
       - sensor.wheatherstation_outdoor_temperature_15min
       # Statistics sensor (48h mean)
       - sensor.wheatherstation_outdoor_temperature_48h_mean
+      # Forecast 48h mean (weather.home, hourly)
+      - sensor.wheatherstation_outdoor_temperature_48h_forecast_mean
       # Template sensor (heating/cooling state)
       - sensor.heating_cooling_indicator
+      # Effective (clamped) thresholds
+      - sensor.heating_indicator_passive_cooling_effective
+      - sensor.heating_indicator_active_cooling_effective
+      # Threshold settings
+      - input_number.heating_indicator_heating_below
+      - input_number.heating_indicator_passive_cooling_above
+      - input_number.heating_indicator_active_cooling_above

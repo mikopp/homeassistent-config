@@ -100,7 +100,7 @@ def test_not_enough_sun(home_assistant: HomeAssistant, low_elevation_sun: None) 
         "option": "not_enough_sun",
     })
     # Low solar values match the original scenario for completeness.
-    home_assistant.set_state("sensor.solar_yield_watts", "30", {"unit_of_measurement": "W"})
+    home_assistant.set_state("sensor.victron_solar_yield_dc_watts", "30", {"unit_of_measurement": "W"})
     home_assistant.set_state("sensor.wheatherstation_solar_radiation", "40",
                              {"unit_of_measurement": "W/m²"})
     home_assistant.set_state("sensor.wheatherstation_uv_index", "0.5", {})
@@ -250,10 +250,10 @@ def test_sun_down_state(home_assistant: HomeAssistant) -> None:
         "entity_id": "input_select.pergola_automation_state",
         "option": "not_enough_sun",
     })
-    home_assistant.set_state("sensor.solar_yield_watts", "0", {"unit_of_measurement": "W"})
+    home_assistant.set_state("sensor.victron_solar_yield_dc_watts", "0", {"unit_of_measurement": "W"})
     home_assistant.set_state("sensor.wheatherstation_solar_radiation", "0",
                              {"unit_of_measurement": "W/m²"})
-    # Wait for the template sensor to propagate solar_yield_watts=0 before triggering the
+    # Wait for the template sensor to propagate victron_solar_yield_dc_watts=0 before triggering the
     # state manager. Without this, evaluate_state may read stale PV (1500 W) on a loaded
     # event loop, causing Rule 5 to fail and Rule 6 to enter no_sun_behind_house, which
     # calls script.pergola_set_slat_angle(90) and overwrites the seeded angle.
@@ -284,16 +284,16 @@ def test_sun_down_state(home_assistant: HomeAssistant) -> None:
 
 
 def test_pv_power_zero_at_night_when_mppt_stale(home_assistant: HomeAssistant) -> None:
-    """PV wrapper: solar_yield_watts unavailable but Victron alive → pergola_pv_power = 0.
+    """PV wrapper: victron_solar_yield_dc_watts unavailable but Victron alive → pergola_pv_power = 0.
 
-    At night the MPPT Yield/Power topic stops publishing and sensor.solar_yield_watts
+    At night the MPPT Yield/Power topic stops publishing and sensor.victron_solar_yield_dc_watts
     (expire_after: 120) goes unavailable. As long as Victron is alive
     (sensor.victron_ac_load_total_power available), sensor.pergola_pv_power must report 0,
     not unavailable — otherwise the sun_down rule (needs pv == 0) fails and the pergola
     opens to 90° at night.
     """
-    # MPPT topic expired → solar_yield_watts unavailable; house load still reporting.
-    home_assistant.set_state("sensor.solar_yield_watts", "unavailable", {})
+    # MPPT topic expired → victron_solar_yield_dc_watts unavailable; house load still reporting.
+    home_assistant.set_state("sensor.victron_solar_yield_dc_watts", "unavailable", {})
     # pergola_pv_power must stay available and read 0 (not -1 / not unavailable).
     home_assistant.assert_entity_state("sensor.pergola_pv_power",
                                        lambda s: float(s) == 0.0, timeout=5)
@@ -311,3 +311,75 @@ def test_pv_power_zero_at_night_when_mppt_stale(home_assistant: HomeAssistant) -
     })
     home_assistant.assert_entity_state("input_select.pergola_automation_state",
                                        "sun_down", timeout=5)
+
+
+# ── Heating/cooling indicator → pergola_heating sync ─────────────────────────────────────
+# automation.pergola_sync_heating_from_indicator is disabled by the conftest baseline so the
+# seeded indicator cannot flip the boolean behind unrelated tests; these tests enable it.
+#
+# The indicator is never pinned with set_state: it reads its own previous state (`this`), so
+# HA re-renders it right after any external write and walks it back to whatever the 48h mean
+# says. Instead each step drives the real input (the 48h mean, thresholds 12 / 16 / 20 from the
+# conftest baseline) and asserts the indicator actually reached the expected season.
+#
+# Hysteresis moves the indicator one step per render; HA allows the triggering render plus two
+# self re-renders (state + availability templates), so one mean change moves it at most 3
+# steps. active_heating → active_cooling is exactly 3 — the sequences below avoid that jump.
+#
+# After each step the automation is also fired explicitly: automation.turn_on registers its
+# trigger asynchronously, so relying on the state-change event alone races with it.
+# skip_condition=False keeps the automation's "real classification only" condition active
+# (automation.trigger skips conditions by default).
+
+_SYNC = "automation.pergola_sync_heating_from_indicator"
+_MEAN = "sensor.wheatherstation_outdoor_temperature_48h_mean"
+_IND = "sensor.heating_cooling_indicator"
+
+
+def _season(ha: HomeAssistant, mean: float, expected: str) -> None:
+    """Set the 48h mean, wait until the indicator shows `expected`, then run the sync."""
+    ha.set_state(_MEAN, str(mean), {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.assert_entity_state(_IND, expected, timeout=5)
+    ha.call_action("automation", "trigger", {"entity_id": _SYNC, "skip_condition": False})
+
+
+def test_indicator_heating_season_turns_pergola_heating_on(
+    home_assistant: HomeAssistant,
+) -> None:
+    """active_heating and neutral are heating season → pergola_heating on."""
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 22.0, "active_cooling")    # neutral → active_cooling (2 steps)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
+    _season(home_assistant, 14.0, "neutral")           # active_cooling → neutral (2 steps)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
+    _season(home_assistant, 17.0, "passive_cooling")   # neutral → passive_cooling (1 step)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
+    _season(home_assistant, 8.0, "active_heating")     # passive_cooling → active_heating (2 steps)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
+
+
+def test_indicator_cooling_season_turns_pergola_heating_off(
+    home_assistant: HomeAssistant,
+) -> None:
+    """passive_cooling and active_cooling are cooling season → pergola_heating off."""
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 8.0, "active_heating")     # neutral → active_heating (1 step)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
+    _season(home_assistant, 17.0, "passive_cooling")   # active_heating → passive_cooling (2 steps)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
+    _season(home_assistant, 22.0, "active_cooling")    # passive_cooling → active_cooling (1 step)
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "off", timeout=5)
+
+
+def test_indicator_unavailable_keeps_pergola_heating_unchanged(
+    home_assistant: HomeAssistant,
+) -> None:
+    """Missing indicator data must not flip the season: boolean keeps its last value."""
+    home_assistant.call_action("automation", "turn_on", {"entity_id": _SYNC})
+    _season(home_assistant, 8.0, "active_heating")
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
+    # A missing 48h mean makes the indicator genuinely unavailable via its availability template.
+    home_assistant.set_state(_MEAN, "unavailable", {})
+    home_assistant.assert_entity_state(_IND, "unavailable", timeout=5)
+    home_assistant.call_action("automation", "trigger", {"entity_id": _SYNC, "skip_condition": False})
+    home_assistant.assert_entity_state("input_boolean.pergola_heating", "on", timeout=5)
