@@ -11,6 +11,7 @@
 | 0. Plan revision 2 (this file), incl. hot-water pause | done, awaiting approval |
 | 1. Pre-implementation checks on the live system (below) | open |
 | 2. `climate_common.yaml` extraction + `airflow_cooling.yaml` repoint (regression gate: airflow tests) | open |
+| 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
 | 3. `airflow_cooling.yaml`: dehumidify hold (preset medium + moisture bypass), boost gating | open |
 | 4. `hrds_dehumidifier.yaml` + `packages/notes/hrds_dehumidifier.md` + `heating_dhw_running` split in `heating_pv_boost.yaml` + tests | open |
 | 5. Migration runbook on deploy day (user) | open |
@@ -54,6 +55,10 @@ Consequences for the plan:
   Shelly migration is done) and the PV balance is owned by `packages/victron.yaml`
   (`sensor.victron_pv_net_power`). The HRDS PV gate lives in the HRDS package, built like
   `sensor.heating_pv_surplus`.
+- **One battery floor for every PV-surplus load** (Decision 18): the heating package's
+  `heating_pv_min_battery_soc` moves to `packages/energy.yaml` as the shared
+  `input_number.energy_pv_min_battery_soc` + `binary_sensor.energy_pv_battery_ok`; heating and HRDS
+  both read it. No HRDS-own SoC helper.
 
 ---
 
@@ -137,6 +142,20 @@ New (revision 2, from the user's instructions — confirm the ones marked *propo
     hot water and pause; with the compressor off there can be no hot-water charge.
     Related handbook note: on a heat-pump circuit with hot-water priority the handbook opens the
     HRDS `OFF` input during hot water (HB 3.8.6); here the same is done over Modbus.
+18. **One battery SoC floor for all PV-surplus loads, owned by `packages/energy.yaml`.** The battery
+    gets first call on surplus, whichever load wants it; two floors would let one load drain what
+    the other protects. Home: `energy.yaml`, not `victron.yaml` — `victron.yaml` holds the Victron
+    hardware readings (`sensor.victron_battery_soc`, `sensor.victron_pv_net_power`) and stays that
+    way; the floor is a house energy **policy** that consumers share, which is what `energy.yaml`
+    becomes the home for (next to its metering wrappers). New in `energy.yaml`:
+    - `input_number.energy_pv_min_battery_soc` (%) — replaces `input_number.heating_pv_min_battery_soc`
+      (same min/max/step/icon).
+    - `binary_sensor.energy_pv_battery_ok` — state-based, `victron_battery_soc ≥ floor` (the
+      heating package's current semantics: blocked only below the floor), availability on
+      `sensor.victron_battery_soc`. Each consumer reads this one sensor, so the comparison exists
+      once. No hysteresis of its own: both consumers already debounce (heating 15/20 min, HRDS 5 min).
+    Each load keeps its own **surplus** figure and threshold (they add back their own draw, and their
+    demands differ); only the battery floor is shared.
 
 ---
 
@@ -209,15 +228,15 @@ device prefix — check 1): `switch.dehumidify`, `switch.unit_on_off`,
 - `input_number.hrds_off_dew_diff` (°C) — stop hysteresis (Decision 9).
 - `input_number.hrds_min_runtime` (min, suggested 45) — must clearly exceed the 6.5–8 min until the
   compressor starts (T11, T18), or a run can end before it dried anything.
-- `input_number.hrds_battery_soc_min` (%) — SoC floor for the PV branch.
 - `timer.hrds_min_runtime`.
+- (No SoC helper: the battery floor is the shared one in `energy.yaml`, Decision 18.)
 
 **Sensors:**
 - `sensor.hrds_pv_surplus` (W) — `victron_pv_net_power` **plus** `hrds_power_demand` while
   `compressor_status` is on, clamped at 0. Same pattern as `sensor.heating_pv_surplus`: without the
   add-back the run lowers measured surplus and switches itself off.
 - `binary_sensor.hrds_pv_surplus_available` — `hrds_pv_surplus ≥ hrds_power_demand` **and**
-  `victron_battery_soc > hrds_battery_soc_min`; delay_on/off 5 min. Availability-guarded.
+  `binary_sensor.energy_pv_battery_ok` on; delay_on/off 5 min. Availability-guarded.
 - `binary_sensor.hrds_indoor_above_max` — trigger-based Schmitt: on at
   `climate_indoor_dew_5min ≥ climate_dew_point_max`, off at `≤ max − hrds_off_dew_diff`.
 - `binary_sensor.hrds_indoor_above_target` — same on `climate_dew_point_target`.
@@ -329,7 +348,17 @@ Still structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_tar
 - **Edit:** `packages/heating_pv_boost.yaml` — new `binary_sensor.heating_dhw_running` (undelayed),
   `heating_dhw_active` reads it (behaviour unchanged); one line in `packages/notes/heating_pv_boost.md`
   naming the two signals; `tests/test_heating_pv_boost.py` as the regression gate.
-- Not touched: `packages/energy.yaml`, `packages/victron.yaml`.
+- **Edit:** `packages/energy.yaml` — new "PV surplus policy" section with
+  `input_number.energy_pv_min_battery_soc` and `binary_sensor.energy_pv_battery_ok` (Decision 18);
+  `packages/notes/energy.md` gets the rule "one battery floor for every PV-surplus load; consumers
+  read `energy_pv_battery_ok`, never compare the SoC themselves"; the `energy.yaml` row in
+  `packages/CLAUDE.md` mentions the policy.
+- **Edit:** `packages/heating_pv_boost.yaml` — remove `input_number.heating_pv_min_battery_soc`;
+  `heating_slab_mode_wanted` reads `binary_sensor.energy_pv_battery_ok` instead of comparing
+  `victron_battery_soc` (availability on that sensor instead of the SoC); the PV notification text
+  and the group list follow. `dashboards/heating-dashboard.yaml` shows the new helper;
+  `tests/conftest.py` seeds `input_number.energy_pv_min_battery_soc` instead of the heating one.
+- Not touched: `packages/victron.yaml`.
 
 ### Rename map (Decision 4)
 
@@ -371,7 +400,10 @@ Unchanged from revision 1:
 - **YAML helpers** (`input_number`, `schedule`; no registry entry): snapshot the values, deploy,
   set them again.
 
-Runbook: (1) snapshot the renamed `input_number` values; (2) registry-rename the template sensors
+The battery floor is such a YAML helper too: `input_number.heating_pv_min_battery_soc →
+input_number.energy_pv_min_battery_soc` loses its value on deploy, so it is in the snapshot.
+
+Runbook: (1) snapshot the renamed `input_number` values (incl. the battery floor); (2) registry-rename the template sensors
 `sensor.airflow_* → sensor.climate_*`; (3) user deploys via `git pull`; (4) restore the values and
 set the new `hrds_*` helpers; (5) verify continuous history and no orphaned `airflow_*` entities.
 
@@ -394,7 +426,11 @@ set the new `hrds_*` helpers; (5) verify continuous history and no orphaned `air
      window closed meanwhile; `heating_dhw_running` unknown + compressor on → paused, + compressor
      off → not paused.
    - `tests/test_heating_pv_boost.py`: `heating_dhw_active` still keeps its 25-min tail;
-     `heating_dhw_running` follows the inputs with no delay.
+     `heating_dhw_running` follows the inputs with no delay; slab mode still blocked below the
+     floor and allowed at the floor, now through `energy_pv_battery_ok` (existing SoC cases pass
+     with the renamed helper).
+   - energy: `energy_pv_battery_ok` off below the floor, on at and above it, unavailable without
+     `victron_battery_soc`; the HRDS PV branch and slab mode both follow the one floor.
 2. **Unit tests — `tests/test_airflow.py`:**
    - active on → auto off + medium from each prior state (auto, low, boost running → cancelled,
      heat_low, moisture_low); Away → preset untouched;
