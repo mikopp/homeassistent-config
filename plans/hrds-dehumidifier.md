@@ -9,7 +9,7 @@
 
 | Step | State |
 |------|-------|
-| 0. Plan (this file) and design doc | done; open: Decision 14 and starting values (below) |
+| 0. Plan (this file) and design doc | done — all decisions confirmed; next: step 1 |
 | 1. Pre-implementation checks on the live system (below) | open |
 | 2. `airflow_cooling.yaml`: shared boost-window sensor (regression gate: airflow tests) | open |
 | 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
@@ -39,6 +39,7 @@
 - **Rev 3d** (2026-10-25): the Q350 treats Away as a preset; the lift stays explicit; Away is a
   manual action (HA or ComfoConnect) — Away set during a run is lifted again (25); above max is not
   an Away reason (24 confirmed).
+- **Rev 3e** (2026-10-25): Decision 14 and the starting values confirmed; plan complete.
 
 ## The facts this rests on
 
@@ -113,9 +114,12 @@ by 19).
 13. **Bypass keeps intake moisture low while dehumidifying.** Profile `cool` (bypass may open) when
     the intake is drier than indoor by a margin; `warm` (bypass closed, full enthalpy recovery)
     otherwise. Purely moisture-driven during the run.
-14. *Proposed:* **Boost vs HRDS.** Below max a pending drying boost wins (the HRDS reason is gated
-    off by `drying_needed`); above max the HRDS wins and the boost is suspended. When the HRDS stops
-    and `drying_needed` is still on, the boost automation starts the boost.
+14. **Boost vs HRDS (at home)** — *confirmed*. Below max a pending drying boost wins (the HRDS reason
+    is gated off by `drying_needed`); above max the HRDS wins and the boost is suspended. When the
+    HRDS stops and `drying_needed` is still on, the boost automation starts the boost. When the
+    airflow package does **not** intend a boost (`drying_needed` off), the HRDS runs on its own
+    conditions (above max, or above target with free PV) — the boost only ever takes precedence
+    while it is actually intended.
 15. **The package never switches the unit on or off** — *confirmed*. Whether the HRDS is on is the
     owner's choice (`switch.unit_on_off`). The automation acts only while the unit is on
     (`sensor.unit_status` = on) **and** its own enable switch `input_boolean.hrds_automatic_enabled`
@@ -202,8 +206,8 @@ by 19).
 Deferred to [`todo.md`](todo.md): **PV priority between loads** (the heating PV boost and the HRDS
 can see the same surplus at once; I11).
 
-**Starting values** (set by hand on deploy; still to confirm): `hrds_power_demand` 500 W,
-`hrds_min_runtime` 45 min, `hrds_off_dew_diff` 0.5–1.0 °C.
+**Starting values** — *confirmed* (set by hand on deploy): `hrds_power_demand` 500 W,
+`hrds_min_runtime` 45 min, `hrds_off_dew_diff` 0.5 °C.
 
 ---
 

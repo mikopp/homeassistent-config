@@ -47,7 +47,7 @@ the same window as the ventilation boost; runs are noisy), for one of these reas
 | Reason | Condition |
 |--------|-----------|
 | **Too humid** | Indoor dew point above the dew point of the *max* humidity. Runs regardless of PV |
-| **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** a ventilation drying boost is pending (outdoor air dry enough to flush for free; the boost goes first) |
+| **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** a ventilation drying boost is pending (outdoor air dry enough to flush for free; the boost goes first). With no boost intended, the HRDS runs |
 
 **In Away** (`binary_sensor.airflow_away_active`: the Q350's away function on, or Away lifted for
 a run, see below) — nobody is home, so the **boost window is ignored**. The HRDS runs when the indoor dew point is above the *target* dew point and one of:
@@ -186,9 +186,9 @@ HRDS package never writes it.
 | `switch.unit_on_off` (integration) | The HRDS itself on/off — yours, never touched by the automation |
 | `input_boolean.hrds_automatic_enabled` | The automation on/off |
 | `input_boolean.airflow_away_lifted` | Shown as "Away (lifted for dehumidify)": on while a run has lifted Away. Switch it off to end Away during a run |
-| `input_number.hrds_off_dew_diff` | How far (°C dew point) below a threshold the indoor air must fall before a run stops |
-| `input_number.hrds_min_runtime` | Shortest run (minutes); must clearly exceed the 6.5–8 min until the compressor starts |
-| `input_number.hrds_power_demand` | The HRDS's electrical draw while running (W), for the PV check |
+| `input_number.hrds_off_dew_diff` | How far (°C dew point) below a threshold the indoor air must fall before a run stops. Starting value 0.5 °C |
+| `input_number.hrds_min_runtime` | Shortest run (minutes); must clearly exceed the 6.5–8 min until the compressor starts. Starting value 45 min |
+| `input_number.hrds_power_demand` | The HRDS's electrical draw while running (W), for the PV check. Starting value 500 W |
 | `input_number.energy_pv_min_battery_soc` | Battery floor for all PV-surplus loads (shared) |
 | `schedule.airflow_boost_workday` / `_non_workday` | When runs, and ventilation boosts, are allowed |
 | `input_number.airflow_target_humidity` / `_max_humidity` | The thresholds, shared with the ventilation |
