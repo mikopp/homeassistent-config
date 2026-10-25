@@ -49,13 +49,13 @@ the same window as the ventilation boost; runs are noisy), for one of these reas
 | **Too humid** | Indoor dew point above the dew point of the *max* humidity. Runs regardless of PV |
 | **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** a ventilation drying boost is pending (outdoor air dry enough to flush for free; the boost goes first) |
 
-**In Away** (`switch.comfoconnect_pro_away_function` on) — nobody is home, so the **boost window
-is ignored**. The HRDS runs when the indoor dew point is above the *target* dew point and one of:
+**In Away** (`binary_sensor.airflow_away_active`: the Q350's away function on, or Away lifted for
+a run, see below) — nobody is home, so the **boost window is ignored**. The HRDS runs when the indoor dew point is above the *target* dew point and one of:
 
 | Reason | Condition |
 |--------|-----------|
 | **The sun pays for it** | Free PV available |
-| **Double down on a flush** | The ventilation package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`: outdoor air drier than indoor). The ventilation flushes dry air at the Away level and the HRDS dries the recirculated air at the same time |
+| **Double down on a flush** | The ventilation package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`: outdoor air drier than indoor). The ventilation flushes dry air at medium and the HRDS dries the recirculated air at the same time |
 
 Free cooling does not stop a run: free PV makes the extra drying cheap, and free cooling only dries
 as far as the outdoor dew allows.
@@ -96,8 +96,14 @@ suspends its normal logic:
   temperature does not.
 - **No boost.** A running boost is cancelled when the run starts; a pending one starts when the run
   ends.
-- **Away keeps priority.** In Away mode the preset, and a boost, are left to the ventilation; only
-  the bypass rule applies. The HRDS adds to whatever Away delivers.
+- **Medium also in Away.** The Away level is far too little air for the coil. When a run starts in
+  Away, the ventilation controller lifts Away for the run (turns the Q350's away function off and
+  marks it in `input_boolean.airflow_away_lifted`), holds medium like at home, and switches Away
+  back on when the run ends. While Away is lifted the house still counts as Away for every rule
+  (`binary_sensor.airflow_away_active`): no boost, no boost window. Coming home during a run:
+  switch off "Away (lifted for dehumidify)" on the dehumidifier dashboard, then Away is not
+  restored. (If the Q350 turns out to accept preset medium while Away stays on, the design writes
+  only the preset instead.)
 
 When the run ends, the ventilation controller re-derives its normal state from its own sensors.
 Nothing has to be restored.
@@ -177,6 +183,7 @@ HRDS package never writes it.
 |---------|---------|
 | `switch.unit_on_off` (integration) | The HRDS itself on/off — yours, never touched by the automation |
 | `input_boolean.hrds_automatic_enabled` | The automation on/off |
+| `input_boolean.airflow_away_lifted` | Shown as "Away (lifted for dehumidify)": on while a run has lifted Away. Switch it off to end Away during a run |
 | `input_number.hrds_off_dew_diff` | How far (°C dew point) below a threshold the indoor air must fall before a run stops |
 | `input_number.hrds_min_runtime` | Shortest run (minutes); must clearly exceed the 6.5–8 min until the compressor starts |
 | `input_number.hrds_power_demand` | The HRDS's electrical draw while running (W), for the PV check |
@@ -196,6 +203,9 @@ HRDS package never writes it.
 - **Humid nights:** at home, above max humidity outside the window, the HRDS does not run.
 - **Away with humid outdoor air:** in Away the HRDS runs only on free PV or alongside a flush, so
   with humid outdoor air and no sun it does not run.
+- **Away is lifted during a run:** the Q350 leaves its Away level for the run (more air, more
+  noise in an empty house), and the away switch itself reads off meanwhile; the dashboard shows
+  the lift. A hot-water pause restores Away until the run resumes.
 - **Bypass is a request, not a command:** `cool` lets the Q350 open the bypass; the Q350 opens it
   only when that also cools. With dry but warm intake air the bypass stays closed and some indoor
   moisture is recovered.
