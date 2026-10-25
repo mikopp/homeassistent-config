@@ -32,21 +32,30 @@ evidence tags T11–T29):
 
 ## When the HRDS runs
 
-All of these must hold:
+Always required:
 
 | Condition | Why |
 |-----------|-----|
-| Automatic control enabled (`input_boolean.hrds_automatic_enabled`) | Master switch |
-| Inside the **boost time window** (`binary_sensor.airflow_boost_window_active`, the same window as the ventilation boost) | Runs are noisy and should happen when the house allows it; one definition of the window for both |
+| The HRDS is **switched on** (`sensor.unit_status` on) | Switching the unit on or off is the owner's choice; the automation never does it. Unit off means the automation is off |
+| The automation is enabled (`input_boolean.hrds_automatic_enabled`) | Its own enable switch, like every automation in this repo |
 | Not heating season (`sensor.heating_cooling_indicator` ≠ `active_heating`) | Brine circuit, see above |
 | The heat pump is **not making hot water** | See [Hot water](#hot-water-pauses-a-run) |
 
-And one of these:
+**At home** — only inside the **boost time window** (`binary_sensor.airflow_boost_window_active`,
+the same window as the ventilation boost; runs are noisy), for one of these reasons:
 
 | Reason | Condition |
 |--------|-----------|
 | **Too humid** | Indoor dew point above the dew point of the *max* humidity. Runs regardless of PV |
 | **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** a ventilation drying boost is pending (outdoor air dry enough to flush for free; the boost goes first) |
+
+**In Away** (`switch.comfoconnect_pro_away_function` on) — nobody is home, so the **boost window
+is ignored**. The HRDS runs when the indoor dew point is above the *target* dew point and one of:
+
+| Reason | Condition |
+|--------|-----------|
+| **The sun pays for it** | Free PV available |
+| **Double down on a flush** | The ventilation package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`: outdoor air drier than indoor). The ventilation flushes dry air at the Away level and the HRDS dries the recirculated air at the same time |
 
 Free cooling does not stop a run: free PV makes the extra drying cheap, and free cooling only dries
 as far as the outdoor dew allows.
@@ -62,8 +71,8 @@ stops only once the indoor dew point is `input_number.hrds_off_dew_diff` below i
 lasts at least `input_number.hrds_min_runtime`, also when the window closes during it. Only a hot
 water charge ends a run early.
 
-**Nights.** Outside the window the HRDS does not run, even above max humidity. That is deliberate:
-the ventilation package's own moisture logic (flush, low) handles moisture then.
+**Nights.** At home, outside the window the HRDS does not run, even above max humidity. That is
+deliberate: the ventilation package's own moisture logic (flush, low) handles moisture then.
 
 ## What the ventilation does during a run
 
@@ -87,7 +96,8 @@ suspends its normal logic:
   temperature does not.
 - **No boost.** A running boost is cancelled when the run starts; a pending one starts when the run
   ends.
-- **Away keeps priority.** In Away mode the preset is left to Away; the bypass rule still applies.
+- **Away keeps priority.** In Away mode the preset, and a boost, are left to the ventilation; only
+  the bypass rule applies. The HRDS adds to whatever Away delivers.
 
 When the run ends, the ventilation controller re-derives its normal state from its own sensors.
 Nothing has to be restored.
@@ -118,9 +128,9 @@ The signal is the heating package's hot-water detection without the 25-minute ta
 
 ## Notifications
 
-One message when a run starts (why: too humid or free PV) and one when it ends (why: humidity
-reached, window closed, automatic control turned off, or the unit refused the request; and how
-long it ran). Nothing else: a hot-water pause and its restart are silent, and the ventilation
+One message when a run starts (why: too humid, free PV, or in Away free PV or a flush) and one
+when it ends (why: humidity reached, window closed, automatic control turned off, the unit switched
+off, or the unit refused the request; and how long it ran). Nothing else: a hot-water pause and its restart are silent, and the ventilation
 package does not report its hold or the hand-back afterwards. The ventilation's own messages resume
 three minutes after a run.
 
@@ -141,7 +151,7 @@ three minutes after a run.
 
 | Package | Writes | Reads from the other |
 |---------|--------|----------------------|
-| `hrds_dehumidifier.yaml` | The HRDS dehumidify request (and switches the unit on if it is off) | Boost window, drying boost intent, humidity thresholds, season, hot water, battery floor |
+| `hrds_dehumidifier.yaml` | The HRDS dehumidify request only | Boost window, Away, drying boost and flush intent, humidity thresholds, season, hot water, battery floor |
 | `airflow_cooling.yaml` | Every Q350 output: profile, preset, auto mode, boost | `binary_sensor.hrds_dehumidify_active` |
 
 No device is written by both. The ventilation controller stays the only writer of the Q350; the
@@ -154,8 +164,10 @@ HRDS package never writes it.
   package does not retry in a loop.
 - The package writes only when the wanted state differs from the unit's read-back; never
   periodically.
-- The unit is never switched off by the package: in standby it keeps its hourly valve/pump
-  anti-stagnation pulses. Switching it off for the winter is a manual, seasonal step.
+- The package never switches the unit on or off. Switched on, it idles in standby (keeping its
+  hourly valve/pump anti-stagnation pulses) until a run; switched off, the automation does nothing.
+  If the unit is switched off during a run, the package clears its own dehumidify request, so the
+  unit does not start on a stale request when it is switched on again.
 - Missing data fails safe: an unavailable HRDS reads as "not running", so the ventilation works
   normally.
 
@@ -163,7 +175,8 @@ HRDS package never writes it.
 
 | Setting | Meaning |
 |---------|---------|
-| `input_boolean.hrds_automatic_enabled` | Automatic control on/off |
+| `switch.unit_on_off` (integration) | The HRDS itself on/off — yours, never touched by the automation |
+| `input_boolean.hrds_automatic_enabled` | The automation on/off |
 | `input_number.hrds_off_dew_diff` | How far (°C dew point) below a threshold the indoor air must fall before a run stops |
 | `input_number.hrds_min_runtime` | Shortest run (minutes); must clearly exceed the 6.5–8 min until the compressor starts |
 | `input_number.hrds_power_demand` | The HRDS's electrical draw while running (W), for the PV check |
@@ -171,15 +184,18 @@ HRDS package never writes it.
 | `schedule.airflow_boost_workday` / `_non_workday` | When runs, and ventilation boosts, are allowed |
 | `input_number.airflow_target_humidity` / `_max_humidity` | The thresholds, shared with the ventilation |
 
-`sensor.hrds_state` says what the package is doing: `off`, `outside_window`, `idle`,
-`dehumidify_max`, `dehumidify_pv`, `min_runtime`, `paused_hot_water`, `blocked`.
+`sensor.hrds_state` says what the package is doing: `off` (automation disabled), `unit_off`,
+`outside_window`, `idle`, `dehumidify_max`, `dehumidify_pv`, `dehumidify_away_pv`,
+`dehumidify_away_flush`, `min_runtime`, `paused_hot_water`, `blocked`.
 `sensor.airflow_cooling_state` shows `hrds_dehumidify` during a run.
 
 ## Accepted trade-offs
 
 - **Hot days:** during a run the Q350 is at medium even when the ventilation would hold low to keep
   heat out and spare the ground duct. Limited to the window and the run.
-- **Humid nights:** above max humidity outside the window, the HRDS does not run.
+- **Humid nights:** at home, above max humidity outside the window, the HRDS does not run.
+- **Away with humid outdoor air:** in Away the HRDS runs only on free PV or alongside a flush, so
+  with humid outdoor air and no sun it does not run.
 - **Bypass is a request, not a command:** `cool` lets the Q350 open the bypass; the Q350 opens it
   only when that also cools. With dry but warm intake air the bypass stays closed and some indoor
   moisture is recovered.
@@ -191,7 +207,7 @@ HRDS package never writes it.
 ## Not part of this design
 
 HRDS cooling (the integration request), changing the HRDS fan band (installer setting),
-dehumidifying outside the boost window or in winter, PV priority between loads, and moving the
+dehumidifying outside the boost window at home or in winter, PV priority between loads, and moving the
 shared humidity settings out of the ventilation package (both in
 [`plans/todo.md`](../../plans/todo.md)).
 
