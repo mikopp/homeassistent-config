@@ -9,6 +9,7 @@
 | Step | State |
 |------|-------|
 | 0. Plan revision 2 (this file), incl. hot-water pause | done, awaiting approval |
+| 0b. Design doc [`doc/design/hrds_dehumidifier.md`](../doc/design/hrds_dehumidifier.md) (agreed design, for owner and agents) | done |
 | 1. Pre-implementation checks on the live system (below) | open |
 | 2. `climate_common.yaml` extraction + `airflow_cooling.yaml` repoint (regression gate: airflow tests) | open |
 | 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
@@ -77,7 +78,7 @@ Q350 delivers medium airflow and the moisture-minimising bypass setting while th
 
 | Owner | Writes | Reads from the other |
 |-------|--------|----------------------|
-| `hrds_dehumidifier.yaml` | `switch.dehumidify` (and `switch.unit_on_off` on only) — nothing else | `binary_sensor.airflow_free_cooling_available`, `binary_sensor.airflow_humidity_drying_needed`, `sensor.heating_cooling_indicator`, `binary_sensor.heating_dhw_running` + `binary_sensor.heating_compressor_active` (heating package) |
+| `hrds_dehumidifier.yaml` | `switch.dehumidify` (and `switch.unit_on_off` on only) — nothing else | `binary_sensor.airflow_humidity_drying_needed`, `sensor.heating_cooling_indicator`, `binary_sensor.heating_dhw_running` + `binary_sensor.heating_compressor_active` (heating package) |
 | `airflow_cooling.yaml` (`airflow_ventilation_controller`, `airflow_humidity_drying_boost`) | every Comfo output: profile, preset, auto_mode, boost | `binary_sensor.hrds_dehumidify_active` |
 
 No entity is written by both. No template sensor cycle: no airflow decision sensor reads an HRDS
@@ -87,7 +88,7 @@ sensor; only the airflow **automations** read `hrds_dehumidify_active`.
 
 | Airflow state | HRDS behaviour | Comfo while HRDS dehumidifies |
 |---|---|---|
-| **Free cooling** (`airflow_free_cooling_available`) | Below max: HRDS stays off, free dry air does the job (Decision 8). Above max: HRDS runs. | medium; bypass per the moisture rule (intake is dry here, so open) |
+| **Free cooling** (`airflow_free_cooling_available`) | Not a gate (Decision 19): HRDS runs above max, or above target on free PV, alongside free cooling. | medium; bypass per the moisture rule (intake is dry here, so open) |
 | **Flush** (`airflow_humidity_flush_needed`) | Not a gate by itself. | medium; bypass open (flush implies intake drier than indoor) |
 | **Drying boost** (`airflow_humidity_drying_needed`) | Below max: HRDS yields — a boost with dry outdoor air is free. Above max: HRDS runs and the boost is cancelled (preset write) and held off. | medium (boost cancelled); bypass open |
 | **Moisture protect low** (`airflow_moisture_ventilation_low_needed`) | The HRDS's main case: indoor humid, outdoor too humid to flush. | **medium instead of low** (user requirement: 300 total); bypass **closed** so the enthalpy exchanger keeps intake moisture out |
@@ -101,11 +102,11 @@ sensor; only the airflow **automations** read `hrds_dehumidify_active`.
 Kept from revision 1 (resolved with the user): **1** PV gate (now built in the HRDS package, see
 below), **2** no extra outdoor-humidity guard on Comfo flush/boost (the dew gates already block it),
 **4** shared `climate_*` package with history-preserving rename, **6** dehumidify also during Away,
-**7** opportunistic branch off in `active_heating`, **8** free cooling beats the opportunistic branch;
-above max always runs, **9** HRDS has its own `hrds_off_dew_diff`.
+**7** opportunistic branch off in `active_heating`, **9** HRDS has its own `hrds_off_dew_diff`.
 
 Dropped: **3** (fan top-up only) and **5** (three combined-airflow targets) — the fan is not
-controllable and recirculation is fixed.
+controllable and recirculation is fixed. **8** (free cooling beats the opportunistic branch) —
+superseded by Decision 19.
 
 New (revision 2, from the user's instructions — confirm the ones marked *proposed*):
 
@@ -156,6 +157,11 @@ New (revision 2, from the user's instructions — confirm the ones marked *propo
       once. No hysteresis of its own: both consumers already debounce (heating 15/20 min, HRDS 5 min).
     Each load keeps its own **surplus** figure and threshold (they add back their own draw, and their
     demands differ); only the battery floor is shared.
+19. **Free cooling does not stop the HRDS.** Above target with free PV (and above max in any case),
+    the HRDS runs even while `airflow_free_cooling_available` is on. Free PV makes the extra drying
+    cheap, and free cooling alone only dries as far as the outdoor dew allows. Supersedes Decision 8.
+    While the HRDS runs, its hold applies (medium, moisture bypass — open, since free cooling means
+    the intake is dry); free cooling resumes its own preset logic when the run ends.
 
 ---
 
@@ -249,9 +255,8 @@ device prefix — check 1): `switch.dehumidify`, `switch.unit_on_off`,
   window   = climate_boost_schedule_active                      # Decision 10
   season   = heating_cooling_indicator != active_heating        # Decision 16
   hot_wtr  = hrds_paused_for_hot_water                          # Decision 17
-  urgent   = hrds_indoor_above_max                              # beats free cooling and boost
+  urgent   = hrds_indoor_above_max                              # beats a pending boost
   opportun = hrds_indoor_above_target and hrds_pv_surplus_available
-             and not airflow_free_cooling_available             # Decision 8
              and not airflow_humidity_drying_needed             # Decision 14
   needed   = window and season and not hot_wtr and (urgent or opportun)
   ```
@@ -314,7 +319,7 @@ Still structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_tar
 | # | Issue | Resolution |
 |---|-------|------------|
 | I1 | Heating-season cross-purpose | **Resolved, tightened:** no HRDS in `active_heating` (Decision 16) |
-| I2 | Free-cooling overlap | **Resolved:** opportunistic branch gated off by free cooling; above max runs, with bypass open on dry intake |
+| I2 | Free-cooling overlap | **Resolved by Decision 19:** both run together; while the HRDS runs the Comfo holds medium and the bypass follows the moisture rule (open, the intake is dry under free cooling), so free cooling continues at medium and the HRDS dries the recirculated share. Costs compressor energy only when PV is free or indoor is above max |
 | I3 | Shared hysteresis knob | **Resolved:** `hrds_off_dew_diff` |
 | I4–I6 | Fan write chatter / open-loop flow / fan re-assert after off | **Obsolete:** no fan writes at all |
 | I7 | Two controllers on one indoor-dew sensor | Documented. Now stronger: the HRDS run sets the Comfo state. Kept stable by the Schmitt bands, `hrds_min_runtime` and the 10-min airflow delays; `airflow_intake_drier` has its own 10-min delay so the profile does not chatter |
@@ -334,6 +339,8 @@ Still structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_tar
 ## Files
 
 - **New:** `packages/climate_common.yaml`.
+- **Keep current:** `doc/design/hrds_dehumidifier.md` — change it with any design change during
+  implementation; set its status to implemented at the end.
 - **New:** `packages/hrds_dehumidifier.yaml`, `packages/notes/hrds_dehumidifier.md` (the hardware
   facts above: fixed 150 m³/h recirculation, no fan control, compressor start delay, stop timing),
   index row in `packages/CLAUDE.md`.
@@ -414,8 +421,8 @@ set the new `hrds_*` helpers; (5) verify continuous history and no orphaned `air
 
 1. **Unit tests — `tests/test_hrds.py`:**
    - need off outside the window even above max; on inside the window above max regardless of PV,
-     free cooling and `drying_needed`;
-   - above target: on only with PV surplus, and off with free cooling, with `drying_needed`, in
+     and `drying_needed`;
+   - above target: on only with PV surplus, also with free cooling on; off with `drying_needed`, in
      `active_heating`;
    - Schmitt: stays on between trigger and `trigger − hrds_off_dew_diff`;
    - min runtime: need clears with the timer active → no stop until `timer.finished`;

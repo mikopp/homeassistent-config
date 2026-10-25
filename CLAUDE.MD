@@ -71,6 +71,13 @@ Current packages:
 - `packages/pergola.yaml` — pergola roof automation (helpers, template sensors, automations, scripts)
 - `packages/airflow_cooling.yaml` — ventilation/free-cooling + humidity flush/drying boost (ComfoConnect)
 
+### Design docs (`doc/design/<package>.md`)
+One design doc per package, same basename as the package file: what the package does and why it is
+built that way (behaviour, design choices, coordination with other packages, settings, accepted
+trade-offs), for the owner and for agents. Not implementation steps (those go in `plans/`) and not
+coding rules (those go in `packages/notes/`). Read it before changing a package's behaviour, and
+update it in the same commit. Index and rules: `doc/design/README.md`.
+
 ## Persistent Memory
 - Before starting complex tasks, read and ingest `.claude/learnings.md`.
 - After resolving non-obvious bugs or completing features:
