@@ -9,7 +9,7 @@
 
 | Step | State |
 |------|-------|
-| 0. Plan (this file) and design doc | done; open: Decision 14, the Away above-max question (24), how Away is set (25) and starting values (below) |
+| 0. Plan (this file) and design doc | done; open: Decision 14 and starting values (below) |
 | 1. Pre-implementation checks on the live system (below) | open |
 | 2. `airflow_cooling.yaml`: shared boost-window sensor (regression gate: airflow tests) | open |
 | 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
@@ -36,6 +36,9 @@
   (15 revised); Away keeps the ventilation level (12 confirmed).
 - **Rev 3c** (2026-10-25): the Away level is too little air for the coil — during a run the Q350
   goes to medium in Away too, by lifting Away for the run (25; supersedes 12).
+- **Rev 3d** (2026-10-25): the Q350 treats Away as a preset; the lift stays explicit; Away is a
+  manual action (HA or ComfoConnect) — Away set during a run is lifted again (25); above max is not
+  an Away reason (24 confirmed).
 
 ## The facts this rests on
 
@@ -167,8 +170,8 @@ by 19).
       opens the bypass (the intake is drier);
     - a pending drying boost does not make the HRDS yield (Decision 14 is a home-mode rule);
     - season, hot-water pause, unit-on and the enable switch apply as at home.
-    *Open:* above max in Away with neither PV nor a flush (outdoor humid) the HRDS does **not** run —
-    the literal reading of the rule. Confirm, or add above max as a third Away reason.
+    - **Above max is not an Away reason** — *confirmed*: in Away with neither PV nor a flush
+      (outdoor humid) the HRDS does not run.
 25. **Medium during a run, also in Away** — *confirmed requirement* (the HRDS needs 300 m³/h:
     150 recirculation + 150 from the Q350). Away otherwise keeps its level; only a run lifts it.
     Mechanism (the airflow controller does it: it is the only writer of Q350 outputs):
@@ -184,13 +187,17 @@ by 19).
     - **Coming home during a run:** turning the away function off is not visible while it is lifted.
       The latch is shown on the HRDS dashboard as "Away (lifted for dehumidify)"; switching it off
       ends Away — the run continues under the home rules and Away is not restored afterwards.
-    - Mechanism choice depends on check 7: if the Q350 takes preset medium **while** the away
-      function stays on, and returns to the Away level when the run ends without toggling Away,
-      write the preset only and drop the latch. Lifting Away is the default because it relies only on
-      known behaviour (away off → preset level; away on → Away level).
-    - *Open:* how is Away set in this house (Comfo app/panel, Loxone, an HA automation)? If something
-      re-asserts Away during a run, the two would fight; it has to read `airflow_away_active` or
-      leave the away function alone while the latch is on.
+    - **Explicit, although the Q350 would do it anyway** (owner): the Q350 treats Away as one of its
+      levels (away / low / medium / high / boost), so writing preset medium alone would already leave
+      Away. The controller still turns the away function off first, then writes medium, so the lift
+      is a visible step with its latch rather than a side effect of the preset write.
+    - **Away is a manual action**, from Home Assistant or directly from the ComfoConnect app; no
+      automation sets it. **Away switched on during a run** (from either side): the house has just
+      gone Away, so the controller sets the latch and lifts it again at once — the run keeps its
+      air — and restores Away when the run ends.
+    - Coming home from the **ComfoConnect app** during a run: the latch is not visible there, so
+      Away comes back when the run ends; switch it off again. From Home Assistant: switch the latch
+      off (above).
 
 Deferred to [`todo.md`](todo.md): **PV priority between loads** (the heating PV boost and the HRDS
 can see the same surplus at once; I11).
@@ -230,7 +237,8 @@ edits; derived-from-binaries sensors are state-based).
    clear the latch; the `choose` exits (Away owns the level again).
    The existing Away guard and the boost automation's Away condition read
    `binary_sensor.airflow_away_active` instead of the away switch.
-5. **Controller triggers:** add `hrds_dehumidify_active` (any change) and `airflow_intake_drier`.
+5. **Controller triggers:** add `hrds_dehumidify_active` (any change), `airflow_intake_drier`, and
+   the away function → `on` (Away set by hand during a run is lifted again, 25).
    On `on → off` the normal blocks re-derive the full state — no restore code.
 6. **Quiet hand-back (21):** a controller variable `quiet` = `hrds_dehumidify_active` on, or its
    `last_changed` less than 3 min ago; every existing `notify` step is wrapped in `if: not quiet`.
@@ -366,7 +374,7 @@ Registered in `configuration.yaml` under `lovelace: dashboards:` as `hrds-dehumi
 Away, outdoor drier than indoor: `flush_needed` on and indoor above target → HRDS runs (start
 notification "away: flush") → airflow lifts Away, preset **medium**, profile `cool` (intake drier)
 → both dry the house until the HRDS reasons clear → run ends → Away restored (Q350 back at its
-Away level).
+Away level). Away switched on by hand during a run: lifted again at once, restored at the end.
 
 Hot-water interruption during step 4: dehumidify off at once, airflow back to normal (silent),
 charge ends → dehumidify on again, no new notification, fresh minimum runtime.
@@ -432,10 +440,6 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 5. **Bypass response:** does `sensor.airflow_bypass_estimation` follow `warm` vs `cool` during a run?
 6. **Hot-water signal:** across one charge, `geotherm_heating_hvac_action` reads `water` and
    `geotherm_heating_hwc_active` turns on and off with the charge (not "hot water enabled").
-7. **Q350 under Away** (a write test, done by the owner): with the away function on, set preset
-   medium: does
-   `sensor.comfoconnect_pro_supply_fan_volume` rise to about 150, and does it fall back to the Away
-   level by itself afterwards? Decides the mechanism of Decision 25.
 
 ## Deploy
 
@@ -467,8 +471,9 @@ checks pass.
    - `airflow_boost_window_active` matches the old `in_schedule`; `drying_needed` unchanged;
    - active on → auto off + medium from each prior state (auto, low, boost running → cancelled,
      heat_low, moisture_low); in Away: latch set, away off, medium, and at run end away on, latch
-     cleared; latch switched off during a run → Away not restored; `airflow_away_active` on through
-     the lift;
+     cleared; latch switched off during a run → Away not restored; away switched on during a run →
+     latch set, away off again, medium kept; away off is written before the preset;
+     `airflow_away_active` on through the lift;
    - profile `warm` when intake wetter, `cool` when drier; Blocks 1–5 not run while active;
    - boost does not start or re-arm while active, nor while Away is lifted; starts on active → off
      with `drying_needed` on (at home);

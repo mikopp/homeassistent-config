@@ -102,8 +102,10 @@ suspends its normal logic:
   back on when the run ends. While Away is lifted the house still counts as Away for every rule
   (`binary_sensor.airflow_away_active`): no boost, no boost window. Coming home during a run:
   switch off "Away (lifted for dehumidify)" on the dehumidifier dashboard, then Away is not
-  restored. (If the Q350 turns out to accept preset medium while Away stays on, the design writes
-  only the preset instead.)
+  restored. The Q350 treats Away as one of its levels, so a preset write alone would leave Away
+  too; the lift is still done explicitly, so it is a visible step. Away is set by hand, from Home
+  Assistant or the ComfoConnect app; set during a run, it is lifted again at once and restored when
+  the run ends.
 
 When the run ends, the ventilation controller re-derives its normal state from its own sensors.
 Nothing has to be restored.
@@ -205,7 +207,9 @@ HRDS package never writes it.
   with humid outdoor air and no sun it does not run.
 - **Away is lifted during a run:** the Q350 leaves its Away level for the run (more air, more
   noise in an empty house), and the away switch itself reads off meanwhile; the dashboard shows
-  the lift. A hot-water pause restores Away until the run resumes.
+  the lift. A hot-water pause restores Away until the run resumes. Coming home from the
+  ComfoConnect app during a run, Away returns at the end of the run and has to be switched off
+  again.
 - **Bypass is a request, not a command:** `cool` lets the Q350 open the bypass; the Q350 opens it
   only when that also cools. With dry but warm intake air the bypass stays closed and some indoor
   moisture is recovered.
