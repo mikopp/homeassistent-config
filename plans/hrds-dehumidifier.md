@@ -10,7 +10,7 @@
 | Step | State |
 |------|-------|
 | 0. Plan (this file) and design doc | done — all decisions confirmed; next: step 1 |
-| 1. Pre-implementation checks on the live system (below) | open |
+| 1. Pre-implementation checks on the live system — hand-off block below, answered in its Results table | open |
 | 2. `airflow_cooling.yaml`: shared boost-window sensor (regression gate: airflow tests) | open |
 | 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
 | 3. `airflow_cooling.yaml`: dehumidify hold (preset medium + moisture bypass), boost gating, quiet hand-back | open |
@@ -433,17 +433,86 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 - **Keep current:** `doc/design/hrds_dehumidifier.md` — set its status to implemented at the end.
 - Not touched: `packages/victron.yaml`, `dashboards/airflow-dashboard.yaml` (no renames).
 
-## Pre-implementation checks (live system, read-only)
+## Pre-implementation checks (step 1) — hand-off for a session with Home Assistant access
 
-1. **Entity ids:** the live ids of the HRDS entities (device prefix) and the Comfo ids used above.
-2. **Q350 medium ≈ 150 m³/h:** `sensor.comfoconnect_pro_supply_fan_volume` at preset medium. If it
-   differs, adjust the medium setpoint on the Q350.
-3. **Write path open:** `sensor.unit_status` reads on while the unit is on, `switch.operation_allowed` on, PH28 enable on, season summer, brine guard
-   configured and passing.
-4. **HRDS draw:** confirm or measure the 500 W starting value.
-5. **Bypass response:** does `sensor.airflow_bypass_estimation` follow `warm` vs `cool` during a run?
-6. **Hot-water signal:** across one charge, `geotherm_heating_hvac_action` reads `water` and
-   `geotherm_heating_hwc_active` turns on and off with the charge (not "hot water enabled").
+This block is written so that **a different session** (or the owner) can answer it without the
+earlier conversation. Nothing in it needs the plan to be read top to bottom, but the decisions it
+feeds are 10–25 above.
+
+**Who and how**
+- The session that answers needs the **ha-mcp connection**, used **read-only** (`CLAUDE.MD`: entity
+  lookup, states, history, statistics; never a write or a service call). Checks marked **owner
+  action** need a write or a physical action and are done by the owner, who reports the result.
+- Answer by filling the **Results** table below on branch `claude/hdrs-dehumidifier-airflow-iiit7c`
+  (the PR #89 branch) and committing only this file. Do not implement anything (`CLAUDE.MD` rules
+  2–3), do not create a PR, do not touch other files. If an entity id differs from the plan, record
+  it in the table and in the **Entity map**; the implementation step then uses the map.
+- When every **blocking** check has a result, set row 1 of the Status table to done and say in the
+  commit message which checks are open.
+
+**Entity map** — every entity the plan uses. For each: does it exist, what is its exact id, and (for
+the state-valued ones) which state strings does it use? Record differences in the Results table
+(check 1).
+
+| Group | Ids the plan assumes | Notes |
+|-------|----------------------|-------|
+| HRDS (integration `innova_hrds`; live ids likely carry the device prefix, e.g. `switch.hrds_dehumidify`) | `switch.dehumidify`, `switch.unit_on_off`, `sensor.unit_status`, `binary_sensor.recirculation_active`, `binary_sensor.dehumidify_request`, `binary_sensor.brine_temperature_guard`, `switch.operation_allowed`, `switch.enable_dehumidify_bms`, `sensor.compressor_status`, `sensor.compressor_output`, `sensor.operating_mode`, `sensor.supply_fan_airflow`, `sensor.supply_fan_output`, `sensor.setup_check`, `sensor.water_check`, `binary_sensor.alarm_active`, `climate.hrds_climate` | Keys are listed in the integration repo's `doc/entity-reference.md`. State strings to record: `sensor.unit_status` (the value for "on"), `sensor.compressor_status` (the value for running), `sensor.operating_mode` (summer) |
+| Comfo Q350 | `switch.comfoconnect_pro_away_function`, `switch.comfoconnect_pro_boost`, `switch.comfoconnect_pro_auto_mode`, `select.comfoconnect_pro_ventilation_preset`, `select.comfoconnect_pro_temperature_profile`, `sensor.comfoconnect_pro_supply_fan_volume` | already used by `airflow_cooling.yaml` |
+| Airflow package | `sensor.airflow_bypass_estimation`, `sensor.airflow_outdoor_dew_5min`, `sensor.airflow_min_indoor_dew_5min`, `sensor.airflow_dew_point_target`, `sensor.airflow_dew_point_max`, `binary_sensor.airflow_humidity_flush_needed`, `binary_sensor.airflow_humidity_drying_needed`, `binary_sensor.workday`, `schedule.airflow_boost_workday`, `schedule.airflow_boost_non_workday` | exist in the repo; confirm they are live |
+| Heating | `sensor.geotherm_heating_hvac_action`, `binary_sensor.geotherm_heating_hwc_active`, `binary_sensor.heating_compressor_active`, `binary_sensor.heating_dhw_active`, `sensor.technikraum_heizung_heizung_power`, `sensor.heating_cooling_indicator` | state strings to record: `hvac_action` values seen; `heating_cooling_indicator` values (`active_heating` in particular) |
+| Victron | `sensor.victron_pv_net_power`, `sensor.victron_battery_soc` | |
+
+**Checks**
+
+1. **Entity ids** *(blocking; read-only)*. Look up every entity in the map (entity search by name or
+   device). Record the live id for each HRDS entity (device prefix) and every id that differs or is
+   missing. Also record the state strings listed in the map's notes column.
+2. **Q350 medium ≈ 150 m³/h** *(blocking; read-only from history, otherwise owner action)*. Read
+   `sensor.comfoconnect_pro_supply_fan_volume` from history/statistics for periods where
+   `select.comfoconnect_pro_ventilation_preset` was `medium` and `switch.comfoconnect_pro_boost` was
+   off (a mean over at least 30 min, away function off). Record the value for medium, and also for
+   `low` and, if available, `high`. **Owner action** if there is no history at medium: set preset
+   medium and read the volume after a few minutes.
+   Pass: 130–170 m³/h. Fail: record the value. The plan then needs the Q350 medium setpoint changed
+   on the Q350 itself (not in Home Assistant) so that medium + 150 ≈ 300, or the 150 assumption
+   revised; say which.
+3. **Write path open** *(blocking; read-only)*. Record the current state of: `sensor.unit_status`,
+   `switch.unit_on_off`, `switch.operation_allowed`, `switch.enable_dehumidify_bms` (PH28),
+   `sensor.operating_mode`, `binary_sensor.brine_temperature_guard`, `sensor.setup_check` (and its
+   `issues` attribute), `sensor.water_check`, `binary_sensor.alarm_active`. Pass: unit on, operation
+   allowed on, PH28 on, summer, guard not blocking, setup check `ok`. For each fail, say what the
+   owner has to switch or fix before the dry run. Do not change anything.
+4. **HRDS draw** *(not blocking; read-only, otherwise owner action)*. Look for any power reading for
+   the HRDS in Home Assistant (a smart plug or clamp on the unit; search entities for the unit's
+   name, `dehumid`, `hrds`). If there is one, record the draw during a run (compressor on): peak in
+   the first 10 min and the steady value after. If there is none, take the compressor output
+   (`sensor.compressor_output`, steady 25–27 % in the runs of 2026-10-22/23) and the handbook
+   (820 W maximum = 690 W compressor + 120 W fan) and say whether 500 W is a sound starting value.
+   An owner clamp reading during the next run settles it. Result feeds `hrds_power_demand`.
+5. **Bypass response** *(not blocking; owner action, can wait for the dry run)*. During an HRDS run,
+   with the Q350 at medium, switch `select.comfoconnect_pro_temperature_profile` between `warm` and
+   `cool` and watch `sensor.airflow_bypass_estimation` (it moves in 15 % steps, delayed by its 5-min
+   filters) for 15–20 min each. Record whether it follows. If it does not, Decision 13 is
+   best-effort (I15); nothing else in the plan changes.
+6. **Hot-water signal** *(blocking; read-only from history)*. Read the history of
+   `sensor.geotherm_heating_hvac_action`, `binary_sensor.geotherm_heating_hwc_active`,
+   `sensor.technikraum_heizung_heizung_power` and `binary_sensor.heating_compressor_active` for the
+   last 7 days. Pass: across each hot-water charge (power about 3.5 kW) `hvac_action` is `water` and
+   `hwc_active` is on, and both are off outside charges. Record: the `hvac_action` values seen, how
+   often and how long the charges are (typical and longest), whether `hwc_active` is on at other
+   times ("hot water enabled"), and whether the two signals agree. If `hwc_active` is on outside
+   charges, `heating_dhw_running` must use `hvac_action == water` alone — say so.
+
+**Results** *(fill in; one row per check)*
+
+| # | Blocking | Result (pass / fail / partial) | Values and ids found | Consequence for the plan | By, date |
+|---|----------|--------------------------------|----------------------|--------------------------|----------|
+| 1 | yes | open | | | |
+| 2 | yes | open | | | |
+| 3 | yes | open | | | |
+| 4 | no | open | | | |
+| 5 | no | open | | | |
+| 6 | yes | open | | | |
 
 ## Deploy
 
