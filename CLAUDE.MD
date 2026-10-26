@@ -51,6 +51,8 @@ are defined here in YAML files — not in the HA UI or via MCP tools.
 - `automations.yaml` — only automations that span multiple features or have no natural feature home
 - `scripts.yaml` — same principle as automations.yaml
 - `blueprints/automation/mine/` — custom automation blueprints
+- `custom_templates/` — Jinja macros imported by templates (`{% from 'x.jinja' import ... %}`);
+  currently only `airflow_decision.jinja`, the airflow package's single decision
 
 ### Feature packages (`packages/<feature>.yaml`)
 Each feature gets its own file under `packages/`. A package file may contain any combination of:

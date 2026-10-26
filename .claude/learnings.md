@@ -61,6 +61,15 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   only when `unknown` is actually wanted (it is NOT for idle appliances without `expire_after`).
   Applied to the Loxone appliance sensors in `packages/energy.yaml`.
 
+- **One decision sensor, consumers read only it** (CONFIRMED by `test_decision_*` in
+  `tests/test_airflow.py` at 2026.10.1): when several automations/displays act on the same
+  indicators, compute the decision ONCE in a state-based template sensor (state = reason, attributes
+  = outputs to apply) and have every consumer read only that. Inputs must never include the outputs.
+  To give state and attributes one evaluation, put the logic in a `custom_templates/*.jinja` macro
+  returning `"a|b|c"` and import it in each template — state-based entity `variables:` render ONCE
+  at setup (`template_entity.py::_async_template_startup`), so they cannot carry live state.
+  Wiring indicators into each consumer separately let them disagree (airflow, 2026-10-23).
+
 ### Test Harness
 - **Step the mocked clock with `fast_forward(timedelta(...))`, never `jump_to_next(hour=...)`,
   unless the code under test is genuinely time-of-day dependent.** CONFIRMED in `time_machine.py`:
@@ -112,6 +121,11 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   production YAML.**
 
 ### Test Harness
+- **REST-seeding a trigger-based template binary sensor with `delay_on/off`, then changing one of
+  its trigger inputs** — CONFIRMED by deterministic reproduction (airflow decision tests, 2026.10.1):
+  in CI the sensor's 10-min delay has never elapsed, so it has no internal state; any trigger
+  re-renders it and writes `unknown` over the seeded value (and cascades to sensors that trigger on
+  it). Seed the trigger inputs (season, dew) FIRST, then the delayed sensors.
 - **Pinning a self-referencing template sensor with `set_state()`** (any template that reads
   `this.state`, e.g. `sensor.heating_cooling_indicator`'s hysteresis) — the pinned state does not
   stick. CONFIRMED at 2026.10.1 (`components/template/template_entity.py` `_handle_results`): `this`
@@ -216,3 +230,13 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   mean and assert the indicator's real state; the sync automation names both seasons explicitly
   with no `default:`. `tests/test_airflow.py` still pins the indicator via `set_state()` ~30× and
   passes only because the seeded mean happens to keep those states — latent fragility.
+
+### 2026-10-23 — airflow: `sensor.airflow_cooling_state` as the single decision
+- **Task:** Active heating showed `free_cooling`: the controller had no block for heating + free
+  cooling (stuck `cool`), and Section 2 raised the rate on raw `free_cooling_available`.
+- **Learning:** Root cause was structural — five consumers read the indicators directly, each with
+  its own season rules. Moved all priority/season logic into one stateless decision (macro in
+  `custom_templates/airflow_decision.jinja`); controller, boost and hvac_action read only it. The
+  stuck-profile recovery blocks disappeared with the "keep current profile" path. Docker works in the
+  cloud sandbox (`dockerd`), but the harness image needs the proxy CA + libfaketime baked in
+  (`apk add` at container start fails TLS through the proxy).
