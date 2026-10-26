@@ -41,7 +41,6 @@ Always required:
 |-----------|-----|
 | The HRDS is **switched on** (`sensor.unit_status` on) | Switching the unit on or off is the owner's choice; the automation never does it. Unit off means the automation is off |
 | The automation is enabled (`input_boolean.hrds_automatic_enabled`) | Its own enable switch, like every automation in this repo |
-| The ventilation automation is enabled (`input_boolean.airflow_cooling_automatic_enabled`) | Only it holds the Q350 at medium during a run; without it the coil would not get its air |
 | Not heating season (`sensor.heating_cooling_indicator` ≠ `active_heating`) | Brine circuit, see above |
 | The heat pump is **not making hot water** | See [Hot water](#hot-water-pauses-a-run) |
 
@@ -126,6 +125,16 @@ one:
 
 When the run ends, the decision is the normal one again and the automations apply it. Nothing has
 to be restored, except Away after a lift.
+
+**Also with the ventilation automation off.** The hold belongs to the HRDS run, not to the
+ventilation automation: while the HRDS automation is on, a run gets medium, the moisture profile
+and the Away lift even when `input_boolean.airflow_cooling_automatic_enabled` is off. The writes
+still come from the ventilation controller (the only thing that writes the Q350), which then does
+nothing else. Before its first write it takes a snapshot of the Q350's preset, auto mode and
+profile, and after the run it puts them back; if the snapshot is gone after a restart, it hands the
+Q350 back to its own schedule. Without the ventilation automation there is no ventilation decision,
+so no pending boost and no flush: the HRDS then runs on too-humid or free PV at home, and on free PV
+in Away. With both automations off, nothing touches the Q350.
 
 The decision keeps what it *would* decide without the HRDS as the attribute `base_state` (for
 example `moisture_flush_boost` for a pending boost). That is what the HRDS reads for "a boost is
