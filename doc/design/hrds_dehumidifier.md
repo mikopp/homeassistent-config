@@ -12,8 +12,9 @@ coordination changes in `packages/airflow_cooling.yaml`, `packages/heating_pv_bo
 
 The HRDS+ 30 dehumidifier sits in the supply duct of the Zehnder ComfoAir Q350. Home Assistant
 asks it to dehumidify when the house is too humid, **only inside the boost time window**, and
-holds the ventilation in the state that makes that run effective: **Q350 at medium, bypass set to
-keep outdoor moisture out**. Outside a run the ventilation package works exactly as before.
+holds the Q350 where it **helps the run**: enough air for the coil (**preset medium**) and the
+temperature profile that **brings in the least moisture** (**warm** or **cool**, whichever the
+airflow state calls for). Outside a run the ventilation package works exactly as before.
 
 ## The unit facts the design rests on
 
@@ -83,17 +84,26 @@ suspends its normal logic:
 - **Preset medium, auto off.** Together with the 150 m³/h recirculation that gives the 300 m³/h
   the coil is built for. This replaces whatever the ventilation would otherwise do: low (humid or
   hot outdoor air), the auto schedule, a boost.
-- **Bypass chosen to keep moisture out.** The Q350 has an enthalpy exchanger, which moves moisture
-  from the wetter air stream to the drier one:
+- **Profile chosen to bring in the least moisture.** The HRDS removes moisture from the air that
+  passes its coil, so the Q350 should not undo that by bringing moisture in. The Q350 has an
+  enthalpy exchanger, which moves moisture from the wetter air stream to the drier one, so the
+  profile decides which way the moisture goes:
 
-  | Intake air vs indoor (dew point) | Profile | Effect |
+  | Airflow state | Profile | Why |
   |---|---|---|
-  | Intake **drier** | `cool` — bypass may open | Dry outdoor air comes in as it is; the exchanger would otherwise hand indoor moisture back to the supply |
-  | Intake **wetter** | `warm` — bypass closed | The exchanger moves moisture out of the incoming air into the exhaust |
+  | **Flush** or **free cooling** — outdoor air is clearly drier than indoor and not too humid to import | `cool` — bypass may open | Dry outdoor air comes in as it is; with the exchanger it would pick up indoor moisture and hand it back to the supply |
+  | **Moisture protection** (low) — outdoor air is too humid to import | `warm` — bypass closed | The exchanger moves moisture out of the incoming air into the exhaust, so the humid intake is kept out |
+  | Anything else (for example a heat-protection spell, or no airflow state at all) | by the same moisture test | Whichever of the two lets in less moisture |
 
-  The intake dew point is the Q350's own intake sensor, after the ground duct: the air that actually
-  enters (`binary_sensor.airflow_intake_drier`). During a run this rule alone decides the profile;
-  temperature does not.
+  All three rows are one test, kept in `binary_sensor.airflow_intake_dry_enough`: the intake air is
+  *dry enough* when its dew point is at least the margin (`airflow_min_dew_diff`) below indoor and
+  below the max-humidity dew point — the same limits the airflow package applies when it decides to
+  flush or to protect. The intake dew point is the Q350's own intake sensor, after the ground duct:
+  the air that actually enters. Dry enough → `cool`, otherwise `warm`. The flush, free-cooling and
+  moisture-protection states are the cases where that test already holds or fails clearly, so
+  during a run the profile follows them (up to their hysteresis). During a run the profile is
+  decided by moisture alone; the Q350 itself opens the bypass only when that also suits the
+  temperature.
 - **No boost.** A running boost is cancelled when the run starts; a pending one starts when the run
   ends.
 - **Medium also in Away.** The Away level is far too little air for the coil. When a run starts in
@@ -151,7 +161,7 @@ three minutes after a run.
 - whether it can run: operation gate, brine guard, setup and water checks, alarms;
 - the automation: `sensor.hrds_state`, the reasons, the boost window, the hot-water pause, the
   minimum-runtime timer;
-- the ventilation during a run: state, Q350 volume, preset, profile, intake-drier, bypass estimate;
+- the ventilation during a run: state, Q350 volume, preset, profile, intake-dry-enough, bypass estimate;
 - moisture history (indoor dew against the target and max dew points, intake dew), the solar
   figures, the settings, and a logbook of runs.
 

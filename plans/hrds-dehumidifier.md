@@ -40,6 +40,9 @@
   manual action (HA or ComfoConnect) — Away set during a run is lifted again (25); above max is not
   an Away reason (24 confirmed).
 - **Rev 3e** (2026-10-25): Decision 14 and the starting values confirmed; plan complete.
+- **Rev 3f** (2026-10-26): the Q350 hold is stated as its goal — medium airflow plus the profile
+  (warm or cool, by airflow state) that brings in the least moisture (13); the intake sensor is
+  `airflow_intake_dry_enough` and also respects the max-humidity dew point.
 
 ## The facts this rests on
 
@@ -64,7 +67,8 @@ From the integration repo `mikopp/homeassistant-innova-hrds` (read-only for this
 The **HRDS+ 30 H R K DC** (headless, brine circuit variant 6) sits on the **Comfo Q350** supply
 duct. Goal: a package `packages/hrds_dehumidifier.yaml` that dehumidifies when it is worth it,
 **only in the boost time window**, plus surgical changes to `packages/airflow_cooling.yaml` so the
-Q350 delivers medium airflow and the moisture-minimising bypass setting while the HRDS runs.
+Q350 is held where it helps the run: medium airflow for the coil and the profile (warm or cool, by
+airflow state) that brings in the least moisture.
 
 ## How the packages divide the work
 
@@ -81,11 +85,12 @@ dependency of the airflow package (Decision 20).
 
 | Airflow state | HRDS behaviour | Comfo while HRDS dehumidifies |
 |---|---|---|
-| **Free cooling** | Not a gate (19) | medium; bypass open (intake is dry) |
-| **Flush** | Not a gate | medium; bypass open (flush implies intake drier than indoor) |
-| **Drying boost** (`drying_needed`) | Below max: HRDS yields — the boost is free. Above max: HRDS runs, boost cancelled and held off | medium; bypass open |
-| **Moisture protect low** | The main case: indoor humid, outdoor too humid to flush | **medium instead of low**; bypass **closed** — enthalpy recovery keeps intake moisture out |
-| **Heat protect low** | Runs if needed | medium instead of low (accepted, I9) |
+| **Free cooling** | Not a gate (19) | medium; **`cool`** (bypass may open) — intake is dry enough |
+| **Flush** | Not a gate | medium; **`cool`** — flush implies intake clearly drier than indoor |
+| **Drying boost** (`drying_needed`) | Below max: HRDS yields — the boost is free. Above max: HRDS runs, boost cancelled and held off | medium; **`cool`** (a boost implies a flush) |
+| **Moisture protect low** | The main case: indoor humid, outdoor too humid to flush | **medium instead of low**; **`warm`** (bypass closed) — enthalpy recovery keeps intake moisture out |
+| **Heat protect low** | Runs if needed | medium instead of low (accepted, I9); **`cool` or `warm` by the moisture test** — heat protection says nothing about moisture, the Q350 itself opens the bypass only if that cools |
+| **None of these** | Runs if needed | medium; **`cool` or `warm` by the moisture test** |
 | **Away** | No boost window; runs above target on free PV or alongside a flush (24) | **medium** — Away is lifted for the run and restored after it (25); bypass rule applies; no boost (the boost never runs in Away) |
 
 ---
@@ -111,9 +116,16 @@ by 19).
     logic resumes when it clears.
 12. ~~Away keeps priority over the ventilation level~~ — superseded by 25: the Away level gives
     the coil far less than 300 m³/h.
-13. **Bypass keeps intake moisture low while dehumidifying.** Profile `cool` (bypass may open) when
-    the intake is drier than indoor by a margin; `warm` (bypass closed, full enthalpy recovery)
-    otherwise. Purely moisture-driven during the run.
+13. **Hold the Q350 so it helps dehumidify: medium airflow and the profile that brings in the least
+    moisture** — *confirmed*. The preset is fixed (medium, for the coil); the profile depends on the
+    airflow state and is `warm` (bypass closed, full enthalpy recovery) or `cool` (bypass may open):
+    - flush / free cooling / boost → `cool`: the intake is clearly drier than indoor;
+    - moisture protection (low) → `warm`: the intake is too humid to import;
+    - any other state (heat protection, none) → by the same moisture test.
+    One test covers all rows (`binary_sensor.airflow_intake_dry_enough`, below): `cool` when the
+    intake dew point is at least `airflow_min_dew_diff` below indoor **and** below the max-humidity
+    dew point, else `warm`. Moisture alone decides during a run; the temperature side is left to the
+    Q350, which opens the bypass only when that also suits (I15).
 14. **Boost vs HRDS (at home)** — *confirmed*. Below max a pending drying boost wins (the HRDS reason
     is gated off by `drying_needed`); above max the HRDS wins and the boost is suspended. When the
     HRDS stops and `drying_needed` is still on, the boost automation starts the boost. When the
@@ -171,7 +183,7 @@ by 19).
       airflow package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`:
       outdoor air drier than indoor). In the flush case the HRDS **doubles down**: the ventilation
       flushes dry air at **medium** (25), the HRDS dries the recirculated air, and the bypass rule
-      opens the bypass (the intake is drier);
+      lets the bypass open (a flush means the intake is dry enough);
     - a pending drying boost does not make the HRDS yield (Decision 14 is a home-mode rule);
     - season, hot-water pause, unit-on and the enable switch apply as at home.
     - **Above max is not an Away reason** — *confirmed*: in Away with neither PV nor a flush
@@ -224,15 +236,21 @@ edits; derived-from-binaries sensors are state-based).
    `schedule.airflow_boost_workday` or non-workday + `schedule.airflow_boost_non_workday`.
    `airflow_humidity_drying_needed` reads it instead of its inline `in_schedule` block; its
    workday/schedule triggers are replaced by one trigger on the new sensor. Behaviour unchanged.
-2. **New decision sensor `binary_sensor.airflow_intake_drier`** (trigger-based, numeric inputs,
+2. **New decision sensor `binary_sensor.airflow_intake_dry_enough`** (trigger-based, numeric inputs,
    `this.state` Schmitt + 10-min delay like the flush sensor): ON when
-   `airflow_outdoor_dew_5min + airflow_min_dew_diff < airflow_min_indoor_dew_5min`, released with
-   the same 0.3 °C hysteresis. The Q350 **intake** dew (after the ground duct) is the air that
-   enters. An enthalpy exchanger moves moisture from the wetter to the drier stream: intake drier →
-   open the bypass; intake wetter → keep it closed.
+   `airflow_outdoor_dew_5min + airflow_min_dew_diff < airflow_min_indoor_dew_5min` **and**
+   `airflow_outdoor_dew_5min < airflow_dew_point_max`, released with the same 0.3 °C hysteresis.
+   These are the limits the flush sensor (Branch 1) and the moisture-protection sensor already use,
+   so the sensor agrees with them: flush, free cooling and boost imply it, moisture protection
+   (low) implies its opposite, and the remaining states are decided by it alone. The Q350
+   **intake** dew (after the ground duct) is the air that enters. An enthalpy exchanger moves
+   moisture from the wetter to the drier stream: dry enough → `cool` (bypass may open, the
+   exchanger does not hand indoor moisture back); not → `warm` (bypass closed, the exchanger moves
+   the intake moisture into the exhaust).
 3. **Controller Section 1, new Block 0 (first)** — HRDS dehumidify owner: `hrds_dehumidify_active`
-   on → profile `cool` if `airflow_intake_drier` on, else `warm`; write only if it differs; no
-   notification (21). Blocks 1–5 never run during a run.
+   on → profile `cool` if `airflow_intake_dry_enough` on, else `warm` (the flush / free-cooling /
+   moisture-protection states need no branch of their own: the sensor already agrees with them);
+   write only if it differs; no notification (21). Blocks 1–5 never run during a run.
 4. **Controller Section 2, new first branch (before the Away guard)** — HRDS dehumidify owner:
    `hrds_dehumidify_active` on → if the away function is on: set `input_boolean.airflow_away_lifted`,
    away function off (25); then `auto_mode off, preset medium` unless already there; no
@@ -241,7 +259,7 @@ edits; derived-from-binaries sensors are state-based).
    clear the latch; the `choose` exits (Away owns the level again).
    The existing Away guard and the boost automation's Away condition read
    `binary_sensor.airflow_away_active` instead of the away switch.
-5. **Controller triggers:** add `hrds_dehumidify_active` (any change), `airflow_intake_drier`, and
+5. **Controller triggers:** add `hrds_dehumidify_active` (any change), `airflow_intake_dry_enough`, and
    the away function → `on` (Away set by hand during a run is lifted again, 25).
    On `on → off` the normal blocks re-derive the full state — no restore code.
 6. **Quiet hand-back (21):** a controller variable `quiet` = `hrds_dehumidify_active` on, or its
@@ -355,7 +373,7 @@ Registered in `configuration.yaml` under `lovelace: dashboards:` as `hrds-dehumi
 4. **Can it run** — operation allowed, brine temperature guard, setup check, water check, alarm
    active (with the individual alarms as a conditional section when any is on).
 5. **Ventilation during a run** — `sensor.airflow_cooling_state`, Comfo supply volume, preset,
-   profile, `binary_sensor.airflow_intake_drier`, bypass gauge (`sensor.airflow_bypass_estimation`).
+   profile, `binary_sensor.airflow_intake_dry_enough`, bypass gauge (`sensor.airflow_bypass_estimation`).
 6. **Moisture** — history graph (24 h): indoor dew vs `airflow_dew_point_target` / `_max`, intake
    dew; indoor RH.
 7. **Solar** — `sensor.hrds_pv_surplus`, `sensor.victron_pv_net_power`, battery SoC,
@@ -376,7 +394,7 @@ Registered in `configuration.yaml` under `lovelace: dashboards:` as `hrds-dehumi
    normal state silently (LOW + warm here).
 
 Away, outdoor drier than indoor: `flush_needed` on and indoor above target → HRDS runs (start
-notification "away: flush") → airflow lifts Away, preset **medium**, profile `cool` (intake drier)
+notification "away: flush") → airflow lifts Away, preset **medium**, profile `cool` (intake dry enough)
 → both dry the house until the HRDS reasons clear → run ends → Away restored (Q350 back at its
 Away level). Away switched on by hand during a run: lifted again at once, restored at the end.
 
@@ -393,10 +411,10 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 | # | Issue | Resolution |
 |---|-------|------------|
 | I1 | Heating-season cross-purpose | No HRDS in `active_heating` (16) |
-| I2 | Free-cooling overlap | Both run (19); hold at medium, bypass open on dry intake |
+| I2 | Free-cooling overlap | Both run (19); hold at medium, `cool` (intake dry enough) |
 | I3 | Shared hysteresis knob | `hrds_off_dew_diff` |
 | I4–I6 | Fan writes | Obsolete: no fan writes |
-| I7 | Two controllers on one indoor-dew sensor | Schmitt bands, `hrds_min_runtime`, 10-min airflow delays; `airflow_intake_drier` has its own 10-min delay |
+| I7 | Two controllers on one indoor-dew sensor | Schmitt bands, `hrds_min_runtime`, 10-min airflow delays; `airflow_intake_dry_enough` has its own 10-min delay |
 | I8 | Boost cancel on hand-over | Boost start/re-arm gated on `hrds_dehumidify_active` off; HRDS branch precedes the boost-owner branch (14) |
 | I9 | Heat protection overridden | Accepted (300 m³/h requirement); bounded to window and run |
 | I10 | PV self-cancel | `hrds_pv_surplus` adds the HRDS draw back while it runs |
@@ -404,7 +422,8 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 | I12 | Stale restore | `wanted`, `needed`, `active`, `paused_for_hot_water` are state-based |
 | I13 | Window ends mid-run | Run finishes `hrds_min_runtime`, then stops |
 | I14 | Moisture outside the window | Confirmed (10); airflow flush/low act |
-| I15 | Bypass vs the Q350's own logic | `cool` permits, does not force; observe with the bypass estimate |
+| I15 | Bypass vs the Q350's own logic | `cool` permits, does not force: the Q350 opens the bypass only when that also cools. With dry but warm intake air the bypass stays closed and some indoor moisture is recovered. Observe with the bypass estimate |
+| I23 | **The moisture test and the airflow states disagree at their edges** (hysteresis, 10-min delays) | The test uses the same limits as the states and its own 0.3 °C band and 10-min delay; a brief mismatch moves the profile for one cycle, no actuator fights (the HRDS owner branch is the only writer during a run) |
 | I16 | Hot-water pause cycles the HRDS | Accepted (17); silent (21) |
 | I17 | ebusd offline | Shelly fallback (17) |
 | I19 | **Away double-down feedback.** The run lowers indoor dew, which also clears `flush_needed` | Intended: both stop together once outdoor air can no longer help; the HRDS Schmitt band and minimum runtime keep the run from flapping |
@@ -492,7 +511,8 @@ the state-valued ones) which state strings does it use? Record differences in th
 5. **Bypass response** *(not blocking; owner action, can wait for the dry run)*. During an HRDS run,
    with the Q350 at medium, switch `select.comfoconnect_pro_temperature_profile` between `warm` and
    `cool` and watch `sensor.airflow_bypass_estimation` (it moves in 15 % steps, delayed by its 5-min
-   filters) for 15–20 min each. Record whether it follows. If it does not, Decision 13 is
+   filters) for 15–20 min each, at a moment when the moisture test says `cool` (otherwise there is
+   no bypass to open). Record whether it follows. If it does not, Decision 13 is
    best-effort (I15); nothing else in the plan changes.
 6. **Hot-water signal** *(blocking; read-only from history)*. Read the history of
    `sensor.geotherm_heating_hvac_action`, `binary_sensor.geotherm_heating_hwc_active`,
@@ -547,7 +567,10 @@ checks pass.
      cleared; latch switched off during a run → Away not restored; away switched on during a run →
      latch set, away off again, medium kept; away off is written before the preset;
      `airflow_away_active` on through the lift;
-   - profile `warm` when intake wetter, `cool` when drier; Blocks 1–5 not run while active;
+   - profile `cool` when the intake is dry enough, `warm` when it is wetter or at/above the
+     max-humidity dew point; consistent with `flush_needed` (→ cool) and
+     `moisture_ventilation_low_needed` (→ warm) wherever those are on; also with heat protection
+     on and with no airflow state on; Blocks 1–5 not run while active;
    - boost does not start or re-arm while active, nor while Away is lifted; starts on active → off
      with `drying_needed` on (at home);
    - active → off restores the normal state; no airflow notification while active and for 3 min;
