@@ -1,6 +1,8 @@
 # HRDS Dehumidifier + Airflow Coordination — Implementation Plan
 
-> Status: **PLAN ONLY — do not implement yet** (CLAUDE.MD rules 2–3). Revision 3 (2026-10-25).
+> Status: **PLAN ONLY — do not implement yet** (CLAUDE.MD rules 2–3). Revision 4 (2026-10-26).
+> **Stacked on PR #131** (`claude/friendly-meitner-m9kv9h`, airflow single decision): PR #89's base
+> is that branch, and #131 merges and deploys first.
 > The agreed design is described for owner and agents in
 > [`doc/design/hrds_dehumidifier.md`](../doc/design/hrds_dehumidifier.md); this file holds the
 > work steps, decision history, risks, deploy and tests.
@@ -9,11 +11,12 @@
 
 | Step | State |
 |------|-------|
-| 0. Plan (this file) and design doc | done — all decisions confirmed; next: step 1 |
+| 0. Plan (this file) and design doc | done; rev 4 rebased on #131 — Decision 27 proposed |
+| 0c. PR #131 merged and deployed (prerequisite) | open |
 | 1. Pre-implementation checks on the live system — hand-off block below, answered in its Results table | open |
 | 2. `airflow_cooling.yaml`: shared boost-window sensor (regression gate: airflow tests) | open |
 | 2b. Shared battery floor in `energy.yaml`, heating repointed (regression gate: heating tests) | open |
-| 3. `airflow_cooling.yaml`: dehumidify hold (preset medium + moisture bypass), boost gating, quiet hand-back | open |
+| 3. Airflow: HRDS layer in `custom_templates/airflow_decision.jinja`, `base_state` attribute, controller dehumidify branch + Away lift, quiet hand-back | open |
 | 4. `hrds_dehumidifier.yaml` + notes + `heating_dhw_running` split + tests | open |
 | 5. `dashboards/hrds-dashboard.yaml` + registration | open |
 | 6. Deploy by hand (instructions in the PR description) | open |
@@ -43,6 +46,11 @@
 - **Rev 3f** (2026-10-26): the Q350 hold is stated as its goal — medium airflow plus the profile
   (warm or cool, by airflow state) that brings in the least moisture (13); the intake sensor is
   `airflow_intake_dry_enough` and also respects the max-humidity dew point.
+- **Rev 4** (2026-10-26): stacked on PR #131 (26). The hold is an HRDS layer in the airflow
+  decision (`airflow_decision.jinja`): state `hrds_dehumidify`, profile by the moisture test,
+  ventilation `dehumidify`; new attribute `base_state` (the decision without the HRDS) is what the
+  HRDS reads instead of the airflow indicators. The boost hand-over follows the decision. HRDS runs
+  only while the airflow automation is enabled (27, proposed).
 
 ## The facts this rests on
 
@@ -74,23 +82,29 @@ airflow state) that brings in the least moisture.
 
 | Owner | Writes | Reads from the others |
 |-------|--------|-----------------------|
-| `hrds_dehumidifier.yaml` | `switch.dehumidify` — nothing else | `binary_sensor.airflow_boost_window_active`, `binary_sensor.airflow_humidity_drying_needed`, `binary_sensor.airflow_humidity_flush_needed`, `switch.comfoconnect_pro_away_function`, the airflow dew sensors, `sensor.heating_cooling_indicator`, `binary_sensor.heating_dhw_running`, `binary_sensor.heating_compressor_active`, `binary_sensor.energy_pv_battery_ok` |
-| `airflow_cooling.yaml` (`airflow_ventilation_controller`, `airflow_humidity_drying_boost`) | every Comfo output: profile, preset, auto_mode, boost | `binary_sensor.hrds_dehumidify_active` |
+| `hrds_dehumidifier.yaml` | `switch.dehumidify` — nothing else | `sensor.airflow_cooling_state` attribute `base_state` (pending boost, flush), `binary_sensor.airflow_boost_window_active`, `binary_sensor.airflow_away_active`, `input_boolean.airflow_cooling_automatic_enabled`, the airflow dew sensors, `sensor.heating_cooling_indicator`, `binary_sensor.heating_dhw_running`, `binary_sensor.heating_compressor_active`, `binary_sensor.energy_pv_battery_ok` |
+| `airflow_cooling.yaml` (decision `sensor.airflow_cooling_state` via `custom_templates/airflow_decision.jinja`; `airflow_ventilation_controller`, `airflow_humidity_drying_boost`) | every Comfo output: profile, preset, auto_mode, boost, away (lift) | the decision reads `binary_sensor.hrds_dehumidify_active` |
 
-No entity is written by both. No template sensor cycle: no airflow decision sensor reads an HRDS
-sensor; only the airflow **automations** read `hrds_dehumidify_active`. The HRDS is a new
-dependency of the airflow package (Decision 20).
+No entity is written by both. Following #131's rule, the HRDS is folded into the **decision**, not
+wired into the automations: the decision reads `hrds_dehumidify_active` (an input, like the season)
+and the controller and boost automation only apply the decision. No cycle: the HRDS reads only
+`base_state`, the decision **without** the HRDS layer, which never depends on any HRDS entity. The
+HRDS is a new dependency of the airflow package (Decision 20).
 
 ## Airflow states vs the HRDS
 
-| Airflow state | HRDS behaviour | Comfo while HRDS dehumidifies |
+Airflow decision (#131 states of `sensor.airflow_cooling_state`, here as `base_state`):
+
+| Airflow decision (`base_state`) | HRDS behaviour | Comfo while HRDS dehumidifies (state `hrds_dehumidify`) |
 |---|---|---|
-| **Free cooling** | Not a gate (19) | medium; **`cool`** (bypass may open) — intake is dry enough |
-| **Flush** | Not a gate | medium; **`cool`** — flush implies intake clearly drier than indoor |
-| **Drying boost** (`drying_needed`) | Below max: HRDS yields — the boost is free. Above max: HRDS runs, boost cancelled and held off | medium; **`cool`** (a boost implies a flush) |
-| **Moisture protect low** | The main case: indoor humid, outdoor too humid to flush | **medium instead of low**; **`warm`** (bypass closed) — enthalpy recovery keeps intake moisture out |
-| **Heat protect low** | Runs if needed | medium instead of low (accepted, I9); **`cool` or `warm` by the moisture test** — heat protection says nothing about moisture, the Q350 itself opens the bypass only if that cools |
-| **None of these** | Runs if needed | medium; **`cool` or `warm` by the moisture test** |
+| **`free_cooling`** | Not a gate (19) | medium; **`cool`** (bypass may open) — intake is dry enough |
+| **`moisture_flush_cooling`** (flush) | Not a gate at home; an Away reason (24) | medium; **`cool`** — flush implies intake clearly drier than indoor |
+| **`moisture_flush_boost`** (drying boost) | Below max: HRDS yields — the boost is free. Above max: HRDS runs; the decision leaves `boost`, so the boost automation stops the boost, and restarts it when the run ends | medium; **`cool`** (a boost implies a flush) |
+| **`moisture_protection`** (low) | The main case: indoor humid, outdoor too humid to flush | **medium instead of low**; **`warm`** (bypass closed) — enthalpy recovery keeps intake moisture out |
+| **`heat_protection`** (low) | Runs if needed | medium instead of low (accepted, I9); **`cool` or `warm` by the moisture test** — heat protection says nothing about moisture, the Q350 itself opens the bypass only if that cools |
+| **`comfort`** | Runs if needed | medium; **`cool` or `warm` by the moisture test** |
+| **`heating`**, **`moisture_retention`** | Does not run (active heating 16; dry indoor is below target) | — |
+| **`off`** (airflow automation disabled) | Does not run (27, proposed) | — |
 | **Away** | No boost window; runs above target on free PV or alongside a flush (24) | **medium** — Away is lifted for the run and restored after it (25); bypass rule applies; no boost (the boost never runs in Away) |
 
 ---
@@ -111,9 +125,10 @@ by 19).
     `airflow_cooling.yaml`'s flush/low logic handles moisture then. A run still inside its minimum
     runtime when the window closes finishes that runtime. Not in Away: there the window is ignored
     (24).
-11. **Airflow stands down while dehumidifying.** While `hrds_dehumidify_active` is on, the
-    controller holds `auto_mode off, preset medium`, runs no boost and writes no low; its normal
-    logic resumes when it clears.
+11. **Airflow stands down while dehumidifying.** While `hrds_dehumidify_active` is on, the airflow
+    **decision** is `hrds_dehumidify` (ventilation `dehumidify`, profile by 13): the controller holds
+    `auto_mode off, preset medium`, no boost is decided and no low is written; the normal decision
+    returns when it clears (26).
 12. ~~Away keeps priority over the ventilation level~~ — superseded by 25: the Away level gives
     the coil far less than 300 m³/h.
 13. **Hold the Q350 so it helps dehumidify: medium airflow and the profile that brings in the least
@@ -127,11 +142,12 @@ by 19).
     dew point, else `warm`. Moisture alone decides during a run; the temperature side is left to the
     Q350, which opens the bypass only when that also suits (I15).
 14. **Boost vs HRDS (at home)** — *confirmed*. Below max a pending drying boost wins (the HRDS reason
-    is gated off by `drying_needed`); above max the HRDS wins and the boost is suspended. When the
-    HRDS stops and `drying_needed` is still on, the boost automation starts the boost. When the
-    airflow package does **not** intend a boost (`drying_needed` off), the HRDS runs on its own
-    conditions (above max, or above target with free PV) — the boost only ever takes precedence
-    while it is actually intended.
+    is gated off by `base_state == moisture_flush_boost`); above max the HRDS wins and the boost is
+    suspended. With #131 the hand-over is the decision itself: during a run the decision is not
+    `boost`, so the boost automation stops a decided boost; when the run ends the decision returns
+    to `boost` and the automation starts it again. When the airflow package does **not** intend a
+    boost, the HRDS runs on its own conditions (above max, or above target with free PV) — the
+    boost only ever takes precedence while it is actually intended.
 15. **The package never switches the unit on or off** — *confirmed*. Whether the HRDS is on is the
     owner's choice (`switch.unit_on_off`). The automation acts only while the unit is on
     (`sensor.unit_status` = on) **and** its own enable switch `input_boolean.hrds_automatic_enabled`
@@ -159,7 +175,8 @@ by 19).
 20. **Keep the `airflow_*` names; the HRDS is a new dependency of the airflow package** — *confirmed*.
     The HRDS reads the airflow humidity thresholds and indoor dew as they are
     (`sensor.airflow_dew_point_target/_max`, `sensor.airflow_min_indoor_dew_5min`,
-    `input_number.airflow_*_humidity`). Only the **boost window** is shared as a new sensor:
+    `input_number.airflow_*_humidity`) — numeric thresholds, not decision indicators — and the
+    airflow decision's `base_state` (26). Only the **boost window** is shared as a new sensor:
     `binary_sensor.airflow_boost_window_active` in `airflow_cooling.yaml`, extracted from the inline
     `in_schedule` expression of `airflow_humidity_drying_needed`, which then consumes it. No renames,
     no migration. A neutral shared package is a future refactor ([`todo.md`](todo.md)).
@@ -168,9 +185,10 @@ by 19).
       when it ends (reason: humidity reached / window closed / automatic control off / refused,
       duration). A hot-water pause and resume inside a run are silent. A refused request ends the
       run with reason "refused"; `sensor.hrds_state` shows `blocked`.
-    - Airflow: silent while it holds for the HRDS and while it hands back. The controller's existing
-      notifications are skipped while `hrds_dehumidify_active` is on and for 3 minutes after it
-      clears (covers the hand-back and the route-to-auto re-run it may cause).
+    - Airflow: silent while it holds for the HRDS and while it hands back. The controller's and the
+      boost automation's notifications are skipped while the decision is `hrds_dehumidify` and for
+      3 minutes after `hrds_dehumidify_active` clears (covers the hand-back, the route-to-auto re-run
+      and a boost stopped and restarted around the run).
 22. **HRDS dashboard** — *confirmed*: a new `dashboards/hrds-dashboard.yaml` with the integration's
     essentials plus this package's entities (content below).
 23. **Deploy by hand, no `ha_mcp` writes** — *confirmed*. With Decision 20 there are no entity
@@ -180,8 +198,8 @@ by 19).
     home, so noise does not matter:
     - the **boost window is ignored**;
     - the HRDS runs when indoor is above target **and** either free PV is available **or** the
-      airflow package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`:
-      outdoor air drier than indoor). In the flush case the HRDS **doubles down**: the ventilation
+      airflow package wants to flush moisture (`base_state` `moisture_flush_cooling` or
+      `moisture_flush_boost`: outdoor air drier than indoor). In the flush case the HRDS **doubles down**: the ventilation
       flushes dry air at **medium** (25), the HRDS dries the recirculated air, and the bypass rule
       lets the bypass open (a flush means the intake is dry enough);
     - a pending drying boost does not make the HRDS yield (Decision 14 is a home-mode rule);
@@ -190,7 +208,8 @@ by 19).
       (outdoor humid) the HRDS does not run.
 25. **Medium during a run, also in Away** — *confirmed requirement* (the HRDS needs 300 m³/h:
     150 recirculation + 150 from the Q350). Away otherwise keeps its level; only a run lifts it.
-    Mechanism (the airflow controller does it: it is the only writer of Q350 outputs):
+    Mechanism (the airflow controller does it: it is the only writer of Q350 outputs; Away is a
+    controller guard in #131, not a decision input, so the lift stays in the controller):
     - **Run starts in Away:** set `input_boolean.airflow_away_lifted` (airflow package), turn
       `switch.comfoconnect_pro_away_function` **off**; the HRDS owner branch then holds medium as at
       home.
@@ -215,6 +234,22 @@ by 19).
       Away comes back when the run ends; switch it off again. From Home Assistant: switch the latch
       off (above).
 
+26. **Built on PR #131's single decision** — *confirmed* ("we build on top of 131"). PR #89 is
+    stacked on #131. The HRDS hold is not a set of controller branches but a **layer of the
+    decision** in `custom_templates/airflow_decision.jinja`:
+    - the macro first computes the normal decision exactly as #131 does (`base_state`), then, if
+      `binary_sensor.hrds_dehumidify_active` is on: state `hrds_dehumidify`, profile `cool` if
+      `binary_sensor.airflow_intake_dry_enough` is on else `warm` (13), ventilation `dehumidify`;
+    - it returns a fourth field, exposed as attribute `base_state`; HRDS rules read it instead of
+      `drying_needed` / `flush_needed` (#131: never wire an indicator into a consumer);
+    - the decision still never reads an output; the HRDS inputs are read fail-safe (`is_state`, an
+      unknown HRDS = not running, unknown moisture test = `warm`) and are **not** added to the
+      decision's availability, so an HRDS outage never stops the airflow automation.
+27. *Proposed:* **The HRDS runs only while the airflow automation is enabled**
+    (`input_boolean.airflow_cooling_automatic_enabled`). With it off the decision is `off` and
+    nothing holds the Q350 at medium, so the coil would not get its air. A dehumidify started by
+    hand still works; only the HRDS automation waits.
+
 Deferred to [`todo.md`](todo.md): **PV priority between loads** (the heating PV boost and the HRDS
 can see the same surplus at once; I11).
 
@@ -227,8 +262,9 @@ can see the same surplus at once; I11).
 
 All `CLAUDE.MD` template/helper rules apply: availability guards, no `initial:`, no
 `| float(default)` behind a guard or on helpers, a comment on every block.
-`packages/notes/airflow_cooling.md` rules apply to the airflow edits (minimal, surgical controller
-edits; derived-from-binaries sensors are state-based).
+`packages/notes/airflow_cooling.md` rules apply to the airflow edits (indicators feed only the
+decision, consumers read only the decision; minimal, surgical controller edits; derived-from-binaries
+sensors are state-based). Line numbers and names below refer to PR #131's version of the package.
 
 ### Airflow changes — `packages/airflow_cooling.yaml` (EDIT, surgical)
 
@@ -247,31 +283,41 @@ edits; derived-from-binaries sensors are state-based).
    moisture from the wetter to the drier stream: dry enough → `cool` (bypass may open, the
    exchanger does not hand indoor moisture back); not → `warm` (bypass closed, the exchanger moves
    the intake moisture into the exhaust).
-3. **Controller Section 1, new Block 0 (first)** — HRDS dehumidify owner: `hrds_dehumidify_active`
-   on → profile `cool` if `airflow_intake_dry_enough` on, else `warm` (the flush / free-cooling /
-   moisture-protection states need no branch of their own: the sensor already agrees with them);
-   write only if it differs; no notification (21). Blocks 1–5 never run during a run.
-4. **Controller Section 2, new first branch (before the Away guard)** — HRDS dehumidify owner:
-   `hrds_dehumidify_active` on → if the away function is on: set `input_boolean.airflow_away_lifted`,
-   away function off (25); then `auto_mode off, preset medium` unless already there; no
-   notification. The preset write cancels a running boost (14). It precedes the boost-owner branch.
-   **Away restore branch** (next): `hrds_dehumidify_active` off and the latch on → away function on,
-   clear the latch; the `choose` exits (Away owns the level again).
-   The existing Away guard and the boost automation's Away condition read
-   `binary_sensor.airflow_away_active` instead of the away switch.
-5. **Controller triggers:** add `hrds_dehumidify_active` (any change), `airflow_intake_dry_enough`, and
-   the away function → `on` (Away set by hand during a run is lifted again, 25).
-   On `on → off` the normal blocks re-derive the full state — no restore code.
-6. **Quiet hand-back (21):** a controller variable `quiet` = `hrds_dehumidify_active` on, or its
-   `last_changed` less than 3 min ago; every existing `notify` step is wrapped in `if: not quiet`.
-7. **Boost automation `airflow_humidity_drying_boost`:** condition "`hrds_dehumidify_active` off"
-   on the start and re-arm paths (its existing Away condition now reads `airflow_away_active`, so no
-   boost while Away is lifted); new trigger `hrds_dehumidify_active` → `off` that starts the boost
-   when `drying_needed` is on (14). `drying_needed` itself stays pure intent.
-8. **Status:** `sensor.airflow_cooling_state` gets `hrds_dehumidify` (right after `off`), icon
-   `mdi:water-off`.
-9. The startup guard's `has_value` list gains `hrds_dehumidify_active`; an unavailable HRDS reads
-   as "not active", so airflow runs normally (fail-safe).
+3. **Decision macro `custom_templates/airflow_decision.jinja` — HRDS layer (26).** After #131's
+   state/profile/ventilation are computed (unchanged), keep them as `base_state`; then, when
+   `is_state('binary_sensor.hrds_dehumidify_active', 'on')` and the automation is on: state
+   `hrds_dehumidify`, profile `cool` if `is_state('binary_sensor.airflow_intake_dry_enough', 'on')`
+   else `warm`, ventilation `dehumidify`. Return
+   `"<state>|<profile>|<ventilation>|<base_state>"`. With the automation off everything stays
+   `off` (as in #131). Update the macro's header comment (inputs, return value, the HRDS layer).
+4. **`sensor.airflow_cooling_state`:** new attribute `base_state` (field 4, same macro render as the
+   other fields); icon `mdi:water-off` for `hrds_dehumidify`; availability unchanged (26).
+5. **Controller Section 1:** unchanged — it already writes the decided `profile`, which is now the
+   moisture profile during a run. Its notification is wrapped in `if: not quiet` (7).
+6. **Controller Section 2:** a new block **before** the Away guard:
+   - **Dehumidify:** `ventilation == 'dehumidify'` and `switch.comfoconnect_pro_boost` off → if the
+     away function is on: set `input_boolean.airflow_away_lifted`, away function off (25); then
+     `auto_mode off`, preset `medium`, unless already (auto off, medium). No notification. A
+     manual boost (switch on) is left alone: it gives more air than medium.
+   - **Away restore:** `ventilation != 'dehumidify'` and the latch on → away function on, clear the
+     latch.
+   The existing Away guard (and so the existing branches) reads `binary_sensor.airflow_away_active`
+   instead of the away switch. The existing branches need no HRDS gate: none of them matches
+   `ventilation == 'dehumidify'`. New trigger: away function → `on` (Away set by hand during a run is
+   lifted again, 25); the decision trigger already covers the HRDS starting and stopping and the
+   moisture test changing.
+7. **Quiet hand-back (21):** a controller variable `quiet` = decision `hrds_dehumidify`, or
+   `hrds_dehumidify_active` changed less than 3 min ago; every existing `notify` step is wrapped in
+   `if: not quiet`. Same variable and wrapping in the boost automation.
+8. **Boost automation `airflow_humidity_drying_boost`:** no HRDS gate — the decision leaves `boost`
+   during a run (stop) and returns after it (start). Its Away condition reads
+   `binary_sensor.airflow_away_active`, so no boost while Away is lifted. Notifications quiet (7).
+9. **New `binary_sensor.airflow_away_active`** (state-based): away function on or
+   `input_boolean.airflow_away_lifted` on. New helper `input_boolean.airflow_away_lifted`.
+10. **Climate `hvac_action_template`:** `hrds_dehumidify` → `drying`.
+11. **Notes `packages/notes/airflow_cooling.md`:** the HRDS layer rule (the decision folds the HRDS
+    in; consumers still read only the decision; the HRDS reads only `base_state`), the Away lift,
+    the quiet hand-back.
 
 ### Energy change — `packages/energy.yaml` (EDIT)
 
@@ -320,14 +366,20 @@ the device prefix, likely `hrds_` — check 1): `switch.dehumidify`, `switch.uni
   season   = heating_cooling_indicator != active_heating        # 16
   away     = airflow_away_active == on                          # 24, 25 (survives the lift)
   # home: inside the boost window
+  airflow  = airflow_cooling_automatic_enabled == on             # 27 (proposed)
+  base     = state_attr(airflow_cooling_state, 'base_state')    # 26
+  boost_pending = base == moisture_flush_boost
+  flushing      = base in [moisture_flush_boost, moisture_flush_cooling]
   home     = airflow_boost_window_active                        # 10
              and (hrds_indoor_above_max                         # beats a pending boost
                   or (hrds_indoor_above_target and hrds_pv_surplus_available
-                      and not airflow_humidity_drying_needed))  # 14
+                      and not boost_pending))                   # 14
   # away: no window; PV or double down on an airflow flush
   away_run = hrds_indoor_above_target
-             and (hrds_pv_surplus_available or airflow_humidity_flush_needed)   # 24
-  wanted   = unit_on and season and ((not away and home) or (away and away_run))
+             and (hrds_pv_surplus_available or flushing)        # 24
+  wanted   = unit_on and season and airflow
+             and ((not away and home) or (away and away_run))
+  # an unavailable decision has no base_state: no pending boost, no flush
   ```
 - `binary_sensor.hrds_dehumidify_needed` — state-based: `wanted and not hrds_paused_for_hot_water`.
 - `binary_sensor.hrds_dehumidify_active` — state-based, what airflow keys on: `switch.dehumidify` on
@@ -415,7 +467,7 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 | I3 | Shared hysteresis knob | `hrds_off_dew_diff` |
 | I4–I6 | Fan writes | Obsolete: no fan writes |
 | I7 | Two controllers on one indoor-dew sensor | Schmitt bands, `hrds_min_runtime`, 10-min airflow delays; `airflow_intake_dry_enough` has its own 10-min delay |
-| I8 | Boost cancel on hand-over | Boost start/re-arm gated on `hrds_dehumidify_active` off; HRDS branch precedes the boost-owner branch (14) |
+| I8 | Boost cancel on hand-over | The decision leaves `boost` during a run, so the boost automation stops it and restarts it after (14, 26); a manual boost is left alone |
 | I9 | Heat protection overridden | Accepted (300 m³/h requirement); bounded to window and run |
 | I10 | PV self-cancel | `hrds_pv_surplus` adds the HRDS draw back while it runs |
 | I11 | PV double booking with `heating_pv_boost` | Deferred: [`todo.md`](todo.md) |
@@ -423,7 +475,9 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
 | I13 | Window ends mid-run | Run finishes `hrds_min_runtime`, then stops |
 | I14 | Moisture outside the window | Confirmed (10); airflow flush/low act |
 | I15 | Bypass vs the Q350's own logic | `cool` permits, does not force: the Q350 opens the bypass only when that also cools. With dry but warm intake air the bypass stays closed and some indoor moisture is recovered. Observe with the bypass estimate |
-| I23 | **The moisture test and the airflow states disagree at their edges** (hysteresis, 10-min delays) | The test uses the same limits as the states and its own 0.3 °C band and 10-min delay; a brief mismatch moves the profile for one cycle, no actuator fights (the HRDS owner branch is the only writer during a run) |
+| I23 | **The moisture test and the airflow states disagree at their edges** (hysteresis, 10-min delays) | The test uses the same limits as the states and its own 0.3 °C band and 10-min delay; a brief mismatch moves the profile for one cycle, no actuator fights (during a run the decision has one profile) |
+| I24 | **HRDS feedback through the decision.** The decision reads `hrds_dehumidify_active`, and the HRDS reads the decision | No loop: the HRDS reads only `base_state`, computed before the HRDS layer (26) |
+| I25 | **#131 changes before it merges** | This plan follows #131's head `59cafbe`; re-check the macro, controller and boost automation when #131 changes, and before step 3 |
 | I16 | Hot-water pause cycles the HRDS | Accepted (17); silent (21) |
 | I17 | ebusd offline | Shelly fallback (17) |
 | I19 | **Away double-down feedback.** The run lowers indoor dew, which also clears `flush_needed` | Intended: both stop together once outdoor air can no longer help; the HRDS Schmitt band and minimum runtime keep the run from flapping |
@@ -440,8 +494,8 @@ Structurally safe: no shared actuator; no sensor cycle; `dew_min < dew_target` k
   fixed 150 m³/h recirculation, no fan control, start delay, stop timing); index row in
   `packages/CLAUDE.md`.
 - **New:** `dashboards/hrds-dashboard.yaml`; **edit** `configuration.yaml` (dashboard registration).
-- **Edit:** `packages/airflow_cooling.yaml` (above); `packages/notes/airflow_cooling.md` — the
-  dehumidify owner rule and the quiet hand-back.
+- **Edit:** `packages/airflow_cooling.yaml` and `custom_templates/airflow_decision.jinja` (above);
+  `packages/notes/airflow_cooling.md` — the HRDS layer, the Away lift and the quiet hand-back.
 - **Edit:** `packages/energy.yaml`, `packages/notes/energy.md` ("one battery floor for every
   PV-surplus load; consumers read `energy_pv_battery_ok`"), the `energy.yaml` row in
   `packages/CLAUDE.md`.
@@ -477,7 +531,7 @@ the state-valued ones) which state strings does it use? Record differences in th
 |-------|----------------------|-------|
 | HRDS (integration `innova_hrds`; live ids likely carry the device prefix, e.g. `switch.hrds_dehumidify`) | `switch.dehumidify`, `switch.unit_on_off`, `sensor.unit_status`, `binary_sensor.recirculation_active`, `binary_sensor.dehumidify_request`, `binary_sensor.brine_temperature_guard`, `switch.operation_allowed`, `switch.enable_dehumidify_bms`, `sensor.compressor_status`, `sensor.compressor_output`, `sensor.operating_mode`, `sensor.supply_fan_airflow`, `sensor.supply_fan_output`, `sensor.setup_check`, `sensor.water_check`, `binary_sensor.alarm_active`, `climate.hrds_climate` | Keys are listed in the integration repo's `doc/entity-reference.md`. State strings to record: `sensor.unit_status` (the value for "on"), `sensor.compressor_status` (the value for running), `sensor.operating_mode` (summer) |
 | Comfo Q350 | `switch.comfoconnect_pro_away_function`, `switch.comfoconnect_pro_boost`, `switch.comfoconnect_pro_auto_mode`, `select.comfoconnect_pro_ventilation_preset`, `select.comfoconnect_pro_temperature_profile`, `sensor.comfoconnect_pro_supply_fan_volume` | already used by `airflow_cooling.yaml` |
-| Airflow package | `sensor.airflow_bypass_estimation`, `sensor.airflow_outdoor_dew_5min`, `sensor.airflow_min_indoor_dew_5min`, `sensor.airflow_dew_point_target`, `sensor.airflow_dew_point_max`, `binary_sensor.airflow_humidity_flush_needed`, `binary_sensor.airflow_humidity_drying_needed`, `binary_sensor.workday`, `schedule.airflow_boost_workday`, `schedule.airflow_boost_non_workday` | exist in the repo; confirm they are live |
+| Airflow package (after #131 is deployed) | `sensor.airflow_cooling_state` (state and attributes `profile`, `ventilation`), `sensor.airflow_bypass_estimation`, `sensor.airflow_outdoor_dew_5min`, `sensor.airflow_min_indoor_dew_5min`, `sensor.airflow_dew_point_target`, `sensor.airflow_dew_point_max`, `binary_sensor.airflow_humidity_flush_needed`, `binary_sensor.airflow_humidity_drying_needed`, `binary_sensor.workday`, `schedule.airflow_boost_workday`, `schedule.airflow_boost_non_workday` | exist in the repo; confirm they are live |
 | Heating | `sensor.geotherm_heating_hvac_action`, `binary_sensor.geotherm_heating_hwc_active`, `binary_sensor.heating_compressor_active`, `binary_sensor.heating_dhw_active`, `sensor.technikraum_heizung_heizung_power`, `sensor.heating_cooling_indicator` | state strings to record: `hvac_action` values seen; `heating_cooling_indicator` values (`active_heating` in particular) |
 | Victron | `sensor.victron_pv_net_power`, `sensor.victron_battery_soc` | |
 
@@ -536,7 +590,8 @@ the state-valued ones) which state strings does it use? Record differences in th
 
 ## Deploy
 
-By hand (Decision 23). The step-by-step instructions are in the PR description. The only carried
+By hand (Decision 23). PR #131 is merged and deployed first (it needs a restart for its
+`custom_templates/` file). The step-by-step instructions are in the PR description. The only carried
 value is the battery floor (`heating_pv_min_battery_soc` → `energy_pv_min_battery_soc`); the new
 `hrds_*` helpers get the starting values above; `hrds_automatic_enabled` stays off until the
 checks pass.
@@ -545,8 +600,9 @@ checks pass.
 
 1. **`tests/test_hrds.py`:**
    - not wanted outside the window even above max; wanted inside the window above max regardless of
-     PV and `drying_needed`;
-   - above target: wanted only with PV surplus, also with free cooling on; not with `drying_needed`,
+     PV and a pending boost;
+   - above target: wanted only with PV surplus, also with free cooling on; not with a pending boost
+     (`base_state` `moisture_flush_boost`),
      not in `active_heating`;
    - Schmitt: stays on between trigger and `trigger − hrds_off_dew_diff`;
    - min runtime: need clears with the timer active → no stop until `timer.finished`;
@@ -558,21 +614,27 @@ checks pass.
      reasons (humidity reached, window closed, automatic off, unit switched off, refused);
    - unit off → nothing happens, state `unit_off`; unit switched off mid-run → request cleared, run
      ended; the package never writes `switch.unit_on_off`;
-   - Away: wanted outside the window above target with PV; with `flush_needed` and no PV; not with
-     neither; not blocked by `drying_needed`; Away toggled mid-run keeps the same run.
-2. **`tests/test_airflow.py`:**
+   - Away: wanted outside the window above target with PV; with a flush `base_state` and no PV; not
+     with neither; not blocked by a pending boost; Away toggled mid-run keeps the same run;
+   - not wanted with the airflow automation off (27); an unavailable decision means no pending
+     boost and no flush.
+2. **`tests/test_airflow.py`** (#131's decision-table style, `_seed_indicators`):
    - `airflow_boost_window_active` matches the old `in_schedule`; `drying_needed` unchanged;
-   - active on → auto off + medium from each prior state (auto, low, boost running → cancelled,
-     heat_low, moisture_low); in Away: latch set, away off, medium, and at run end away on, latch
+   - decision table: `hrds_dehumidify_active` on → state `hrds_dehumidify`, ventilation
+     `dehumidify`, profile by the moisture test, `base_state` = #131's decision for every row;
+     off → every #131 row unchanged; automation off → `off` whatever the HRDS; unknown HRDS →
+     normal decision; unknown moisture test during a run → `warm`;
+   - active on → auto off + medium from each prior state (auto, low, boost decided → stopped by the
+     boost automation, heat_low, moisture_low); manual boost left alone; in Away: latch set, away off, medium, and at run end away on, latch
      cleared; latch switched off during a run → Away not restored; away switched on during a run →
      latch set, away off again, medium kept; away off is written before the preset;
      `airflow_away_active` on through the lift;
    - profile `cool` when the intake is dry enough, `warm` when it is wetter or at/above the
      max-humidity dew point; consistent with `flush_needed` (→ cool) and
      `moisture_ventilation_low_needed` (→ warm) wherever those are on; also with heat protection
-     on and with no airflow state on; Blocks 1–5 not run while active;
-   - boost does not start or re-arm while active, nor while Away is lifted; starts on active → off
-     with `drying_needed` on (at home);
+     on and with no airflow state on;
+   - boost not decided while active (stopped), not run while Away is lifted; decided again and
+     started after the run with `drying_needed` on (at home);
    - active → off restores the normal state; no airflow notification while active and for 3 min;
    - all existing airflow tests pass (regression gate).
 3. **`tests/test_heating_pv_boost.py`:** `heating_dhw_active` keeps its 25-min tail;

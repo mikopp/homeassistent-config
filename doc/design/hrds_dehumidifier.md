@@ -1,7 +1,9 @@
 # HRDS dehumidifier — design
 
 Package: `packages/hrds_dehumidifier.yaml`, dashboard `dashboards/hrds-dashboard.yaml`, with
-coordination changes in `packages/airflow_cooling.yaml`, `packages/heating_pv_boost.yaml` and
+coordination changes in `packages/airflow_cooling.yaml` and its decision macro
+`custom_templates/airflow_decision.jinja` (the single airflow decision of PR #131, which this
+design builds on), `packages/heating_pv_boost.yaml` and
 `packages/energy.yaml`.
 
 > **Status: designed, not implemented.** This page describes the agreed design. The work steps,
@@ -39,6 +41,7 @@ Always required:
 |-----------|-----|
 | The HRDS is **switched on** (`sensor.unit_status` on) | Switching the unit on or off is the owner's choice; the automation never does it. Unit off means the automation is off |
 | The automation is enabled (`input_boolean.hrds_automatic_enabled`) | Its own enable switch, like every automation in this repo |
+| The ventilation automation is enabled (`input_boolean.airflow_cooling_automatic_enabled`) | Only it holds the Q350 at medium during a run; without it the coil would not get its air |
 | Not heating season (`sensor.heating_cooling_indicator` ≠ `active_heating`) | Brine circuit, see above |
 | The heat pump is **not making hot water** | See [Hot water](#hot-water-pauses-a-run) |
 
@@ -48,7 +51,7 @@ the same window as the ventilation boost; runs are noisy), for one of these reas
 | Reason | Condition |
 |--------|-----------|
 | **Too humid** | Indoor dew point above the dew point of the *max* humidity. Runs regardless of PV |
-| **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** a ventilation drying boost is pending (outdoor air dry enough to flush for free; the boost goes first). With no boost intended, the HRDS runs |
+| **Humid and the sun pays for it** | Indoor dew point above the dew point of the *target* humidity **and** free PV available, **unless** the ventilation decision has a drying boost pending (outdoor air dry enough to flush for free; the boost goes first). With no boost intended, the HRDS runs |
 
 **In Away** (`binary_sensor.airflow_away_active`: the Q350's away function on, or Away lifted for
 a run, see below) — nobody is home, so the **boost window is ignored**. The HRDS runs when the indoor dew point is above the *target* dew point and one of:
@@ -56,7 +59,7 @@ a run, see below) — nobody is home, so the **boost window is ignored**. The HR
 | Reason | Condition |
 |--------|-----------|
 | **The sun pays for it** | Free PV available |
-| **Double down on a flush** | The ventilation package wants to flush moisture (`binary_sensor.airflow_humidity_flush_needed`: outdoor air drier than indoor). The ventilation flushes dry air at medium and the HRDS dries the recirculated air at the same time |
+| **Double down on a flush** | The ventilation decision wants to flush moisture (outdoor air drier than indoor). The ventilation flushes dry air at medium and the HRDS dries the recirculated air at the same time |
 
 Free cooling does not stop a run: free PV makes the extra drying cheap, and free cooling only dries
 as far as the outdoor dew allows.
@@ -77,9 +80,12 @@ deliberate: the ventilation package's own moisture logic (flush, low) handles mo
 
 ## What the ventilation does during a run
 
-While the HRDS dehumidifies (`binary_sensor.hrds_dehumidify_active`: our request is on, or the unit
-recirculates for any reason — also a dehumidify you start by hand), the ventilation controller
-suspends its normal logic:
+The ventilation package has one decision, `sensor.airflow_cooling_state` (state = the reason,
+attributes `profile` and `ventilation` = what to apply); its automations only apply it. The HRDS is
+folded into that decision as its top layer. While the HRDS dehumidifies
+(`binary_sensor.hrds_dehumidify_active`: our request is on, or the unit recirculates for any reason
+— also a dehumidify you start by hand), the decision is **`hrds_dehumidify`** instead of the normal
+one:
 
 - **Preset medium, auto off.** Together with the 150 m³/h recirculation that gives the 300 m³/h
   the coil is built for. This replaces whatever the ventilation would otherwise do: low (humid or
@@ -104,8 +110,9 @@ suspends its normal logic:
   during a run the profile follows them (up to their hysteresis). During a run the profile is
   decided by moisture alone; the Q350 itself opens the bypass only when that also suits the
   temperature.
-- **No boost.** A running boost is cancelled when the run starts; a pending one starts when the run
-  ends.
+- **No boost.** During a run the decision is not `boost`, so a boost the ventilation started is
+  stopped, and it starts again when the run ends if it is still wanted. A boost you start by hand
+  is left alone (it gives more air than medium).
 - **Medium also in Away.** The Away level is far too little air for the coil. When a run starts in
   Away, the ventilation controller lifts Away for the run (turns the Q350's away function off and
   marks it in `input_boolean.airflow_away_lifted`), holds medium like at home, and switches Away
@@ -117,8 +124,13 @@ suspends its normal logic:
   Assistant or the ComfoConnect app; set during a run, it is lifted again at once and restored when
   the run ends.
 
-When the run ends, the ventilation controller re-derives its normal state from its own sensors.
-Nothing has to be restored.
+When the run ends, the decision is the normal one again and the automations apply it. Nothing has
+to be restored, except Away after a lift.
+
+The decision keeps what it *would* decide without the HRDS as the attribute `base_state` (for
+example `moisture_flush_boost` for a pending boost). That is what the HRDS reads for "a boost is
+pending" and "the ventilation is flushing": the HRDS never looks at the decision's own HRDS layer,
+so the two cannot feed back on each other.
 
 ## Hot water pauses a run
 
@@ -169,11 +181,11 @@ three minutes after a run.
 
 | Package | Writes | Reads from the other |
 |---------|--------|----------------------|
-| `hrds_dehumidifier.yaml` | The HRDS dehumidify request only | Boost window, Away, drying boost and flush intent, humidity thresholds, season, hot water, battery floor |
-| `airflow_cooling.yaml` | Every Q350 output: profile, preset, auto mode, boost | `binary_sensor.hrds_dehumidify_active` |
+| `hrds_dehumidifier.yaml` | The HRDS dehumidify request only | The ventilation decision's `base_state` (pending boost, flush), boost window, Away, whether the ventilation automation is on, humidity thresholds, season, hot water, battery floor |
+| `airflow_cooling.yaml` | Every Q350 output: profile, preset, auto mode, boost, Away lift | Its decision reads `binary_sensor.hrds_dehumidify_active` |
 
-No device is written by both. The ventilation controller stays the only writer of the Q350; the
-HRDS package never writes it.
+No device is written by both. The ventilation automations stay the only writers of the Q350 and
+apply only the decision; the HRDS package never writes the Q350.
 
 ## Safety
 
