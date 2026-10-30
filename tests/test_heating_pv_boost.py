@@ -349,6 +349,19 @@ def test_average_run_is_runtime_over_runs(home_assistant: HomeAssistant) -> None
     )
 
 
+def test_stop_temp_is_flow_setpoint_plus_hysteresis(home_assistant: HomeAssistant) -> None:
+    """Live 2026-10-30: setpoint 24 °C, hysteresis 7 K → forced stop at 31 °C; missing input → unavailable."""
+    home_assistant.set_state("sensor.geotherm_heating_circuit_flow_temp_desired", "24", _C)
+    home_assistant.set_state("sensor.geotherm_heating_compressor_hysteresis", "7.0", {"unit_of_measurement": "K"})
+    home_assistant.assert_entity_state(
+        "sensor.heating_compressor_stop_temp",
+        lambda s: s not in ("unknown", "unavailable") and abs(float(s) - 31.0) < 0.01,
+        timeout=5,
+    )
+    home_assistant.set_state("sensor.geotherm_heating_compressor_hysteresis", "unavailable", {})
+    home_assistant.assert_entity_state("sensor.heating_compressor_stop_temp", "unavailable", timeout=5)
+
+
 def test_efficiency_is_heat_over_electricity_once_meaningful(home_assistant: HomeAssistant) -> None:
     """9 kWh heat from 3 kWh electricity → 3.0; under 1 kWh electricity it is too coarse → 0."""
     _kwh = {"unit_of_measurement": "kWh"}

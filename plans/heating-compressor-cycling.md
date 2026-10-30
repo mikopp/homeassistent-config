@@ -203,6 +203,9 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
       Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
       check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
       35 °C (`FlowTempMax`). See the notes' "Cold weather" point.
+- [x] 7a. `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) added to the dashboard
+      card and the "Why runs end" graph (owner request, 2026-10-30), with a test. Owner declined
+      reading `BackupModeHc` (backup heater stays disabled) and a flow > 34 °C notification.
 
 ### Checks run locally (2026-10-30)
 

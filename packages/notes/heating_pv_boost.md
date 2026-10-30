@@ -156,6 +156,8 @@ Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the li
   `ReturnTempMax` 46 °C; **unknown** is whether `FlowTempMax` also stops the compressor or only
   caps the setpoint. Rule: raise the hysteresis only moderately (8–9 K) and, on the first cold
   days, step it back by 1 K if run-end flow temperatures approach 35 °C.
+  `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) plots that stop point on the
+  "Why runs end" graph.
 
 | Register | Meaning |
 |---|---|

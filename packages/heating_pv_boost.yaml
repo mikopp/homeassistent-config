@@ -711,6 +711,25 @@ template:
           {% set hours = states('sensor.heating_compressor_runtime_today') | float %}
           {{ (hours * 60 / runs) | round(1) if runs > 0 else 0 }}
 
+      # ── Compressor stop temperature (flow setpoint + hysteresis) ──────────
+      # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
+      # (hydraulic plans 1/3, no buffer — this house). Plotted next to the actual flow temp on the
+      # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
+      # cut the run short. In cold weather it also shows how close the stop point comes to
+      # mc/FlowTempMax (35 °C) — the cue to step the hysteresis back (packages/notes "Cold weather").
+      - name: "Heating Compressor Stop Temp"
+        unique_id: heating_compressor_stop_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-alert
+        availability: >
+          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired')
+             and has_value('sensor.geotherm_heating_compressor_hysteresis') }}
+        state: >
+          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)
+              + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
+
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
       # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight. Includes
       # hot water and the circulation pump's standby draw, and YieldTotal moves in whole kWh, so
@@ -1148,6 +1167,7 @@ group:
       - sensor.heating_yield_daily
       - sensor.heating_electricity_daily
       - sensor.heating_efficiency_today
+      - sensor.heating_compressor_stop_temp
       # Loxone comfort signal
       - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors
