@@ -38,11 +38,11 @@ yet. Add them there:
 - New: geoTHERM `mc/OperatingMode` = `auto`, with the Vaillant's own time program (`on` by day,
   `low` at night). Add an Observations entry.
 - New: `ehp/CompIntegral` −150 → −180 °min (owner). Heating curve = 0.15.
-- **Design impact (to discuss before Phase 2):** the control law says HA writes `low`/`on`. Any HA
-  write would replace `auto` and silently disable the time program. So Phase 2 must either:
-  - keep `auto` and act only through `mc/TempDesired` during a boost, or
-  - take over the day/night schedule in HA.
-  Record this as an open decision. Don't change it silently.
+- **Phase 2 mode decision (owner, 2026-10-30, recorded in the slab plan's "Control law"):** `auto`
+  is normal operation. HA writes `on` only when Loxone says "not warm enough" or a boost is
+  wanted, then returns to `auto`. HA never writes `low` any more. By day `auto` and `on` give the
+  same setpoint, so there are no on/low setpoint flips. At night Loxone's schedule matches the
+  Vaillant's, so they normally agree. A boost only happens by day.
 - Loxone still publishes `warm_enough` (owner-confirmed), so it stays the comfort input.
 - **Bridge pattern (owner-supplied live config, 2026-10-30): an explicit per-topic allowlist.**
   - Each state topic HA reads gets its own `topic ebusd/<circuit>/<name> in 0` line.
@@ -180,7 +180,7 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
 ## Status
 
 - [x] 0. Plan file (this file)
-- [x] 0b. Owner's manual changes, the bridge allowlist pattern and the open Phase 2 decision
+- [x] 0b. Owner's manual changes, the bridge allowlist pattern and the Phase 2 mode decision
       recorded in `plans/ebusd-pv-heating-optimization.md` and `packages/notes/heating_pv_boost.md`
 - [x] 1. 9 read-only MQTT sensors (integral, demand, flow setpoint, 3 settings, 3 counters)
 - [x] 2. Poll registration: tier 4 (`?5`) and tier 5 (`?9`)

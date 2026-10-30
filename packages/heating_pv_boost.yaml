@@ -147,7 +147,8 @@ mqtt:
     # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
     # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
     # generator's real-time activity (HVAC action). This is what the control law will write in
-    # Phase 3 (as "low" or "on", never "off" — see the plan). Read-only here in Phase 1.
+    # Phase 2/3 (as "auto" or "on", never "off" or "low" — see the plan's control law). Read-only
+    # here in Phase 1.
     #
     # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
     # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.

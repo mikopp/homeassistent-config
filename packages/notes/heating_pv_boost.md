@@ -93,7 +93,7 @@ ebusd instance actually runs is unconfirmed from here — the dual-form parsing 
 cheap insurance either way.
 
 - **Every enum read accepts both forms**, mapping through one table; unmapped → `unknown`.
-- **Writes take names** (`low`, `on`). Never echo a normalised read back on a write.
+- **Writes take names** (`auto`, `on`). Never echo a normalised read back on a write.
 - Field *position* is stable across config generations even where field *names* are not, which is
   the one place positional parsing beats named access.
 
@@ -167,8 +167,9 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
 - Loxone does **not** control room valves. Room valves are fixed hydraulic throttling only
   (bedrooms), no automatic actuation.
 - geoTHERM `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day,
-  `low` at night). Any HA write of `low`/`on` would replace `auto` and disable that program —
-  see the open Phase 2 decision in the slab plan.
+  `low` at night). **Decided for Phase 2:** `auto` is normal operation; HA writes `on` only for
+  Loxone "not warm enough" or a slab boost, then back to `auto` — never `low`. By day both give
+  the same setpoint. See the slab plan's "Control law".
 - `ehp/CompIntegral` changed −150 → −180 °min; heating curve 0.15.
 
 ## Hardware limits the controller must respect

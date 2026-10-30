@@ -23,26 +23,40 @@ Each system does only what it uniquely knows:
 | Home Assistant | Energy. Computes PV surplus, decides slab mode, writes two registers. |
 | Vaillant | The machine. Weather compensation, VR 90 room influence, compressor protection, outdoor cutoff. |
 
-HA writes only `mc/OperatingMode` and `mc/TempDesired`, and only ever `low` or `on` — **never
-`off`**. That single rule makes the worst failure state "slightly cool", never "no heat".
+HA writes only `mc/OperatingMode` and `mc/TempDesired`, and only ever `auto` or `on` — **never
+`off`** (and no longer `low`). That single rule makes the worst failure state "slightly cool",
+never "no heat".
 
-> **OPEN DECISION before Phase 2 (2026-10-30).** The owner set the geoTHERM to `auto` with its own
-> time program (`on` by day, `low` at night). Any HA write of `low`/`on` replaces `auto` and
-> silently disables that program. Phase 2 must either keep `auto` and act only through
-> `mc/TempDesired` during a boost, or take over the day/night schedule in HA. Not yet decided —
-> the control law below assumes the original design.
+**Decided (owner, 2026-10-30): `auto` is normal operation, `on` is the exception.** The
+geoTHERM's own time program runs the day/night schedule (`TempDesired` by day, `TempDesiredLow` at
+night). HA switches to `on` only when Loxone says the house is not warm enough, or when a slab
+boost is wanted, and returns to `auto` afterwards.
+
+- **By day `auto` and `on` give the same setpoint** (`TempDesired`), so outside a boost the switch
+  changes nothing for the machine. This removes the frequent `on`/`low` setpoint flips that Loxone
+  used to cause.
+- **At night** Loxone's own night schedule matches the Vaillant time program, so the two normally
+  agree and HA stays on `auto`. If Loxone finds the house is not warm enough at night, HA writes
+  `on`, which lifts the night setpoint from `TempDesiredLow` to `TempDesired` until Loxone is
+  satisfied. That is intended.
+- **A boost only happens by day** (`schedule.heating_pv_window`), so it never fights the night
+  setback.
 
 ### Control law
 
 | Heating season | Slab mode | Loxone says | `mc/OperatingMode` | `mc/TempDesired` |
 |---|---|---|---|---|
-| off | — | — | `low` | `TDL` |
-| on | no | warm enough | `low` | `TDL + 1` |
+| off | — | — | `auto` | `TDL` |
+| on | no | warm enough | `auto` | `TDL + 1` |
 | on | no | heat needed | `on` | `TDL + 1` |
 | on | yes | *ignored* | `on` | `TDL + 1 + offset` |
 
 `TDL` = `mc/TempDesiredLow`, the only human knob. Heating season =
 `sensor.heating_cooling_indicator` in (`active_heating`, `neutral`).
+
+Off season: `auto` with `TempDesired` = `TDL` makes the day and night setpoints equal, which is
+what `low` did before. The night setpoint is always `TDL` (the Vaillant's own setback), so
+`TDL + 1` / `TDL + 1 + offset` only ever apply by day — or at night while Loxone holds `on`.
 
 ### Why the setpoint is derived, not captured
 
@@ -246,10 +260,10 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Victron's own floor, so the gate never blocked.
 - [x] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode — owner, 2026-10-30.
       Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
-      valves. The geoTHERM now runs `auto` on its own time program (see the open decision in
-      "Control law").
+      valves. The geoTHERM now runs `auto` on its own time program; HA will switch to `on` only
+      for "not warm enough" or a boost (decided 2026-10-30, see "Control law").
 - [ ] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
-- [ ] 11. Phase 2 — comfort control (`low`/`on` + derived setpoint)
+- [ ] 11. Phase 2 — comfort control (`auto`/`on` + derived setpoint)
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
 - [ ] 14. Compressor short-cycling observation + tuning — separate plan,
