@@ -244,9 +244,18 @@ template:
           {% set pv = ps * RH / 100 %}
           {{ (237.3 * (pv / 0.61078) | log / (17.27 - (pv / 0.61078) | log)) | round(2) }}
 
-      # Read-only reason-based status of the cooling/ventilation automation.
-      # Derived view only — the automations remain the source of truth. Recorded
-      # in history (intentionally NOT in the recorder.exclude block below).
+      # THE single decision of the airflow automation (state-based on purpose: it is derived from
+      # slow binary indicators, so it must re-evaluate from current inputs and never restore stale —
+      # see packages/notes/airflow_cooling.md). Indicators feed ONLY this sensor; every automation
+      # that changes the ComfoConnect (controller profile + preset/auto, drying boost) and the
+      # climate hvac_action read ONLY this sensor, never the indicators directly.
+      #   state       — reason label shown on the dashboard
+      #   profile     — attribute: temperature profile to apply (warm / comfort / cool)
+      #   ventilation — attribute: rate to apply (boost / medium / low / auto)
+      # All three come from ONE macro (custom_templates/airflow_decision.jinja) so they can never
+      # disagree; the decision table is documented there. It never reads the outputs (profile,
+      # preset, boost switch, climate), so applying a decision cannot change the decision.
+      # Recorded in history (intentionally NOT in the recorder.exclude block below).
       - unique_id: airflow_cooling_state
         name: "Airflow Cooling State"
         icon: >
@@ -255,47 +264,33 @@ template:
           {% elif s == 'moisture_flush_boost' %}mdi:fan-plus
           {% elif s == 'moisture_protection' %}mdi:fan-minus
           {% elif s == 'heat_protection' %}mdi:sun-thermometer
-          {% elif s in ['free_cooling', 'moisture_flush_cooling', 'cooling'] %}mdi:snowflake
+          {% elif s in ['free_cooling', 'moisture_flush_cooling'] %}mdi:snowflake
           {% elif s in ['heating', 'moisture_retention'] %}mdi:fire
           {% else %}mdi:fan{% endif %}
-        # low_needed and free_cooling_available are NOT has_value gates: the state template
-        # reads both only via is_state(..., 'on'), False for unknown/unavailable — fail-safe.
-        # Gating on them would cascade their boot-unknown into this sensor (→ unavailable).
+        # Every input must hold a value: an unavailable decision makes the automations no-op
+        # (they require has_value on this sensor) instead of acting on a fail-safe 'off' reading.
+        # A reload brings the trigger-based indicators back as 'unknown' only until their own
+        # self-trigger / next input change, so this is brief.
         availability: >
-          {{ has_value('climate.airflow_climate') and
-             has_value('switch.comfoconnect_pro_boost') and
+          {{ has_value('sensor.heating_cooling_indicator') and
+             has_value('binary_sensor.airflow_free_cooling_available') and
+             has_value('binary_sensor.airflow_humidity_flush_needed') and
+             has_value('binary_sensor.airflow_humidity_drying_needed') and
+             has_value('binary_sensor.airflow_moisture_ventilation_low_needed') and
+             has_value('binary_sensor.airflow_heat_ventilation_low_needed') and
              has_value('sensor.airflow_min_indoor_dew_5min') and
              has_value('sensor.airflow_dew_point_min') }}
+        # this.attributes.profile = previous decision (dry-retention hysteresis memory).
         state: >
-          {# action: reads hvac_action from climate.airflow_climate, where 'drying' already
-             reflects moisture flushing (a boost during free cooling, or the cool profile
-             flushing humid air). moisture_flush_boost = a boost while that drying is active. #}
-          {# input_boolean/input_number: never unavailable — no defaults needed. #}
-          {% set auto   = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
-          {% set free   = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
-          {% set moist  = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
-          {% set heat   = is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') %}
-          {% set boost  = is_state('switch.comfoconnect_pro_boost', 'on') %}
-          {% set action = state_attr('climate.airflow_climate', 'hvac_action') %}
-          {# Indoor moisture vs the min-humidity-derived dew point at target_temp (stable threshold). #}
-          {% set indoor_dew = states('sensor.airflow_min_indoor_dew_5min') | float %}
-          {% set dew_min    = states('sensor.airflow_dew_point_min') | float %}
-          {# Flush (action == 'drying') is checked BEFORE the low guards: when air is actively being
-             flushed, that is the operative mode — never report a protection. With the mutual
-             exclusivity a low guard can't be ON during a flush anyway, but action can also be
-             'drying' via free_cool + boost (independent of flush_needed), so the ordering matters.
-             heat_protection (too-warm outdoor) is reported only when moisture protection is not also
-             active; a hot-and-humid spell reports moisture_protection. #}
-          {% if not auto %}off
-          {% elif boost and action == 'drying' %}moisture_flush_boost
-          {% elif action == 'drying' %}moisture_flush_cooling
-          {% elif heat and not moist %}heat_protection
-          {% elif moist or heat %}moisture_protection
-          {% elif action == 'cooling' and free %}free_cooling
-          {% elif action == 'cooling' %}cooling
-          {% elif action == 'heating' and indoor_dew < dew_min %}moisture_retention
-          {% elif action == 'heating' %}heating
-          {% else %}comfort{% endif %}
+          {% from 'airflow_decision.jinja' import airflow_decision %}
+          {{ (airflow_decision(this.attributes.get('profile', '')) | string).split('|')[0] }}
+        attributes:
+          profile: >
+            {% from 'airflow_decision.jinja' import airflow_decision %}
+            {{ (airflow_decision(this.attributes.get('profile', '')) | string).split('|')[1] }}
+          ventilation: >
+            {% from 'airflow_decision.jinja' import airflow_decision %}
+            {{ (airflow_decision(this.attributes.get('profile', '')) | string).split('|')[2] }}
 
 
   # --- Trigger-based binary sensors ---
@@ -504,13 +499,13 @@ template:
           minutes: 10
 
   # Combined "reduce ventilation" intent: either protection — outdoor too HUMID or too WARM.
-  # Section 2 keys on this single sensor so both guards share the same priority over the
-  # free-cooling low→medium bump.
+  # Display/history only: the decision (sensor.airflow_cooling_state) reads the two guards
+  # separately so it can label heat_protection vs moisture_protection.
   #
   # STATE-BASED (deliberately NOT trigger-based): this is a pure derived OR of two SLOW binary
   # sensors that can sit steady for hours. A trigger-based template RESTORES its last state on HA
   # restart and only recomputes when an input CHANGES — so it could come back STALE (e.g. 'off'
-  # while heat_low is 'on') and never recompute, stranding Section 2 off its low intent (observed:
+  # while heat_low is 'on') and never recompute, stranding its consumer off the low intent (observed:
   # heat-protection all day but preset stuck at medium because this sensor read 'off'). A plain
   # state-based template re-evaluates continuously from the current inputs and at startup, so it can
   # never go stale. It carries no delay/hysteresis of its own — the two source sensors already do.
@@ -925,23 +920,14 @@ climate:
                   option: cool
 
     # Standard climate property: reflects actual ComfoConnect profile state (read-only).
-    # 'drying' reflects moisture flushing — either a boost is running while free cooling is
-    # active, or the cool profile is flushing humid air (binary_sensor.airflow_humidity_flush_needed).
+    # 'drying' = the decision (sensor.airflow_cooling_state) is a moisture flush AND the device is
+    # actually on the cool profile. Reads the decision sensor, never the indicators: the stable
+    # decision (not the raw boost switch, which drops for seconds on every hardware re-arm) keeps
+    # hvac_action from flip-flopping. Otherwise it mirrors the actual profile.
     hvac_action_template: >
-      {% set profile   = states('select.comfoconnect_pro_temperature_profile') %}
-      {% set free_cool = is_state('binary_sensor.airflow_free_cooling_available', 'on') %}
-      {# Use the drying INTENT, not the raw boost switch. switch.comfoconnect_pro_boost drops for
-         a few seconds whenever the hardware boost timer is re-armed; reading it here would flip
-         hvac_action (and sensor.airflow_cooling_state) on every re-arm — the 30-min flip-flop.
-         drying_needed is the stable intent that actually drives the boost, so the action follows
-         the decision, not the momentary switch state. #}
-      {% set drying_wanted = is_state('binary_sensor.airflow_humidity_drying_needed', 'on') %}
-      {# Flush state comes from the dedicated sensor (mirrors Block 2's flush trigger): it
-         already encodes the two dew branches, the ComfoConnect temp gate and season guard. #}
-      {% set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-      {% if free_cool and drying_wanted %}
-        drying
-      {% elif profile == 'cool' and flush_needed %}
+      {% set profile = states('select.comfoconnect_pro_temperature_profile') %}
+      {% set state   = states('sensor.airflow_cooling_state') %}
+      {% if profile == 'cool' and state in ['moisture_flush_boost', 'moisture_flush_cooling'] %}
         drying
       {% elif profile == 'cool' %}
         cooling
@@ -975,56 +961,52 @@ climate:
 
 # --- AUTOMATION ---
 automation:
-  # UNIFIED VENTILATION CONTROLLER — single source of truth for all ComfoConnect outputs that the
-  # automation owns: temperature profile (warm/comfort/cool), ventilation preset (low/medium) and
-  # auto_mode. On every relevant input change it recomputes the COMPLETE desired state from the
-  # decision sensors and applies it idempotently, so no two automations ever fight over auto_mode or
-  # the preset. The boost (binary_sensor.airflow_humidity_drying_needed → switch boost) is the only
-  # output left to a separate automation; this controller never touches it.
+  # UNIFIED VENTILATION CONTROLLER — applies the decision of sensor.airflow_cooling_state to every
+  # ComfoConnect output the automation owns: temperature profile (warm/comfort/cool), ventilation
+  # preset (low/medium) and auto_mode. It reads ONLY the decision sensor (its `profile` and
+  # `ventilation` attributes) — never the indicators (free cooling, flush, low guards, season,
+  # indoor dew): those feed the decision sensor, which owns all priority and season rules. The
+  # controller adds only hardware/user guards (Away, never cancel a running boost, idempotency).
+  # The boost itself is applied by the separate drying-boost automation (same decision sensor).
   #   Section 1 — Temperature profile: runs whenever automatic control is on, even during Away.
   #   Section 2 — Preset / auto_mode: runs only when Away is off (Away owns ventilation level).
   - id: airflow_ventilation_controller
     alias: "Airflow: Ventilation Controller"
     description: >
-      Single deterministic controller for ComfoConnect profile + ventilation preset + auto_mode.
-      Profile follows heating/cooling indicator, free cooling, flush and indoor dew. Preset/auto_mode
-      derive from low_needed (→ low), free/flush (→ medium), else auto restored. Idempotent: only
-      writes an output when it differs from the desired state. Boost is handled separately.
+      Applies sensor.airflow_cooling_state to the ComfoConnect: its `profile` attribute sets the
+      temperature profile, its `ventilation` attribute sets preset/auto_mode (low → manual low,
+      medium → manual medium over a low schedule, auto/boost → ComfoConnect auto). Idempotent: only
+      writes an output when it differs from the decision. Boost is handled separately.
     # queued (not restart): a rapid second trigger must never abort a partial apply mid-sequence
     # (auto_mode off → preset). Each run is short and idempotent, so stacked already-satisfied runs
     # are cheap no-ops.
     mode: queued
     trigger:
+      # The decision changed (state or any attribute: a bare entity_id state trigger also fires on
+      # attribute-only changes, e.g. heat_protection with profile comfort → cool).
       - platform: state
-        entity_id: sensor.heating_cooling_indicator
-        id: heating_cooling_changed
+        entity_id: sensor.airflow_cooling_state
+        id: decision_changed
+      # The device changed the profile on its own (reconnect / restart reports a stale profile, or a
+      # manual change while automatic control is on) → re-assert the decided profile.
       - platform: state
-        entity_id: binary_sensor.airflow_free_cooling_available
-        id: free_cooling_changed
-      - platform: state
-        entity_id: binary_sensor.airflow_humidity_flush_needed
-        id: flush_changed
-      - platform: state
-        entity_id: sensor.airflow_avg_indoor_humidity_5min
-        id: humidity_changed
-      # Preset/auto_mode drivers (Section 2) — combined low (moisture OR heat) so a heat-protect
-      # transition re-runs the controller too.
-      - platform: state
-        entity_id: binary_sensor.airflow_ventilation_low_needed
-        id: low_changed
-      # Schedule flipped auto_mode back on while an owner is active → re-assert manual preset
+        entity_id: select.comfoconnect_pro_temperature_profile
+        not_to:
+          - unavailable
+          - unknown
+        id: profile_changed
+      # Schedule flipped auto_mode back on while a manual level is decided → re-assert it
       - platform: state
         entity_id: switch.comfoconnect_pro_auto_mode
         to: "on"
         id: auto_mode_on
-      # Schedule dropped the preset to low while an owner wants medium → re-bump
+      # Schedule dropped the preset to low while medium is decided → re-bump
       - platform: state
         entity_id: select.comfoconnect_pro_ventilation_preset
         to: "low"
         id: preset_set_low
-      # Boost ended: re-evaluate preset so medium/auto is correctly asserted while flush/free
-      # is still active. Boost owns 'high'; on hardware expiry the preset drops — controller
-      # must re-assert the right level without waiting for the next humidity tick.
+      # Boost ended: re-evaluate preset so medium/auto is correctly asserted. Boost owns 'high';
+      # on hardware expiry the preset drops — re-assert the decided level right away.
       - platform: state
         entity_id: switch.comfoconnect_pro_boost
         to: "off"
@@ -1034,374 +1016,94 @@ automation:
         entity_id: switch.comfoconnect_pro_away_function
         to: "off"
         id: away_ended
-      # Re-evaluate once on startup after sensors leave unavailable
+      # Re-evaluate once on startup
       - platform: homeassistant
         event: start
         id: ha_start
     # Guard: skip everything when automatic control is disabled. Away is NOT a top-level condition —
-    # the profile (Section 1) must still follow the season during Away; Section 2 guards Away itself.
+    # the profile (Section 1) must still follow the decision during Away; Section 2 guards Away itself.
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
-      # Startup guard: the ha_start run only proceeds when the decision sensors already have a
-      # value; real state-change triggers always pass. This is a NON-blocking check on purpose —
-      # the previous wait_template (5 min) sat at the head of this queued automation and let every
-      # sensor transition during startup pile up behind it until "Maximum number of runs
-      # exceeded". Skipping is safe: each sensor's own unavailable/unknown → value transition
-      # fires the state triggers above and re-runs the controller as soon as it is evaluable.
-      - condition: or
-        conditions:
-          - condition: not
-            conditions:
-              - condition: trigger
-                id: ha_start
-          - condition: template
-            value_template: >
-              {{ has_value('sensor.heating_cooling_indicator') and
-                 has_value('binary_sensor.airflow_free_cooling_available') and
-                 has_value('binary_sensor.airflow_humidity_flush_needed') and
-                 has_value('binary_sensor.airflow_ventilation_low_needed') }}
+      # No decision → no action. Non-blocking on purpose (a wait here at the head of this queued
+      # automation once piled up startup triggers until "Maximum number of runs exceeded"); the
+      # decision sensor's unavailable → value transition re-fires decision_changed.
+      - condition: template
+        value_template: "{{ has_value('sensor.airflow_cooling_state') }}"
+    variables:
+      decision: "{{ states('sensor.airflow_cooling_state') }}"
+      profile: "{{ state_attr('sensor.airflow_cooling_state', 'profile') }}"
+      ventilation: "{{ state_attr('sensor.airflow_cooling_state', 'ventilation') }}"
     action:
       # ===== SECTION 1: TEMPERATURE PROFILE (runs even during Away) =====
-      - choose:
-          # Block 1: Moisture protect OR active heating without free cooling → warm profile.
-          # Case A: indoor dew below the min-humidity-derived dew (at target_temp) AND not cooling
-          #         season — dry air, retain moisture. A stable, temperature-independent threshold.
-          #         Cooling season is exempt: indoor moisture naturally dips below min in summer.
-          # Case B: active heating + free cooling unavailable AND no humidity flush pending —
-          #         heating season, no free exchange. The flush guard yields to Block 2 when
-          #         indoor moisture is above max (Branch 1), the higher-priority safety action;
-          #         dry-air retention (Case A) is unaffected (dew_min < dew_max, so Case A and a
-          #         flush can never both be true).
-          - conditions:
-              - condition: or
-                conditions:
-                  - condition: and
-                    conditions:
-                      - condition: template
-                        value_template: >
-                          {# Indoor moisture below the min-derived dew (−0.1°C anti-chatter epsilon). #}
-                          {{ states('sensor.airflow_min_indoor_dew_5min') | is_number and
-                             states('sensor.airflow_dew_point_min') | is_number and
-                             states('sensor.airflow_min_indoor_dew_5min') | float <
-                             states('sensor.airflow_dew_point_min') | float - 0.1 }}
-                      - condition: not
-                        conditions:
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "passive_cooling"
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "active_cooling"
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: sensor.heating_cooling_indicator
-                        state: "active_heating"
-                      - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "off"
-                      - condition: state
-                        entity_id: binary_sensor.airflow_humidity_flush_needed
-                        state: "off"
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: select.comfoconnect_pro_temperature_profile
-                    state: "warm"
-            sequence:
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "warm"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Warm Profile"
-                  message: >
-                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
-                    {% set dew_min = states('sensor.airflow_dew_point_min') %}
-                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
-                    {% if dew | is_number and dew_min | is_number and dew | float < dew_min | float %}
-                      Indoor dew {{ dew | float }}°C below min-dew {{ dew_min | float }}°C
-                      (≈{{ rh }}% RH, non-cooling season) — profile set to Warm to retain moisture.
-                    {% else %}
-                      Active heating, free cooling unavailable — profile set to Warm.
-                    {% endif %}
-
-          # Block 2: Free cooling (any non-heating season) OR humidity flush → cool profile.
-          # Case A: free cooling available AND season ≠ active_heating — open the bypass to cool
-          #         whenever the room is above target and outdoor air is cooler and dry enough,
-          #         in neutral (mild spell) as well as cooling season. The free_cooling sensor
-          #         already carries the room≥target + cool/dry-outdoor gates, so only active
-          #         heating is vetoed here (Block 1B owns heating season).
-          # Case B: binary_sensor.airflow_humidity_flush_needed is ON — flush indoor moisture
-          #         toward max even when target humidity is unreachable and even when the
-          #         (dew_target-gated) free-cooling sensor is OFF. The flush sensor already
-          #         encodes the two dew branches, the ComfoConnect temp gate (Branch 2 only),
-          #         the season guard and hysteresis, so no extra gate is needed here.
-          - conditions:
-              - condition: or
-                conditions:
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "on"
-                      # Any season except active heating — free cooling opens the bypass in
-                      # neutral (mild spell / shoulder season) as well as cooling season. The
-                      # free_cooling sensor already requires room ≥ target and cool, dry outdoor
-                      # air, so the season classifier only needs to veto active heating here.
-                      - condition: not
-                        conditions:
-                          - condition: state
-                            entity_id: sensor.heating_cooling_indicator
-                            state: "active_heating"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_humidity_flush_needed
-                    state: "on"
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: select.comfoconnect_pro_temperature_profile
-                    state: "cool"
-            sequence:
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "cool"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: >
-                    {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-                      Ventilation: Humidity flushing
-                    {% else %}
-                      Ventilation: Free Cooling
-                    {% endif %}
-                  message: >
-                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
-                    {% set dew_max = states('sensor.airflow_dew_point_max') %}
-                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
-                    {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
-                      Indoor dew {{ dew }}°C vs max-dew {{ dew_max }}°C
-                      (≈{{ rh }}% RH) — profile set to Cool to flush humid air.
-                    {% else %}
-                      Free cooling active — profile set to Cool to bring in cooler outdoor air.
-                    {% endif %}
-
-          # Block 3: Neutral or cooling season WITHOUT free cooling → comfort profile.
-          # Dead-band guard [min, max] prevents overriding Block 1's warm profile on re-triggers.
-          # Free-cooling guard: Block 2A now owns `cool` in every non-heating season (neutral
-          # included), so this comfort block must yield whenever free cooling is available —
-          # otherwise, once the profile is already `cool`, 2A's idempotency guard skips and this
-          # block would flip it back to comfort (a cool ↔ comfort oscillation).
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "off"
-              - condition: or
-                conditions:
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "neutral"
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "passive_cooling"
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "active_cooling"
-              - condition: template
-                value_template: >
-                  {# Indoor moisture within the dead-band [dew_min, dew_max] (inclusive, no epsilon). #}
-                  {% set dew    = states('sensor.airflow_min_indoor_dew_5min') %}
-                  {% set dew_lo = states('sensor.airflow_dew_point_min') | float %}
-                  {% set dew_hi = states('sensor.airflow_dew_point_max') | float %}
-                  {{ dew | is_number and dew_lo <= dew | float <= dew_hi }}
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: select.comfoconnect_pro_temperature_profile
-                    state: "comfort"
-            sequence:
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "comfort"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Comfort Profile"
-                  message: >
-                    {% if is_state('sensor.heating_cooling_indicator', 'neutral') %}
-                      Neutral season — profile set to Comfort.
-                    {% else %}
-                      Cooling season, free cooling inactive — profile set to Comfort.
-                    {% endif %}
-
-          # Block 4: Bypass-close recovery — profile is stuck at `cool` with no legitimate owner.
-          #
-          # WHY THIS BLOCK EXISTS ("stuck-cool trap"):
-          #   Block 3 can only close the bypass (cool → comfort) when indoor dew is already inside
-          #   the [dew_min, dew_max] dead-band. In two trap scenarios no earlier block matches:
-          #     • C7 (overcool, DRY in cooling season):  1A excluded in cooling; 3 band-fails (DRY).
-          #     • C8 (humid,    HUM in cooling season):  1A needs DRY; 3 band-fails (HUM).
-          #     • N3 (humid,    HUM in neutral season):  1A needs DRY; 3 band-fails (HUM).
-          #   All three leave the `choose:` falling through to `default: []`, freezing the profile
-          #   at `cool`. The humid traps are especially harmful: an open bypass during a humid spell
-          #   keeps importing humid outdoor air even while `low` preset reduces the rate — the open
-          #   bypass defeats heat-recovery mode.
-          #
-          # FIX LOGIC:
-          #   Close the bypass back to `comfort` whenever `cool` is the current profile AND there is
-          #   no active owner (free cooling off, humidity flush off) AND it is not heating season.
-          #   Heating season is excluded because Block 1B (active_heating → warm) takes priority and
-          #   will have already set `warm`, making Block 4 inert.
-          #
-          # WHY THIS CANNOT OSCILLATE:
-          #   Block 4 requires `profile == cool`. Any earlier block that fires first will flip the
-          #   profile away from `cool`, making Block 4 inert on the very next re-trigger:
-          #     • NEUT + DRY + cool → Block 1A fires first → warm → Block 4 sees profile ≠ cool.
-          #     • HEAT + cool + free–/flush– → Block 1B fires first → warm → same.
-          #     • In-band + cool → Block 3 fires first → comfort → Block 4 sees profile ≠ cool.
-          #   The `free– AND flush–` guard suppresses Block 4 for any legitimate `cool` (Block 2
-          #   holds cool while an owner is active, and Block 4 is never reached by the `choose:`).
-          #   Block 4 uniquely drains the out-of-band DRY/HUM stuck-cool trap.
-          - conditions:
-              # Profile must already be `cool` — only the stuck trap value, never warm/comfort.
-              - condition: state
-                entity_id: select.comfoconnect_pro_temperature_profile
-                state: "cool"
-              # No active free-cooling owner — if free cooling is on, Block 2A should hold `cool`.
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "off"
-              # No active humidity-flush owner — if flush is on, Block 2B should hold `cool`.
-              - condition: state
-                entity_id: binary_sensor.airflow_humidity_flush_needed
-                state: "off"
-              # Not heating season — Block 1B owns heating season (sets warm first); belt-and-suspenders.
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "active_heating"
-            sequence:
-              # Close the bypass by restoring the comfort profile.
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "comfort"
-              # Notify: bypass closed because cool is no longer warranted.
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Comfort Profile"
-                  message: >
-                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
-                    {% set dew_min = states('sensor.airflow_dew_point_min') %}
-                    {% set dew_max = states('sensor.airflow_dew_point_max') %}
-                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
-                    Bypass closed — Cool no longer warranted (free cooling and flush both cleared).
-                    Indoor dew {{ dew }}°C (≈{{ rh }}% RH) outside comfort band
-                    [{{ dew_min }}–{{ dew_max }}°C] — profile restored to Comfort.
-
-          # Block 5: Warm-stuck recovery — profile is stuck at `warm` in cooling season with no owner.
-          #
-          # WHY THIS BLOCK EXISTS ("stuck-warm trap"):
-          #   Symmetric twin of Block 4. When season transitions HEAT→COOL while profile is `warm`,
-          #   and indoor dew sits outside [dew_min, dew_max], no earlier block matches:
-          #     • W1 (overcool, DRY in cooling season): 1A excluded (cooling season); 3 band-fails (DRY).
-          #     • W2 (humid,    HUM in cooling season): 1A needs DRY; 3 band-fails (HUM).
-          #   Result: bypass stays CLOSED in summer — ERV runs full heat-recovery when it should cool.
-          #   Less harmful than the cool-stuck trap (no overcool or open-bypass humidity import), but
-          #   costs cooling efficiency until dew drifts into the dead-band or an owner fires.
-          #
-          # FIX LOGIC:
-          #   Restore `comfort` when profile is `warm` AND cooling season is active AND no owner
-          #   (free–, flush–). Cooling season check (passive or active) is explicit so this block
-          #   is completely inert in neutral and heating seasons.
-          #
-          # WHY THIS CANNOT OSCILLATE:
-          #   • Heating season: Block 1B fires first → re-asserts `warm`; Block 5 season-guarded off.
-          #   • Neutral + DRY: Block 1A fires first (dew < dew_min, not cooling) → `warm`; Block 5
-          #     inert (season ≠ cooling). Correct behaviour: dry neutral air should retain moisture.
-          #   • Cooling + in-band: Block 3 fires first → `comfort`; Block 5 never reached by `choose:`.
-          #   • Once Block 5 sets `comfort`, `profile != warm` makes Block 5 inert on next trigger.
-          - conditions:
-              # Profile must already be `warm` — only the stuck trap value in cooling season.
-              - condition: state
-                entity_id: select.comfoconnect_pro_temperature_profile
-                state: "warm"
-              # No active free-cooling owner (Block 2A would legitimately hold cool, not warm, anyway).
-              - condition: state
-                entity_id: binary_sensor.airflow_free_cooling_available
-                state: "off"
-              # No active humidity-flush owner.
-              - condition: state
-                entity_id: binary_sensor.airflow_humidity_flush_needed
-                state: "off"
-              # Cooling season only (passive or active) — neutral/heating seasons are handled by other blocks.
-              - condition: or
-                conditions:
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "passive_cooling"
-                  - condition: state
-                    entity_id: sensor.heating_cooling_indicator
-                    state: "active_cooling"
-            sequence:
-              # Restore comfort profile — bypass opens to normal heat-exchange mode for cooling season.
-              - action: select.select_option
-                target:
-                  entity_id: select.comfoconnect_pro_temperature_profile
-                data:
-                  option: "comfort"
-              - action: notify.mobile_app_greywinds_iphone
-                data:
-                  title: "Ventilation: Comfort Profile"
-                  message: >
-                    {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
-                    {% set dew_min = states('sensor.airflow_dew_point_min') %}
-                    {% set dew_max = states('sensor.airflow_dew_point_max') %}
-                    {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
-                    Cooling season — Warm profile no longer warranted (free cooling and flush both off).
-                    Indoor dew {{ dew }}°C (≈{{ rh }}% RH) outside comfort band
-                    [{{ dew_min }}–{{ dew_max }}°C] — profile restored to Comfort.
-
-        # Fallback: no rule matched (recovery zone, already-correct profile, or edge case) → no-op.
-        # After Blocks 4 and 5 drain the stuck-cool and stuck-warm traps, the only remaining
-        # default path is an already-correct profile (idempotency guard fired above) or H6
-        # (heating season + free cooling active — vanishingly rare, self-heals on next trigger).
-        default: []
+      # Write the decided profile when the device differs. The decision is stateless (every reason
+      # maps to exactly one profile), so the former stuck-cool / stuck-warm recovery blocks are gone:
+      # there is no "keep the current profile" path left to get stuck in.
+      - if:
+          - condition: template
+            value_template: >
+              {{ profile in ['warm', 'comfort', 'cool'] and
+                 not is_state('select.comfoconnect_pro_temperature_profile', profile) }}
+        then:
+          - action: select.select_option
+            target:
+              entity_id: select.comfoconnect_pro_temperature_profile
+            data:
+              option: "{{ profile }}"
+          - action: notify.mobile_app_greywinds_iphone
+            data:
+              title: >
+                {% if decision in ['moisture_flush_boost', 'moisture_flush_cooling'] %}
+                  Ventilation: Humidity flushing
+                {% elif profile == 'cool' %}
+                  Ventilation: Free Cooling
+                {% elif profile == 'warm' %}
+                  Ventilation: Warm Profile
+                {% else %}
+                  Ventilation: Comfort Profile
+                {% endif %}
+              message: >
+                {% set dew     = states('sensor.airflow_min_indoor_dew_5min') %}
+                {% set dew_min = states('sensor.airflow_dew_point_min') %}
+                {% set dew_max = states('sensor.airflow_dew_point_max') %}
+                {% set rh      = states('sensor.airflow_avg_indoor_humidity_5min') %}
+                {% if decision in ['moisture_flush_boost', 'moisture_flush_cooling'] %}
+                  Indoor dew {{ dew }}°C vs max-dew {{ dew_max }}°C
+                  (≈{{ rh }}% RH) — profile set to Cool to flush humid air.
+                {% elif profile == 'cool' %}
+                  Free cooling active — profile set to Cool to bring in cooler outdoor air.
+                {% elif decision == 'moisture_retention' %}
+                  Indoor dew {{ dew }}°C below min-dew {{ dew_min }}°C
+                  (≈{{ rh }}% RH) — profile set to Warm to retain moisture.
+                {% elif profile == 'warm' %}
+                  Active heating season — profile set to Warm.
+                {% else %}
+                  No free cooling, flush or heating needed ({{ decision }}) — profile set to Comfort.
+                {% endif %}
 
       # ===== SECTION 2: VENTILATION PRESET / AUTO_MODE (skipped during Away) =====
       # Away owns the ventilation level, so we only touch preset/auto_mode when Away is off.
-      # Desired state is a priority function of the decision sensors:
-      #   low_needed (combined: moisture OR heat) → auto_mode OFF, preset low
-      #   free OR flush                           → auto_mode OFF, preset medium   (boost rides on top)
-      #   otherwise                               → auto_mode ON  (hand back to ComfoConnect schedule)
-      #
-      # AIRFLOW-INCREASE INVARIANTS (this section is the ONLY place that raises the fan rate):
-      #   1. Dry-air only: medium fires on free OR flush, and BOTH require outdoor drier than indoor
-      #      (dew margin) — a rate increase never imports humid air. Boost ⊂ flush inherits this.
-      #   2. A COOLING increase is guarded on moisture AND real outdoor temp: the free-cooling medium
-      #      bump fires only when the combined low intent is OFF, i.e. heat_low OFF ⇒ real
-      #      (weather-station) outdoor < indoor. A hot real-outdoor day (≥ indoor) can never raise
-      #      flow for cooling — heat_low forces LOW, overriding even a schedule-set medium/high.
-      #   3. The cool PROFILE (Section 1) is a bypass change guarded on the INTAKE temp, not a rate
-      #      increase — so a hot day sits at bypass-open + LOW (cool delivery, minimum rate).
-      #   The ONE hot-weather increase is a moisture flush: flush suppresses moisture_low AND heat_low,
-      #   so flush→medium may fire even when real outdoor ≥ indoor. That is moisture relief (dry air,
-      #   MEDIUM never boost — drying needs weather-station < target), the deliberate mould-safety
-      #   exception; it is NOT a cooling increase escaping the temp guard.
+      # Desired level = the decision's `ventilation` attribute:
+      #   boost  → auto_mode ON, no preset write (the drying-boost automation runs the boost)
+      #   low    → auto_mode OFF, preset low
+      #   medium → auto_mode OFF, preset medium   (only over a schedule holding LOW)
+      #   auto   → auto_mode ON  (hand back to ComfoConnect schedule)
+      # The decision sensor carries all priority/season rules (flush > protections > free cooling;
+      # medium for free cooling only when the cool profile was actually chosen for it — never in
+      # active heating). The rate invariants it encodes:
+      #   1. Dry-air only: medium is decided for a flush or free cooling, and BOTH require outdoor
+      #      drier than indoor (dew margin) — a rate increase never imports humid air.
+      #   2. A COOLING increase is guarded on moisture AND real outdoor temp: free-cooling medium is
+      #      never decided while moisture-low or heat-low is on (heat_low ON ⇔ real outdoor ≥ indoor).
+      #   3. The cool PROFILE is a bypass change guarded on the INTAKE temp, not a rate increase —
+      #      so a hot day sits at bypass-open + LOW (heat_protection: profile cool, ventilation low).
+      #   The ONE hot-weather increase is a moisture flush (medium, never boost — drying needs the
+      #   weather-station temp below target), the deliberate mould-safety exception.
       #
       # Each branch carries an idempotent "needs change" guard, so a notify fires only on a real
       # transition. auto_mode is turned OFF before the preset is written so the schedule can't
-      # momentarily override the manual level. The low branch reads the COMBINED low intent
-      # (moisture OR heat); low and flush are mutually exclusive in the sensors, and the
-      # low-before-medium ordering makes both protections outrank the medium bump.
+      # momentarily override the manual level.
       - if:
           - condition: state
             entity_id: switch.comfoconnect_pro_away_function
@@ -1411,22 +1113,19 @@ automation:
               # Boost owner: boost delivers HIGH airflow in hardware. TWO actions cancel a running
               # boost — writing ANY preset (low/medium), and turning auto_mode OFF (airflow lingers high
               # a few minutes then reverts to the prior preset). Turning auto_mode ON does NOT cancel it
-              # (auto + boost coexist). Detect a boost by its INTENT (drying_needed, which subsumes
-              # flush_needed) OR the switch — never by preset==high (boost merely *reports* high).
-              # While a boost is intended/running we only do SAFE things: keep auto_mode ON (turn on if
-              # off) and write NO preset. The schedule then supplies a sensible underlying preset for
-              # when the boost ends; meanwhile boost gives HIGH so the underlying level is moot.
-              # CRUCIAL: this is the FIRST branch and matches on the boost intent, so the `choose` EXITS
-              # here for the whole boost-owned window — INCLUDING the brief switch-off during a boost
-              # expiry/re-enable. That blocks the Low/Medium branches below (which turn auto OFF / write
-              # a preset) from ever running while a boost is intended, so they can never cancel it. This
-              # is the fix for both observed flip-flops (low clobber + expiry cascade).
+              # (auto + boost coexist). Detect a boost by the decision (ventilation == boost) OR the
+              # switch (a manual boost must not be cancelled either) — never by preset==high (boost
+              # merely *reports* high). While a boost is decided/running we only do SAFE things: keep
+              # auto_mode ON (turn on if off) and write NO preset.
+              # CRUCIAL: this is the FIRST branch, so the `choose` EXITS here for the whole boost-owned
+              # window — INCLUDING the brief switch-off during a boost re-arm. That blocks the
+              # Low/Medium branches below (which turn auto OFF / write a preset) from ever cancelling
+              # a boost.
               - conditions:
                   - condition: or
                     conditions:
-                      - condition: state
-                        entity_id: binary_sensor.airflow_humidity_drying_needed
-                        state: "on"
+                      - condition: template
+                        value_template: "{{ ventilation == 'boost' }}"
                       - condition: state
                         entity_id: switch.comfoconnect_pro_boost
                         state: "on"
@@ -1442,11 +1141,10 @@ automation:
                           entity_id: switch.comfoconnect_pro_auto_mode
 
               # Low: reduce ventilation (outdoor too humid OR too warm). Act unless we are already
-              # at (auto off, preset low). Keys on the combined low intent so both protections win.
+              # at (auto off, preset low).
               - conditions:
-                  - condition: state
-                    entity_id: binary_sensor.airflow_ventilation_low_needed
-                    state: "on"
+                  - condition: template
+                    value_template: "{{ ventilation == 'low' }}"
                   - condition: template
                     value_template: >
                       {{ not (is_state('switch.comfoconnect_pro_auto_mode', 'off') and
@@ -1464,8 +1162,7 @@ automation:
                     data:
                       title: "Ventilation: Low Level"
                       message: >
-                        {% if is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on')
-                              and not is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') %}
+                        {% if decision == 'heat_protection' %}
                           Outdoor air {{ states('sensor.airflow_wheatherstation_outdoor_temp_5min') }}°C
                           at/above indoor {{ states('sensor.airflow_avg_indoor_temp_5min') }}°C —
                           too warm to import; ventilation set to Low to spare the ground reservoir.
@@ -1476,13 +1173,11 @@ automation:
                           too humid — ventilation set to Low.
                         {% endif %}
 
-              # Transient route-to-auto: we are in MANUAL LOW (auto off, preset low), the low owner
-              # has cleared, and a medium owner (free cooling or humidity flush) is now active. The
-              # medium force is an override of the auto SCHEDULE, so hand control back to auto rather
-              # than jump manual-low → manual-medium directly. Turning auto_mode ON re-fires this
-              # controller via the auto_mode_on trigger; on that re-run the Medium branch (now
+              # Transient route-to-auto: we are in MANUAL LOW (auto off, preset low) and medium is now
+              # decided. The medium force is an override of the auto SCHEDULE, so hand control back to
+              # auto rather than jump manual-low → manual-medium directly. Turning auto_mode ON re-fires
+              # this controller via the auto_mode_on trigger; on that re-run the Medium branch (now
               # auto==on) forces medium with a truthful message. No notify — internal routing step.
-              # Requires (free OR flush) ON so the all-clear case is left to the Restore branch below.
               # Boost-gated for symmetry so it never flips auto while boost owns the level.
               - conditions:
                   - condition: state
@@ -1491,59 +1186,29 @@ automation:
                   - condition: state
                     entity_id: select.comfoconnect_pro_ventilation_preset
                     state: "low"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_ventilation_low_needed
-                    state: "off"
+                  - condition: template
+                    value_template: "{{ ventilation == 'medium' }}"
                   - condition: state
                     entity_id: switch.comfoconnect_pro_boost
                     state: "off"
-                  - condition: or
-                    conditions:
-                      - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "on"
-                      - condition: state
-                        entity_id: binary_sensor.airflow_humidity_flush_needed
-                        state: "on"
                 sequence:
                   - action: switch.turn_on
                     target:
                       entity_id: switch.comfoconnect_pro_auto_mode
 
-              # Medium: free cooling or humidity flush wants more air exchange.
-              # GUARDS (see Section 2 header invariants): requires the COMBINED low intent OFF, so this
-              # increase inherits both protections — moisture_low off AND heat_low off. Two legs:
-              #   • free-cooling leg (a COOLING increase): heat_low off ⇒ real outdoor < indoor, and
-              #     free_cooling's own dew gates ⇒ outdoor dry. Guarded on moisture AND real outdoor temp.
-              #   • flush leg (a MOISTURE increase): flush requires outdoor drier than indoor; it also
-              #     suppresses heat_low, so it may raise flow to MEDIUM even when real outdoor ≥ indoor —
-              #     the deliberate mould-safety exception (dry air, medium never boost).
-              # Fires ONLY from the
-              # auto state (auto_mode on) — it overrides the ComfoConnect schedule. Reaching this from
-              # manual low is routed via the transient route-to-auto branch above (manual-low → auto →
-              # medium), so the "from auto schedule" framing below is always truthful. Fires ONLY when
-              # the schedule is actively holding the level at LOW (preset==low): auto=on with preset
-              # already medium (or high) is the PREFERRED end state and needs no intervention, so we no
-              # longer re-force (auto off, medium) over it. Boost-gated: while a boost is intended the
-              # boost-owner branch above matches and exits, so this branch never runs during boost;
-              # the boost==off guard is belt-and-suspenders (writing a preset would cancel a boost).
-              # On boost expiry the boost_ended trigger re-fires the controller so this branch
-              # re-asserts medium (once drying has cleared) without waiting for the next humidity tick.
+              # Medium: flush or free cooling decided — more air exchange. Fires ONLY from the auto
+              # state (auto_mode on) — it overrides the ComfoConnect schedule; manual low is routed via
+              # the route-to-auto branch above. Fires ONLY when the schedule is actively holding the
+              # level at LOW (preset==low): auto=on with preset already medium (or high) is the
+              # PREFERRED end state and is not re-forced. The boost==off guard is belt-and-suspenders
+              # (writing a preset would cancel a boost). On boost expiry the boost_ended trigger
+              # re-fires the controller so this branch re-asserts medium without waiting.
               - conditions:
                   - condition: state
                     entity_id: switch.comfoconnect_pro_auto_mode
                     state: "on"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_ventilation_low_needed
-                    state: "off"
-                  - condition: or
-                    conditions:
-                      - condition: state
-                        entity_id: binary_sensor.airflow_free_cooling_available
-                        state: "on"
-                      - condition: state
-                        entity_id: binary_sensor.airflow_humidity_flush_needed
-                        state: "on"
+                  - condition: template
+                    value_template: "{{ ventilation == 'medium' }}"
                   - condition: state
                     entity_id: switch.comfoconnect_pro_boost
                     state: "off"
@@ -1564,26 +1229,19 @@ automation:
                     data:
                       title: "Ventilation: Medium Preset"
                       message: >
-                        {% if is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
+                        {% if decision == 'moisture_flush_cooling' %}
                           Humidity flush active — preset bumped from auto schedule to Medium
                           for faster moisture exchange.
                         {% else %}
-                          Free cooling available — preset bumped from auto schedule to Medium
+                          Free cooling active — preset bumped from auto schedule to Medium
                           for faster air exchange.
                         {% endif %}
 
-              # Restore: no owner active (low off, free off, flush off). Hand control back to the
+              # Restore: auto decided (no flush, protection or free cooling). Hand control back to the
               # ComfoConnect schedule, but only if WE had taken it (auto_mode currently off).
               - conditions:
-                  - condition: state
-                    entity_id: binary_sensor.airflow_ventilation_low_needed
-                    state: "off"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_free_cooling_available
-                    state: "off"
-                  - condition: state
-                    entity_id: binary_sensor.airflow_humidity_flush_needed
-                    state: "off"
+                  - condition: template
+                    value_template: "{{ ventilation == 'auto' }}"
                   - condition: state
                     entity_id: switch.comfoconnect_pro_auto_mode
                     state: "off"
@@ -1601,34 +1259,42 @@ automation:
             # No branch matched: desired state already satisfied → no-op (avoids log spam).
             default: []
 
-  # Manages boost when outdoor air is dry enough to flush indoor humidity.
-  # The boost switch itself is the only state: drying_needed off→on (re)starts the boost, the
+  # Manages boost when the decision (sensor.airflow_cooling_state, `ventilation` attribute) is
+  # boost — i.e. outdoor air is dry enough to flush indoor humidity and the boost schedule allows
+  # it. Reads ONLY the decision sensor, never binary_sensor.airflow_humidity_drying_needed directly.
+  # The boost switch itself is the only state: ventilation becoming boost (re)starts the boost, the
   # countdown re-arms it while it runs, and nothing restarts a boost that was turned off (by the
-  # user or otherwise) until drying_needed goes off and on again.
+  # user or otherwise) until the decision leaves boost and returns.
   - id: airflow_humidity_drying_boost
     alias: "Airflow: Humidity Drying Boost"
     description: >
-      Runs a 60-minute ventilation boost when outdoor air is dry enough to flush indoor humidity.
-      drying_needed turning on (re)starts the boost, also adopting one that is already running.
-      While the boost runs and drying is still needed it re-arms SEAMLESSLY ~5 min before the
-      hardware countdown expires by re-sending boost ON: the unit restarts its timer with the
+      Runs a 60-minute ventilation boost while sensor.airflow_cooling_state decides ventilation
+      'boost'. The decision becoming boost (re)starts the boost, also adopting one that is already
+      running. While the boost runs and boost is still decided it re-arms SEAMLESSLY ~5 min before
+      the hardware countdown expires by re-sending boost ON: the unit restarts its timer with the
       switch staying on, no flip-flop, no notification. A boost that is turned off stays off until
-      drying_needed goes off and on again. Notifies only on a real state change (boost started /
+      the decision leaves boost and returns. Notifies only on a real state change (boost started /
       stopped).
     # queued (not single): with single, a trigger arriving while a run was still executing was
-    # dropped ("Already running") — a lost drying_needed on/off meant a missed boost start/stop.
+    # dropped ("Already running") — a lost boost on/off decision meant a missed boost start/stop.
     # Every branch re-reads current state, so processing queued triggers in order is safe.
     mode: queued
     max: 5
     trigger:
+      # Decision entered boost. from: none / unavailable (attribute absent) → boost also counts,
+      # like the former drying_needed unknown → on.
       - platform: state
-        entity_id: binary_sensor.airflow_humidity_drying_needed
-        to: "on"
-        id: drying_needed_on
+        entity_id: sensor.airflow_cooling_state
+        attribute: ventilation
+        to: "boost"
+        id: boost_decided
+      # Decision left boost. An unavailable decision drops the attribute (to: None); the stop
+      # branch requires a real non-boost decision, so a reload never stops a running boost.
       - platform: state
-        entity_id: binary_sensor.airflow_humidity_drying_needed
-        to: "off"
-        id: drying_needed_off
+        entity_id: sensor.airflow_cooling_state
+        attribute: ventilation
+        from: "boost"
+        id: boost_not_decided
       # Seamless re-arm: number.comfoconnect_pro_boost_time is a LIVE COUNTDOWN of remaining
       # boost minutes. When it drops below 5 (≈5 min before the 60-min run would end) we
       # re-send boost ON while the switch is still ON. Verified on the device: writing the boost
@@ -1652,31 +1318,26 @@ automation:
       - condition: state
         entity_id: switch.comfoconnect_pro_away_function
         state: "off"
-      # Startup guard: the ha_start run only proceeds once drying_needed has a value. Non-blocking
-      # on purpose — a 5 min wait here held the run slot and starved real triggers. If skipped,
-      # drying_needed's own unknown/unavailable → on/off transition fires the triggers above.
-      - condition: or
-        conditions:
-          - condition: not
-            conditions:
-              - condition: trigger
-                id: ha_start
-          - condition: template
-            value_template: "{{ has_value('binary_sensor.airflow_humidity_drying_needed') }}"
+      # No decision → no action (startup / reload). Non-blocking on purpose — a 5 min wait here held
+      # the run slot and starved real triggers. The decision's own unavailable → value transition
+      # fires boost_decided when boost is decided.
+      - condition: template
+        value_template: "{{ has_value('sensor.airflow_cooling_state') }}"
     action:
       - choose:
-          # Seamless re-arm: the countdown reached <5 min while a boost is running and drying is
-          # still needed. Re-send boost ON: the unit restarts its timer at the full duration while
+          # Seamless re-arm: the countdown reached <5 min while a boost is running and boost is
+          # still decided. Re-send boost ON: the unit restarts its timer at the full duration while
           # the switch stays on (writing boost_time instead is ignored by the device), so nothing
-          # reading switch.comfoconnect_pro_boost (hvac_action, cooling_state, the controller's
+          # reading switch.comfoconnect_pro_boost (the controller's boost owner guard and its
           # boost_ended trigger) flips. No notify: silent internal step, state is unchanged.
           # Guarded on boost == on so it can never (re)start a stopped boost.
           - conditions:
               - condition: trigger
                 id: rearm_due
               - condition: state
-                entity_id: binary_sensor.airflow_humidity_drying_needed
-                state: "on"
+                entity_id: sensor.airflow_cooling_state
+                attribute: ventilation
+                state: "boost"
               - condition: state
                 entity_id: switch.comfoconnect_pro_boost
                 state: "on"
@@ -1685,17 +1346,18 @@ automation:
                 target:
                   entity_id: switch.comfoconnect_pro_boost
 
-          # (Re)start boost: drying_needed turned on, so write boost ON even if a boost already runs
+          # (Re)start boost: boost was decided, so write boost ON even if a boost already runs
           # (restarts its timer, adopts a manual boost). A Home Assistant restart only acts when no
           # boost runs, so it never resets the timer.
           - conditions:
               - condition: state
-                entity_id: binary_sensor.airflow_humidity_drying_needed
-                state: "on"
+                entity_id: sensor.airflow_cooling_state
+                attribute: ventilation
+                state: "boost"
               - condition: or
                 conditions:
                   - condition: trigger
-                    id: drying_needed_on
+                    id: boost_decided
                   - condition: and
                     conditions:
                       - condition: trigger
@@ -1728,14 +1390,16 @@ automation:
                         (dew {{ states('sensor.airflow_min_indoor_dew_5min') }}°C)
                         — boost started to flush humid air via free cooling.
 
-          # Disable boost: drying no longer needed. Only acts on a running boost, so a boost the
-          # user already turned off produces no "stopped" notification.
+          # Disable boost: the decision left boost for a real non-boost level (not an unavailable
+          # decision). Only acts on a running boost, so a boost the user already turned off produces
+          # no "stopped" notification.
           - conditions:
               - condition: trigger
-                id: drying_needed_off
-              - condition: state
-                entity_id: binary_sensor.airflow_humidity_drying_needed
-                state: "off"
+                id: boost_not_decided
+              - condition: template
+                value_template: >
+                  {{ state_attr('sensor.airflow_cooling_state', 'ventilation')
+                     in ['medium', 'low', 'auto', 'off'] }}
               - condition: state
                 entity_id: switch.comfoconnect_pro_boost
                 state: "on"
@@ -1749,7 +1413,7 @@ automation:
                   message: "Humidity drying conditions no longer met — boost stopped."
 
         # No branch matched: desired state already satisfied (e.g. a manual boost reaching the
-        # countdown threshold while drying is off) → no-op (avoids log spam).
+        # countdown threshold while boost is not decided) → no-op (avoids log spam).
         default: []
 
 # --- GROUP ---

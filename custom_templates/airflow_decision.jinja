@@ -1,0 +1,68 @@
+{#- Single decision of the airflow (ComfoConnect) automation — see packages/airflow_cooling.yaml.
+
+    sensor.airflow_cooling_state renders this macro for its state AND for its `profile` /
+    `ventilation` attributes, so the reason shown on the dashboard and the outputs the automations
+    apply always come from one evaluation of the same inputs. Inputs are ONLY the decision
+    indicators — never the device outputs (profile, preset, boost switch, climate) — so the
+    decision cannot feed back on itself.
+
+    prev_profile: the sensor's previous `profile` attribute (hysteresis memory for dry retention).
+    Returns "<state>|<profile>|<ventilation>":
+      state       — reason label (off, moisture_flush_boost, moisture_flush_cooling, heat_protection,
+                    moisture_protection, free_cooling, moisture_retention, heating, comfort)
+      profile     — warm | comfort | cool   (off when automation is off)
+      ventilation — boost | medium | low | auto   (off when automation is off)
+
+    Binary indicators are read via is_state(..., 'on') (unknown/unavailable → False); the sensor's
+    availability template guarantees they all hold a value before this is trusted. -#}
+{%- macro airflow_decision(prev_profile) -%}
+  {%- set auto    = is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') -%}
+  {%- set season  = states('sensor.heating_cooling_indicator') -%}
+  {%- set free    = is_state('binary_sensor.airflow_free_cooling_available', 'on') -%}
+  {%- set flush   = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') -%}
+  {%- set drying  = is_state('binary_sensor.airflow_humidity_drying_needed', 'on') -%}
+  {%- set moist   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}
+  {%- set heat    = is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') -%}
+  {%- set dew     = states('sensor.airflow_min_indoor_dew_5min') | float(0) -%}
+  {%- set dew_min = states('sensor.airflow_dew_point_min') | float(0) -%}
+  {%- set heating_season = season == 'active_heating' -%}
+  {%- set cooling_season = season in ['passive_cooling', 'active_cooling'] -%}
+  {#- Dry indoor air: below the min-humidity dew point. Enter 0.1°C below it, stay warm until it
+      is reached again (anti-chatter, memory = previous profile). -#}
+  {%- set dry = dew < (dew_min if prev_profile == 'warm' else dew_min - 0.1) -%}
+  {#- PROFILE (protections never change it — they only lower the rate):
+      P1 flush (⊇ drying) → cool: moisture relief in any season (flush carries its own season guard).
+      P2 active heating   → warm: free cooling is never used in heating season.
+      P3 dry, not cooling season → warm: retain moisture (wins over free cooling).
+      P4 free cooling     → cool.
+      P5 otherwise        → comfort (no path keeps the current profile, so it can never get stuck). -#}
+  {%- set flushing = flush or drying -%}
+  {%- set retain   = dry and not cooling_season -%}
+  {%- set profile  = 'cool' if flushing
+                     else 'warm' if heating_season or retain
+                     else 'cool' if free
+                     else 'comfort' -%}
+  {%- set free_cooling = profile == 'cool' and not flushing -%}
+  {#- VENTILATION: boost (drying) > medium (flush) > low (outdoor too humid OR too warm) >
+      medium (free cooling actually chosen above) > auto (ComfoConnect schedule). -#}
+  {%- set ventilation = 'boost' if drying
+                        else 'medium' if flush
+                        else 'low' if moist or heat
+                        else 'medium' if free_cooling
+                        else 'auto' -%}
+  {%- if not auto -%}
+    {%- set state = 'off' -%}
+    {%- set profile = 'off' -%}
+    {%- set ventilation = 'off' -%}
+  {%- else -%}
+    {%- set state = 'moisture_flush_boost' if drying
+                    else 'moisture_flush_cooling' if flush
+                    else 'heat_protection' if heat and not moist
+                    else 'moisture_protection' if moist
+                    else 'free_cooling' if free_cooling
+                    else 'moisture_retention' if profile == 'warm' and dry
+                    else 'heating' if profile == 'warm'
+                    else 'comfort' -%}
+  {%- endif -%}
+  {{- state ~ '|' ~ profile ~ '|' ~ ventilation -}}
+{%- endmacro -%}
