@@ -339,6 +339,26 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("binary_sensor.geotherm_heating_backup_heater", "off", {})
     # Loxone comfort signal — "not warm enough", i.e. the house wants heat.
     ha.set_state("binary_sensor.loxone_heating_heating_loxone_warm_enough", "off", {})
+    # Compressor-cycling observation (ebusd MQTT): integral mid-pause, settings as tuned by the
+    # owner (start −180 °min), lifetime counters at plausible values.
+    ha.set_state("sensor.geotherm_heating_energy_integral", "-90", {"unit_of_measurement": "°min"})
+    ha.set_state("binary_sensor.geotherm_heating_compressor_demand", "off", {})
+    ha.set_state("sensor.geotherm_heating_circuit_flow_temp_desired", "26",
+                 {"unit_of_measurement": "°C", "device_class": "temperature"})
+    ha.set_state("sensor.geotherm_heating_compressor_start_integral", "-180",
+                 {"unit_of_measurement": "°min"})
+    ha.set_state("sensor.geotherm_heating_compressor_hysteresis", "7", {"unit_of_measurement": "K"})
+    ha.set_state("sensor.geotherm_heating_backup_start_integral", "-600",
+                 {"unit_of_measurement": "°min"})
+    ha.set_state("sensor.geotherm_heating_compressor_starts", "20000", {"state_class": "total_increasing"})
+    ha.set_state("sensor.geotherm_heating_compressor_hours", "15000",
+                 {"unit_of_measurement": "h", "device_class": "duration"})
+    ha.set_state("sensor.geotherm_heating_yield_total", "60000",
+                 {"unit_of_measurement": "kWh", "device_class": "energy"})
+    # Daily meters behind sensor.heating_efficiency_today (utility_meter; its source energy
+    # sensors are MQTT and absent in CI, so seed the meters directly).
+    ha.set_state("sensor.heating_yield_daily", "0", {"unit_of_measurement": "kWh"})
+    ha.set_state("sensor.heating_electricity_daily", "0", {"unit_of_measurement": "kWh"})
 
 
 # ── Shared time-machine fixtures ─────────────────────────────────────────────────────────

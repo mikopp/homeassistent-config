@@ -19,24 +19,55 @@ Each system does only what it uniquely knows:
 
 | System | Owns |
 |---|---|
-| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* Stops writing the heat pump. |
+| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* No longer writes the heat pump (done 2026-10-30). Does **not** control room valves — those are fixed hydraulic throttling only. |
 | Home Assistant | Energy. Computes PV surplus, decides slab mode, writes two registers. |
 | Vaillant | The machine. Weather compensation, VR 90 room influence, compressor protection, outdoor cutoff. |
 
-HA writes only `mc/OperatingMode` and `mc/TempDesired`, and only ever `low` or `on` — **never
-`off`**. That single rule makes the worst failure state "slightly cool", never "no heat".
+HA writes only `mc/OperatingMode` and `mc/TempDesired`. The mode is `auto` or `on` in heating and
+neutral season, and `off` **only in cooling season** — never `low`. Outside cooling season that
+keeps the worst failure state at "slightly cool", never "no heat".
+
+**Cooling season → heating `off` (owner, 2026-10-30).** When `sensor.heating_cooling_indicator`
+is `passive_cooling` or `active_cooling`, HA writes `mc/OperatingMode` = `off`; when it returns to
+`neutral` or `active_heating`, HA writes `auto` again. `mc/OperatingMode` is the *heating* mode
+only — cooling has its own register (`mc/CoolingOperatingModeHc2`) — so `off` does not touch
+cooling. Safety: only a definite cooling state writes `off`; an `unknown`/`unavailable` indicator
+must never write `off` (leave the mode as it is, or `auto`). The indicator works on a 48 h outdoor
+mean with hysteresis, so a single warm winter day cannot switch heating off.
+
+**Decided (owner, 2026-10-30): `auto` is normal operation, `on` is the exception.** The
+geoTHERM's own time program runs the day/night schedule (`TempDesired` by day, `TempDesiredLow` at
+night). HA switches to `on` only when Loxone says the house is not warm enough, or when a slab
+boost is wanted, and returns to `auto` afterwards.
+
+- **By day `auto` and `on` give the same setpoint** (`TempDesired`), so outside a boost the switch
+  changes nothing for the machine. This removes the frequent `on`/`low` setpoint flips that Loxone
+  used to cause.
+- **At night** Loxone's own night schedule matches the Vaillant time program, so the two normally
+  agree and HA stays on `auto`. If Loxone finds the house is not warm enough at night, HA writes
+  `on`, which lifts the night setpoint from `TempDesiredLow` to `TempDesired` until Loxone is
+  satisfied. That is intended.
+- **A boost only happens by day** (`schedule.heating_pv_window`), so it never fights the night
+  setback.
 
 ### Control law
 
-| Heating season | Slab mode | Loxone says | `mc/OperatingMode` | `mc/TempDesired` |
+| Indicator | Slab mode | Loxone says | `mc/OperatingMode` | `mc/TempDesired` |
 |---|---|---|---|---|
-| off | — | — | `low` | `TDL` |
-| on | no | warm enough | `low` | `TDL + 1` |
-| on | no | heat needed | `on` | `TDL + 1` |
-| on | yes | *ignored* | `on` | `TDL + 1 + offset` |
+| `passive_cooling` / `active_cooling` | — (never) | — | **`off`** | `TDL` |
+| `neutral` | — (never) | warm enough | `auto` | `TDL + 1` |
+| `neutral` | — (never) | heat needed | `on` | `TDL + 1` |
+| `active_heating` | no | warm enough | `auto` | `TDL + 1` |
+| `active_heating` | no | heat needed | `on` | `TDL + 1` |
+| `active_heating` | yes | *ignored* | `on` | `TDL + 1 + offset` |
+| `unknown` / `unavailable` | — | — | unchanged (never `off`) | unchanged |
 
-`TDL` = `mc/TempDesiredLow`, the only human knob. Heating season =
-`sensor.heating_cooling_indicator` in (`active_heating`, `neutral`).
+`TDL` = `mc/TempDesiredLow`, the only human knob. **Slab boosting happens only in
+`active_heating`** (owner, 2026-10-30) — implemented in `binary_sensor.heating_slab_mode_wanted`.
+`binary_sensor.heating_season_active` (`active_heating` or `neutral`) still gates comfort heating.
+
+The night setpoint is always `TDL` (the Vaillant's own setback), so `TDL + 1` /
+`TDL + 1 + offset` only ever apply by day — or at night while Loxone holds `on`.
 
 ### Why the setpoint is derived, not captured
 
@@ -116,7 +147,15 @@ display, meaning it's subscribed to ebusd's *current* broker today. Repointing e
 target moves that data out from under Loxone — its display would go stale/break unless Loxone is
 also repointed at the same time, an extra, coupled change this plan does not otherwise need.
 
-### Option B — bridge HA's broker to ebusd's existing broker (recommended)
+### Option B — bridge HA's broker to ebusd's existing broker (recommended — DEPLOYED)
+
+> **As deployed (owner, 2026-10-30): the bridge is an explicit per-topic allowlist, not the
+> `topic ebusd/# in 0` snippet below** — which never was what got deployed, and could not have
+> worked on its own: it carries nothing outbound, so HA's `/get` poll registrations would never
+> reach ebusd. Live: one `topic ebusd/<circuit>/<name> in 0` line per state topic HA reads, one
+> `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
+> `ebusd/global/scan` `in` only. Every new register needs both lines — see
+> `packages/notes/heating_pv_boost.md` "Transport". The snippet below is kept for the history only.
 
 Leave ebusd exactly as configured today (still publishing to its current broker, so Loxone's
 integration is completely undisturbed) and instead configure HA's own Mosquitto broker to pull
@@ -230,11 +269,16 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Observations, finding 4).
 - [ ] 8c. Set `input_number.heating_pv_min_battery_soc` to 50 (UI, user). The current 30 equals the
       Victron's own floor, so the gate never blocked.
-- [ ] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode
+- [x] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode — owner, 2026-10-30.
+      Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
+      valves. The geoTHERM now runs `auto` on its own time program; HA will switch to `on` only
+      for "not warm enough" or a boost (decided 2026-10-30, see "Control law").
 - [ ] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
-- [ ] 11. Phase 2 — comfort control (`low`/`on` + derived setpoint)
+- [ ] 11. Phase 2 — comfort control (`auto`/`on` + derived setpoint)
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
+- [ ] 14. Compressor short-cycling observation + tuning — separate plan,
+      `plans/heating-compressor-cycling.md`
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 
@@ -270,6 +314,11 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
 7. **Possible outdoor shutdown (OBSERVED, one day).** 10-17 `hvac_action` `off` 13:52–17:00 matched
    outdoor ≥ 15 °C (`mc/OtShutdownLimit`); 10-16 14:43–16:11 `off` at ~13 °C is unexplained. Whether
    a boost is honoured above 15 °C is untested — check on the first armed sunny day.
+
+8. **Owner changes and short-cycling (2026-10-30, owner-reported).** Loxone stopped writing the
+   mode; geoTHERM set to `auto` with a day `on` / night `low` time program; `CompIntegral`
+   −150 → −180 °min; heating curve 0.15. In mild weather the compressor still starts about once an
+   hour and runs about 5 min. Analysis and observation sensors: `plans/heating-compressor-cycling.md`.
 
 ### Checks run locally
 

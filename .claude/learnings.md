@@ -166,7 +166,12 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   delay window. Removing the single clock advance in `_assert_recomputes_after_reload` broke **two
   unrelated tests** that were silently piggybacking on it running earlier in nodeid order. Any test
   asserting a definite on/off from a delayed sensor needs a `fast_forward` before it — check before
-  touching clock calls in that file.
+  touching clock calls in that file. **Same dependency existed in `tests/test_heating_pv_boost.py`**
+  (CONFIRMED 2026-10-30: two tests failed in an isolated run of that file, on `master` too, and
+  passed after only adding `fast_forward(26 min)`): `heating_slab_mode_wanted` (delay_off 20 min)
+  and `heating_dhw_active` (delay_off 25 min) are `unknown` after boot; in CI the airflow/indicator
+  files run first and moved the clock for them. A green full-suite run hides this — run a touched
+  test file on its own before trusting it.
 - **Chaining multiple `time_machine.jump_to_next()` calls within one test — OBSERVED, mechanism
   DUBIOUS.** Diagnostic dumps showed the entity's `last_updated` pinned to the reset's own timestamp
   instead of advancing on a second/third jump. The data is real, but the conclusion ("the harness
