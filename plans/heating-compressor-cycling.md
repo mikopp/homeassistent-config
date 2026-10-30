@@ -44,12 +44,20 @@ yet. Add them there:
   - take over the day/night schedule in HA.
   Record this as an open decision. Don't change it silently.
 - Loxone still publishes `warm_enough` (owner-confirmed), so it stays the comfort input.
-- Transport section: the documented bridge snippet is `topic ebusd/# in 0`, which is inbound only.
-  That would not carry HA's `ebusd/<c>/<n>/get` poll publishes back to ebusd, yet 7c confirmed that
-  polling works. So the live bridge (or ebusd's target broker) must differ from the doc. Ask the
-  owner for the real bridge lines and correct the snippet. No bridge change is needed for this
-  feature: every new register is under `ebusd/#`, and its `/get` uses the same path as the ten that
-  already work. The exception is an `out` rule that lists specific registers; then add the new ones.
+- **Bridge pattern (owner-supplied live config, 2026-10-30): an explicit per-topic allowlist.**
+  - Each state topic HA reads gets its own `topic ebusd/<circuit>/<name> in 0` line.
+  - Each poll registration gets its own `topic ebusd/<circuit>/<name>/get out 0` line.
+  - `ebusd/global/running` and `ebusd/global/scan` are `in` only.
+  - There are no wildcards. Only the topics HA needs are bridged.
+
+  Where to record it:
+  - `packages/notes/heating_pv_boost.md`: a new "Transport: the bridge is an allowlist" section.
+    Write down the pattern and the rule, not the topic list. The rule: every new register this
+    package reads needs **two** bridge lines (`in` for the state, `out` for `/get`), added on the
+    HA broker host after deploy. Without the `in` line the sensor stays `unavailable`. Without the
+    `out` line the `?N` poll registration never reaches ebusd.
+  - Slab plan "Transport": replace the `topic ebusd/# in 0` snippet with the allowlist pattern,
+    and note that the old snippet was never what got deployed.
 - Loxone does **not** control room valves (owner-confirmed). Record this in the slab plan's
   "Division of responsibility" table and in the notes. Room valves are fixed hydraulic throttling
   only, with no automatic actuation.
@@ -96,13 +104,14 @@ short runs.
 - Live: `ehp/Integral` (°min, measurement) and `ehp/CompDemand` (binary sensor; accepts both
   `yes`/`1` per the enum rule in the notes).
 - `mc/Status0a`: parse field 4 `flowtempdesired` positionally.
-- Settings (read only): `ehp/CompIntegral`, `ehp/CompHysteresis`, `ehp/NumberCompStarts`,
-  `ehp/BackupIntegral`, `mc/HeatingCurve`.
+- Settings (read only): `ehp/CompIntegral`, `ehp/CompHysteresis`, `ehp/BackupIntegral`.
+  Dropped: `mc/HeatingCurve` (owner knows it is 0.15, and it is conditional in the catalog) and
+  `NumberCompStarts` (not the cause). Each bridged register costs two bridge lines, so keep the
+  list minimal.
 - Counters (`total_increasing`): `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` (kWh).
-- Register names and decodes were checked against the live catalog (`08.ehp.csv`, `50.ehp.mc.csv`
-  on ebus.github.io). Not yet checked: whether this unit answers each one, and payload shapes
-  (`HeatingCurve` sits behind `[cfgheatsinktype=1]`). Mark each as unverified until it is seen
-  live.
+- That is **9 new registers**. Register names and decodes were checked against the live catalog
+  (`08.ehp.csv`, `50.ehp.mc.csv` on ebus.github.io). Not yet checked: whether this unit answers each
+  one, and the payload shapes. Mark each as unverified until it is seen live.
 
 ### 2. `heating_ebusd_poll_registration` — new poll tiers
 
@@ -139,6 +148,25 @@ Add a "Compressor cycling" card to `dashboards/heating-dashboard.yaml`:
 - README package section.
 - Update the Status section of the repo plan file.
 
+### 6. Commit, push, open the PR (owner asked for it)
+
+Commit all steps to `claude/heating-slab-pump-tuning-y2g8se`, then open a PR against `master`. The PR
+body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
+1. **Mosquitto bridge:** add 18 lines on the HA broker host, then restart Mosquitto (a reload does
+   not load bridge changes). For each of the 9 registers (`ehp/Integral`, `ehp/CompDemand`,
+   `mc/Status0a`, `ehp/CompIntegral`, `ehp/CompHysteresis`, `ehp/BackupIntegral`,
+   `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal`):
+   - `topic ebusd/<c>/<n> in 0`
+   - `topic ebusd/<c>/<n>/get out 0`
+
+   List them literally in the PR, ready to paste.
+2. Restart HA, or wait for an ebusd rescan, so `heating_ebusd_poll_registration` registers the new
+   polls.
+3. Confirm that each new sensor leaves `unavailable`. If one never publishes, the unit may not
+   answer that register; note it.
+4. Check `BackupModeHc` on the Vaillant (no backup heater) before deepening `CompIntegral`.
+5. Record a 3-day baseline, then change `CompHysteresis` by +1 K. Change one setting at a time.
+
 ## Verification
 
 - yamllint, `.github/scripts/fix_yaml_style.py .`, `resolve_ha_yaml.py`, `extract_templates.py`.
@@ -148,15 +176,30 @@ Add a "Compressor cycling" card to `dashboards/heating-dashboard.yaml`:
   average run, Integral at start and at stop, overshoot at stop, mode flips). Only then change
   `CompHysteresis`. Log the findings under Observations.
 
-Per CLAUDE.MD: implement step by step and wait for approval after each step.
 
 ## Status
 
 - [x] 0. Plan file (this file)
-- [ ] 0b. Record owner's manual changes + bridge-doc mismatch in the slab plan and notes
-- [ ] 1. MQTT sensors for integral, demand, flow setpoint, tuning settings, counters
-- [ ] 2. Poll-registration tiers
-- [ ] 3. Derived sensors (starts/day, duty cycle, run lengths, daily efficiency)
-- [ ] 4. Dashboard card
-- [ ] 5. Tests, notes, README
-- [ ] 6. 3-day baseline after deploy (user), then tune `CompHysteresis` one step at a time
+- [x] 0b. Owner's manual changes, the bridge allowlist pattern and the open Phase 2 decision
+      recorded in `plans/ebusd-pv-heating-optimization.md` and `packages/notes/heating_pv_boost.md`
+- [x] 1. 9 read-only MQTT sensors (integral, demand, flow setpoint, 3 settings, 3 counters)
+- [x] 2. Poll registration: tier 4 (`?5`) and tier 5 (`?9`)
+- [x] 3. Derived: history_stats (runs today, runtime today, 24 h duty cycle), average run today,
+      last run (trigger template), daily utility meters (starts, yield, electricity), efficiency today
+- [x] 4. Dashboard: "Compressor Cycling" entities card + "Why runs end" history graph
+- [x] 5. Tests (`test_last_run_…`, `test_average_run_…`, `test_efficiency_…`), conftest seeds,
+      notes, README
+- [ ] 6. After deploy (owner): add the 18 bridge lines, restart Mosquitto, confirm each sensor
+      publishes, verify `sensor.technikraum_heizung_heizung_energy` is the real Shelly energy id
+- [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations
+
+### Checks run locally (2026-10-30)
+
+- yamllint (package, dashboard, resolved config), `fix_yaml_style.py` — clean; no CRLF
+- `check_config` on the pinned image (2026.10.1) — passes (only warning: `climate_template` custom
+  component not installed in that run); `--info all` lists all 19 new entities
+- pytest against the pinned image (harness v0.11.0, Python 3.14): all 5 new tests and both
+  template tests (strict + lenient) pass. `test_decision_stays_off_while_the_master_switch_is_off`
+  and `test_return_temp_is_masked_while_making_hot_water` fail when `test_heating_pv_boost.py` runs
+  on its own — **identically on `master`**, so not caused by this change (cause not investigated;
+  CI runs the full suite)

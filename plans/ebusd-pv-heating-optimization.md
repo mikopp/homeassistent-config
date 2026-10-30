@@ -19,12 +19,18 @@ Each system does only what it uniquely knows:
 
 | System | Owns |
 |---|---|
-| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* Stops writing the heat pump. |
+| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* No longer writes the heat pump (done 2026-10-30). Does **not** control room valves — those are fixed hydraulic throttling only. |
 | Home Assistant | Energy. Computes PV surplus, decides slab mode, writes two registers. |
 | Vaillant | The machine. Weather compensation, VR 90 room influence, compressor protection, outdoor cutoff. |
 
 HA writes only `mc/OperatingMode` and `mc/TempDesired`, and only ever `low` or `on` — **never
 `off`**. That single rule makes the worst failure state "slightly cool", never "no heat".
+
+> **OPEN DECISION before Phase 2 (2026-10-30).** The owner set the geoTHERM to `auto` with its own
+> time program (`on` by day, `low` at night). Any HA write of `low`/`on` replaces `auto` and
+> silently disables that program. Phase 2 must either keep `auto` and act only through
+> `mc/TempDesired` during a boost, or take over the day/night schedule in HA. Not yet decided —
+> the control law below assumes the original design.
 
 ### Control law
 
@@ -116,7 +122,15 @@ display, meaning it's subscribed to ebusd's *current* broker today. Repointing e
 target moves that data out from under Loxone — its display would go stale/break unless Loxone is
 also repointed at the same time, an extra, coupled change this plan does not otherwise need.
 
-### Option B — bridge HA's broker to ebusd's existing broker (recommended)
+### Option B — bridge HA's broker to ebusd's existing broker (recommended — DEPLOYED)
+
+> **As deployed (owner, 2026-10-30): the bridge is an explicit per-topic allowlist, not the
+> `topic ebusd/# in 0` snippet below** — which never was what got deployed, and could not have
+> worked on its own: it carries nothing outbound, so HA's `/get` poll registrations would never
+> reach ebusd. Live: one `topic ebusd/<circuit>/<name> in 0` line per state topic HA reads, one
+> `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
+> `ebusd/global/scan` `in` only. Every new register needs both lines — see
+> `packages/notes/heating_pv_boost.md` "Transport". The snippet below is kept for the history only.
 
 Leave ebusd exactly as configured today (still publishing to its current broker, so Loxone's
 integration is completely undisturbed) and instead configure HA's own Mosquitto broker to pull
@@ -230,11 +244,16 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Observations, finding 4).
 - [ ] 8c. Set `input_number.heating_pv_min_battery_soc` to 50 (UI, user). The current 30 equals the
       Victron's own floor, so the gate never blocked.
-- [ ] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode
+- [x] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode — owner, 2026-10-30.
+      Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
+      valves. The geoTHERM now runs `auto` on its own time program (see the open decision in
+      "Control law").
 - [ ] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
 - [ ] 11. Phase 2 — comfort control (`low`/`on` + derived setpoint)
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
+- [ ] 14. Compressor short-cycling observation + tuning — separate plan,
+      `plans/heating-compressor-cycling.md`
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 
@@ -270,6 +289,11 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
 7. **Possible outdoor shutdown (OBSERVED, one day).** 10-17 `hvac_action` `off` 13:52–17:00 matched
    outdoor ≥ 15 °C (`mc/OtShutdownLimit`); 10-16 14:43–16:11 `off` at ~13 °C is unexplained. Whether
    a boost is honoured above 15 °C is untested — check on the first armed sunny day.
+
+8. **Owner changes and short-cycling (2026-10-30, owner-reported).** Loxone stopped writing the
+   mode; geoTHERM set to `auto` with a day `on` / night `low` time program; `CompIntegral`
+   −150 → −180 °min; heating curve 0.15. In mild weather the compressor still starts about once an
+   hour and runs about 5 min. Analysis and observation sensors: `plans/heating-compressor-cycling.md`.
 
 ### Checks run locally
 

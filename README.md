@@ -58,6 +58,12 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
   return temperature), the resistive backup heater, battery state of charge, and the heat pump's
   own 20-minute compressor restart lock
 - **Never writes `off`** — only `low` or `on`, so the worst failure state is "slightly cool"
+- **Compressor cycling observation**: energy integral, flow setpoint, compressor demand, the
+  start-integral / hysteresis settings, lifetime counters, and derived starts per day, average and
+  last run length, 24 h duty cycle and daily efficiency — to tune away short compressor runs (see
+  `plans/heating-compressor-cycling.md`)
+- **Transport**: `ebusd/*` reaches HA through a Mosquitto bridge that is an explicit per-topic
+  allowlist — every new register needs its bridge lines added on the broker host after deploy
 
 *Phase 1 (current): read-only. Every sensor and the full decision are live, but nothing is written
 to the heat pump. See `plans/ebusd-pv-heating-optimization.md` for the rollout and

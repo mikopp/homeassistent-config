@@ -168,6 +168,125 @@ mqtt:
         {% elif raw in ['5', 'low'] %}low
         {% else %}unknown{% endif %}
 
+    # ── Compressor cycling: observation only ──────────────────────────────────
+    # Read-only views for diagnosing short compressor runs (plans/heating-compressor-cycling.md).
+    # Register names and decodes are taken from the live catalog (08.ehp.csv / 50.ehp.mc.csv on
+    # ebus.github.io). Whether THIS unit answers each one is NOT yet confirmed live — a register
+    # the unit does not answer simply leaves its sensor unavailable.
+    #
+    # Each of these needs two Mosquitto bridge lines (state `in`, `/get` `out`) — the bridge is
+    # an explicit allowlist, see packages/notes/heating_pv_boost.md "Transport".
+    #
+    # Single-value payloads use the empty-render guard: an unparsable payload renders '' and HA
+    # keeps the last value instead of raising (see .claude/learnings.md, MQTT empty payload).
+
+    # ehp/Integral — the running energy integral: summed (flow actual − flow desired) per minute,
+    # in °min. Goes negative while the slab draws heat; the compressor starts when it reaches
+    # ehp/CompIntegral. Watching where it sits when a run ENDS shows whether the run ended
+    # because the deficit was paid back (≈ 0) or because the hysteresis cut it short.
+    - name: "Heating Energy Integral"
+      unique_id: heating_energy_integral
+      default_entity_id: sensor.geotherm_heating_energy_integral
+      state_topic: "ebusd/ehp/Integral"
+      unit_of_measurement: "°min"
+      state_class: measurement
+      icon: mdi:sigma
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(0) }}"
+
+    # mc/Status0a = flowtemp;mixer;pump;onoff;flowtempdesired. Field 4 is the flow SETPOINT the
+    # weather curve currently asks for (integer °C). Compared against the actual flow temp, the
+    # overshoot at the moment a run ends tells whether ehp/CompHysteresis is what stopped it.
+    - name: "Heating Circuit Flow Temp Desired"
+      unique_id: heating_circuit_flow_temp_desired
+      default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired
+      state_topic: "ebusd/mc/Status0a"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:thermometer-chevron-up
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set f = value.split(';') %}
+        {{ f[4] | float | round(1) if f | count > 4 and f[4] | trim | float(none) is not none else '' }}
+
+    # ── Tuning settings (installer level, changed by hand at the Vaillant panel) ──
+    # Read so every tuning step is visible in HA history next to its effect.
+
+    # ehp/CompIntegral — "Komp. Start in": the integral (°min) at which the compressor starts.
+    # Only sets WHEN a run starts, not how long it lasts.
+    - name: "Heating Compressor Start Integral"
+      unique_id: heating_compressor_start_integral
+      default_entity_id: sensor.geotherm_heating_compressor_start_integral
+      state_topic: "ebusd/ehp/CompIntegral"
+      unit_of_measurement: "°min"
+      entity_category: diagnostic
+      icon: mdi:ray-start-arrow
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(0) }}"
+
+    # ehp/CompHysteresis — forced start below setpoint − hysteresis, forced STOP above
+    # setpoint + hysteresis (hydraulic plans 1 and 3, i.e. no buffer — this house). The main
+    # lever for run length at a low (flat-curve) setpoint.
+    - name: "Heating Compressor Hysteresis"
+      unique_id: heating_compressor_hysteresis
+      default_entity_id: sensor.geotherm_heating_compressor_hysteresis
+      state_topic: "ebusd/ehp/CompHysteresis"
+      unit_of_measurement: "K"
+      entity_category: diagnostic
+      icon: mdi:arrow-expand-vertical
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(1) }}"
+
+    # ehp/BackupIntegral — the backup heater starts at BackupIntegral + CompIntegral. Watched
+    # because deepening CompIntegral moves that point too; resistive heat must not take over.
+    - name: "Heating Backup Start Integral"
+      unique_id: heating_backup_start_integral
+      default_entity_id: sensor.geotherm_heating_backup_start_integral
+      state_topic: "ebusd/ehp/BackupIntegral"
+      unit_of_measurement: "°min"
+      entity_category: diagnostic
+      icon: mdi:heating-coil
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(0) }}"
+
+    # ── Lifetime counters (machine-side, survive HA restarts) ─────────────────
+    # ehp/CompStartsHc — compressor starts in HEATING mode only (DHW has its own counter), so
+    # its daily delta is the authoritative "heating starts per day".
+    - name: "Heating Compressor Starts"
+      unique_id: heating_compressor_starts
+      default_entity_id: sensor.geotherm_heating_compressor_starts
+      state_topic: "ebusd/ehp/CompStartsHc"
+      state_class: total_increasing
+      icon: mdi:counter
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | int }}"
+
+    # ehp/CompHoursHc — compressor operating hours in heating mode.
+    - name: "Heating Compressor Hours"
+      unique_id: heating_compressor_hours
+      default_entity_id: sensor.geotherm_heating_compressor_hours
+      state_topic: "ebusd/ehp/CompHoursHc"
+      unit_of_measurement: "h"
+      device_class: duration
+      state_class: total_increasing
+      icon: mdi:timer-cog-outline
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | int }}"
+
+    # ehp/YieldTotal — total heat delivered (kWh, heating + hot water). Whole-kWh resolution, so
+    # its daily delta is coarse; good enough for a day-over-day efficiency trend.
+    - name: "Heating Yield Total"
+      unique_id: heating_yield_total
+      default_entity_id: sensor.geotherm_heating_yield_total
+      state_topic: "ebusd/ehp/YieldTotal"
+      unit_of_measurement: "kWh"
+      device_class: energy
+      state_class: total_increasing
+      icon: mdi:fire
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | int }}"
+
     # ── ebusd bridge status (the ebusd process itself, not the geoTHERM hardware) ─────────────
     # ebusd's own bus/device scan status: "OK", "running", or "finished" (retained). A poll
     # priority registered while this reads "running" targets a message catalog that may still be
@@ -248,6 +367,18 @@ mqtt:
       default_entity_id: binary_sensor.geotherm_heating_backup_heater
       state_topic: "ebusd/ehp/Backup"
       icon: mdi:heating-coil
+      device: *ebusd_geotherm
+      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+    # ── Compressor demand (observation only) ──────────────────────────────────
+    # ehp/CompDemand — "regulation wants to start the heat source" (enum 0=no 1=yes). Rises when
+    # the integral reaches the start point; compared with binary_sensor.heating_compressor_active
+    # it shows whether a run was requested by the regulation or forced by the hysteresis.
+    - name: "Heating Compressor Demand"
+      unique_id: heating_compressor_demand
+      default_entity_id: binary_sensor.geotherm_heating_compressor_demand
+      state_topic: "ebusd/ehp/CompDemand"
+      icon: mdi:heat-pump-outline
       device: *ebusd_geotherm
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
 
@@ -382,6 +513,63 @@ schedule:
       - from: "09:00:00"
         to: "16:00:00"
 
+# ── COMPRESSOR CYCLING STATISTICS ───────────────────────────────────────────────
+# Observation only (plans/heating-compressor-cycling.md). All built on
+# binary_sensor.heating_compressor_active (Shelly clamp > 500 W), so they count EVERY compressor
+# run — heating and hot water alike. sensor.heating_compressor_starts_daily (below) is the
+# heating-only start count from the machine's own counter.
+sensor:
+  - platform: history_stats
+    name: "Heating Compressor Runs Today"
+    unique_id: heating_compressor_runs_today
+    entity_id: binary_sensor.heating_compressor_active
+    state: "on"
+    type: count
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "Heating Compressor Runtime Today"
+    unique_id: heating_compressor_runtime_today
+    entity_id: binary_sensor.heating_compressor_active
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+
+  # Share of the last 24 h the compressor ran. Short-cycling shows as many starts at a low duty
+  # cycle; the goal is fewer, longer runs for the same (weather-driven) duty cycle.
+  - platform: history_stats
+    name: "Heating Compressor Duty Cycle 24h"
+    unique_id: heating_compressor_duty_cycle_24h
+    entity_id: binary_sensor.heating_compressor_active
+    state: "on"
+    type: ratio
+    end: "{{ now() }}"
+    duration:
+      hours: 24
+
+# Daily deltas of the machine-side counters and the Shelly heating energy, reset at midnight.
+# Entity ids follow the key: sensor.heating_compressor_starts_daily etc.
+utility_meter:
+  heating_compressor_starts_daily:
+    name: "Heating Compressor Starts Daily"
+    unique_id: heating_compressor_starts_daily
+    source: sensor.geotherm_heating_compressor_starts
+    cycle: daily
+  heating_yield_daily:
+    name: "Heating Yield Daily"
+    unique_id: heating_yield_daily
+    source: sensor.geotherm_heating_yield_total
+    cycle: daily
+  # Shelly Pro 3EM "Heizung Energy" (packages/energy.yaml). Entity id derived the same way as
+  # sensor.technikraum_heizung_heizung_power (area + device + name); verify it after deploy.
+  heating_electricity_daily:
+    name: "Heating Electricity Daily"
+    unique_id: heating_electricity_daily
+    source: sensor.technikraum_heizung_heizung_energy
+    cycle: daily
+
 # ── DERIVED SENSORS AND THE DECISION ────────────────────────────────────────────
 template:
   - sensor:
@@ -504,6 +692,40 @@ template:
           {% elif is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on') %}warm_enough
           {% else %}heating{% endif %}
 
+      # ── Compressor cycling: average run length today ──────────────────────
+      # Runtime ÷ runs from the two history_stats sensors above. 0 before the first run of the
+      # day (no runs yet, not "unknown"). Target: ≥ 20–30 min; ~5 min means short-cycling.
+      - name: "Heating Compressor Average Run Today"
+        unique_id: heating_compressor_average_run_today
+        unit_of_measurement: "min"
+        device_class: duration
+        state_class: measurement
+        icon: mdi:timer-outline
+        availability: >
+          {{ has_value('sensor.heating_compressor_runs_today')
+             and has_value('sensor.heating_compressor_runtime_today') }}
+        state: >
+          {% set runs = states('sensor.heating_compressor_runs_today') | int %}
+          {% set hours = states('sensor.heating_compressor_runtime_today') | float %}
+          {{ (hours * 60 / runs) | round(1) if runs > 0 else 0 }}
+
+      # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
+      # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight. Includes
+      # hot water and the circulation pump's standby draw, and YieldTotal moves in whole kWh, so
+      # read it as a day-over-day trend at the end of the day, not as an instantaneous COP.
+      # 0 until at least 1 kWh of electricity has been used today (too coarse before that).
+      - name: "Heating Efficiency Today"
+        unique_id: heating_efficiency_today
+        state_class: measurement
+        icon: mdi:gauge
+        availability: >
+          {{ has_value('sensor.heating_yield_daily')
+             and has_value('sensor.heating_electricity_daily') }}
+        state: >
+          {% set heat = states('sensor.heating_yield_daily') | float %}
+          {% set elec = states('sensor.heating_electricity_daily') | float %}
+          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+
   - binary_sensor:
       # ── Season gate ───────────────────────────────────────────────────────
       # Reuses the repo's existing 48-hour outdoor-mean classifier rather than inventing a
@@ -619,11 +841,32 @@ template:
           {% else %}{{ surplus >= start_at }}
           {% endif %}
 
+  # ── Compressor cycling: length of the last run ─────────────────────────────
+  # Fires when a run ends and measures it from the on→off transition itself, so it needs no
+  # stored start time. Counts every run (heating and hot water); compare with
+  # sensor.geotherm_heating_hvac_action history to tell them apart. Keeps its value until the
+  # next run ends.
+  - trigger:
+      - trigger: state
+        entity_id: binary_sensor.heating_compressor_active
+        from: "on"
+        to: "off"
+    sensor:
+      - name: "Heating Compressor Last Run"
+        unique_id: heating_compressor_last_run
+        unit_of_measurement: "min"
+        device_class: duration
+        state_class: measurement
+        icon: mdi:timer-check-outline
+        state: >
+          {{ ((trigger.to_state.last_changed - trigger.from_state.last_changed)
+              .total_seconds() / 60) | round(1) }}
+
 # ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
   # ── ebusd MQTT poll-priority registration ─────────────────────────────────
-  # All ten ebusd registers this feature reads are confirmed (or suspected) to answer a forced
-  # read but not to auto-publish on MQTT without one. ehp/Status was originally assumed to be the
+  # All ten decision registers (plus the nine compressor-cycling observation registers, which are
+  # not yet seen live) answer a forced read but are not confirmed to auto-publish without one. ehp/Status was originally assumed to be the
   # exception, self-publishing every few seconds — that held only while the compressor was
   # actively running; idle/passive circulation let it go quiet, so it is now registered like every
   # other register (see the sensor comments above and packages/CLAUDE.md).
@@ -634,7 +877,7 @@ automation:
   # (see plans/ebusd-pv-heating-optimization.md) and retune the tiers below if needed.
   #
   # Confirmed (not assumed): ebusd does NOT retain a runtime-set poll priority across its own
-  # process restart. This automation re-asserts all nine on HA start and whenever ebusd is seen
+  # process restart. This automation re-asserts all of them on HA start and whenever ebusd is seen
   # to come back (either global/running or the bus-data liveness sensor) or its bus scan
   # completes — "recompute and re-assert, no state to recover", the same self-healing approach
   # planned for Phase 3's watchdog. Every trigger funnels through one condition — the scan must
@@ -711,8 +954,49 @@ automation:
         data:
           topic: "ebusd/mc/OperatingMode/get"
           payload: "?7"
+      # Tier 4 (priority 5) — compressor-cycling observation (plans/heating-compressor-cycling.md):
+      # the energy integral and demand move every minute, the flow setpoint with the weather curve.
+      # Each topic here also needs its bridge lines (state `in`, `/get` `out`) on the HA broker.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/Integral/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/CompDemand/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/Status0a/get"
+          payload: "?5"
+      # Tier 5 (priority 9) — tuning settings (changed by hand, rarely) and lifetime counters
+      # (only their daily delta matters). Slowest tier, lowest bus load.
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/CompIntegral/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/CompHysteresis/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/BackupIntegral/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/CompStartsHc/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/CompHoursHc/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/YieldTotal/get"
+          payload: "?9"
     # single + silent: at HA start several triggers (start, ebusd running, online, scan finished)
-    # fire within milliseconds. The first run registers all nine priorities, so the duplicates
+    # fire within milliseconds. The first run registers every priority, so the duplicates
     # are redundant — drop them without the "Already running" warning.
     mode: single
     max_exceeded: silent
@@ -838,6 +1122,26 @@ group:
       - binary_sensor.geotherm_heating_hwc_active
       - binary_sensor.geotherm_heating_backup_heater
       - binary_sensor.ebusd_heating_ebusd_running
+      # Compressor cycling observation (ebusd)
+      - sensor.geotherm_heating_energy_integral
+      - binary_sensor.geotherm_heating_compressor_demand
+      - sensor.geotherm_heating_circuit_flow_temp_desired
+      - sensor.geotherm_heating_compressor_start_integral
+      - sensor.geotherm_heating_compressor_hysteresis
+      - sensor.geotherm_heating_backup_start_integral
+      - sensor.geotherm_heating_compressor_starts
+      - sensor.geotherm_heating_compressor_hours
+      - sensor.geotherm_heating_yield_total
+      # Compressor cycling statistics
+      - sensor.heating_compressor_runs_today
+      - sensor.heating_compressor_runtime_today
+      - sensor.heating_compressor_duty_cycle_24h
+      - sensor.heating_compressor_average_run_today
+      - sensor.heating_compressor_last_run
+      - sensor.heating_compressor_starts_daily
+      - sensor.heating_yield_daily
+      - sensor.heating_electricity_daily
+      - sensor.heating_efficiency_today
       # Loxone comfort signal
       - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors

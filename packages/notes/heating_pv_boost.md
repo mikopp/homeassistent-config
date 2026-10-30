@@ -23,6 +23,23 @@ There is **no VRC 700 and no `700` circuit**, so `Hc1RoomCircuitMode`, `Z1DayTem
 not exist here. The VR 90 writes to the bus but accepts and keeps a value HA writes, so HA is the
 sole effective writer of the control registers.
 
+## Transport: the Mosquitto bridge is an explicit allowlist
+
+ebusd publishes to its own broker. HA's broker pulls ebusd data in through a Mosquitto bridge that
+lists **every topic individually** (owner-supplied live config, 2026-10-30) — there is no
+`ebusd/#` wildcard in either direction:
+
+- each state topic HA reads: one `topic ebusd/<circuit>/<name> in 0` line;
+- each poll registration HA publishes: one `topic ebusd/<circuit>/<name>/get out 0` line (ebusd
+  subscribes on ITS broker, so a `/get` that is not bridged out never reaches it);
+- `ebusd/global/running` and `ebusd/global/scan` are `in` only.
+
+**Rule: every new ebusd register this package reads needs TWO bridge lines (`in` + `/get out`),
+added on the HA broker host after deploy, then a Mosquitto restart** (a reload does not load
+bridge changes). Without the `in` line the sensor stays `unavailable`; without the `out` line the
+`?N` poll registration silently never arrives. List the exact lines in the PR's post-deploy steps.
+Only topics HA actually needs are bridged — keep it that way rather than widening to `ebusd/#`.
+
 ## Payload format — do NOT enable `--mqttjson`
 
 ebusd publishes plain `;`-separated values, and **the Loxone integration consumes these same topics
@@ -117,6 +134,42 @@ a hardware timeout when it is polled (`ERR: read timeout` in the live dump) — 
 and is well-formed, this unit just doesn't answer it. Worth an occasional re-check rather than
 writing it off permanently: if it ever responds, `temp_1` is a second, independently-addressed
 return-temperature reading.
+
+## Compressor tuning registers (short-cycling)
+
+Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the live catalog
+(`08.ehp.csv`, `50.ehp.mc.csv`); **not yet seen live on this unit**.
+
+| Register | Meaning |
+|---|---|
+| `ehp/Integral` | running energy integral, Σ(flow actual − flow desired) per minute, °min (`SIN`) |
+| `ehp/CompIntegral` | "Komp. Start in": integral at which the compressor starts (installer setting) |
+| `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (hydraulic plans 1/3 = no buffer) |
+| `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660) |
+| `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
+| `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
+| `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh |
+
+Also in the catalog, not read: `NumberCompStarts` (max starts/h, sets
+`TimeBetweenTwoCompStartsMin`), `mc/HeatingCurve` (conditional on `cfgheatsinktype`), pump-speed
+registers `Hc1PumpSpeedControlDirectCircuit*` (sw ≥ 407/414).
+
+**Start vs stop (HYPOTHESIS, from the register descriptions, not measured):** `CompIntegral` only
+sets when a run starts. A run ends when the integral is paid back or when flow exceeds
+setpoint + `CompHysteresis`. At this house's flat curve (0.15) the setpoint in mild weather is
+only a few K above room temperature, so the fixed-output compressor overshoots within minutes and
+the hysteresis ends the run — deepening `CompIntegral` lengthens the pause, not the run. Confirm
+with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
+
+## Owner-side configuration (2026-10-30)
+
+- Loxone **no longer writes** `mc/OperatingMode`; it still publishes `warm_enough`.
+- Loxone does **not** control room valves. Room valves are fixed hydraulic throttling only
+  (bedrooms), no automatic actuation.
+- geoTHERM `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day,
+  `low` at night). Any HA write of `low`/`on` would replace `auto` and disable that program —
+  see the open Phase 2 decision in the slab plan.
+- `ehp/CompIntegral` changed −150 → −180 °min; heating curve 0.15.
 
 ## Hardware limits the controller must respect
 
