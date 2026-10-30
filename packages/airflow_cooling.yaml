@@ -1262,30 +1262,42 @@ automation:
   # Manages boost when the decision (sensor.airflow_cooling_state, `ventilation` attribute) is
   # boost — i.e. outdoor air is dry enough to flush indoor humidity and the boost schedule allows
   # it. Reads ONLY the decision sensor, never binary_sensor.airflow_humidity_drying_needed directly.
-  # The boost switch itself is the only state: ventilation becoming boost (re)starts the boost, the
-  # countdown re-arms it while it runs, and nothing restarts a boost that was turned off (by the
-  # user or otherwise) until the decision leaves boost and returns.
+  # The boost switch itself is the only state. A boost is started ONLY on an EDGE into boost, never
+  # from a level: (1) the decision going from a real non-boost value to boost, or (2) Away ending
+  # while boost is decided and the boost switch is off. A Home Assistant restart, a reload or an
+  # input flap (decision unavailable -> boost) is NOT an edge and starts / re-arms nothing, so it
+  # can never reset a running 60 min timer. The countdown re-arms a running boost; a boost that was
+  # turned off (by the user or otherwise) stays off until the next edge.
+  # Residual risk (by decision, no second re-arm threshold): if the single re-arm run (<5 min) is
+  # dropped or blocked, the boost lapses and restarts only at the next edge.
+  # Disabling input_boolean.airflow_cooling_automatic_enabled makes this automation stop reacting
+  # (including the stop branch); a boost that is already running then runs out on the hardware.
   - id: airflow_humidity_drying_boost
     alias: "Airflow: Humidity Drying Boost"
     description: >
       Runs a 60-minute ventilation boost while sensor.airflow_cooling_state decides ventilation
-      'boost'. The decision becoming boost (re)starts the boost, also adopting one that is already
-      running. While the boost runs and boost is still decided it re-arms SEAMLESSLY ~5 min before
-      the hardware countdown expires by re-sending boost ON: the unit restarts its timer with the
-      switch staying on, no flip-flop, no notification. A boost that is turned off stays off until
-      the decision leaves boost and returns. Notifies only on a real state change (boost started /
-      stopped).
+      'boost'. A boost starts only on an edge into boost: the decision changing from a real
+      non-boost value to boost, or Away ending while boost is decided and the boost switch is off
+      (a decision change also adopts a manual boost that is already running). A Home Assistant
+      restart or an unavailable -> boost flap is not an edge and starts nothing. While the boost
+      runs and boost is still decided it re-arms SEAMLESSLY ~5 min before the hardware countdown
+      expires by re-sending boost ON: the unit restarts its timer with the switch staying on, no
+      flip-flop, no notification. A boost that is turned off stays off until the next edge.
+      Notifies only on a real state change (boost started / stopped).
     # queued (not single): with single, a trigger arriving while a run was still executing was
     # dropped ("Already running") — a lost boost on/off decision meant a missed boost start/stop.
     # Every branch re-reads current state, so processing queued triggers in order is safe.
     mode: queued
     max: 5
     trigger:
-      # Decision entered boost. from: none / unavailable (attribute absent) → boost also counts,
-      # like the former drying_needed unknown → on.
+      # Decision entered boost from a REAL non-boost value (the same list the stop branch uses).
+      # from: restricts this to a true edge: an unavailable / absent attribute → boost (reload,
+      # template entity restart, an input briefly unavailable) does NOT fire, so it can neither
+      # silently reset a running boost's 60 min timer nor start a boost without a real edge.
       - platform: state
         entity_id: sensor.airflow_cooling_state
         attribute: ventilation
+        from: ["medium", "low", "auto", "off"]
         to: "boost"
         id: boost_decided
       # Decision left boost. An unavailable decision drops the attribute (to: None); the stop
@@ -1304,23 +1316,24 @@ automation:
         entity_id: number.comfoconnect_pro_boost_time
         below: 5
         id: rearm_due
+      # Away ended: a start edge when boost is decided and the boost switch is off (see the
+      # (Re)start branch). Away unknown -> off at HA start also counts as this edge (accepted).
+      # There is deliberately NO homeassistant:start trigger: a restart is not an edge.
       - platform: state
         entity_id: switch.comfoconnect_pro_away_function
         to: "off"
         id: away_ended
-      - platform: homeassistant
-        event: start
-        id: ha_start
     condition:
       - condition: state
         entity_id: input_boolean.airflow_cooling_automatic_enabled
         state: "on"
-      - condition: state
-        entity_id: switch.comfoconnect_pro_away_function
-        state: "off"
+      # Only an explicit "on" means away. unknown / unavailable (e.g. ComfoConnect not yet up right
+      # after a restart) count as NOT away, so they no longer block every run.
+      - condition: template
+        value_template: "{{ not is_state('switch.comfoconnect_pro_away_function', 'on') }}"
       # No decision → no action (startup / reload). Non-blocking on purpose — a 5 min wait here held
-      # the run slot and starved real triggers. The decision's own unavailable → value transition
-      # fires boost_decided when boost is decided.
+      # the run slot and starved real triggers. A decision coming back from unavailable is not a
+      # start edge (see boost_decided), so nothing is started or reset by it.
       - condition: template
         value_template: "{{ has_value('sensor.airflow_cooling_state') }}"
     action:
@@ -1346,9 +1359,13 @@ automation:
                 target:
                   entity_id: switch.comfoconnect_pro_boost
 
-          # (Re)start boost: boost was decided, so write boost ON even if a boost already runs
-          # (restarts its timer, adopts a manual boost). A Home Assistant restart only acts when no
-          # boost runs, so it never resets the timer.
+          # (Re)start boost, only on an EDGE into boost while boost is decided:
+          #  - boost_decided: the decision changed from a real non-boost value to boost. Writes boost
+          #    ON even if a boost already runs (restarts its timer, adopts a manual boost).
+          #  - away_ended: Away ended; starts only when the boost switch is off, so it never
+          #    touches a running boost's timer.
+          # A Home Assistant restart is not an edge and starts nothing; a boost the user stopped by
+          # hand stays off until the next edge.
           - conditions:
               - condition: state
                 entity_id: sensor.airflow_cooling_state
@@ -1361,7 +1378,7 @@ automation:
                   - condition: and
                     conditions:
                       - condition: trigger
-                        id: ha_start
+                        id: away_ended
                       - condition: state
                         entity_id: switch.comfoconnect_pro_boost
                         state: "off"

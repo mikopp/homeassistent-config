@@ -23,8 +23,10 @@
   {%- set drying  = is_state('binary_sensor.airflow_humidity_drying_needed', 'on') -%}
   {%- set moist   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}
   {%- set heat    = is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') -%}
-  {%- set dew     = states('sensor.airflow_min_indoor_dew_5min') | float(0) -%}
-  {%- set dew_min = states('sensor.airflow_dew_point_min') | float(0) -%}
+  {#- No float default on purpose: both sensors are in the decision sensor's availability: (has_value),
+      so this macro is only rendered when they are numeric; a default would only hide errors. -#}
+  {%- set dew     = states('sensor.airflow_min_indoor_dew_5min') | float -%}
+  {%- set dew_min = states('sensor.airflow_dew_point_min') | float -%}
   {%- set heating_season = season == 'active_heating' -%}
   {%- set cooling_season = season in ['passive_cooling', 'active_cooling'] -%}
   {#- Dry indoor air: below the min-humidity dew point. Enter 0.1°C below it, stay warm until it
