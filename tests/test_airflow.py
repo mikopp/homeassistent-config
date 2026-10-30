@@ -551,6 +551,13 @@ def test_drying_boost_away_suppressed(home_assistant: HomeAssistant) -> None:
 # read automation traces, so which BRANCH ran is not observable; what IS observable is whether the
 # automation ran at all: `last_triggered` only moves when a trigger fired AND the top-level
 # conditions passed. So these tests assert "fired / did not fire", not "start branch ran".
+#
+# A clean auto -> boost edge cannot be made by seeding flush/drying: those writes re-trigger the
+# trigger-based moisture_ventilation_low_needed, which has no internal state in CI and re-renders
+# to 'unknown', so the decision flickers 'unavailable' and the edge seen by the automation is
+# None -> boost (correctly NOT an edge, see its `from:` list). The edge is therefore created with
+# input_boolean.airflow_cooling_automatic_enabled, which no indicator listens to: seed with the
+# automation off (decision 'off'), then turn it on: ventilation off -> boost.
 
 
 def _last_triggered(home_assistant: HomeAssistant) -> str | None:
@@ -585,22 +592,58 @@ def _settle_boost_off(home_assistant: HomeAssistant, away: str) -> None:
     home_assistant.set_state("switch.comfoconnect_pro_away_function", away, {})
 
 
-def test_drying_boost_real_edge_into_boost_fires(home_assistant: HomeAssistant) -> None:
-    """Real auto -> boost decision change fires the boost automation (start edge)."""
-    _settle_boost_off(home_assistant, "off")
-    before = _last_triggered(home_assistant)
+def _decision_history(home_assistant: HomeAssistant) -> str:
+    """Best-effort ventilation history of the decision, for failure messages only."""
+    try:
+        resp = requests.get(
+            f"{home_assistant._base_url}/api/history/period",
+            params={"filter_entity_id": _DECISION},
+            headers={"Authorization": f"Bearer {home_assistant._access_token}"},
+            timeout=10,
+        )
+        rows = resp.json()[0] if resp.status_code == 200 and resp.json() else []
+        return " -> ".join(
+            f"{r['state']}/{(r.get('attributes') or {}).get('ventilation')}" for r in rows[-8:]
+        )
+    except Exception as err:  # diagnostics must never mask the real assertion
+        return f"(history unavailable: {err})"
+
+
+def _arm_boost_edge(home_assistant: HomeAssistant) -> None:
+    """Flush + drying needed with the automation OFF (decision 'off'), ready for the edge.
+
+    The caller then calls _enable_auto: ventilation goes off -> boost without touching any
+    indicator, so nothing flickers. Asserting state 'off' needs every indicator to hold a value,
+    so it also proves the moisture indicator's 'unknown' flicker has passed; the second seed
+    repairs it if a late re-render overwrote a seeded value (idempotent otherwise).
+    """
+    home_assistant.call_action("input_boolean", "turn_off",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
     _seed_indicators(home_assistant, flush="on", drying="on")
+    home_assistant.assert_entity_state(_DECISION, "off", timeout=5)
+    _seed_indicators(home_assistant, flush="on", drying="on")
+
+
+def test_drying_boost_real_edge_into_boost_fires(home_assistant: HomeAssistant) -> None:
+    """Real off -> boost decision change fires the boost automation (start edge)."""
+    _settle_boost_off(home_assistant, "off")
+    _arm_boost_edge(home_assistant)
+    before = _last_triggered(home_assistant)
+    _enable_auto(home_assistant)
     _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
-    assert _wait_triggered(home_assistant, before), "auto -> boost did not fire the automation"
+    assert _wait_triggered(home_assistant, before), \
+        f"off -> boost did not fire the automation; decision history: {_decision_history(home_assistant)}"
 
 
 def test_drying_boost_away_unknown_is_not_away(home_assistant: HomeAssistant) -> None:
-    """Away 'unknown' (ComfoConnect not up yet) must not block a real auto -> boost edge."""
+    """Away 'unknown' (ComfoConnect not up yet) must not block a real off -> boost edge."""
     _settle_boost_off(home_assistant, "unknown")
+    _arm_boost_edge(home_assistant)
     before = _last_triggered(home_assistant)
-    _seed_indicators(home_assistant, flush="on", drying="on")
+    _enable_auto(home_assistant)
     _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
-    assert _wait_triggered(home_assistant, before), "Away unknown blocked the boost automation"
+    assert _wait_triggered(home_assistant, before), \
+        f"Away unknown blocked the boost automation; decision history: {_decision_history(home_assistant)}"
 
 
 def test_drying_boost_away_unknown_to_off_fires(home_assistant: HomeAssistant) -> None:

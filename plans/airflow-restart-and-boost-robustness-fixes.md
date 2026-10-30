@@ -158,5 +158,5 @@ Harness: `tests/test_airflow.py` (`home_assistant` fixture, `_decide_boost`, `_t
 - [x] 3. Remove `| float(0)` in `custom_templates/airflow_decision.jinja`
 - [x] 4. Fix stale comments in `packages/airflow_cooling.yaml` and `packages/notes/airflow_cooling.md`
 - [x] 5. Item C comment only (A, B not done by decision)
-- [~] 6. Tests added (4 harness tests + 1 static config test); NOT run (no docker/harness locally, CI to run). yamllint/fix_yaml_style/resolve_ha_yaml/eol checked locally. Not testable in harness: branch selection (no trace access), away_ended with boost already on.
+- [~] 6. Tests added (4 harness tests + 1 static config test); run in CI only (no docker/harness locally); the two "real edge" tests create the edge via the automation master switch because seeding flush/drying makes the decision flicker unavailable in CI (None -> boost is correctly not an edge). yamllint/fix_yaml_style/resolve_ha_yaml/eol checked locally. Not testable in harness: branch selection (no trace access), away_ended with boost already on.
 - [ ] 7. Deployed by user (`git pull`) and live verification above done
