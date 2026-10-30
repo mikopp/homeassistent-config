@@ -173,8 +173,8 @@ mqtt:
     # ── Compressor cycling: observation only ──────────────────────────────────
     # Read-only views for diagnosing short compressor runs (plans/heating-compressor-cycling.md).
     # Register names and decodes are taken from the live catalog (08.ehp.csv / 50.ehp.mc.csv on
-    # ebus.github.io). Whether THIS unit answers each one is NOT yet confirmed live — a register
-    # the unit does not answer simply leaves its sensor unavailable.
+    # ebus.github.io). All nine answered a forced `ebusctl read` on this unit (owner, 2026-10-30),
+    # in the payload shapes parsed below; MQTT delivery depends on the bridge lines.
     #
     # Each of these needs two Mosquitto bridge lines (state `in`, `/get` `out`) — the bridge is
     # an explicit allowlist, see packages/notes/heating_pv_boost.md "Transport".
@@ -870,8 +870,9 @@ template:
 # ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
   # ── ebusd MQTT poll-priority registration ─────────────────────────────────
-  # All ten decision registers (plus the nine compressor-cycling observation registers, which are
-  # not yet seen live) answer a forced read but are not confirmed to auto-publish without one. ehp/Status was originally assumed to be the
+  # All ten decision registers plus the nine compressor-cycling observation registers answer a
+  # forced read but are not confirmed to auto-publish without one. ehp/Status was originally
+  # assumed to be the
   # exception, self-publishing every few seconds — that held only while the compressor was
   # actively running; idle/passive circulation let it go quiet, so it is now registered like every
   # other register (see the sensor comments above and packages/CLAUDE.md).

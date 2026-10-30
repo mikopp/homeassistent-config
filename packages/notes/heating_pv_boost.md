@@ -138,7 +138,16 @@ return-temperature reading.
 ## Compressor tuning registers (short-cycling)
 
 Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the live catalog
-(`08.ehp.csv`, `50.ehp.mc.csv`); **not yet seen live on this unit**.
+(`08.ehp.csv`, `50.ehp.mc.csv`). **All answer a forced read on this unit** (owner `ebusctl`,
+2026-10-30). Values that day: `CompHysteresis` `7.00`, `CompIntegral` `-180`, `Integral` `5`,
+`CompDemand` `no`, `CompStartsHc` `13385`, `CompHoursHc` `13277`, `YieldTotal` `127550`,
+`BackupIntegral` `-600`, `mc/Status0a` `23.94;off;on;off;24` (flow 23.94 °C, setpoint 24 °C).
+
+- **Lifetime average heating run ≈ 60 min** (13277 h ÷ 13385 starts). Short runs are a mild-weather
+  effect, not how this machine has behaved overall.
+- **Hysteresis headroom is small.** With hysteresis 7 K and setpoint 24 °C the forced stop is at
+  31 °C. `FlowTempMax` is 35 °C, so at a 24 °C setpoint the hysteresis can only usefully grow to
+  about 11 K, and less when colder weather raises the setpoint.
 
 | Register | Meaning |
 |---|---|
@@ -177,7 +186,7 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
 - **Backup heater disabled for heating** (owner `ebusctl`, 2026-10-30): `ehp/BackupModeHc` =
   `no_backup`, `ehp/BackupIntegral` = −600. While `no_backup`, deepening `CompIntegral` cannot
   start the resistive heater (if it were enabled, it would start at −600 + CompIntegral, now −780).
-  First register of this set confirmed to answer on this unit (`BackupIntegral`, plain `-600`).
+  `BackupIntegral` answers with a plain `-600`.
 
 ## Hardware limits the controller must respect
 
