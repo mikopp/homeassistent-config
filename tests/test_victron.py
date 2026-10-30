@@ -282,6 +282,43 @@ def test_eta_accumulators_keep_pace_when_ac_pv_expired(
     )
 
 
+def test_eta_accumulators_gate_on_both_signs(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """Both η accumulators need ac_net > 0 AND dc < 0; a mismatched tick adds to NEITHER.
+
+    One test, three ticks (a single tick-firing test, so no extra adjacent real-tick tests):
+      1. ac_net +600 W but dc +660 W (charging current while AC inverts): skip both.
+      2. ac_net -600 W but dc -660 W (inverting current while AC charges): skip both.
+      3. control, ac_net +600 W and dc -660 W: ac_out +0.010, dc_in +0.011.
+    The control tick proves the trigger fires and, because the totals must equal ONE tick's worth,
+    also proves ticks 1 and 2 added nothing (a lone ac_out or dc_in advance would double it).
+    """
+    _reset_energy(home_assistant)
+    ac_out = "sensor.victron_multiplus_ac_out_energy"
+    dc_in = "sensor.victron_multiplus_dc_in_energy"
+
+    # 1. ac_net > 0, dc > 0.
+    _seed(home_assistant, ac_l1=600, vebus_dc=660)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 600, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_dc_power", lambda s: float(s) == 660, timeout=5)
+    time_machine.fast_forward(timedelta(minutes=1))
+
+    # 2. ac_net < 0, dc < 0 (grid import 600 W with no load).
+    _seed(home_assistant, grid_l1=600, vebus_dc=-660)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == -600, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_dc_power", lambda s: float(s) == -660, timeout=5)
+    time_machine.fast_forward(timedelta(minutes=1))
+
+    # 3. Control: both in the inverting direction.
+    _seed(home_assistant, ac_l1=600, vebus_dc=-660)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 600, timeout=5)
+    home_assistant.assert_entity_state("sensor.victron_multiplus_dc_power", lambda s: float(s) == -660, timeout=5)
+    time_machine.fast_forward(timedelta(minutes=1))
+    home_assistant.assert_entity_state(ac_out, lambda s: abs(float(s) - 0.010) < 0.0005, timeout=TICK_TIMEOUT)
+    home_assistant.assert_entity_state(dc_in, lambda s: abs(float(s) - 0.011) < 0.0005, timeout=TICK_TIMEOUT)
+
+
 # ── Night scenario test ───────────────────────────────────────────────────────
 
 
@@ -593,7 +630,7 @@ def test_multiplus_dc_power_charging_is_positive(home_assistant: HomeAssistant) 
 
 
 def test_multiplus_dc_power_expired_current_reads_zero(home_assistant: HomeAssistant) -> None:
-    """The current sensor expires when the GX stops re-publishing an unchanged value → 0 W, not unavailable."""
+    """An expired current (expire_after: 600, i.e. nothing flowing or Multi gone) → 0 W, not unavailable."""
     _seed_multiplus_dc(home_assistant, volts="52.5", amps="unavailable")
     home_assistant.assert_entity_state(
         "sensor.victron_multiplus_dc_power", lambda s: float(s) == 0, timeout=5
