@@ -147,8 +147,9 @@ mqtt:
     # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
     # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
     # generator's real-time activity (HVAC action). This is what the control law will write in
-    # Phase 2/3 (as "auto" or "on", never "off" or "low" — see the plan's control law). Read-only
-    # here in Phase 1.
+    # Phase 2/3: "auto" normally, "on" for "not warm enough" or a boost, "off" only in cooling
+    # season (passive/active_cooling) — never "low". See the plan's control law. Read-only here
+    # in Phase 1.
     #
     # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
     # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.
@@ -730,8 +731,9 @@ template:
   - binary_sensor:
       # ── Season gate ───────────────────────────────────────────────────────
       # Reuses the repo's existing 48-hour outdoor-mean classifier rather than inventing a
-      # date-based season. Both active_heating AND neutral permit heating: shoulder-season sunny
-      # days are exactly when cheap surplus heat is most available.
+      # date-based season. Both active_heating AND neutral permit COMFORT heating (target temp,
+      # control state). Slab BOOSTING is narrower — active_heating only, gated separately in
+      # binary_sensor.heating_slab_mode_wanted (owner decision 2026-10-30).
       - name: "Heating Season Active"
         unique_id: heating_season_active
         icon: mdi:snowflake-thermometer
@@ -832,7 +834,9 @@ template:
              and (return_temp | float) >= (states('input_number.heating_return_temp_max') | float) %}
           {% if not is_state('input_boolean.heating_pv_boost_enabled', 'on') %}false
           {% elif not is_state('binary_sensor.heating_ebusd_online', 'on') %}false
-          {% elif not is_state('binary_sensor.heating_season_active', 'on') %}false
+          {# Boost only in ACTIVE heating season — not neutral (owner decision 2026-10-30): in the
+             shoulder season the slab needs little heat and an over-charge mostly overheats. #}
+          {% elif not is_state('sensor.heating_cooling_indicator', 'active_heating') %}false
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}false
           {% elif is_state('binary_sensor.geotherm_heating_backup_heater', 'on') %}false
           {% elif not is_state('schedule.heating_pv_window', 'on') %}false

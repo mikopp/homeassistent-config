@@ -42,7 +42,9 @@ yet. Add them there:
   is normal operation. HA writes `on` only when Loxone says "not warm enough" or a boost is
   wanted, then returns to `auto`. HA never writes `low` any more. By day `auto` and `on` give the
   same setpoint, so there are no on/low setpoint flips. At night Loxone's schedule matches the
-  Vaillant's, so they normally agree. A boost only happens by day.
+  Vaillant's, so they normally agree. A boost only happens by day, and only in `active_heating`.
+  In cooling season (`passive_cooling`/`active_cooling`) the heating mode is set to `off`, and
+  back to `auto` in `neutral`/`active_heating`.
 - Loxone still publishes `warm_enough` (owner-confirmed), so it stays the comfort input.
 - **Bridge pattern (owner-supplied live config, 2026-10-30): an explicit per-topic allowlist.**
   - Each state topic HA reads gets its own `topic ebusd/<circuit>/<name> in 0` line.

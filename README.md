@@ -57,8 +57,10 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
 - **Interlocks**: cooling (the same hydraulics serve both), hot-water charging (which masks the
   return temperature), the resistive backup heater, battery state of charge, and the heat pump's
   own 20-minute compressor restart lock
-- **Never writes `off`** — only `auto` (normal: the Vaillant's own day/night program) or `on`
-  (house not warm enough, or a slab boost), so the worst failure state is "slightly cool"
+- **Mode law**: `auto` normally (the Vaillant's own day/night program), `on` when the house is
+  not warm enough or for a slab boost, `off` only in cooling season (heating mode only — cooling
+  is a separate register). Never `low`, and never `off` on an unknown season
+- **Slab boost only in active heating season** — not in neutral (shoulder) season
 - **Compressor cycling observation**: energy integral, flow setpoint, compressor demand, the
   start-integral / hysteresis settings, lifetime counters, and derived starts per day, average and
   last run length, 24 h duty cycle and daily efficiency — to tune away short compressor runs (see

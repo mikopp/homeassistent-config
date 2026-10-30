@@ -169,7 +169,10 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
 - geoTHERM `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day,
   `low` at night). **Decided for Phase 2:** `auto` is normal operation; HA writes `on` only for
   Loxone "not warm enough" or a slab boost, then back to `auto` — never `low`. By day both give
-  the same setpoint. See the slab plan's "Control law".
+  the same setpoint. In cooling season (`passive_cooling`/`active_cooling`) HA sets the heating
+  mode `off` (cooling is a separate register, unaffected), and `auto` again in
+  `neutral`/`active_heating`; never `off` on an unknown indicator. Slab boost only in
+  `active_heating`. See the slab plan's "Control law".
 - `ehp/CompIntegral` changed −150 → −180 °min; heating curve 0.15.
 
 ## Hardware limits the controller must respect

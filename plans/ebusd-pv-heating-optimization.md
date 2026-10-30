@@ -23,9 +23,17 @@ Each system does only what it uniquely knows:
 | Home Assistant | Energy. Computes PV surplus, decides slab mode, writes two registers. |
 | Vaillant | The machine. Weather compensation, VR 90 room influence, compressor protection, outdoor cutoff. |
 
-HA writes only `mc/OperatingMode` and `mc/TempDesired`, and only ever `auto` or `on` — **never
-`off`** (and no longer `low`). That single rule makes the worst failure state "slightly cool",
-never "no heat".
+HA writes only `mc/OperatingMode` and `mc/TempDesired`. The mode is `auto` or `on` in heating and
+neutral season, and `off` **only in cooling season** — never `low`. Outside cooling season that
+keeps the worst failure state at "slightly cool", never "no heat".
+
+**Cooling season → heating `off` (owner, 2026-10-30).** When `sensor.heating_cooling_indicator`
+is `passive_cooling` or `active_cooling`, HA writes `mc/OperatingMode` = `off`; when it returns to
+`neutral` or `active_heating`, HA writes `auto` again. `mc/OperatingMode` is the *heating* mode
+only — cooling has its own register (`mc/CoolingOperatingModeHc2`) — so `off` does not touch
+cooling. Safety: only a definite cooling state writes `off`; an `unknown`/`unavailable` indicator
+must never write `off` (leave the mode as it is, or `auto`). The indicator works on a 48 h outdoor
+mean with hysteresis, so a single warm winter day cannot switch heating off.
 
 **Decided (owner, 2026-10-30): `auto` is normal operation, `on` is the exception.** The
 geoTHERM's own time program runs the day/night schedule (`TempDesired` by day, `TempDesiredLow` at
@@ -44,19 +52,22 @@ boost is wanted, and returns to `auto` afterwards.
 
 ### Control law
 
-| Heating season | Slab mode | Loxone says | `mc/OperatingMode` | `mc/TempDesired` |
+| Indicator | Slab mode | Loxone says | `mc/OperatingMode` | `mc/TempDesired` |
 |---|---|---|---|---|
-| off | — | — | `auto` | `TDL` |
-| on | no | warm enough | `auto` | `TDL + 1` |
-| on | no | heat needed | `on` | `TDL + 1` |
-| on | yes | *ignored* | `on` | `TDL + 1 + offset` |
+| `passive_cooling` / `active_cooling` | — (never) | — | **`off`** | `TDL` |
+| `neutral` | — (never) | warm enough | `auto` | `TDL + 1` |
+| `neutral` | — (never) | heat needed | `on` | `TDL + 1` |
+| `active_heating` | no | warm enough | `auto` | `TDL + 1` |
+| `active_heating` | no | heat needed | `on` | `TDL + 1` |
+| `active_heating` | yes | *ignored* | `on` | `TDL + 1 + offset` |
+| `unknown` / `unavailable` | — | — | unchanged (never `off`) | unchanged |
 
-`TDL` = `mc/TempDesiredLow`, the only human knob. Heating season =
-`sensor.heating_cooling_indicator` in (`active_heating`, `neutral`).
+`TDL` = `mc/TempDesiredLow`, the only human knob. **Slab boosting happens only in
+`active_heating`** (owner, 2026-10-30) — implemented in `binary_sensor.heating_slab_mode_wanted`.
+`binary_sensor.heating_season_active` (`active_heating` or `neutral`) still gates comfort heating.
 
-Off season: `auto` with `TempDesired` = `TDL` makes the day and night setpoints equal, which is
-what `low` did before. The night setpoint is always `TDL` (the Vaillant's own setback), so
-`TDL + 1` / `TDL + 1 + offset` only ever apply by day — or at night while Loxone holds `on`.
+The night setpoint is always `TDL` (the Vaillant's own setback), so `TDL + 1` /
+`TDL + 1 + offset` only ever apply by day — or at night while Loxone holds `on`.
 
 ### Why the setpoint is derived, not captured
 
