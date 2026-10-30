@@ -260,6 +260,8 @@ mqtt:
       default_entity_id: sensor.geotherm_heating_compressor_starts
       state_topic: "ebusd/ehp/CompStartsHc"
       state_class: total_increasing
+      # Unit needed so the daily utility_meter and long-term statistics are not unitless.
+      unit_of_measurement: "count"
       icon: mdi:counter
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | int }}"

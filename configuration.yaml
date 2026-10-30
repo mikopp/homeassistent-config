@@ -1,11 +1,13 @@
 # Loads default set of integrations. Do not remove.
 default_config:
 
-# Raw state history (states table — history graphs/logbook) purged after 5 days.
+# Raw state history (states table — history graphs/logbook) purged after 14 days (was 5; raised
+# so the heating compressor-cycling baseline survives until the comparison, see
+# plans/heating-baseline-and-phase2-prerequisites.md; revert to 5 when tuning is done).
 # Does NOT affect the Energy Dashboard: long-term statistics (statistics/statistics_short_term
 # tables) are a separate store, never purged by purge_keep_days, kept indefinitely.
 recorder:
-  purge_keep_days: 5
+  purge_keep_days: 14
 
 # Load frontend themes from the themes folder
 frontend:

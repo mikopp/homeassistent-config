@@ -40,6 +40,32 @@ bridge changes). Without the `in` line the sensor stays `unavailable`; without t
 `?N` poll registration silently never arrives. List the exact lines in the PR's post-deploy steps.
 Only topics HA actually needs are bridged — keep it that way rather than widening to `ebusd/#`.
 
+**Writes need a third kind of line: `topic ebusd/<circuit>/<name>/set out 0`.** Every register HA
+writes (Phase 2 publishes to `mc/OperatingMode` and `mc/TempDesired`) needs its own `/set out`
+line, or the publish never reaches ebusd and fails silently. Same rule as above: add on the broker
+host, then restart Mosquitto. Prove a new line with an idempotent write of the CURRENT value only.
+
+
+## Baseline method (compressor-cycling comparison)
+
+Counting rules so two baselines are comparable (plans/heating-baseline-and-phase2-prerequisites.md):
+
+- **First full baseline day is 2026-10-31**; 2026-10-30 is partial (meters began ~16:06), exclude it.
+  A baseline is 3 consecutive full days with comparable weather; note the daily mean outdoor
+  temperature next to each day.
+- **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only).
+  `sensor.heating_compressor_runs_today` counts every Shelly run incl. hot water: cross-check only,
+  expect it higher.
+- **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
+  in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
+  MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
+- **Settings:** log `CompHysteresis`, `CompIntegral`, `BackupIntegral` at the start of each baseline
+  day and every change (date, time, old, new). They have no long-term statistics.
+- **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
+  the cycling plan's Observations.
+- **Compressor vs circulation:** `binary_sensor.heating_compressor_active` is the Shelly clamp
+  (> 500 W). `ehp/Hc1Pump` is not read; circulation alone staying below 500 W is an inference.
+
 ## Payload format — do NOT enable `--mqttjson`
 
 ebusd publishes plain `;`-separated values, and **the Loxone integration consumes these same topics
