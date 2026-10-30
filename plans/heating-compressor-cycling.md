@@ -193,6 +193,8 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
       notes, README
 - [ ] 6. After deploy (owner): add the 18 bridge lines, restart Mosquitto, confirm each sensor
       publishes, verify `sensor.technikraum_heizung_heizung_energy` is the real Shelly energy id
+- [x] 6a. `BackupModeHc` checked (owner, 2026-10-30): `no_backup`; `BackupIntegral` −600. Safe to
+      deepen `CompIntegral`.
 - [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations
 
 ### Checks run locally (2026-10-30)

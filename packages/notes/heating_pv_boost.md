@@ -174,6 +174,10 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
   `neutral`/`active_heating`; never `off` on an unknown indicator. Slab boost only in
   `active_heating`. See the slab plan's "Control law".
 - `ehp/CompIntegral` changed −150 → −180 °min; heating curve 0.15.
+- **Backup heater disabled for heating** (owner `ebusctl`, 2026-10-30): `ehp/BackupModeHc` =
+  `no_backup`, `ehp/BackupIntegral` = −600. While `no_backup`, deepening `CompIntegral` cannot
+  start the resistive heater (if it were enabled, it would start at −600 + CompIntegral, now −780).
+  First register of this set confirmed to answer on this unit (`BackupIntegral`, plain `-600`).
 
 ## Hardware limits the controller must respect
 
