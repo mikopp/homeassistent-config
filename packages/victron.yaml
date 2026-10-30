@@ -31,6 +31,7 @@ mqtt:
     #     ac-inverter power, solar yield W) KEEP expire_after: 120. They never falsely expire,
     #     but still flip unavailable on a real GX outage, so the per-minute energy accumulators
     #     correctly fall back to float(0) and stop integrating a stale value.
+    #     EXCEPTION: vebus DC current uses 600 (10 min), see victron_vebus_dc_current below.
     #   • Energy counters (total_increasing) and slow diagnostics (SOC, voltages, current)
     #     (battery voltage included) legitimately stay constant for hours. A MISSING expire_after
     #     is NOT harmless though:
@@ -147,7 +148,15 @@ mqtt:
       unit_of_measurement: "A"
       device_class: current
       state_class: measurement
-      expire_after: 120
+      # 600 s (10 min), not the 120 s of the other fluctuating power sensors. An expired current is
+      # read as 0 A by victron_multiplus_dc_power (float(0) there), which would book a whole AC
+      # load as conversion loss while charging. Recorder history (2026-10-30) shows the current
+      # changes about every second at any non-zero load, and a constant non-zero reading for 2+ min
+      # was not seen in ~5 days, so a genuinely flowing current keeps refreshing well inside 600 s.
+      # Real 0.0 A readings are published and correct. Known unverified point: the sensor was
+      # unavailable in 8 spells of ~11 min on 2026-10-30 00:00-12:00 (probably Multi standby or
+      # the service gone); what the AC side did during them was not checked.
+      expire_after: 600
       icon: mdi:current-dc
       device: *victron_device
       value_template: "{% if value_json is defined and value_json.value is not none %}{{ value_json.value | round(2) }}{% endif %}"
@@ -405,7 +414,9 @@ template:
         default_entity_id: sensor.victron_multiplus_dc_power
         state: >
           {# current | float(0): the Multi current is a fluctuating MQTT sensor with
-             expire_after: 120 and the GX does not re-publish an unchanged value, so an expired
+             expire_after: 600 (raised from 120: a non-zero current changes about every second,
+             so it only expires when nothing flows or the Multi/service is gone) and the GX does
+             not re-publish an unchanged value, so an expired
              current means "no DC current flowing" = 0 A, not an outage. Same reasoning as the
              expired PV sensors in victron_multiplus_ac_net_power. A real GX outage is still caught:
              every consumer pairs this with ac_net_power, which needs ac_load and grid. This
@@ -436,6 +447,10 @@ template:
       #   • otherwise clamp to 50…100 % so a measurement glitch can never produce a negative,
       #     zero, or >100 % efficiency that would corrupt the solar/battery split.
       # At η = 100 % the accounting below degenerates exactly to the pre-existing formula.
+      # Known cosmetic quirk (documented, not changed): this sensor depends on two separate
+      # accumulator entities written in the same minute tick, so it can render twice and briefly
+      # show a value computed from one fresh and one stale accumulator. Since both accumulators
+      # now advance together or not at all, the intermediate value is small and short-lived.
       - name: "Victron MultiPlus Conversion Efficiency"
         unique_id: victron_multiplus_conversion_efficiency
         state: >
@@ -577,6 +592,10 @@ template:
       #
       # Clamped to ≥ 0: the AC- and DC-side measurements are sampled independently, so during
       # fast load steps the raw difference can go briefly negative.
+      # Known bias (documented, deliberately not changed): the per-sample clamp discards negative
+      # excursions but keeps positive ones, so the loss reads slightly high (live: 86 W vs ~93 W
+      # expected from the snapshot, a few W). It is diagnostic only, and unclamped integration
+      # would make the total_increasing energy sensor non-monotonic.
       - name: "Victron MultiPlus Conversion Loss Power"
         unique_id: victron_multiplus_conversion_loss_power
         state: >
@@ -609,37 +628,63 @@ template:
         minutes: "/1"
     sensor:
       # ── Inverter efficiency (η) accumulators ─────────────────────────────────
-      # Only the INVERTING direction is accumulated (both half-waves clamped at 0):
-      #   ac_out += max( mp_ac_net, 0) / 60000   AC delivered by the Multi
-      #   dc_in  += max(-mp_dc,     0) / 60000   DC consumed by the Multi (mp_dc =
+      # Only the INVERTING direction is accumulated, and BOTH accumulators share ONE gate:
+      #   ok = ac_net and dc both available AND ac_net > 0 AND dc < 0
+      #   ac_out += ac_net  / 60000 if ok else 0   AC delivered by the Multi
+      #   dc_in  += (-dc)   / 60000 if ok else 0   DC consumed by the Multi (mp_dc =
       #                                          sensor.victron_multiplus_dc_power is negative
       #                                          while inverting — see the sign-convention note
       #                                          on victron_multiplus_ac_net_power above)
       # Charging is excluded on purpose: charge efficiency differs from discharge efficiency, and
       # the solar/battery AC attribution only ever needs the inverting (discharge-side) figure.
       # Their ratio is sensor.victron_multiplus_conversion_efficiency above.
+      #
+      # Why one shared gate: with independent half-wave clamps, a tick where only one side is in
+      # the inverting direction (mode transition, AC/DC sampling skew, expired DC current) advanced
+      # one accumulator and not the other, biasing eta (a lone ac_out tick pushes it up, a lone
+      # dc_in tick pushes it down). Gated together, skew ticks are dropped from both sides.
+      # The condition is duplicated inline in each template (a helper entity would add a
+      # render-order dependency inside the trigger block); keep the two copies identical.
+      # this.state | float(0) stays: standard accumulator seed.
       - name: "Victron MultiPlus AC Out Energy"
         unique_id: victron_multiplus_ac_out_energy
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + ([states('sensor.victron_multiplus_ac_net_power') | float(0), 0] | max / 60000)) | round(3) }}"
+        state: >
+          {# Gate identical to dc_in_energy below: both sources available, ac_net > 0 and dc < 0.
+             float without default is safe: the availability test short-circuits first. #}
+          {% set ac = states('sensor.victron_multiplus_ac_net_power') %}
+          {% set dc = states('sensor.victron_multiplus_dc_power') %}
+          {% set ok = ac not in ['unavailable', 'unknown'] and dc not in ['unavailable', 'unknown']
+                      and (ac | float) > 0 and (dc | float) < 0 %}
+          {{ ((this.state | float(0)) + ((ac | float / 60000) if ok else 0)) | round(3) }}
 
       - name: "Victron MultiPlus DC In Energy"
         unique_id: victron_multiplus_dc_in_energy
         unit_of_measurement: "kWh"
         device_class: energy
         state_class: total_increasing
-        state: "{{ ((this.state | float(0)) + ([-(states('sensor.victron_multiplus_dc_power') | float(0)), 0] | max / 60000)) | round(3) }}"
+        state: >
+          {# Gate identical to ac_out_energy above: both sources available, ac_net > 0 and dc < 0. #}
+          {% set ac = states('sensor.victron_multiplus_ac_net_power') %}
+          {% set dc = states('sensor.victron_multiplus_dc_power') %}
+          {% set ok = ac not in ['unavailable', 'unknown'] and dc not in ['unavailable', 'unknown']
+                      and (ac | float) > 0 and (dc | float) < 0 %}
+          {{ ((this.state | float(0)) + ((-(dc | float) / 60000) if ok else 0)) | round(3) }}
 
       # ── Solar yield in AC kWh — REPOINTED (was raw MQTT DC passthrough) ──────
       # unique_id/entity_id UNCHANGED (victron_solar_yield_total_kwh /
       # sensor.victron_solar_yield_total_kwh) — this is the entity the Energy Dashboard's Solar
       # production ENERGY source already points at. Reusing the ID means no dashboard
-      # reconfiguration and, once the manual entity-registry step in
-      # plans/victron-ac-referenced-accounting.md ("Revision: repoint instead of duplicate") is
-      # done, no history discontinuity: this.state restores from the last MQTT-driven value and
-      # keeps growing from exactly there, just with AC-referenced increments from now on.
+      # reconfiguration. CORRECTION (2026-10-30): an earlier version of this comment promised that
+      # this.state restores from the last MQTT-driven value and keeps growing from there. It did
+      # not: the long-term statistics show the state going from 5644.65 kWh (2026-10-15) to
+      # 0.61 kWh (2026-10-16), because the new template did not restore the old MQTT sensor's
+      # state and started from this.state | float(0). The statistics `sum` stayed continuous, so
+      # the Energy Dashboard is unaffected apart from ~2.7 kWh counted that day instead of ~10.
+      # The state value is therefore NOT comparable with the raw MPPT counter. (Whether it was
+      # also reset by hand is unknown.)
       #
       # Accumulated from the DELTA of the MPPT lifetime counter (now at
       # sensor.victron_solar_yield_dc_total_kwh), NOT by integrating power: the counter is the
