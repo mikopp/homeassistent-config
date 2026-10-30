@@ -201,7 +201,8 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
 - `check_config` on the pinned image (2026.10.1) — passes (only warning: `climate_template` custom
   component not installed in that run); `--info all` lists all 19 new entities
 - pytest against the pinned image (harness v0.11.0, Python 3.14): all 5 new tests and both
-  template tests (strict + lenient) pass. `test_decision_stays_off_while_the_master_switch_is_off`
-  and `test_return_temp_is_masked_while_making_hot_water` fail when `test_heating_pv_boost.py` runs
-  on its own — **identically on `master`**, so not caused by this change (cause not investigated;
-  CI runs the full suite)
+  template tests (strict + lenient) pass. CI (full suite) is green: 193 passed, 1 skipped.
+- Fixed a hidden order dependency: `test_decision_stays_off_while_the_master_switch_is_off` and
+  `test_return_temp_is_masked_while_making_hot_water` passed in CI only because earlier test files
+  had moved the mocked clock past their sensors' `delay_off` windows; run alone they failed (also on
+  `master`). Each now advances the clock 26 min itself; `test_heating_pv_boost.py` alone: 20/20 pass.

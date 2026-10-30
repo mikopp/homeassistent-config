@@ -252,12 +252,20 @@ def test_target_temp_tracks_a_changed_setback(home_assistant: HomeAssistant) -> 
     )
 
 
-def test_return_temp_is_masked_while_making_hot_water(home_assistant: HomeAssistant) -> None:
+def test_return_temp_is_masked_while_making_hot_water(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
     """During a DHW charge the water temperatures describe the cylinder, not the slab.
 
     The valid-return sensor must go unavailable so no numeric threshold downstream can fire on a
     reading that means something else.
+
+    The clock is advanced first: binary_sensor.heating_dhw_active has a 25 min delay_off, so after
+    a fresh boot it sits at 'unknown' (and the valid-return sensor is unavailable) until the mocked
+    clock crosses that window. Without this the test only passed when earlier test files had
+    already moved the clock.
     """
+    time_machine.fast_forward(timedelta(minutes=26))
     home_assistant.set_state("sensor.geotherm_heating_circuit_return_temp", "24.9", _C)
     home_assistant.assert_entity_state(
         "sensor.heating_circuit_return_temp_valid",
@@ -281,9 +289,15 @@ def test_cooling_interlock_follows_the_machine_not_the_setting(
 
 
 def test_decision_stays_off_while_the_master_switch_is_off(
-    home_assistant: HomeAssistant,
+    home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """Abundant surplus must not produce a slab charge unless the feature is armed."""
+    """Abundant surplus must not produce a slab charge unless the feature is armed.
+
+    The clock is advanced first: binary_sensor.heating_slab_mode_wanted has a 20 min delay_off, so
+    after a fresh boot it sits at 'unknown' until the mocked clock crosses that window. Without
+    this the test only passed when earlier test files had already moved the clock.
+    """
+    time_machine.fast_forward(timedelta(minutes=26))
     _seed_power_flows(home_assistant, dc_pv=6000, ac_pv=0, house_load=500, heating=0)
     home_assistant.call_action(
         "input_boolean", "turn_off", {"entity_id": "input_boolean.heating_pv_boost_enabled"}
