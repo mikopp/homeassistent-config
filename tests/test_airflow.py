@@ -546,6 +546,153 @@ def test_drying_boost_away_suppressed(home_assistant: HomeAssistant) -> None:
     # In production: away=on blocks action — boost stays off.
 
 
+# ── Drying boost: edge-only starts (plans/airflow-restart-and-boost-robustness-fixes.md) ──────
+# Real state-change triggers (not manual automation.trigger) are used here. The harness cannot
+# read automation traces, so which BRANCH ran is not observable; what IS observable is whether the
+# automation ran at all: `last_triggered` only moves when a trigger fired AND the top-level
+# conditions passed. So these tests assert "fired / did not fire", not "start branch ran".
+#
+# A clean auto -> boost edge cannot be made by seeding flush/drying: those writes re-trigger the
+# trigger-based moisture_ventilation_low_needed, which has no internal state in CI and re-renders
+# to 'unknown', so the decision flickers 'unavailable' and the edge seen by the automation is
+# None -> boost (correctly NOT an edge, see its `from:` list). The edge is therefore created with
+# input_boolean.airflow_cooling_automatic_enabled, which no indicator listens to: seed with the
+# automation off (decision 'off'), then turn it on: ventilation off -> boost.
+
+
+def _last_triggered(home_assistant: HomeAssistant) -> str | None:
+    """Return the drying-boost automation's last_triggered attribute via the REST state API."""
+    resp = requests.get(
+        f"{home_assistant._base_url}/api/states/{_DRYING_BOOST_AUTO}",
+        headers={"Authorization": f"Bearer {home_assistant._access_token}"},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"State read failed: {resp.text}"
+    return resp.json()["attributes"].get("last_triggered")
+
+
+def _wait_triggered(home_assistant: HomeAssistant, before: str | None,
+                    timeout: float = 5.0) -> bool:
+    """Poll until last_triggered differs from `before`; False if it never moves in `timeout`."""
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _last_triggered(home_assistant) != before:
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _settle_boost_off(home_assistant: HomeAssistant, away: str) -> None:
+    """Decision = comfort/auto (not boost), boost switch off, Away set as given."""
+    _enable_auto(home_assistant)
+    _seed_indicators(home_assistant)
+    _assert_decision(home_assistant, "comfort", "comfort", "auto")
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", away, {})
+
+
+def _decision_history(home_assistant: HomeAssistant) -> str:
+    """Best-effort ventilation history of the decision, for failure messages only."""
+    try:
+        resp = requests.get(
+            f"{home_assistant._base_url}/api/history/period",
+            params={"filter_entity_id": _DECISION},
+            headers={"Authorization": f"Bearer {home_assistant._access_token}"},
+            timeout=10,
+        )
+        rows = resp.json()[0] if resp.status_code == 200 and resp.json() else []
+        return " -> ".join(
+            f"{r['state']}/{(r.get('attributes') or {}).get('ventilation')}" for r in rows[-8:]
+        )
+    except Exception as err:  # diagnostics must never mask the real assertion
+        return f"(history unavailable: {err})"
+
+
+def _arm_boost_edge(home_assistant: HomeAssistant) -> None:
+    """Flush + drying needed with the automation OFF (decision 'off'), ready for the edge.
+
+    The caller then calls _enable_auto: ventilation goes off -> boost without touching any
+    indicator, so nothing flickers. Asserting state 'off' needs every indicator to hold a value,
+    so it also proves the moisture indicator's 'unknown' flicker has passed; the second seed
+    repairs it if a late re-render overwrote a seeded value (idempotent otherwise).
+    """
+    home_assistant.call_action("input_boolean", "turn_off",
+                               {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
+    _seed_indicators(home_assistant, flush="on", drying="on")
+    home_assistant.assert_entity_state(_DECISION, "off", timeout=5)
+    _seed_indicators(home_assistant, flush="on", drying="on")
+
+
+def test_drying_boost_real_edge_into_boost_fires(home_assistant: HomeAssistant) -> None:
+    """Real off -> boost decision change fires the boost automation (start edge)."""
+    _settle_boost_off(home_assistant, "off")
+    _arm_boost_edge(home_assistant)
+    before = _last_triggered(home_assistant)
+    _enable_auto(home_assistant)
+    _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
+    assert _wait_triggered(home_assistant, before), \
+        f"off -> boost did not fire the automation; decision history: {_decision_history(home_assistant)}"
+
+
+def test_drying_boost_away_unknown_is_not_away(home_assistant: HomeAssistant) -> None:
+    """Away 'unknown' (ComfoConnect not up yet) must not block a real off -> boost edge."""
+    _settle_boost_off(home_assistant, "unknown")
+    _arm_boost_edge(home_assistant)
+    before = _last_triggered(home_assistant)
+    _enable_auto(home_assistant)
+    _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
+    assert _wait_triggered(home_assistant, before), \
+        f"Away unknown blocked the boost automation; decision history: {_decision_history(home_assistant)}"
+
+
+def test_drying_boost_away_unknown_to_off_fires(home_assistant: HomeAssistant) -> None:
+    """Boost decided, boost off, Away unknown -> off is an away_ended edge: the automation runs."""
+    _decide_boost(home_assistant)
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "unknown", {})
+    before = _last_triggered(home_assistant)
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    assert _wait_triggered(home_assistant, before), "away_ended did not fire the automation"
+
+
+def test_drying_boost_unavailable_to_boost_does_not_fire(home_assistant: HomeAssistant) -> None:
+    """Decision unavailable -> boost is not an edge: boost_decided must not fire (no timer reset)."""
+    _decide_boost(home_assistant)
+    home_assistant.set_state("switch.comfoconnect_pro_away_function", "off", {})
+    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
+    # An unavailable input makes the decision (and its ventilation attribute) unavailable.
+    home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "unavailable", {})
+    home_assistant.assert_entity_state(_DECISION, "unavailable", timeout=5)
+    before = _last_triggered(home_assistant)
+    # Input returns; indicators are re-seeded so the decision comes back as boost.
+    _seed_indicators(home_assistant, flush="on", drying="on", indoor_dew="12")
+    _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
+    assert not _wait_triggered(home_assistant, before, timeout=4), \
+        "unavailable -> boost fired the automation (would reset a running boost timer)"
+
+
+def test_drying_boost_config_edge_only() -> None:
+    """Static check of the package: from: on boost_decided, no ha_start trigger, no 'ha_start' id."""
+    import pathlib
+    import yaml
+
+    class _Loader(yaml.SafeLoader):
+        pass
+
+    # HA-specific tags (!include, !secret, ...) are irrelevant here: load them as plain strings.
+    _Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    path = pathlib.Path(__file__).resolve().parent.parent / "packages" / "airflow_cooling.yaml"
+    cfg = yaml.load(path.read_text(encoding="utf-8"), Loader=_Loader)
+    auto = next(a for a in cfg["automation"] if a.get("id") == "airflow_humidity_drying_boost")
+    triggers = {t["id"]: t for t in auto["trigger"]}
+    assert "ha_start" not in triggers
+    assert not any(t.get("platform") == "homeassistant" for t in auto["trigger"])
+    assert set(triggers["boost_decided"]["from"]) == {"medium", "low", "auto", "off"}
+    assert triggers["boost_decided"]["to"] == "boost"
+    assert "away_ended" in triggers
+
+
 # ── Heat protection tests ────────────────────────────────────────────────────────────────
 # heat_ventilation_low_needed forces LOW when the REAL outdoor (weather-station) air is too warm
 # to import at volume — symmetric to moisture protection. It reads the smoothed weather-station

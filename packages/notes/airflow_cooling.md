@@ -16,10 +16,14 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
 - **Re-sending boost ON (Modbus coil 6 = 1) while a boost runs RESTARTS the timer at the full
   duration** — verified on the device. This is the seamless re-arm: `switch.turn_on` on the
   already-on boost, no off→on, no notification.
-- **A boost-off never restarts the boost.** The drying automation has no `boost_expired` path; only
-  `drying_needed` off→on (re)starts it (also adopting a running manual boost), and the countdown
-  re-arms it while it runs and drying is still needed. A manual off therefore sticks until the next
-  drying cycle.
+- **A boost-off never restarts the boost.** The drying automation has no `boost_expired` path. A boost
+  is started only on an *edge into boost*: the decision's `ventilation` going from a real non-boost
+  value (`medium`/`low`/`auto`/`off`) to `boost` (also adopting a running manual boost), or Away ending
+  (`away_ended`) while boost is decided and the boost switch is off. A HA restart / reload / the
+  decision going `unavailable -> boost` is NOT an edge and starts nothing (so it cannot reset a running
+  timer). The countdown re-arms a running boost while boost is still decided. A manual off therefore
+  sticks until the next edge. Away counts only when explicitly `on` (`unknown`/`unavailable` = not away).
+  Residual risk: a single dropped re-arm lets the boost lapse; it restarts at the next edge.
 
 ## Template sensor pattern — trigger-based vs state-based
 A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
