@@ -173,8 +173,8 @@ mqtt:
     # ── Compressor cycling: observation only ──────────────────────────────────
     # Read-only views for diagnosing short compressor runs (plans/heating-compressor-cycling.md).
     # Register names and decodes are taken from the live catalog (08.ehp.csv / 50.ehp.mc.csv on
-    # ebus.github.io). Whether THIS unit answers each one is NOT yet confirmed live — a register
-    # the unit does not answer simply leaves its sensor unavailable.
+    # ebus.github.io). All nine answered a forced `ebusctl read` on this unit (owner, 2026-10-30),
+    # in the payload shapes parsed below; MQTT delivery depends on the bridge lines.
     #
     # Each of these needs two Mosquitto bridge lines (state `in`, `/get` `out`) — the bridge is
     # an explicit allowlist, see packages/notes/heating_pv_boost.md "Transport".
@@ -711,6 +711,25 @@ template:
           {% set hours = states('sensor.heating_compressor_runtime_today') | float %}
           {{ (hours * 60 / runs) | round(1) if runs > 0 else 0 }}
 
+      # ── Compressor stop temperature (flow setpoint + hysteresis) ──────────
+      # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
+      # (hydraulic plans 1/3, no buffer — this house). Plotted next to the actual flow temp on the
+      # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
+      # cut the run short. In cold weather it also shows how close the stop point comes to
+      # mc/FlowTempMax (35 °C) — the cue to step the hysteresis back (packages/notes "Cold weather").
+      - name: "Heating Compressor Stop Temp"
+        unique_id: heating_compressor_stop_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer-alert
+        availability: >
+          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired')
+             and has_value('sensor.geotherm_heating_compressor_hysteresis') }}
+        state: >
+          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)
+              + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
+
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
       # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight. Includes
       # hot water and the circulation pump's standby draw, and YieldTotal moves in whole kWh, so
@@ -870,8 +889,9 @@ template:
 # ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
   # ── ebusd MQTT poll-priority registration ─────────────────────────────────
-  # All ten decision registers (plus the nine compressor-cycling observation registers, which are
-  # not yet seen live) answer a forced read but are not confirmed to auto-publish without one. ehp/Status was originally assumed to be the
+  # All ten decision registers plus the nine compressor-cycling observation registers answer a
+  # forced read but are not confirmed to auto-publish without one. ehp/Status was originally
+  # assumed to be the
   # exception, self-publishing every few seconds — that held only while the compressor was
   # actively running; idle/passive circulation let it go quiet, so it is now registered like every
   # other register (see the sensor comments above and packages/CLAUDE.md).
@@ -1147,6 +1167,7 @@ group:
       - sensor.heating_yield_daily
       - sensor.heating_electricity_daily
       - sensor.heating_efficiency_today
+      - sensor.heating_compressor_stop_temp
       # Loxone comfort signal
       - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors

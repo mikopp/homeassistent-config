@@ -193,7 +193,19 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
       notes, README
 - [ ] 6. After deploy (owner): add the 18 bridge lines, restart Mosquitto, confirm each sensor
       publishes, verify `sensor.technikraum_heizung_heizung_energy` is the real Shelly energy id
-- [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations
+- [x] 6a. `BackupModeHc` checked (owner, 2026-10-30): `no_backup`; `BackupIntegral` −600. Safe to
+      deepen `CompIntegral`.
+- [x] 6b. All 9 registers answer `ebusctl read` (owner, 2026-10-30). Snapshot: hysteresis 7.00 K,
+      start integral −180, integral 5, demand no, heating starts 13385, heating hours 13277
+      (lifetime average run ≈ 60 min), yield 127550 kWh, flow 23.94 °C vs setpoint 24 °C. Forced stop
+      at 24 + 7 = 31 °C; `FlowTempMax` 35 °C leaves about 4 K of hysteresis headroom at this setpoint.
+- [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations.
+      Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
+      check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
+      35 °C (`FlowTempMax`). See the notes' "Cold weather" point.
+- [x] 7a. `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) added to the dashboard
+      card and the "Why runs end" graph (owner request, 2026-10-30), with a test. Owner declined
+      reading `BackupModeHc` (backup heater stays disabled) and a flow > 34 °C notification.
 
 ### Checks run locally (2026-10-30)
 

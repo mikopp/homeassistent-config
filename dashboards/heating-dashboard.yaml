@@ -62,6 +62,8 @@ views:
             name: Duty cycle (24 h)
           - entity: sensor.heating_efficiency_today
             name: Efficiency today (heat ÷ electricity)
+          - entity: sensor.heating_compressor_stop_temp
+            name: Compressor stop temp (setpoint + hysteresis, keep ≤ 35 °C)
           - entity: sensor.geotherm_heating_energy_integral
             name: Energy integral
           - entity: binary_sensor.geotherm_heating_compressor_demand
@@ -81,6 +83,7 @@ views:
         entities:
           - entity: sensor.geotherm_heating_circuit_flow_temp
           - entity: sensor.geotherm_heating_circuit_flow_temp_desired
+          - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
           - entity: sensor.geotherm_heating_energy_integral
           - entity: binary_sensor.heating_compressor_active

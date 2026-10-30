@@ -138,7 +138,26 @@ return-temperature reading.
 ## Compressor tuning registers (short-cycling)
 
 Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the live catalog
-(`08.ehp.csv`, `50.ehp.mc.csv`); **not yet seen live on this unit**.
+(`08.ehp.csv`, `50.ehp.mc.csv`). **All answer a forced read on this unit** (owner `ebusctl`,
+2026-10-30). Values that day: `CompHysteresis` `7.00`, `CompIntegral` `-180`, `Integral` `5`,
+`CompDemand` `no`, `CompStartsHc` `13385`, `CompHoursHc` `13277`, `YieldTotal` `127550`,
+`BackupIntegral` `-600`, `mc/Status0a` `23.94;off;on;off;24` (flow 23.94 °C, setpoint 24 °C).
+
+- **Lifetime average heating run ≈ 60 min** (13277 h ÷ 13385 starts). Short runs are a mild-weather
+  effect, not how this machine has behaved overall.
+- **Hysteresis headroom is small.** With hysteresis 7 K and setpoint 24 °C the forced stop is at
+  31 °C. `FlowTempMax` is 35 °C, so at a 24 °C setpoint the hysteresis can only usefully grow to
+  about 11 K, and less when colder weather raises the setpoint.
+- **Cold weather (reasoned, not measured).** `CompHysteresis` is a fixed setting; the Vaillant does
+  not adapt it. In cold weather the deficit builds fast and runs are long anyway, so they most
+  likely end by integral payback before the hysteresis stop — the hysteresis mainly shapes
+  mild-weather runs. When the setpoint rises, setpoint + hysteresis can exceed `FlowTempMax`
+  (e.g. 28 + 9 = 37 °C). The floor stays protected by `FloorProtectionLimit` 44 °C and
+  `ReturnTempMax` 46 °C; **unknown** is whether `FlowTempMax` also stops the compressor or only
+  caps the setpoint. Rule: raise the hysteresis only moderately (8–9 K) and, on the first cold
+  days, step it back by 1 K if run-end flow temperatures approach 35 °C.
+  `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) plots that stop point on the
+  "Why runs end" graph.
 
 | Register | Meaning |
 |---|---|
@@ -174,6 +193,10 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
   `neutral`/`active_heating`; never `off` on an unknown indicator. Slab boost only in
   `active_heating`. See the slab plan's "Control law".
 - `ehp/CompIntegral` changed −150 → −180 °min; heating curve 0.15.
+- **Backup heater disabled for heating** (owner `ebusctl`, 2026-10-30): `ehp/BackupModeHc` =
+  `no_backup`, `ehp/BackupIntegral` = −600. While `no_backup`, deepening `CompIntegral` cannot
+  start the resistive heater (if it were enabled, it would start at −600 + CompIntegral, now −780).
+  `BackupIntegral` answers with a plain `-600`.
 
 ## Hardware limits the controller must respect
 
