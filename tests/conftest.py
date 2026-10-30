@@ -350,7 +350,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     ha.set_state("sensor.geotherm_heating_compressor_hysteresis", "7", {"unit_of_measurement": "K"})
     ha.set_state("sensor.geotherm_heating_backup_start_integral", "-600",
                  {"unit_of_measurement": "°min"})
-    ha.set_state("sensor.geotherm_heating_compressor_starts", "20000", {"state_class": "total_increasing"})
+    ha.set_state("sensor.geotherm_heating_compressor_starts", "20000",
+                 {"state_class": "total_increasing", "unit_of_measurement": "count"})
     ha.set_state("sensor.geotherm_heating_compressor_hours", "15000",
                  {"unit_of_measurement": "h", "device_class": "duration"})
     ha.set_state("sensor.geotherm_heating_yield_total", "60000",

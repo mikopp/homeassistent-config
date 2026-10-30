@@ -155,7 +155,10 @@ also repointed at the same time, an extra, coupled change this plan does not oth
 > reach ebusd. Live: one `topic ebusd/<circuit>/<name> in 0` line per state topic HA reads, one
 > `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
 > `ebusd/global/scan` `in` only. Every new register needs both lines — see
-> `packages/notes/heating_pv_boost.md` "Transport". The snippet below is kept for the history only.
+> `packages/notes/heating_pv_boost.md` "Transport". Writes need a third kind of line:
+> `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`, see
+> `plans/heating-baseline-and-phase2-prerequisites.md` step 2). The snippet below is kept for the
+> history only.
 
 Leave ebusd exactly as configured today (still publishing to its current broker, so Loxone's
 integration is completely undisturbed) and instead configure HA's own Mosquitto broker to pull
@@ -273,8 +276,12 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
       valves. The geoTHERM now runs `auto` on its own time program; HA will switch to `on` only
       for "not warm enough" or a boost (decided 2026-10-30, see "Control law").
-- [ ] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
+- [x] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
+      (live 2026-10-30: TDL 21, TempDesired 22)
 - [ ] 11. Phase 2 — comfort control (`auto`/`on` + derived setpoint)
+      Prerequisite (manual, user): two bridge lines `topic ebusd/mc/OperatingMode/set out 0` and
+      `topic ebusd/mc/TempDesired/set out 0`, then restart Mosquitto — see
+      `plans/heating-baseline-and-phase2-prerequisites.md` step 2. ebusd writes verified by the owner.
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
 - [ ] 14. Compressor short-cycling observation + tuning — separate plan,
