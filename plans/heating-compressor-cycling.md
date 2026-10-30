@@ -19,12 +19,42 @@ fixed ~7 kW thermal output goes into a low setpoint and a small volume of moving
 flow temperature overshoots within minutes, and (b) cuts the run. Going −150 → −180 makes the pause
 about 20 % longer, but each run stays about 5 min.
 
-Two hypotheses outside the Vaillant that the new data must confirm or rule out:
-1. **Loxone mode toggling.** Step 9 of `plans/ebusd-pv-heating-optimization.md` is still pending,
-   and Observation 1 there shows Loxone still flips `mc/OperatingMode` `on`⇄`low`. Each flip moves
-   the flow setpoint, which can force a stop or a start.
-2. **Room valves closing.** When Loxone closes per-room valves, the circulating water volume drops,
-   so the flow temperature rises faster and the hysteresis stop comes sooner.
+Causes outside the Vaillant, ruled out by the owner (2026-10-30):
+- **Loxone mode toggling:** ruled out. Loxone no longer writes `mc/OperatingMode`. The geoTHERM
+  runs `auto` on its own day/night time program.
+- **Room valves closing:** ruled out. Loxone does not control the room valves. The only throttling
+  is the fixed hydraulic throttling of the bedrooms, which is static. It can make the circulating
+  volume smaller, but it does not change from run to run.
+
+So the cause is the Vaillant's own start/stop behaviour (integral + hysteresis) at a low setpoint.
+
+## Step 0b — record the owner's manual changes in the slab plan (docs only)
+
+None of these are in `plans/ebusd-pv-heating-optimization.md` or `packages/notes/heating_pv_boost.md`
+yet. Add them there:
+
+- Status step 9: Loxone no longer writes `mc/OperatingMode` (owner, 2026-10-30). Also record whether
+  it still publishes `warm_enough`.
+- New: geoTHERM `mc/OperatingMode` = `auto`, with the Vaillant's own time program (`on` by day,
+  `low` at night). Add an Observations entry.
+- New: `ehp/CompIntegral` −150 → −180 °min (owner). Heating curve = 0.15.
+- **Design impact (to discuss before Phase 2):** the control law says HA writes `low`/`on`. Any HA
+  write would replace `auto` and silently disable the time program. So Phase 2 must either:
+  - keep `auto` and act only through `mc/TempDesired` during a boost, or
+  - take over the day/night schedule in HA.
+  Record this as an open decision. Don't change it silently.
+- Loxone still publishes `warm_enough` (owner-confirmed), so it stays the comfort input.
+- Transport section: the documented bridge snippet is `topic ebusd/# in 0`, which is inbound only.
+  That would not carry HA's `ebusd/<c>/<n>/get` poll publishes back to ebusd, yet 7c confirmed that
+  polling works. So the live bridge (or ebusd's target broker) must differ from the doc. Ask the
+  owner for the real bridge lines and correct the snippet. No bridge change is needed for this
+  feature: every new register is under `ebusd/#`, and its `/get` uses the same path as the ten that
+  already work. The exception is an `out` rule that lists specific registers; then add the new ones.
+- Loxone does **not** control room valves (owner-confirmed). Record this in the slab plan's
+  "Division of responsibility" table and in the notes. Room valves are fixed hydraulic throttling
+  only, with no automatic actuation.
+- The time program gives two intended mode switches a day, at the day and night switch-over. These
+  are expected, not cycling.
 
 ## Answer to "what else should I change" (Vaillant side, manual, after a baseline)
 
@@ -37,8 +67,8 @@ Change one value at a time, then give each change at least 3 comparable-weather 
 | `BackupIntegral` | read it | keep `BackupModeHc` = without backup heater ("ohne ZH") | Backup heater starts at BackupIntegral + CompIntegral, so a deeper integral must not make it start |
 | Heating curve | 0.15 | **leave it** | Already low; lowering it further only shortens runs |
 | `NumberCompStarts` | read it | 3 | Upper limit only; not the cause at 1 start/h |
-| Loxone | writes mode | finish step 9 (stop writing `OperatingMode`) | Removes hypothesis 1 |
-| Room valves | Loxone | keep the large zones fully open in mild weather | Removes hypothesis 2; more water volume = longer runs |
+| Loxone | no longer writes, no valve control (done) | — | Ruled out as a cause |
+| Bedroom throttling | fixed, hydraulic | leave it unless the flow−return spread is very large | Less water moving means faster overshoot; it's static, so it's a minor factor |
 
 The planned PV slab boost (Phase 3) is the structural fix: one long midday run instead of hourly
 short runs.
@@ -53,7 +83,7 @@ short runs.
 | Energy integral | `ehp/Integral` (°min) | Shows the start point and how runs end |
 | Compressor demand | `ehp/CompDemand` | Who asked for the start |
 | Flow setpoint vs actual | `mc/Status0a` field 4 vs `ehp/Status` field 0 | Overshoot at the stop ≈ hysteresis → hysteresis is the cut-off |
-| Spread (flow − return) | existing sensors | Very large spread = little water moving (valves) |
+| Spread (flow − return) | existing sensors | Very large spread = little water moving (pump speed or throttling) |
 | Mode flips | `sensor.geotherm_heating_hvac_mode` changes | Should be near 0 once Loxone stops writing |
 | Daily efficiency | `ehp/YieldTotal` Δ / Shelly `Heizung Energy` Δ | Rises as runs get longer (coarse, kWh resolution) |
 
@@ -123,6 +153,7 @@ Per CLAUDE.MD: implement step by step and wait for approval after each step.
 ## Status
 
 - [x] 0. Plan file (this file)
+- [ ] 0b. Record owner's manual changes + bridge-doc mismatch in the slab plan and notes
 - [ ] 1. MQTT sensors for integral, demand, flow setpoint, tuning settings, counters
 - [ ] 2. Poll-registration tiers
 - [ ] 3. Derived sensors (starts/day, duty cycle, run lengths, daily efficiency)
