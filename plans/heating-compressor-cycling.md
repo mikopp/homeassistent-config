@@ -199,7 +199,10 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
       start integral −180, integral 5, demand no, heating starts 13385, heating hours 13277
       (lifetime average run ≈ 60 min), yield 127550 kWh, flow 23.94 °C vs setpoint 24 °C. Forced stop
       at 24 + 7 = 31 °C; `FlowTempMax` 35 °C leaves about 4 K of hysteresis headroom at this setpoint.
-- [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations
+- [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations.
+      Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
+      check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
+      35 °C (`FlowTempMax`). See the notes' "Cold weather" point.
 
 ### Checks run locally (2026-10-30)
 

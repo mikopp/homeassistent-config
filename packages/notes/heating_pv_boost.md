@@ -148,6 +148,14 @@ Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the li
 - **Hysteresis headroom is small.** With hysteresis 7 K and setpoint 24 °C the forced stop is at
   31 °C. `FlowTempMax` is 35 °C, so at a 24 °C setpoint the hysteresis can only usefully grow to
   about 11 K, and less when colder weather raises the setpoint.
+- **Cold weather (reasoned, not measured).** `CompHysteresis` is a fixed setting; the Vaillant does
+  not adapt it. In cold weather the deficit builds fast and runs are long anyway, so they most
+  likely end by integral payback before the hysteresis stop — the hysteresis mainly shapes
+  mild-weather runs. When the setpoint rises, setpoint + hysteresis can exceed `FlowTempMax`
+  (e.g. 28 + 9 = 37 °C). The floor stays protected by `FloorProtectionLimit` 44 °C and
+  `ReturnTempMax` 46 °C; **unknown** is whether `FlowTempMax` also stops the compressor or only
+  caps the setpoint. Rule: raise the hysteresis only moderately (8–9 K) and, on the first cold
+  days, step it back by 1 K if run-end flow temperatures approach 35 °C.
 
 | Register | Meaning |
 |---|---|
