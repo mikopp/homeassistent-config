@@ -200,6 +200,8 @@ body has a **"After deployment (manual, on the HA host / Vaillant)"** checklist:
       (lifetime average run ≈ 60 min), yield 127550 kWh, flow 23.94 °C vs setpoint 24 °C. Forced stop
       at 24 + 7 = 31 °C; `FlowTempMax` 35 °C leaves about 4 K of hysteresis headroom at this setpoint.
 - [ ] 7. 3-day baseline, then `CompHysteresis` +1 K; one change at a time, log under Observations.
+      First full baseline day is 2026-10-31. Recorder retention is raised to 14 d and the counting
+      rules are in `plans/heating-baseline-and-phase2-prerequisites.md` (steps 1 and 4).
       Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
       check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
       35 °C (`FlowTempMax`). See the notes' "Cold weather" point.
