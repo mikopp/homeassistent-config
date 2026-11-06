@@ -1,6 +1,6 @@
 # Pergola Slat Angle Formula Analysis
 
-> Referenced by: `packages/pergola.yaml` (design plan `pergola-roof-automation.md` removed; see git history)
+> Referenced by: [pergola-roof-automation.md](pergola-roof-automation.md)
 > Sources: [terrace roof titl.xlsx](terrace%20roof%20titl.xlsx), [Gemini conversation](gemini-conversation-slat-formulas.md)
 
 ---
@@ -266,7 +266,7 @@ Dead zone explanation: When `A_eff > 122°` (sun from moderate-to-far west), sla
 | 240° | 40° | 125.0° | tilt = 100 (DZ) | West — dead zone, max tilt |
 | 260° | 30° | 145.1° | tilt = 100 (DZ) | Far west — dead zone, max tilt |
 
-All values match the verification table in the former `pergola-roof-automation.md` (git history).
+All values match the verification table in `pergola-roof-automation.md`.
 
 ---
 

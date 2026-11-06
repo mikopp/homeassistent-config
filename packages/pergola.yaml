@@ -1,5 +1,5 @@
 # Pergola Dach — full automation package (Phase 1: Foundation)
-# Design plan (removed once implemented) is in git history: plans/pergola-roof-automation.md.
+# See plans/pergola-roof-automation.md for the complete design and implementation plan.
 #
 # All helpers, template sensors, automations, and scripts for the two Somfy bioclimatic
 # pergola covers (cover.dach_links, cover.dach_rechts) live in this file.
@@ -11,7 +11,7 @@
 #
 # All entities under this feature are grouped via group.pergola_dach (built-in group integration).
 # No post-deploy UI steps required — the group is fully defined in YAML.
-# Group design rationale: see git history of plans/pergola-roof-automation.md § "Pergola Device".
+# See plans/pergola-roof-automation.md § "Pergola Device" for the group design rationale.
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT BOOLEANS — on/off toggles
