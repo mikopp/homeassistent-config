@@ -130,7 +130,7 @@ Harness: `tests/test_airflow.py` (`home_assistant` fixture, `_decide_boost`, `_t
 - New: real `auto -> boost` -> start branch.
 - New: Away `unknown` + real `auto -> boost` -> start branch (Away fail-open).
 - New: no `ha_start` trigger remains (assert via the automation config if the harness exposes it).
-- Run: pinned-image suite as in `plans/airflow-cooling-state-single-decision.md` step 6 (re-measure
+- Run: pinned-image suite as in the single-decision refactor (PR #131) step 6 (re-measure
   the baseline on master first), HA `check_config`, yamllint, `git ls-files --eol`.
 
 ## Risks
