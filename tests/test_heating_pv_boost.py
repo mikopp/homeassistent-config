@@ -331,6 +331,78 @@ def test_last_run_measures_the_on_to_off_transition(
     )
 
 
+def test_heating_active_is_on_for_a_heating_run(home_assistant: HomeAssistant) -> None:
+    """Clamp > 500 W while the generator is in heating mode → the heating-only sensor is on."""
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "heat", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "1800", _W)
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_heating_active", "on", timeout=5
+    )
+
+
+def test_heating_active_is_off_for_a_hot_water_run(home_assistant: HomeAssistant) -> None:
+    """Clamp > 500 W but hvac_action 'water' → the all-runs sensor is on, the heating-only one off.
+
+    Also covers the heating → hot-water roll-over: flipping the mode ends the heating segment.
+    """
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "heat", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "1800", _W)
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_heating_active", "on", timeout=5
+    )
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "water", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "3500", _W)
+    home_assistant.assert_entity_state("binary_sensor.heating_compressor_active", "on", timeout=5)
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_heating_active", "off", timeout=5
+    )
+
+
+def test_heating_active_is_off_when_the_compressor_is_off(home_assistant: HomeAssistant) -> None:
+    """Idle circulation (~83 W) in heating mode is not a compressor run."""
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "heat", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "83", _W)
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_heating_active", "off", timeout=5
+    )
+
+
+def test_last_run_ignores_hot_water_runs(
+    home_assistant: HomeAssistant, time_machine: TimeMachine
+) -> None:
+    """A 30-minute hot-water run must not update 'last run'; a following 12-minute heating run does.
+
+    The HA instance is shared across the test session, so 'last run' may already hold a value
+    from an earlier test (e.g. 7 min). The run lengths are chosen so neither can be mistaken for
+    that leftover: the check is "never ≈ 30" after the DHW run and "≈ 12" after the heating run.
+    """
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "water", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "3500", _W)
+    home_assistant.assert_entity_state("binary_sensor.heating_compressor_active", "on", timeout=5)
+    time_machine.fast_forward(timedelta(minutes=30))
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "83", _W)
+    home_assistant.assert_entity_state("binary_sensor.heating_compressor_active", "off", timeout=5)
+    # The hot-water run never made the heating sensor go on→off, so last run did not take its 30 min.
+    home_assistant.assert_entity_state(
+        "sensor.heating_compressor_last_run",
+        lambda s: s in ("unknown", "unavailable") or not 29.0 <= float(s) <= 31.0,
+        timeout=5,
+    )
+    # Now a real heating run of 12 minutes → reported.
+    home_assistant.set_state("sensor.geotherm_heating_hvac_action", "heat", {})
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "1800", _W)
+    home_assistant.assert_entity_state(
+        "binary_sensor.heating_compressor_heating_active", "on", timeout=5
+    )
+    time_machine.fast_forward(timedelta(minutes=12))
+    home_assistant.set_state("sensor.technikraum_heizung_heizung_power", "83", _W)
+    home_assistant.assert_entity_state(
+        "sensor.heating_compressor_last_run",
+        lambda s: s not in ("unknown", "unavailable") and 11.5 <= float(s) <= 13.0,
+        timeout=5,
+    )
+
+
 def test_average_run_is_runtime_over_runs(home_assistant: HomeAssistant) -> None:
     """4 runs in 1.0 h → 15 min per run; no runs yet → 0, not a division error."""
     home_assistant.set_state("sensor.heating_compressor_runtime_today", "1.0", {"unit_of_measurement": "h"})

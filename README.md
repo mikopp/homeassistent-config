@@ -63,7 +63,7 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
 - **Slab boost only in active heating season** — not in neutral (shoulder) season
 - **Compressor cycling observation**: energy integral, flow setpoint, compressor demand, the
   start-integral / hysteresis settings, lifetime counters, and derived starts per day, average and
-  last run length, 24 h duty cycle and daily efficiency — to tune away short compressor runs (see
+  last run length (hot-water runs excluded) and 24 h duty cycle, plus daily efficiency (incl. hot water) — to tune away short compressor runs (see
   `plans/heating-compressor-cycling.md`)
 - **Transport**: `ebusd/*` reaches HA through a Mosquitto bridge that is an explicit per-topic
   allowlist — every new register needs its bridge lines added on the broker host after deploy
