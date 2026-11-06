@@ -130,8 +130,8 @@ Harness: `tests/test_airflow.py` (`home_assistant` fixture, `_decide_boost`, `_t
 - New: real `auto -> boost` -> start branch.
 - New: Away `unknown` + real `auto -> boost` -> start branch (Away fail-open).
 - New: no `ha_start` trigger remains (assert via the automation config if the harness exposes it).
-- Run: pinned-image suite as in the single-decision refactor (PR #131) step 6 (re-measure
-  the baseline on master first), HA `check_config`, yamllint, `git ls-files --eol`.
+- Run: the non-pergola `pytest` suite against the pinned image (see README "Tests"; re-measure
+  the baseline on master first; design context in `plans/airflow-cooling-architecture.md` §6-§7), HA `check_config`, yamllint, `git ls-files --eol`.
 
 ## Risks
 - Fail-open Away: if Away is `unavailable` while people are really away, a boost may run 60 min.

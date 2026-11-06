@@ -483,4 +483,4 @@ decision-table tests in `tests/test_airflow.py` (`test_decision_*`) pin each row
 
 The previous per-block matrix (Blocks 1–5, `keep` traps C7/N3/C8/W1/W2/H6) is obsolete: the
 decision is stateless apart from P3's dry-retention hysteresis, so there is no `keep` row left.
-History: single-decision refactor, PR #131.
+The current design is described in §6 (decision) and §7 (actuators).
