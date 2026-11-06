@@ -1,5 +1,5 @@
 # Pergola Dach — full automation package (Phase 1: Foundation)
-# See plans/pergola-roof-automation.md for the complete design and implementation plan.
+# See doc/pergola-roof-automation.md for the complete design and implementation plan.
 #
 # All helpers, template sensors, automations, and scripts for the two Somfy bioclimatic
 # pergola covers (cover.dach_links, cover.dach_rechts) live in this file.
@@ -11,7 +11,7 @@
 #
 # All entities under this feature are grouped via group.pergola_dach (built-in group integration).
 # No post-deploy UI steps required — the group is fully defined in YAML.
-# See plans/pergola-roof-automation.md § "Pergola Device" for the group design rationale.
+# See doc/pergola-roof-automation.md § "Pergola Device" for the group design rationale.
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT BOOLEANS — on/off toggles
@@ -319,7 +319,7 @@ template:
       # Singularity at delta_phi ≈ 0 (sun along slat axis): limit is sun_height = 90°.
       # A_eff: east-of-wall (az < wall_az) → A_eff = sun_height
       #         west-of-wall (az ≥ wall_az) → A_eff = 180 − sun_height
-      # Derivation: plans/pergola-slat-formula-analysis.md
+      # Derivation: doc/pergola-slat-formula-analysis.md
       #
       # The template also guards elev ≤ 0 directly — evaluation-order edge cases can
       # deliver a stale elevation to the template before the availability filter clears.
