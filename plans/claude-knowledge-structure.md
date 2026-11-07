@@ -28,7 +28,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 |---|---|---|
 | 0 | Canary: prove `@` imports in a path-scoped rule load, and only on a matching read | [x] DONE 2026-11-07: A FAILED (import loads eagerly), B WORKS → **symlink fallback** (section 7.1) |
 | 1 | `git mv CLAUDE.MD CLAUDE.md` + fix references | [x] DONE 2026-11-07 (plain `git mv` worked; refs fixed in `packages/CLAUDE.md`, `plans/ci-test-speedups.md`, `plans/victron-ac-referenced-accounting.md`) |
-| 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [ ] TODO |
+| 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [x] DONE 2026-11-07 |
 | 3 | `paths:` frontmatter in each note + `.claude/rules/packages/<pkg>.md` symlink to it (no `@` imports, see 7.1) | [ ] TODO |
 | 4 | Move package learnings into notes; de-duplicate | [ ] TODO |
 | 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [ ] TODO |
