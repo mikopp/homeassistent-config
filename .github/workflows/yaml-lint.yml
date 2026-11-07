@@ -13,6 +13,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Read Python version
+        id: pyver
+        run: |
+          echo "version=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ steps.pyver.outputs.version }}
+
       - name: Check for style issues
         run: |
           python .github/scripts/fix_yaml_style.py .
@@ -45,6 +55,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Read Python version
+        id: pyver
+        run: |
+          echo "version=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ steps.pyver.outputs.version }}
 
       - name: Install dependencies
         run: pip install pyyaml yamllint
