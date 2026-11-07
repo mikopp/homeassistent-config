@@ -1,9 +1,9 @@
 # Knowledge dedup: victron
 
-**Status:** PLAN ONLY. Follow-up 1 of 5 from `plans/claude-knowledge-structure.md` (section 9, D6).
+**Status:** PLAN ONLY. Follow-up 1 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** base plan steps 10-13 merged to `master` (conventions in `doc/KNOWLEDGE.md`, guards,
-`.claude/rules/packages/victron.md`). Branch `claude/knowledge-dedup-victron` off `master`.
+**Depends on:** conventions in `doc/KNOWLEDGE.md`, guards,
+`.claude/rules/packages/victron.md`: satisfied by PR #141. Branch `claude/knowledge-dedup-victron` off `master`.
 **Line numbers** below are from the analysis at `master` `da0d742` (2026-11-07). Re-check them first.
 
 ## Overview
@@ -46,7 +46,7 @@ Expected: Read + note 15.3k → ~10.5k tokens. No behaviour change.
    | `:151-160` | vebus current 600 s | 2 lines + note pointer |
    | `:558-562` | "previous formula was…" | background; keep identity `:564-566` |
    | `:620-626` | "grid import/export used to live here" | background |
-   | `:698-702`, `:826-845` | attributes / #172847 / declaration-order story | background, **graded UNPROVEN** there; YAML keeps "baselines are declared after their consumers; reordering ⇒ re-run counter-delta tests" (base step 12 already flagged it) |
+   | `:698-702`, `:826-845` | attributes / #172847 / declaration-order story | background, **graded UNPROVEN** there; YAML keeps "baselines are declared after their consumers; reordering ⇒ re-run counter-delta tests" (PR #141 already flagged it) |
 6. [TODO] Fix yamllint comment warnings in touched blocks.
 7. [TODO] **Repoint** the 13 YAML and 4 test references from the plan to `doc/victron/design.md#VIC-n`
    (test edits are comment/docstring only), then `git rm plans/victron-ac-referenced-accounting.md`.

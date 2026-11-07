@@ -1,8 +1,8 @@
 # Knowledge dedup: airflow_cooling
 
-**Status:** PLAN ONLY. Follow-up 4 of 5 from `plans/claude-knowledge-structure.md` (section 9, D6).
+**Status:** PLAN ONLY. Follow-up 4 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** base plan step 13 merged (`doc/airflow/design.md` with §4 and §7.2 fixed, bypass
+**Depends on:** satisfied by PR #141 (`doc/airflow/design.md` with §4 and §7.2 fixed, bypass
 section added, `background.md`, `sources/`). Also needs `.github/scripts/yaml_semantic_equal.py`
 (victron plan step 1). Branch `claude/knowledge-dedup-airflow` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
@@ -33,7 +33,7 @@ Expected cost: about 22.6k → about 18.7k tokens per edit. No behaviour change.
    | `:205`, `:423`, `:1331` | "previously inlined", "was an RH gate", "no longer block" | drop (background if not already there) |
 2. [TODO] Fix the yamllint comment warnings: `:329`, `:403`, `:558`, `:623` (comments-indentation),
    `:657-659` (missing space), `:683`, `:950`, `:952`, plus any others in touched blocks.
-3. [x] DONE in base step 13 (2026-11-07). Note: shrink the "stranded `ventilation_low_needed`" and "(2026-10-23)" incidents to
+3. [x] DONE in PR #141 (2026-11-07). Note: shrink the "stranded `ventilation_low_needed`" and "(2026-10-23)" incidents to
    one-line whys (story → background); check that the design link is present.
 4. [TODO] `custom_templates/airflow_decision.jinja`: leave its 24 `{# #}` lines alone. They are
    template text; changing them belongs to a behaviour PR with tests.
@@ -48,6 +48,6 @@ Expected cost: about 22.6k → about 18.7k tokens per edit. No behaviour change.
 
 ## Risks
 - `heating_cooling_indicator.yaml` is out of scope: it is all current and small. Its thresholds
-  are documented in design §4 after base step 13.
+  are documented in design §4 (PR #141).
 - `description:` strings are YAML values. Editing them changes the data tree, and the semantic
   check will fail. Only shorten them deliberately, and approve that separately.

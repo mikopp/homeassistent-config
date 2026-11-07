@@ -1,8 +1,8 @@
 # Knowledge dedup: energy
 
-**Status:** PLAN ONLY. Follow-up 5 of 5 from `plans/claude-knowledge-structure.md` (section 9, D6).
+**Status:** PLAN ONLY. Follow-up 5 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** base plan merged (the `ha-mqtt` skill holds the Loxone empty-payload rule).
+**Depends on:** satisfied by PR #141 (the `ha-mqtt` skill holds the Loxone empty-payload rule).
 Needs `.github/scripts/yaml_semantic_equal.py` (victron plan step 1). Branch
 `claude/knowledge-dedup-energy` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07); re-check them first.

@@ -1,8 +1,8 @@
 # Knowledge dedup: pergola
 
-**Status:** PLAN ONLY. Follow-up 3 of 5 from `plans/claude-knowledge-structure.md` (section 9, D6).
+**Status:** PLAN ONLY. Follow-up 3 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** base plan step 13 merged. It creates `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
+**Depends on:** satisfied by PR #141, which created `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
 `packages/notes/pergola.md`, `.claude/rules/packages/pergola.md`, and
 `plans/pergola-field-calibration.md`. Also needs `.github/scripts/yaml_semantic_equal.py`
 (victron plan step 1). Branch `claude/knowledge-dedup-pergola` off `master`.
@@ -52,4 +52,4 @@ design read on demand only. No behaviour change.
 ## Risks
 - Jinja `{# #}` comments inside templates are template text: leave them (the semantic check catches edits).
 - The design doc must already hold the corrected formulas (`mow − 5`, correction 6) before the YAML
-  points at them. Base step 13 covers this; re-check it.
+  points at them. PR #141 covered this; re-check it.

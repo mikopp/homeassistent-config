@@ -108,3 +108,24 @@ Ask about a distinctive sentence from the rule, not its file name (root `CLAUDE.
 Skills: run a task prompt that matches the description without naming the skill, with
 `--allowedTools Read,Skill,Grep,Glob`; the session must invoke the skill and answer from its body.
 A prompt outside the description must not invoke it.
+
+## K-8 Loading mechanics (Claude Code)
+
+What the layout in K-1 relies on. Grades: DOC = Claude Code docs (2026-11-07), CONFIRMED = tested
+headless in this repo 2026-11-07 (K-7 method).
+
+- Startup loads only root `CLAUDE.md` plus each skill's name + description; no rule or note bodies.
+  A skill body loads only when the skill is invoked. (CONFIRMED)
+- A `paths:` rule loads when Read/Write/Edit (or a single-file `cat`/`head`) touches a matching
+  file. **Grep and Glob do not trigger it**: before relying on package facts after a search, read
+  the package YAML or its note. (DOC; Read trigger CONFIRMED)
+- Broken frontmatter makes a rule load always. (DOC)
+- On-demand files (path rules, nested `CLAUDE.md`, their imports) are truncated above 40k chars.
+  (DOC)
+- `@` imports in a rule load eagerly at launch; a symlinked note with its own `paths:` loads
+  lazily. (CONFIRMED, canary)
+- Path rules also load inside subagents (a general-purpose subagent reading `packages/energy.yaml`
+  got the energy note and `ha-yaml.md`). (CONFIRMED)
+- Guards: `permissions.ask` blocks Read and `cat`, not Grep (K-1). (CONFIRMED)
+- Rules are context, not enforcement: anything that must never happen (CRLF, YAML errors) needs a
+  check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.

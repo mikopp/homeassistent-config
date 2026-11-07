@@ -14,7 +14,7 @@ IDs `AF-B<n>` are stable. Raw material (never edited, guarded): `doc/sources/air
   (`airflow_wheatherstation_outdoor_temp_5min`) replaced that debounce, and `delay_on` was removed.
 - Effect on start latency: was flush 10 min + drying 10 min = 20 min; now ~10 min (flush only).
 - The architecture doc then still said "`delay_off` 10 min kept to avoid premature boost stop".
-  At step 13 of `plans/claude-knowledge-structure.md` (2026-11-07) the YAML had neither
+  At the knowledge restructure (PR #141, 2026-11-07) the YAML had neither
   `delay_on` nor `delay_off` on this sensor, only a 0.3 °C `this.state` hysteresis; the doc was
   corrected to the YAML.
 - The sensor also once self-gated on `NOT low_active` (moisture-low). Dropped once `low_needed`
