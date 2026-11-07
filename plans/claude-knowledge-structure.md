@@ -382,6 +382,10 @@ doc/KNOWLEDGE.md             # the conventions themselves (this section, made pe
 - Note template: header (scope, rule paths, design link) → Invariants → Hardware/integration quirks →
   Entity map (ids from `default_entity_id`) → Decisions in force (one-line why + background link) →
   Known biases/open issues → Related.
+- Tests in notes: one note per package with a short "Tests" section (package-specific test facts only;
+  generic harness knowledge lives in the `ha-test-harness` skill). If a package's Tests section grows past
+  ~2 KB, split it into `packages/notes/<pkg>-tests.md` (own symlink rule, `paths:` only `tests/test_<pkg>.py`).
+  Not split today: airflow 0.9 KB, heating 0.2 KB (decided 2026-11-07).
 - Heading IDs: short, grep-able, never renumbered, retired IDs marked gone (`PG-4`, `AF-7.2`, `VIC-N3`, `HPB-B2`).
 - Design doc threshold: state machine, decision table, derived math, or > ~800 YAML lines
   (today: pergola, airflow, victron; heating later, when `plans/ebusd-*` is done). energy and
