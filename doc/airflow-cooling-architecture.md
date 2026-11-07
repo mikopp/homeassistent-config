@@ -470,7 +470,7 @@ flip it.
 > **state-based on purpose**: it derives from only two *slow binary* sensors (`moisture_low`, `heat_low`),
 > so trigger-based + restore could leave them stale for hours (it did — `off` while `heat_low` was on
 > all day). Rule: a template binary_sensor whose inputs are only other binary sensors must be
-> state-based. See `packages/CLAUDE.md`.
+> state-based. See `packages/notes/airflow_cooling.md`.
 
 ---
 

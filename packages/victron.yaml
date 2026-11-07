@@ -836,12 +836,8 @@ template:
       # a dedicated sensor's own state instead of an attribute. See
       # plans/victron-ac-referenced-accounting.md for the full writeup.
       #
-      # Declared AFTER their consumers (Solar Yield AC Total, Battery Energy In/Out) in this
-      # same trigger block: sensors within one trigger pass render in declaration order, and an
-      # earlier sensor's fresh write IS visible to a later sensor's states() read within that
-      # same pass (this is also why η, further above, lags by one tick behind its accumulators).
-      # Putting the baselines last means the consumers above see last tick's value here, not one
-      # this tick has already advanced.
+      # UNPROVEN (not demonstrated): render order within one trigger pass. Baselines are
+      # declared after their consumers; if you reorder, re-run the counter-delta tests.
       #
       # 'unknown' (before this sensor has ever rendered) | float(-1) reproduces the same -1
       # "no baseline yet" sentinel the consumers already guard for.

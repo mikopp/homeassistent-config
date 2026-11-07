@@ -5,7 +5,7 @@
 # phase is to run the full decision against live data for several days so the thresholds — above
 # all the return-temperature saturation point — can be calibrated before any register is written.
 #
-# Hardware context and verified ebusd register decodes live in packages/CLAUDE.md.
+# Hardware context and verified ebusd register decodes live in packages/notes/heating_pv_boost.md.
 #
 # ebusd MQTT payload format: plain ';'-separated values (NOT --mqttjson, which must stay off
 # because the Loxone integration consumes these same topics in this format). Multi-field messages
@@ -33,7 +33,7 @@ mqtt:
     # currently served) names this field "hcmode2" with an enum lacking 1=cooling, so cooling
     # would arrive as the raw "1" there — confirmed absent from the current config, but which
     # generation this ebusd instance runs is unconfirmed, so both forms are still accepted.
-    # See packages/CLAUDE.md for the full verification.
+    # See packages/notes/heating_pv_boost.md for the full verification.
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
       default_entity_id: sensor.geotherm_heating_hvac_action
@@ -296,7 +296,7 @@ mqtt:
     # priority registered while this reads "running" targets a message catalog that may still be
     # incomplete (ebusd is mid-discovery of what's on the bus) and is unreliable.
     # automation.heating_ebusd_poll_registration gates on this being anything other than
-    # "running" before it (re-)registers polling — see that automation and packages/CLAUDE.md.
+    # "running" before it (re-)registers polling — see that automation and packages/notes/heating_pv_boost.md.
     - name: "Heating ebusd Scan Status"
       unique_id: heating_ebusd_scan_status
       default_entity_id: sensor.ebusd_heating_ebusd_scan_status
@@ -896,7 +896,7 @@ automation:
   # assumed to be the
   # exception, self-publishing every few seconds — that held only while the compressor was
   # actively running; idle/passive circulation let it go quiet, so it is now registered like every
-  # other register (see the sensor comments above and packages/CLAUDE.md).
+  # other register (see the sensor comments above and packages/notes/heating_pv_boost.md).
   # Publishing "?N" (N = priority digit 1-9) to a register's ".../get" topic both performs a read
   # AND enables ONGOING automatic polling at that priority going forward — an empty payload to the
   # same topic is a one-time read only. Priority is a relative scheduling weight ("polled every

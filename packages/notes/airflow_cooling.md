@@ -7,6 +7,8 @@ paths:
   - "doc/airflow-cooling-architecture.md"
   - "plans/knowledge-dedup-airflow.md"
 ---
+Architecture, decision table, transitions: `doc/airflow-cooling-architecture.md`
+
 # airflow_cooling.yaml — ComfoConnect ventilation
 
 Notes for `packages/airflow_cooling.yaml`. Load only when working on this package.
