@@ -41,6 +41,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 12 | Fix stale pointers (heating YAML → note, airflow doc §10, victron UNPROVEN comment) | [ ] TODO |
 | 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `sources/`; pergola note + rule | [ ] TODO |
 | 14 | Write follow-up plans `plans/knowledge-dedup-<pkg>.md` (victron, heating-pv-boost, pergola, airflow, energy); NOT executed here | [x] DONE 2026-11-07 |
+| 15 | Close: move anything still needed (conventions, canary result, verify method, how-to-extend) into `doc/KNOWLEDGE.md` / `record-learning` / root `CLAUDE.md`; repoint refs; delete this plan (last commit of the PR) | [ ] TODO |
 
 Branch: `claude/knowledge-structure`, rebased onto `origin/master` `da0d742` (#140, CI on Python
 3.15). The victron cleanup landed via squash-merged PR #138, so `a19711d` is not on master by hash
