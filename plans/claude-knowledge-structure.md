@@ -39,7 +39,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 10 | Knowledge-home conventions (`doc/KNOWLEDGE.md`): current/background test, layout, note template, heading IDs, comment style, size limits. Runs after step 3, before step 6 | [x] DONE 2026-11-07 |
 | 11 | Guards: `permissions.ask` on background/sources, root-table line, `doc/<pkg>/design.md` in rule `paths:` | [x] DONE 2026-11-07, verified: headless Read+cat blocked, Grep leaks (accepted), control Read OK |
 | 12 | Fix stale pointers (heating YAML → note, airflow doc §10, victron UNPROVEN comment) | [x] DONE 2026-11-07 |
-| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `doc/sources/<pkg>/`; pergola note + rule | [x] DONE 2026-11-07 (pergola 46f4c9c, airflow <this commit>) |
+| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `doc/sources/<pkg>/`; pergola note + rule | [x] DONE 2026-11-07 (pergola 46f4c9c, airflow 54a7d25) |
 | 14 | Write follow-up plans `plans/knowledge-dedup-<pkg>.md` (victron, heating-pv-boost, pergola, airflow, energy); NOT executed here | [x] DONE 2026-11-07 |
 | 15 | Close: move anything still needed (conventions, canary result, verify method, how-to-extend) into `doc/KNOWLEDGE.md` / `record-learning` / root `CLAUDE.md`; repoint refs; delete this plan (last commit of the PR) | [ ] TODO |
 
