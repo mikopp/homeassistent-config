@@ -4,16 +4,37 @@ paths:
   - "custom_templates/airflow_decision.jinja"
   - "tests/test_airflow.py"
   - "dashboards/airflow-dashboard.yaml"
-  - "doc/airflow-cooling-architecture.md"
+  - "doc/airflow/design.md"
   - "plans/knowledge-dedup-airflow.md"
 ---
-Architecture, decision table, transitions: `doc/airflow-cooling-architecture.md`
+# airflow_cooling package notes (`packages/airflow_cooling.yaml`)
 
-# airflow_cooling.yaml — ComfoConnect ventilation
+Read before touching `packages/airflow_cooling.yaml`, `custom_templates/airflow_decision.jinja`,
+its tests or its dashboard. Scope: ComfoConnect (Zehnder ComfoAir Q350 ERV) temperature profile,
+ventilation level and humidity boost. Design (entities, season machine, decision table, actuator
+automations, bypass estimation): `doc/airflow/design.md` (`AF-1` … `AF-12`). This note holds what
+you must not break.
 
-Notes for `packages/airflow_cooling.yaml`. Load only when working on this package.
+## Invariants
+### Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
+CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
+- **Indicators feed only the decision; consumers read only the decision.** The indicators
+  (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
+  `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
+  `sensor.airflow_cooling_state` and of nothing that writes the device. The controller, the drying
+  boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
+  attributes. Never wire an indicator straight into an automation — why: consumers that each
+  re-implement the season rules disagree (story → `doc/airflow/background.md#AF-B4`).
+- The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
+  applying it cannot change it. Priority/season rules live in one place:
+  `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
+  template entities cannot share variables between state and attributes at 2026.10.1 — entity
+  `variables` render once at setup).
+- It is **state-based** (derives from slow binaries; see the trigger-vs-state rule below) and
+  unavailable unless every indicator has a value — the automations then no-op.
 
-## Boost/preset hardware model
+## Hardware / integration quirks
+### Boost/preset hardware model
 Hardware behaviour of the ComfoConnect unit, relied on by the airflow automations:
 - A running **boost** is identified by `switch.comfoconnect_pro_boost` (and the stable `drying_needed`
   intent) — **never** by `preset==high`. Boost only *reports* `high` as a side effect.
@@ -34,36 +55,41 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
   decision going `unavailable -> boost` is NOT an edge and starts nothing (so it cannot reset a running
   timer). The countdown re-arms a running boost while boost is still decided. A manual off therefore
   sticks until the next edge. Away counts only when explicitly `on` (`unknown`/`unavailable` = not away).
-  Residual risk: a single dropped re-arm lets the boost lapse; it restarts at the next edge.
+  Edge table: design `AF-7.2`.
 
-## Template sensor pattern — trigger-based vs state-based
+## Entity map
+Full inventory with roles: design `AF-2` (inputs, thresholds, indicators, actuators, views) and
+`AF-9` (helpers). Season thresholds: `input_number.heating_indicator_*` (design `AF-4`).
+
+## Decisions in force
+### Template sensor pattern — trigger-based vs state-based
 A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
 **state-based** (plain `state:`, no `trigger:`). Trigger-based template sensors restore their last
 state on HA **restart** and recompute only when an input **changes** — so a derived-from-binaries
-sensor can restore **stale** and never resync (this is what stranded `ventilation_low_needed` at
-`off` while `heat_low` was `on` all day, leaving the preset at medium under `heat_protection`).
+sensor can restore **stale** and never resync (story → `doc/airflow/background.md#AF-B3`).
 Reserve trigger-based + restore for **primary** decision sensors driven by continuously-drifting
 numeric filters (outdoor temp/dew, weather-station temp): there the drift guarantees a recompute
 within ~1 debounce after restart, and restoring preserves the 10-min delay + `this.state` Schmitt
 hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unknown`), **not**
 *restart* (comes up with a restored value), so it does not protect against restart-stale.
 
-## Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
-CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
-- **Indicators feed only the decision; consumers read only the decision.** The indicators
-  (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
-  `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
-  `sensor.airflow_cooling_state` and of nothing that writes the device. The controller, the drying
-  boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
-  attributes. Never wire an indicator straight into an automation — why: consumers that each
-  re-implement the season rules disagree (active heating once got free cooling that way).
-- The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
-  applying it cannot change it. Priority/season rules live in one place:
-  `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
-  template entities cannot share variables between state and attributes at 2026.10.1 — entity
-  `variables` render once at setup).
-- It is **state-based** (derives from slow binaries; see the trigger-vs-state rule above) and
-  unavailable unless every indicator has a value — the automations then no-op.
+### Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
+- Gate preset/auto ownership on the **decision** (`ventilation` attribute — boost ⊂ flush intent),
+  NOT the boost/auto switches, which flap during boost expiry/re-enable races.
+- While a boost is intended/running: write **no preset** and only ever turn `auto_mode` **ON** (or do
+  nothing). The boost-owner branch is first in the `choose` and matches on the intent, so the `choose`
+  EXITS there and the Low/Medium branches (which turn auto off / write a preset) can never cancel the
+  boost. Boost gives HIGH meanwhile, so the underlying preset is moot until boost ends.
+- Force `preset=medium, auto=off` only when medium is decided and the schedule is holding
+  `preset=low`; `auto=on, preset=medium` is the preferred state and must not be re-forced.
+- Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
+  a change is required to fix a specific defect.
+
+## Known biases / open issues
+- Boost residual risk (accepted): a single dropped re-arm lets the boost lapse; it restarts at the
+  next edge.
+- `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
+  default on a helper that the repo rule forbids (code, not fixed in a docs step).
 
 ## Tests (`tests/test_airflow.py`)
 - Seed season/dew first, then the delayed indicators (`_seed_indicators`) — CONFIRMED; otherwise a
@@ -77,14 +103,7 @@ CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
   only holds because the seeded 48h mean happens to keep those states (the indicator re-renders from
   its inputs). If a pin stops sticking, drive the mean instead.
 
-## Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
-- Gate preset/auto ownership on the **decision** (`ventilation` attribute — boost ⊂ flush intent),
-  NOT the boost/auto switches, which flap during boost expiry/re-enable races.
-- While a boost is intended/running: write **no preset** and only ever turn `auto_mode` **ON** (or do
-  nothing). The boost-owner branch is first in the `choose` and matches on the intent, so the `choose`
-  EXITS there and the Low/Medium branches (which turn auto off / write a preset) can never cancel the
-  boost. Boost gives HIGH meanwhile, so the underlying preset is moot until boost ends.
-- Force `preset=medium, auto=off` only when medium is decided and the schedule is holding
-  `preset=low`; `auto=on, preset=medium` is the preferred state and must not be re-forced.
-- Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
-  a change is required to fix a specific defect.
+## Related
+- `doc/airflow/design.md` — current design (`AF-*` IDs).
+- `packages/heating_cooling_indicator.yaml` — season indicator consumed by the decision.
+- `plans/knowledge-dedup-airflow.md` — open YAML comment dedup.

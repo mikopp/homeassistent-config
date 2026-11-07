@@ -33,7 +33,7 @@ Expected cost: about 22.6k → about 18.7k tokens per edit. No behaviour change.
    | `:205`, `:423`, `:1331` | "previously inlined", "was an RH gate", "no longer block" | drop (background if not already there) |
 2. [TODO] Fix the yamllint comment warnings: `:329`, `:403`, `:558`, `:623` (comments-indentation),
    `:657-659` (missing space), `:683`, `:950`, `:952`, plus any others in touched blocks.
-3. [TODO] Note: shrink the "stranded `ventilation_low_needed`" and "(2026-10-23)" incidents to
+3. [x] DONE in base step 13 (2026-11-07). Note: shrink the "stranded `ventilation_low_needed`" and "(2026-10-23)" incidents to
    one-line whys (story → background); check that the design link is present.
 4. [TODO] `custom_templates/airflow_decision.jinja`: leave its 24 `{# #}` lines alone. They are
    template text; changing them belongs to a behaviour PR with tests.

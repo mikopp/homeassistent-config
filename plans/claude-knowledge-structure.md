@@ -39,7 +39,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 10 | Knowledge-home conventions (`doc/KNOWLEDGE.md`): current/background test, layout, note template, heading IDs, comment style, size limits. Runs after step 3, before step 6 | [x] DONE 2026-11-07 |
 | 11 | Guards: `permissions.ask` on background/sources, root-table line, `doc/<pkg>/design.md` in rule `paths:` | [x] DONE 2026-11-07, verified: headless Read+cat blocked, Grep leaks (accepted), control Read OK |
 | 12 | Fix stale pointers (heating YAML → note, airflow doc §10, victron UNPROVEN comment) | [x] DONE 2026-11-07 |
-| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `doc/sources/<pkg>/`; pergola note + rule | [~] pergola done 2026-11-07; airflow TODO |
+| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `doc/sources/<pkg>/`; pergola note + rule | [x] DONE 2026-11-07 (pergola 46f4c9c, airflow <this commit>) |
 | 14 | Write follow-up plans `plans/knowledge-dedup-<pkg>.md` (victron, heating-pv-boost, pergola, airflow, energy); NOT executed here | [x] DONE 2026-11-07 |
 | 15 | Close: move anything still needed (conventions, canary result, verify method, how-to-extend) into `doc/KNOWLEDGE.md` / `record-learning` / root `CLAUDE.md`; repoint refs; delete this plan (last commit of the PR) | [ ] TODO |
 
@@ -173,7 +173,7 @@ Victron package knowledge (loaded because a victron file was touched):
 The note itself is NOT in `paths` (would double-load). Path lists per package:
 - airflow_cooling: `packages/airflow_cooling.yaml`, `custom_templates/airflow_decision.jinja`,
   `tests/test_airflow.py`, `dashboards/airflow-dashboard.yaml`. Links (not imports)
-  `doc/airflow-cooling-architecture.md` (25 KB).
+  `doc/airflow/design.md` (29 KB, in the note's `paths:` since step 13).
 - energy: `packages/energy.yaml`, `tests/test_wallbox.py`.
 - heating_pv_boost: `packages/heating_pv_boost.yaml`, `tests/test_heating_pv_boost.py`,
   `dashboards/heating-dashboard.yaml`, `plans/heating-*.md`, `plans/ebusd-*.md`.
@@ -336,6 +336,8 @@ that agents do not read by default.
 Read-only subagent analysis of `doc/`, all package YAML and the notes. Measured, ~4 chars/token.
 
 ### 9.1 Findings
+Line refs in 9.1/9.5 refer to the pre-step-13 files (deleted/moved); historical.
+
 | Package | Comment share of YAML | ≈ comment tokens / file | Share that is history | Design doc | Note |
 |---|---|---|---|---|---|
 | pergola | 55 % | 12.2k / 22.2k | ~10 % (rest restates doc) | 71 + 19 KB + 49 KB transcript | none |
@@ -427,11 +429,14 @@ fix 7 → 6 at `:354`); §2-4 keep results, derivations → background; §5 Gemi
 **`doc/gemini-conversation-slat-formulas.md`, `terrace roof titl.xlsx`** → `doc/sources/pergola/`.
 Result: design ~25-30 KB, new note ~6-8 KB, background ~40 KB.
 
-**`doc/airflow-cooling-architecture.md`**: almost all current → `doc/airflow/design.md`. Fix §4
+Airflow part done in step 13: now `doc/airflow/design.md` (AF ids), `doc/airflow/background.md`
+(`AF-B1…B5`), raw bypass answer in `doc/sources/airflow/`. Names below are the pre-move files.
+
+**`doc/airflow-cooling-architecture.md`** (now `doc/airflow/design.md`): almost all current → `doc/airflow/design.md`. Fix §4
 (helper thresholds), §7.2 (#136 edges: `away_ended`; restart / `unavailable→boost` not an edge),
 §10 pointer. Background (~1.5 KB): "replaces old `delay_on`" (`:60-61,:84`), "Former Blocks 3/4/5"
 (`:320`), "stale for hours" incident, "previous per-block matrix" (`:484`).
-**`doc/estimated-bypass-percentage-evr.md`** (raw LLM answer, has BOM) → `doc/sources/airflow/`;
+**`doc/estimated-bypass-percentage-evr.md`** (raw LLM answer, has BOM) → `doc/sources/airflow/` (done);
 add a ~10-line "Bypass estimation" section to design (impl. `airflow_cooling.yaml:159-200`).
 
 **Victron** (follow-up plan): distil the 90 KB plan → `doc/victron/design.md` (~10-15 KB: accounting
