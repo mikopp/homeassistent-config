@@ -39,7 +39,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 10 | Knowledge-home conventions (`doc/KNOWLEDGE.md`): current/background test, layout, note template, heading IDs, comment style, size limits. Runs after step 3, before step 6 | [x] DONE 2026-11-07 |
 | 11 | Guards: `permissions.ask` on background/sources, root-table line, `doc/<pkg>/design.md` in rule `paths:` | [x] DONE 2026-11-07, verified: headless Read+cat blocked, Grep leaks (accepted), control Read OK |
 | 12 | Fix stale pointers (heating YAML → note, airflow doc §10, victron UNPROVEN comment) | [x] DONE 2026-11-07 |
-| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `sources/`; pergola note + rule | [ ] TODO |
+| 13 | `doc/` restructure (docs only, no YAML): pergola + airflow → `design.md` / `background.md` / `doc/sources/<pkg>/`; pergola note + rule | [~] pergola done 2026-11-07; airflow TODO |
 | 14 | Write follow-up plans `plans/knowledge-dedup-<pkg>.md` (victron, heating-pv-boost, pergola, airflow, energy); NOT executed here | [x] DONE 2026-11-07 |
 | 15 | Close: move anything still needed (conventions, canary result, verify method, how-to-extend) into `doc/KNOWLEDGE.md` / `record-learning` / root `CLAUDE.md`; repoint refs; delete this plan (last commit of the PR) | [ ] TODO |
 
@@ -177,8 +177,8 @@ The note itself is NOT in `paths` (would double-load). Path lists per package:
 - energy: `packages/energy.yaml`, `tests/test_wallbox.py`.
 - heating_pv_boost: `packages/heating_pv_boost.yaml`, `tests/test_heating_pv_boost.py`,
   `dashboards/heating-dashboard.yaml`, `plans/heating-*.md`, `plans/ebusd-*.md`.
-- pergola / heating_cooling_indicator: no note, so no rule yet. Never import
-  `doc/pergola-roof-automation.md` (71 KB > 40k limit).
+- pergola: note + rule since step 13 (`packages/notes/pergola.md`); heating_cooling_indicator: no
+  note yet. Never import `doc/pergola/design.md`.
 (Exact dashboard/test file names to be confirmed with `ls` at implementation.)
 
 `ha-yaml.md` paths: `packages/**/*.yaml`, `automations.yaml`, `scripts.yaml`,
@@ -374,7 +374,7 @@ Read-only subagent analysis of `doc/`, all package YAML and the notes. Measured,
 packages/notes/<pkg>.md      # auto-loaded via path rule; current; ≤ 24 KB (~6k tokens); fixed template
 doc/<pkg>/design.md          # current architecture/derivation results; on demand; ≤ 40k chars; stable IDs
 doc/<pkg>/background.md      # history/alternatives/investigations; guarded; IDs <PKG>-B<n>
-doc/<pkg>/sources/           # transcripts, xlsx, raw LLM answers; guarded; never edited
+doc/sources/<pkg>/           # transcripts, xlsx, raw LLM answers; guarded; never edited
 packages/<pkg>.yaml comments # what the block does + ≤1 line why + pointer "# → doc/<pkg>/design.md#PG-4"
 plans/                       # open work + hypotheses only; implemented → distil into note/design, story → background, delete
 doc/KNOWLEDGE.md             # the conventions themselves (this section, made permanent; linked from root CLAUDE.md)
@@ -395,7 +395,8 @@ doc/KNOWLEDGE.md             # the conventions themselves (this section, made pe
   loads the note); never put background/sources in `paths:`.
 
 ### 9.4 Guards for background/sources
-1. `.claude/settings.json` `permissions.ask`: `Read(doc/**/background*.md)`, `Read(doc/**/sources/**)`
+1. `.claude/settings.json` `permissions.ask`: `Read(/doc/**/background*.md)`, `Read(/doc/sources/**)`,
+   `Bash(cat doc/**/background*)`, `Bash(cat doc/sources/*)` (sources moved to `doc/sources/<pkg>/`, user decision 2026-11-07)
    (ask, not deny: a deliberate "why was this done?" read stays possible).
 2. Root "Where knowledge lives" line: "background/sources are not design-relevant: never cite as
    current behaviour; read only when the user asks for history."
@@ -403,6 +404,10 @@ doc/KNOWLEDGE.md             # the conventions themselves (this section, made pe
    line is the main guard (add `Bash(cat doc/**/background*)`-style asks only if cheap).
 
 ### 9.5 Per-doc keep / condense / move (input for step 13 and the follow-up plans)
+Pergola part done in step 13: the two pergola docs named below no longer exist; their content is in
+`doc/pergola/design.md` (current) and `doc/pergola/background.md` (history), raw files in
+`doc/sources/pergola/`. Line numbers refer to the deleted files.
+
 **`doc/pergola-roof-automation.md` (858 lines)**
 | Lines | Section | Verdict |
 |---|---|---|
@@ -419,14 +424,14 @@ doc/KNOWLEDGE.md             # the conventions themselves (this section, made pe
 
 **`doc/pergola-slat-formula-analysis.md`**: §1 geometry, §6 summary formulas = design (canonical,
 fix 7 → 6 at `:354`); §2-4 keep results, derivations → background; §5 Gemini assessment → background.
-**`doc/gemini-conversation-slat-formulas.md`, `terrace roof titl.xlsx`** → `doc/pergola/sources/`.
+**`doc/gemini-conversation-slat-formulas.md`, `terrace roof titl.xlsx`** → `doc/sources/pergola/`.
 Result: design ~25-30 KB, new note ~6-8 KB, background ~40 KB.
 
 **`doc/airflow-cooling-architecture.md`**: almost all current → `doc/airflow/design.md`. Fix §4
 (helper thresholds), §7.2 (#136 edges: `away_ended`; restart / `unavailable→boost` not an edge),
 §10 pointer. Background (~1.5 KB): "replaces old `delay_on`" (`:60-61,:84`), "Former Blocks 3/4/5"
 (`:320`), "stale for hours" incident, "previous per-block matrix" (`:484`).
-**`doc/estimated-bypass-percentage-evr.md`** (raw LLM answer, has BOM) → `doc/airflow/sources/`;
+**`doc/estimated-bypass-percentage-evr.md`** (raw LLM answer, has BOM) → `doc/sources/airflow/`;
 add a ~10-line "Bypass estimation" section to design (impl. `airflow_cooling.yaml:159-200`).
 
 **Victron** (follow-up plan): distil the 90 KB plan → `doc/victron/design.md` (~10-15 KB: accounting
@@ -449,7 +454,7 @@ Main gain is correctness: one home per fact, so copies cannot drift.
 
 ### 9.7 Additions to existing sections
 - "Where knowledge lives" table (root): rows for YAML comments, note, `doc/<pkg>/design.md`,
-  `doc/<pkg>/background.md` + `sources/` (guarded, not design-relevant), `plans/` (open work only),
+  `doc/<pkg>/background.md` + `doc/sources/<pkg>/` (guarded, not design-relevant), `plans/` (open work only),
   `doc/KNOWLEDGE.md` (conventions).
 - `record-learning` routing: current package fact → note; architecture/derivation result → design
   (create at threshold); story/superseded/investigation → background; transcript/spreadsheet →

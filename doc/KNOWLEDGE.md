@@ -12,7 +12,7 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | `packages/notes/<pkg>.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
 | `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
-| `doc/<pkg>/background.md`, `doc/<pkg>/sources/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
+| `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | git history / PRs | the log: what changed when and why | `git log`, `gh pr view` | n/a |
@@ -23,8 +23,9 @@ Rules:
   The symlink layout (note with its own `paths:` + symlink in `.claude/rules/packages/`) loads lazily.
 - **Background and sources are not design-relevant.** Never cite them as current behaviour; read
   them only when the user asks "why/how did this come about".
+  Sources live under `doc/sources/<pkg>/` (one tree, easy to guard), not inside `doc/<pkg>/`.
   Guard (`.claude/settings.json` `permissions.ask`): `Read(/doc/**/background*.md)`,
-  `Read(/doc/**/sources/**)`, `Bash(cat doc/**/background*)`, `Bash(cat doc/**/sources/*)`.
+  `Read(/doc/sources/**)`, `Bash(cat doc/**/background*)`, `Bash(cat doc/sources/*)`.
   Verified headless 2026-11-07: Read and `cat` are blocked; Grep content search is NOT blocked
   (it printed the token), nor are other shell readers. The guard is a prompt, not a wall.
 - No dated logs anywhere. Git and PRs are the log.

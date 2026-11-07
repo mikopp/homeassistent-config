@@ -2,7 +2,7 @@
 
 **Status:** PLAN ONLY. Follow-up 3 of 5 from `plans/claude-knowledge-structure.md` (section 9, D6).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** base plan step 13 merged. It creates `doc/pergola/{design.md,background.md,sources/}`,
+**Depends on:** base plan step 13 merged. It creates `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
 `packages/notes/pergola.md`, `.claude/rules/packages/pergola.md`, and
 `plans/pergola-field-calibration.md`. Also needs `.github/scripts/yaml_semantic_equal.py`
 (victron plan step 1). Branch `claude/knowledge-dedup-pergola` off `master`.
@@ -27,6 +27,7 @@ design read on demand only. No behaviour change.
    | Lines | Content | Action |
    |---|---|---|
    | `:1` | "(Phase 1: Foundation)" | replace with a package summary + design link |
+   | `:2`, `:14`, `:322` | pointers to deleted `doc/pergola-roof-automation.md` / `doc/pergola-slat-formula-analysis.md` | → `doc/pergola/design.md#PG-n` (`:14` group → note invariants) |
    | `:38-40`, `:93`, `:108`, `:701`, `:781`, `:859` | "plan Step N" refs | point to design IDs (`PG-n`) or drop |
    | `:311-322` | A_eff derivation | 3-5 lines + `→ #PG-4` |
    | `:355-389` | 35-line `slat_angle` dispatch comment | 3-5 lines + `→ #PG-4` |

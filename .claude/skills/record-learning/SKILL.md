@@ -42,7 +42,7 @@ not CONFIRMED.
 | a current fact about one package | `packages/notes/<pkg>.md` (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | architecture or a derivation result | `doc/<pkg>/design.md` (create at the K-4 threshold) |
 | a story, superseded design or investigation | `doc/<pkg>/background.md` |
-| a transcript or spreadsheet | `doc/<pkg>/sources/` (never edited) |
+| a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |
 | a cross-package topic fact (templates, MQTT, energy, tests …) | the matching skill in `.claude/skills/`, or a new skill |
 | needed in every session | root `CLAUDE.md` (keep it < 100 lines) |
 | a hypothesis | the feature's `plans/` file, marked UNPROVEN |

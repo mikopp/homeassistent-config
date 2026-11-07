@@ -6,9 +6,9 @@
     ],
     "ask": [
       "Read(/doc/**/background*.md)",
-      "Read(/doc/**/sources/**)",
+      "Read(/doc/sources/**)",
       "Bash(cat doc/**/background*)",
-      "Bash(cat doc/**/sources/*)"
+      "Bash(cat doc/sources/*)"
     ]
   }
 }
