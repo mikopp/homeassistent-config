@@ -546,7 +546,7 @@ def test_drying_boost_away_suppressed(home_assistant: HomeAssistant) -> None:
     # In production: away=on blocks action — boost stays off.
 
 
-# ── Drying boost: edge-only starts (plans/airflow-restart-and-boost-robustness-fixes.md) ──────
+# ── Drying boost: edge-only starts (PR #136) ──────
 # Real state-change triggers (not manual automation.trigger) are used here. The harness cannot
 # read automation traces, so which BRANCH ran is not observable; what IS observable is whether the
 # automation ran at all: `last_triggered` only moves when a trigger fired AND the top-level

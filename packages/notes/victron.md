@@ -29,17 +29,32 @@ better. The long-run ratio `victron_multiplus_conversion_efficiency` is dominate
 inverting but is applied to daytime PV. Totals still close exactly; only the Solar/Battery split
 shifts. A load-dependent η would be a separate change.
 
+## Venus OS MQTT publishes on CHANGE only (proven from source)
+Python Venus services write values through velib `vedbus.py` `_local_set_value`
+(`if self._value == newvalue: return None`), so an unchanged value sends no D-Bus signal.
+dbus-flashmq relays every signal it gets, has no de-dup and no periodic value re-publish, and the
+`suppress-republish` keep-alive skips the full dump. A value that stays constant (e.g.
+`/Dc/Vebus/Current` = 0.0 A while idle) is sent ONCE, so any `expire_after` shorter than "how long it
+can stay constant" WILL expire it. Size `expire_after` per topic and read an expired value as
+"unchanged", not "outage". Chain: dbus-systemcalc-py `delegates/multi.py` -> velib `vedbus.py` ->
+dbus-flashmq `src/state.cpp`; every key line dates from 2014-2024 (`git log -S`), so any current
+Venus OS has it. Only Python/vedbus producers were checked; C services (vecan, mk2) were not.
+
+Checking it live: ha-mcp only offers long-term statistics (no raw state history), so an expiry shows
+only as missing 5-min rows. MQTT sensors do not expose `expire_after` as an attribute. For exact
+timing use the HA History panel or `mosquitto_sub -v -t 'N/c0619ab4c19e/<path>'`.
+
 ## expire_after policy
 See the comment at the top of `packages/victron.yaml`. A missing `expire_after` on an MQTT sensor
 means it is not restored after a restart.
 
 `sensor.victron_vebus_dc_current` uses `expire_after: 600` (not 120). `victron_multiplus_dc_power`
 reads an expired current as 0 A, which would book the whole AC load as conversion loss while
-charging. Recorder history (2026-10-30): the current changes about every second at non-zero loads
-(e.g. -22.7 A in 119 separate spells totalling 139 s in a 2 h window) and a constant non-zero
-reading for 2+ min was not seen in ~5 days (judged from per-state totals). Real 0.0 A readings are
-correct. The sensor was also unavailable in 8 spells of ~11 min on 2026-10-30 00:00-12:00 (likely
-Multi standby / service gone); what the AC side did during them was NOT verified.
+charging. A non-zero current changes about every second (no constant non-zero reading for 2+ min
+was seen in ~5 days of history), so it never falsely expires within 600 s. It DOES expire, several
+times a day, after more than 10 min of real 0 A (idle, see the change-only section above). That is
+harmless: `ac_net_power` is then about -40..-50 W (Multi idle draw from AC), `dc_power` reads 0 W,
+`conversion_loss_power` shows the idle draw (same as a published 0 A), and the η gate is closed.
 
 ## η accumulators share one gate
 `ac_out_energy` and `dc_in_energy` both advance only when `ac_net > 0` AND `dc < 0` and both inputs
@@ -50,6 +65,14 @@ to neither, so skew ticks cannot bias η. Existing totals are not re-seeded; the
 - Conversion loss is clamped per sample (`max(-(ac_net+dc), 0)`), so negative excursions are
   dropped and the loss reads a few W high (live 86 W vs ~93 W expected). Diagnostic only.
 - `conversion_efficiency` can render twice per minute tick (two accumulator entities); cosmetic.
+- η is about 85 % in normal operation (85.1 % in 2026-11); use that as the sanity value.
+
+## Open issue (not fixed)
+`battery_energy_in` / `battery_energy_out` read grid/load with `float(0)` and no availability guard,
+so an unavailable grid or load is booked as 0 W for that tick. A "hold the tick" fix is NOT a small
+change: both sensors share a long template with counter-delta branches, and the solar/AC-PV baseline
+sensors advance on their own, so a held tick would drop that tick's delta. Needs its own tests
+(none cover an unavailable grid today).
 
 ## `sensor.victron_solar_yield_total_kwh` is not the MPPT counter
 Template sensor since #121 (merged 2026-10-16): accumulates the MPPT counter delta x η, starting
