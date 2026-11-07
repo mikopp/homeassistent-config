@@ -180,7 +180,7 @@ mqtt:
     # an explicit allowlist, see packages/notes/heating_pv_boost.md "Transport".
     #
     # Single-value payloads use the empty-render guard: an unparsable payload renders '' and HA
-    # keeps the last value instead of raising (see .claude/learnings.md, MQTT empty payload).
+    # keeps the last value instead of raising (see .claude/skills/ha-mqtt/SKILL.md).
 
     # ehp/Integral — the running energy integral: summed (flow actual − flow desired) per minute,
     # in °min. Goes negative while the slab draws heat; the compressor starts when it reaches

@@ -31,7 +31,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [x] DONE 2026-11-07, verified: headless `claude -p` loads ha-yaml.md after reading `packages/energy.yaml`, not with no read or after `README.md` |
 | 3 | `paths:` frontmatter in each note + `.claude/rules/packages/<pkg>.md` symlink to it (no `@` imports, see 7.1) | [x] DONE 2026-11-07, verified (headless, section 10 method) |
 | 4 | Move package learnings into notes; de-duplicate | [x] DONE 2026-11-07 |
-| 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [ ] TODO |
+| 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [x] DONE 2026-11-07, verified (rule + skill trigger) |
 | 6 | `record-learning` skill; slim root `CLAUDE.md`; slim `packages/CLAUDE.md` | [ ] TODO |
 | 7 | Fix `yaml` skill conflict (`float(0)` defaults) | [ ] TODO |
 | 8 | Delete `.claude/learnings.md`; repoint all references | [ ] TODO |
