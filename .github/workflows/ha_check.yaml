@@ -93,10 +93,17 @@ jobs:
       # ── 3. Python tooling ────────────────────────────────────────────────────
       #    This is the only step with meaningful duration before the barrier, so
       #    it is the only real cover the background pulls get (~7s).
+      #    The version lives in .github/ha-versions/python/Dockerfile so Dependabot
+      #    (docker ecosystem) can bump it, e.g. `FROM python:3.15` -> 3.16.
+      - name: Read Python version
+        id: pyver
+        run: |
+          echo "version=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: ${{ steps.pyver.outputs.version }}
 
       - name: Install Python dependencies
         run: pip install -r .github/workflows/requirements.txt

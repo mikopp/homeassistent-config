@@ -18,3 +18,6 @@ custom_components/
 .vscode/settings.json
 .claude/settings.local.json
 .HA_VERSION
+
+# Local virtualenv for .github/scripts/ci-local.sh
+.venv/

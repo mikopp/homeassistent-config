@@ -119,13 +119,16 @@ Dashboard element fragments live in `dashboards/elements/` and are included via 
 Runs on every push. Validates the full configuration and executes the test suite against a live HA Docker instance.
 
 1. Pulls the pinned HA Docker image (`.github/ha-versions/ha/Dockerfile`, bumped by Dependabot) and caches it; the same image is used for `check_config` and the test harness via `HA_IMAGE`
-2. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
-3. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
-4. Runs `homeassistant --script check_config` to catch invalid configuration
-5. Extracts all Jinja2 templates from YAML files into `/tmp/templates.json`
-6. Runs `pytest tests/` against a session-scoped live HA container — covers template rendering correctness and automation scenario tests
-7. Posts a PR comment with truncated pytest output on failure
-8. Writes full results to the Actions Job Summary
+2. Sets up Python from `.github/ha-versions/python/Dockerfile` (`FROM python:<minor>`, bumped by Dependabot; `yaml-lint.yml` reads the same file)
+3. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
+4. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
+5. Runs `homeassistant --script check_config` to catch invalid configuration
+6. Extracts all Jinja2 templates from YAML files into `/tmp/templates.json`
+7. Runs `pytest tests/` against a session-scoped live HA container — covers template rendering correctness and automation scenario tests
+8. Posts a PR comment with truncated pytest output on failure
+9. Writes full results to the Actions Job Summary
+
+**Run the Docker-free checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15`; builds `.venv` itself). `check_config` and pytest require Docker and run only in CI.
 
 ### `yaml-lint.yml` — YAML Style + Lint
 Runs on every push as a separate job chain.

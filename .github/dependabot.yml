@@ -18,3 +18,10 @@ updates:
     directory: /.github/ha-versions/ha
     schedule:
       interval: weekly
+
+  # Python version used by CI (setup-python reads it from this Dockerfile,
+  # since Dependabot cannot bump `python-version:` in workflow files).
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/python
+    schedule:
+      interval: weekly
