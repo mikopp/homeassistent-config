@@ -153,9 +153,10 @@ mqtt:
       # load as conversion loss while charging. Recorder history (2026-10-30) shows the current
       # changes about every second at any non-zero load, and a constant non-zero reading for 2+ min
       # was not seen in ~5 days, so a genuinely flowing current keeps refreshing well inside 600 s.
-      # Real 0.0 A readings are published and correct. Known unverified point: the sensor was
-      # unavailable in 8 spells of ~11 min on 2026-10-30 00:00-12:00 (probably Multi standby or
-      # the service gone); what the AC side did during them was not checked.
+      # Real 0.0 A readings are published and correct. The sensor still expires when 0 A lasts
+      # more than 600 s, because Venus OS publishes on change only (see packages/notes/victron.md).
+      # That is harmless: at idle ac_net is about -40..-50 W (Multi idle draw from AC), dc_power
+      # reads 0 W exactly as for a published 0 A, and the eta accumulator gate is closed.
       expire_after: 600
       icon: mdi:current-dc
       device: *victron_device
