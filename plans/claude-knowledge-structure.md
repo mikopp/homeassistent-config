@@ -35,7 +35,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 6 | `record-learning` skill; slim root `CLAUDE.md`; slim `packages/CLAUDE.md` | [x] DONE 2026-11-07, verified |
 | 7 | Fix `yaml` skill conflict (`float(0)` defaults) | [x] DONE 2026-11-07 |
 | 8 | Delete `.claude/learnings.md`; repoint all references | [x] DONE 2026-11-07 |
-| 9 | Verify in a fresh session (`/context`, `/memory`) + `git ls-files --eol` | [ ] TODO |
+| 9 | Verify in a fresh session (`/context`, `/memory`) + `git ls-files --eol` | [x] DONE 2026-11-07: headless haiku runs, startup lean, lazy-load matrix as expected (§9.9), path rules DO load inside a general-purpose subagent (energy note + `ha-yaml.md`), skills trigger, static checks + ci-local pass |
 | 10 | Knowledge-home conventions (`doc/KNOWLEDGE.md`): current/background test, layout, note template, heading IDs, comment style, size limits. Runs after step 3, before step 6 | [x] DONE 2026-11-07 |
 | 11 | Guards: `permissions.ask` on background/sources, root-table line, `doc/<pkg>/design.md` in rule `paths:` | [x] DONE 2026-11-07, verified: headless Read+cat blocked, Grep leaks (accepted), control Read OK |
 | 12 | Fix stale pointers (heating YAML → note, airflow doc §10, victron UNPROVEN comment) | [x] DONE 2026-11-07 |
@@ -480,6 +480,36 @@ Main gain is correctness: one home per fact, so copies cannot drift.
 - **D7 Guard strength:** `permissions.ask` (recommended) vs `deny` on background/sources.
 - **D8 Conventions home:** `doc/KNOWLEDGE.md` linked from root CLAUDE.md (recommended) vs inline in
   root CLAUDE.md (always loaded, costs ~1k tokens) vs only in the `record-learning` skill.
+
+### 9.9 Step 9 results
+Fresh `claude -p --model haiku` sessions from the repo root, 2026-11-07. Each run read one file
+(`Read`, limit 3) and was asked one fact each from the 7 files below. Y = fact answered and file
+listed as auto-loaded; - = NOT IN CONTEXT. Root `CLAUDE.md` is always loaded; `packages/CLAUDE.md`
+loads on any `packages/` read.
+
+| Read | ha-yaml | tests | pergola | airflow | energy | heating | victron |
+|---|---|---|---|---|---|---|---|
+| (none) | - | - | - | - | - | - | - |
+| `README.md` | - | - | - | - | - | - | - |
+| `packages/pergola.yaml` | Y | - | Y | - | - | - | - |
+| `packages/airflow_cooling.yaml` | Y | - | - | Y | - | - | - |
+| `packages/energy.yaml` | Y | - | - | - | Y | - | - |
+| `packages/heating_pv_boost.yaml` | Y | - | - | - | - | Y | - |
+| `packages/victron.yaml` | Y | - | - | - | - | - | Y |
+| `tests/test_airflow.py` | Y | Y | - | Y | - | - | - |
+| `doc/pergola/design.md` | - | - | Y | - | - | - | - |
+
+- Startup (no tools): only root `CLAUDE.md` is loaded; skills appear as name + description only;
+  no note or rule bodies.
+- Subagent (open risk 4): a general-purpose subagent that read `packages/energy.yaml` had the
+  energy note and `ha-yaml.md` in its own context. Path rules load inside subagents.
+- Skills: `record-learning` triggered on "where should I write this lesson down" (and gave the new
+  GitHub-issue route); `ha-templates` triggered on a `this.state` question.
+- Static: no CRLF; 5 symlinks, all mode 120000, targets exist; stale-name grep hits only history
+  wording, the plan files and the tracked `pergola.yaml` comments (#142 note, YAML not changed
+  here); no broken repo paths in the knowledge files (the misses are upstream HA/ebusd paths, a
+  generic example, and the deleted docs named on purpose); largest note 23,947 B
+  (`heating_pv_boost.md`), largest design 29,133 chars; `ci-local.sh` passes.
 
 ## 10. Verifying a step that changes loading (method, 2026-11-07)
 Rules are discovered at session start, so verify in a FRESH headless session from the repo root:
