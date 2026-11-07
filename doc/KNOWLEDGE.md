@@ -23,6 +23,10 @@ Rules:
   The symlink layout (note with its own `paths:` + symlink in `.claude/rules/packages/`) loads lazily.
 - **Background and sources are not design-relevant.** Never cite them as current behaviour; read
   them only when the user asks "why/how did this come about".
+  Guard (`.claude/settings.json` `permissions.ask`): `Read(/doc/**/background*.md)`,
+  `Read(/doc/**/sources/**)`, `Bash(cat doc/**/background*)`, `Bash(cat doc/**/sources/*)`.
+  Verified headless 2026-11-07: Read and `cat` are blocked; Grep content search is NOT blocked
+  (it printed the token), nor are other shell readers. The guard is a prompt, not a wall.
 - No dated logs anywhere. Git and PRs are the log.
 
 ## K-2 Current vs background
