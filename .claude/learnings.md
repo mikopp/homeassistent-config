@@ -1,21 +1,6 @@
 # Project Learnings & Gotchas
 
-Evidence grading is explicit throughout. **CONFIRMED** = a stack trace, a source read at the pinned
-pinned HA version (`.github/ha-versions/ha/Dockerfile`), or a deterministic reproduction. **OBSERVED** = real data from a real run, but with a
-plausible alternative explanation still open. **UNPROVEN** = a hypothesis kept only so it is not
-re-litigated from scratch. Never promote an entry a grade without new evidence. See `CLAUDE.md` →
-"NEVER write an unconfirmed learning".
-
-Topic knowledge lives in project skills (`.claude/skills/`): `ha-templates`, `ha-energy-metering`,
-`ha-mqtt`, `ha-test-harness`. Package-specific facts live in `packages/notes/<package>.md`.
-
-## Active Patterns
-
-### Home Assistant
-- **Verifying HA-version-specific behaviour**: pull the actual source at the pinned version (Dockerfile `FROM`, not `.HA_VERSION`, which is gone) —
-  `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`. This is what CLAUDE.md's "HA version
-  gate" operationalises, and it is what turned three of the entries on this page from guesses into
-  facts. Docs were ambiguous or silent every time it mattered.
+Do not add entries here. To record a learning, invoke the `record-learning` skill.
 
 ## Log
 

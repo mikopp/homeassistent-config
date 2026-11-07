@@ -32,7 +32,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 3 | `paths:` frontmatter in each note + `.claude/rules/packages/<pkg>.md` symlink to it (no `@` imports, see 7.1) | [x] DONE 2026-11-07, verified (headless, section 10 method) |
 | 4 | Move package learnings into notes; de-duplicate | [x] DONE 2026-11-07 |
 | 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [x] DONE 2026-11-07, verified (rule + skill trigger) |
-| 6 | `record-learning` skill; slim root `CLAUDE.md`; slim `packages/CLAUDE.md` | [ ] TODO |
+| 6 | `record-learning` skill; slim root `CLAUDE.md`; slim `packages/CLAUDE.md` | [x] DONE 2026-11-07, verified |
 | 7 | Fix `yaml` skill conflict (`float(0)` defaults) | [ ] TODO |
 | 8 | Delete `.claude/learnings.md`; repoint all references | [ ] TODO |
 | 9 | Verify in a fresh session (`/context`, `/memory`) + `git ls-files --eol` | [ ] TODO |
