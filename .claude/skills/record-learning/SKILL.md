@@ -46,6 +46,7 @@ not CONFIRMED.
 | a cross-package topic fact (templates, MQTT, energy, tests …) | the matching skill in `.claude/skills/`, or a new skill |
 | needed in every session | root `CLAUDE.md` (keep it < 100 lines) |
 | a hypothesis | the feature's `plans/` file, marked UNPROVEN |
+| a confirmed bug or flaky test not being fixed now | a GitHub issue (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts |
 | local to one YAML block | a YAML comment (`doc/KNOWLEDGE.md#K-5`) |
 | contradicted | delete or strike through where it lives |
 

@@ -89,7 +89,7 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 - Boost residual risk (accepted): a single dropped re-arm lets the boost lapse; it restarts at the
   next edge.
 - `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
-  default on a helper that the repo rule forbids (code, not fixed in a docs step).
+  default on a helper that the repo rule forbids (code, not fixed in a docs step). → GitHub issue #142
 
 ## Tests (`tests/test_airflow.py`)
 - Seed season/dew first, then the delayed indicators (`_seed_indicators`) — CONFIRMED; otherwise a

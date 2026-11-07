@@ -15,6 +15,7 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
+| GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
 | git history / PRs | the log: what changed when and why | `git log`, `gh pr view` | n/a |
 
 Rules:

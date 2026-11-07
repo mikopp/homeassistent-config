@@ -95,12 +95,13 @@ Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their 
   `pergola.yaml:397-405` (and more templates in the file) read helpers with `| float(122)`,
   `| float(5)` etc. `.claude/rules/ha-yaml.md` forbids fallback defaults on `input_*` helpers and
   on guarded sensor reads. This is code, not a comment: fixing it needs a test run. Tracked in
-  `plans/knowledge-dedup-pergola.md` step 4.
+  `plans/knowledge-dedup-pergola.md` step 4. → GitHub issue #142
 - Field calibration (PV factor, shading sensitivity, wall azimuth, drain angles, rain lock):
   `plans/pergola-field-calibration.md`.
 - YAML comments still point to the deleted `doc/pergola-roof-automation.md` /
   `doc/pergola-slat-formula-analysis.md` (`:2`, `:14`, `:322`), say "+7" (`:529`) and cite
   "plan Step N". Fix: `plans/knowledge-dedup-pergola.md`. Trust the code and design doc.
+- Flaky test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN).
 
 ## Tests (`tests/test_pergola.py`)
 - Formula tests seed `sensor.pergola_effective_sun_angle` directly (the sun integration can

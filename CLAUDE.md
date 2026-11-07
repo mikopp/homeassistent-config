@@ -95,4 +95,5 @@ Details, limits and how to extend: `doc/KNOWLEDGE.md`.
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant, never cite as current behaviour |
 | YAML comments | what + one-line why + pointer to note/design |
 | `plans/` | open work and hypotheses only; deleted when done |
+| GitHub issues | confirmed bugs/flaky tests not fixed now; link `#n` from the note; plan only when work starts |
 | git history / PRs | the log; no dated logs elsewhere |
