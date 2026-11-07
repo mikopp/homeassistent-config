@@ -61,14 +61,13 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   only when `unknown` is actually wanted (it is NOT for idle appliances without `expire_after`).
   Applied to the Loxone appliance sensors in `packages/energy.yaml`.
 
-- **One decision sensor, consumers read only it** (CONFIRMED by `test_decision_*` in
-  `tests/test_airflow.py` at 2026.10.1): when several automations/displays act on the same
+- **One decision sensor, consumers read only it** (CONFIRMED at 2026.10.1): when several automations/displays act on the same
   indicators, compute the decision ONCE in a state-based template sensor (state = reason, attributes
   = outputs to apply) and have every consumer read only that. Inputs must never include the outputs.
   To give state and attributes one evaluation, put the logic in a `custom_templates/*.jinja` macro
   returning `"a|b|c"` and import it in each template — state-based entity `variables:` render ONCE
   at setup (`template_entity.py::_async_template_startup`), so they cannot carry live state.
-  Wiring indicators into each consumer separately let them disagree (airflow, 2026-10-23).
+  Wiring indicators into each consumer separately lets them disagree.
 
 ### Test Harness
 - **Step the mocked clock with `fast_forward(timedelta(...))`, never `jump_to_next(hour=...)`,
@@ -125,7 +124,7 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   its trigger inputs** — CONFIRMED by deterministic reproduction (airflow decision tests, 2026.10.1):
   in CI the sensor's 10-min delay has never elapsed, so it has no internal state; any trigger
   re-renders it and writes `unknown` over the seeded value (and cascades to sensors that trigger on
-  it). Seed the trigger inputs (season, dew) FIRST, then the delayed sensors.
+  it). Seed the trigger inputs FIRST, then the delayed sensors.
 - **Pinning a self-referencing template sensor with `set_state()`** (any template that reads
   `this.state`, e.g. `sensor.heating_cooling_indicator`'s hysteresis) — the pinned state does not
   stick. CONFIRMED at 2026.10.1 (`components/template/template_entity.py` `_handle_results`): `this`
@@ -159,19 +158,10 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
 - **pytest test order here is NOT file-definition order.** `tests/conftest.py`'s
   `pytest_collection_modifyitems` sorts by `(0 if "test_pergola" else 1, item.nodeid)` — alphabetical
   by nodeid. Don't reason about "the test before/after this one" from source position.
-- **`tests/test_airflow.py` has real cross-test ordering dependencies on the clock.** CONFIRMED by
-  breaking it: the delayed binary sensors (`delay_on`/`delay_off` = 10 min, trigger-based, no
-  `homeassistant:start` trigger) sit at `unknown` after boot. conftest's `baseline_states` seeds
-  their inputs and fires their triggers, but the result only lands once the mocked clock crosses the
-  delay window. Removing the single clock advance in `_assert_recomputes_after_reload` broke **two
-  unrelated tests** that were silently piggybacking on it running earlier in nodeid order. Any test
-  asserting a definite on/off from a delayed sensor needs a `fast_forward` before it — check before
-  touching clock calls in that file. **Same dependency existed in `tests/test_heating_pv_boost.py`**
-  (CONFIRMED 2026-10-30: two tests failed in an isolated run of that file, on `master` too, and
-  passed after only adding `fast_forward(26 min)`): `heating_slab_mode_wanted` (delay_off 20 min)
-  and `heating_dhw_active` (delay_off 25 min) are `unknown` after boot; in CI the airflow/indicator
-  files run first and moved the clock for them. A green full-suite run hides this — run a touched
-  test file on its own before trusting it.
+- **Delayed trigger-based sensors are `unknown` after boot until the mocked clock crosses their
+  delay** (CONFIRMED in airflow and heating tests; per-file details in the package notes). Tests can
+  silently piggyback on an earlier test's clock move; a green full-suite run hides this — run a
+  touched test file on its own before trusting it.
 - **Chaining multiple `time_machine.jump_to_next()` calls within one test — OBSERVED, mechanism
   DUBIOUS.** Diagnostic dumps showed the entity's `last_updated` pinned to the reset's own timestamp
   instead of advancing on a second/third jump. The data is real, but the conclusion ("the harness
@@ -233,8 +223,7 @@ re-litigated from scratch. Never promote an entry a grade without new evidence. 
   re-renders itself after an external `set_state()` and walks its hysteresis back toward its inputs,
   and `automation.trigger` skips conditions unless `skip_condition: false`. Tests now drive the 48h
   mean and assert the indicator's real state; the sync automation names both seasons explicitly
-  with no `default:`. `tests/test_airflow.py` still pins the indicator via `set_state()` ~30× and
-  passes only because the seeded mean happens to keep those states — latent fragility.
+  with no `default:`.
 
 ### 2026-10-23 — airflow: `sensor.airflow_cooling_state` as the single decision
 - **Task:** Active heating showed `free_cooling`: the controller had no block for heating + free

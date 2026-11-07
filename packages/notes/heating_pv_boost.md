@@ -339,3 +339,7 @@ physical control for it: the VR 90 has no Party button, confirmed directly again
 installation. So the register is real but untriggerable from the wall on this hardware — recorded
 this precisely (rather than "no such register") so a future reader doesn't rediscover `mc/Party`
 in a scan and wrongly conclude this note was mistaken.
+
+## Tests: delayed sensors
+CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
+`unknown` after boot; tests need `fast_forward(26 min)` first. Earlier test files hide this.

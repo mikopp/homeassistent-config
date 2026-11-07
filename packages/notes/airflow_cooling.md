@@ -47,13 +47,14 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 *restart* (comes up with a restored value), so it does not protect against restart-stale.
 
 ## Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
+CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
 - **Indicators feed only the decision; consumers read only the decision.** The indicators
   (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
   `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
   `sensor.airflow_cooling_state` and of nothing that writes the device. The controller, the drying
   boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
-  attributes. Never wire an indicator straight into an automation again — that is how active heating
-  got free cooling (2026-10-23): each consumer re-implemented its own season rule and they disagreed.
+  attributes. Never wire an indicator straight into an automation — why: consumers that each
+  re-implement the season rules disagree (active heating once got free cooling that way).
 - The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
   applying it cannot change it. Priority/season rules live in one place:
   `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
@@ -61,10 +62,18 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
   `variables` render once at setup).
 - It is **state-based** (derives from slow binaries; see the trigger-vs-state rule above) and
   unavailable unless every indicator has a value — the automations then no-op.
-- CI gotcha: in the test harness the trigger-based indicators have no internal state (their 10-min
-  delay never elapsed), so changing one of their trigger inputs (season, dew) re-renders them to
-  `unknown` over a REST-seeded value. Seed season/dew first, then the indicators
-  (`_seed_indicators` in `tests/test_airflow.py`).
+
+## Tests (`tests/test_airflow.py`)
+- Seed season/dew first, then the delayed indicators (`_seed_indicators`) — CONFIRMED; otherwise a
+  season/dew change re-renders the REST-seeded indicators to `unknown` (harness pattern:
+  ha-test-harness skill).
+- Clock-order dependency, CONFIRMED by breaking it: the delayed indicators (`delay_on`/`delay_off`
+  = 10 min, no `homeassistant:start` trigger) are `unknown` after boot until the mocked clock crosses
+  the delay. Any test asserting a definite on/off from them needs its own `fast_forward` first —
+  removing the one in `_assert_recomputes_after_reload` broke two unrelated tests later in nodeid order.
+- Latent fragility: the file pins `sensor.heating_cooling_indicator` via `set_state()` ~30×; that
+  only holds because the seeded 48h mean happens to keep those states (the indicator re-renders from
+  its inputs). If a pin stops sticking, drive the mean instead.
 
 ## Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
 - Gate preset/auto ownership on the **decision** (`ventilation` attribute — boost ⊂ flush intent),
