@@ -17,7 +17,7 @@ No context from the session that wrote it is required. Everything below was gath
 reference-repo study (section 2a), doc facts (section 2), file sizes and the entry-by-entry
 mapping (sections 1 and 4). To re-check the reference repo, clone it into the scratchpad:
 `gh repo clone mikopp/homeassistant-innova-hrds <scratchpad>/ref` (user's own repo, read only).
-Before starting, read: root `CLAUDE.MD`, `packages/CLAUDE.md`, `.claude/learnings.md`,
+Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learnings.md`,
 `.claude/skills/yaml/SKILL.md`, all `packages/notes/*.md` (they are the material being moved).
 
 ---
@@ -27,7 +27,7 @@ Before starting, read: root `CLAUDE.MD`, `packages/CLAUDE.md`, `.claude/learning
 | # | Step | Status |
 |---|---|---|
 | 0 | Canary: prove `@` imports in a path-scoped rule load, and only on a matching read | [x] DONE 2026-11-07: A FAILED (import loads eagerly), B WORKS → **symlink fallback** (section 7.1) |
-| 1 | `git mv CLAUDE.MD CLAUDE.md` + fix references | [ ] TODO |
+| 1 | `git mv CLAUDE.MD CLAUDE.md` + fix references | [x] DONE 2026-11-07 (plain `git mv` worked; refs fixed in `packages/CLAUDE.md`, `plans/ci-test-speedups.md`, `plans/victron-ac-referenced-accounting.md`) |
 | 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [ ] TODO |
 | 3 | `paths:` frontmatter in each note + `.claude/rules/packages/<pkg>.md` symlink to it (no `@` imports, see 7.1) | [ ] TODO |
 | 4 | Move package learnings into notes; de-duplicate | [ ] TODO |

@@ -10,7 +10,7 @@ Do not read the notes of packages you are not touching.
 
 ## Rule for adding/changing notes (applies to every future package)
 - Package-specific knowledge goes in `packages/notes/<name>.md` (same basename as the YAML file).
-  **Never add it to this file or to the root `CLAUDE.MD`.**
+  **Never add it to this file or to the root `CLAUDE.md`.**
 - When you create a new `packages/<name>.yaml` and have notes worth keeping, create
   `packages/notes/<name>.md` and add a row to the index below (one line: when to read it).
 - Keep this file to the index and these rules only.

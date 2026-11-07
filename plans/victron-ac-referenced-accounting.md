@@ -1022,7 +1022,7 @@ Update 2026-10-17 (evening) — problem 2 explained from a VRM screenshot (user)
       `test_surplus_uses_ac_referenced_mppt_not_raw_dc`, `test_surplus_keeps_the_deficit_when_adding_the_heat_pump_back`,
       `test_surplus_clamps_at_zero` (test_heating_pv_boost.py). **Depends on this branch being
       deployed** — on the live pre-deploy system `sensor.solar_yield_watts` is still raw DC.
-- [x] Docs: `CLAUDE.MD` HA-version gate and `.claude/learnings.md` live in the CI / test-speedups PR.
+- [x] Docs: `CLAUDE.md` HA-version gate and `.claude/learnings.md` live in the CI / test-speedups PR.
       This branch is stacked on that PR and must be rebased onto `master` after it merges; its CI
       only means anything with the HTTP shim and timeouts in place.
 
