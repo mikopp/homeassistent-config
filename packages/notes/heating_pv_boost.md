@@ -1,3 +1,12 @@
+---
+paths:
+  - "packages/heating_pv_boost.yaml"
+  - "tests/test_heating_pv_boost.py"
+  - "dashboards/heating-dashboard.yaml"
+  - "plans/heating-*.md"
+  - "plans/ebusd-*.md"
+  - "plans/knowledge-dedup-heating-pv-boost.md"
+---
 # heating_pv_boost.yaml — Vaillant geoTHERM via ebusd
 
 Notes for `packages/heating_pv_boost.yaml`. Load only when working on this package.

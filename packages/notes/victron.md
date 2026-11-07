@@ -1,3 +1,10 @@
+---
+paths:
+  - "packages/victron.yaml"
+  - "tests/test_victron.py"
+  - "plans/victron-*.md"
+  - "plans/knowledge-dedup-victron.md"
+---
 # Victron package notes (`packages/victron.yaml`)
 
 Read before touching `packages/victron.yaml`. Hardware: GX `c0619ab4c19e`, MPPT 279 (DC solar),
