@@ -34,7 +34,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 | 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [x] DONE 2026-11-07, verified (rule + skill trigger) |
 | 6 | `record-learning` skill; slim root `CLAUDE.md`; slim `packages/CLAUDE.md` | [x] DONE 2026-11-07, verified |
 | 7 | Fix `yaml` skill conflict (`float(0)` defaults) | [x] DONE 2026-11-07 |
-| 8 | Delete `.claude/learnings.md`; repoint all references | [ ] TODO |
+| 8 | Delete `.claude/learnings.md`; repoint all references | [x] DONE 2026-11-07 |
 | 9 | Verify in a fresh session (`/context`, `/memory`) + `git ls-files --eol` | [ ] TODO |
 | 10 | Knowledge-home conventions (`doc/KNOWLEDGE.md`): current/background test, layout, note template, heading IDs, comment style, size limits. Runs after step 3, before step 6 | [x] DONE 2026-11-07 |
 | 11 | Guards: `permissions.ask` on background/sources, root-table line, `doc/<pkg>/design.md` in rule `paths:` | [ ] TODO |

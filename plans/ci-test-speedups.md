@@ -4,11 +4,11 @@
 (HA pin 2026.10.1). Everything below was developed on the `fix-victron-ac-dc-mixup` branch
 (PR #101) while debugging that feature's CI, then split out so it can merge independently.
 **Target files:** `.github/workflows/ha_check.yaml`, `.github/workflows/requirements.txt`,
-`pyproject.toml`, `tests/conftest.py`, `tests/test_airflow.py`, `.claude/learnings.md`, `CLAUDE.md`
+`pyproject.toml`, `tests/conftest.py`, `tests/test_airflow.py`, `.claude/learnings.md` (since removed; its entries now live in the `ha-test-harness` and `ha-energy-metering` skills), `CLAUDE.md`
 **Not in this change:** any `packages/*.yaml`, `tests/test_victron.py`, `tests/test_pergola.py`
 (see "Scope boundary").
 
-Evidence grades follow `.claude/learnings.md`: **CONFIRMED** (stack trace / source read /
+Evidence grades follow the `record-learning` skill: **CONFIRMED** (stack trace / source read /
 deterministic reproduction), **OBSERVED** (real data, alternative explanation open),
 **UNPROVEN** (hypothesis).
 
@@ -30,7 +30,7 @@ deterministic reproduction), **OBSERVED** (real data, alternative explanation op
 
 ### Documentation changes riding along
 `CLAUDE.md` (HA version gate pointing at the Dockerfile pin, persistent-memory rule, "never write an
-unconfirmed learning") and `.claude/learnings.md` (graded learnings). Both came out of the
+unconfirmed learning") and `.claude/learnings.md` (graded learnings, since moved into the `ha-test-harness` / `ha-energy-metering` skills). Both came out of the
 debugging below; the learnings file also holds general HA lessons (integration platform, entity
 registry reclaim) that were learned on the Victron work — they reference
 `packages/victron.yaml` / `plans/victron-ac-referenced-accounting.md`, which land in the feature PR.
