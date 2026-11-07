@@ -28,7 +28,7 @@ Before starting, read: root `CLAUDE.md`, `packages/CLAUDE.md`, `.claude/learning
 |---|---|---|
 | 0 | Canary: prove `@` imports in a path-scoped rule load, and only on a matching read | [x] DONE 2026-11-07: A FAILED (import loads eagerly), B WORKS → **symlink fallback** (section 7.1) |
 | 1 | `git mv CLAUDE.MD CLAUDE.md` + fix references | [x] DONE 2026-11-07 (plain `git mv` worked; refs fixed in `packages/CLAUDE.md`, `plans/ci-test-speedups.md`, `plans/victron-ac-referenced-accounting.md`) |
-| 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [x] DONE 2026-11-07 |
+| 2 | `.claude/rules/ha-yaml.md` (HA YAML / MQTT rules moved out of root) | [x] DONE 2026-11-07, verified: headless `claude -p` loads ha-yaml.md after reading `packages/energy.yaml`, not with no read or after `README.md` |
 | 3 | `paths:` frontmatter in each note + `.claude/rules/packages/<pkg>.md` symlink to it (no `@` imports, see 7.1) | [ ] TODO |
 | 4 | Move package learnings into notes; de-duplicate | [ ] TODO |
 | 5 | Topic skills; move topic learnings; `.claude/rules/tests.md` pointer | [ ] TODO |
@@ -465,3 +465,11 @@ Main gain is correctness: one home per fact, so copies cannot drift.
 - **D7 Guard strength:** `permissions.ask` (recommended) vs `deny` on background/sources.
 - **D8 Conventions home:** `doc/KNOWLEDGE.md` linked from root CLAUDE.md (recommended) vs inline in
   root CLAUDE.md (always loaded, costs ~1k tokens) vs only in the `record-learning` skill.
+
+## 10. Verifying a step that changes loading (method, 2026-11-07)
+Rules are discovered at session start, so verify in a FRESH headless session from the repo root:
+`claude -p "<prompt>" --model haiku --allowedTools Read --max-turns 4`. For each changed rule or note:
+1. No tools used: the rule's content must NOT be in context.
+2. Read one matching file (first lines): the content MUST be in context, and the session names the source file.
+3. Read one non-matching file (e.g. `README.md`): the content must NOT be in context.
+Ask about a distinctive sentence from the rule, not its file name (the root pointer names the file).
