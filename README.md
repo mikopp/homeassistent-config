@@ -128,6 +128,8 @@ Runs on every push. Validates the full configuration and executes the test suite
 8. Posts a PR comment with truncated pytest output on failure
 9. Writes full results to the Actions Job Summary
 
+**Run the Docker-free checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15`; builds `.venv` itself). `check_config` and pytest require Docker and run only in CI.
+
 ### `yaml-lint.yml` — YAML Style + Lint
 Runs on every push as a separate job chain.
 

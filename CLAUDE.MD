@@ -14,6 +14,11 @@
    `git ls-files --eol` (nothing may show `w/crlf` or `i/crlf`). A CRLF write turns the whole file
    into one giant diff. Enforced by `.gitattributes` (`eol=lf`) and `.editorconfig`.
 
+## Local CI checks
+Run `.github/scripts/ci-local.sh` before pushing. It creates `.venv`, installs the CI Python deps and runs
+the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs
+`brew install yamllint python@3.15`. `check_config` and pytest need Docker and only run in CI.
+
 ## HA version gate — check before trusting any info
 The pinned HA version lives in the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag
 like `ghcr.io/home-assistant/home-assistant:2026.10.1`; Dependabot bumps it). `.HA_VERSION` was

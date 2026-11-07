@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Run the Docker-free CI checks locally (mirrors yaml-lint.yml and the
+# template-extraction step of ha_check.yaml). Not covered here, because they
+# need Docker: `check_config` and all pytest runs.
+#
+# Prerequisites (macOS): brew install yamllint python@3.15
+# Usage:  .github/scripts/ci-local.sh        (run from anywhere)
+set -u
+
+# Work from the repo root so relative paths match CI.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+VENV=.venv
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+FAILED=()
+
+# Pick the Python pinned for CI (.github/ha-versions/python/Dockerfile), falling
+# back to plain python3 if that exact minor version is not installed.
+PYVER=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)
+PY=$(command -v "python$PYVER" || command -v python3) || { echo "No python3 found"; exit 1; }
+command -v yamllint >/dev/null || { echo "yamllint missing: brew install yamllint"; exit 1; }
+
+# Create the venv once and (re)install CI Python deps from the same manifest CI uses.
+if [ ! -x "$VENV/bin/python" ]; then
+  "$PY" -m venv "$VENV" || exit 1
+fi
+"$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt || exit 1
+echo "Using $("$VENV/bin/python" --version) (CI pin: $PYVER)"
+
+# step <name> <command...>: run a check, record failures, keep going.
+step() {
+  local name=$1; shift
+  echo "── $name"
+  if "$@"; then echo "   ok"; else echo "   FAILED"; FAILED+=("$name"); fi
+}
+
+# fix_yaml_style.py rewrites files in place; CI fails if that changes anything.
+# Compare the diff before/after so a dirty working tree does not cause a false alarm.
+style_check() {
+  local before after
+  before=$(git diff | shasum)
+  "$VENV/bin/python" .github/scripts/fix_yaml_style.py . || return 1
+  after=$(git diff | shasum)
+  [ "$before" = "$after" ] || { echo "   style fixer changed files; review with git diff"; return 1; }
+}
+
+# Resolve !include directives, then lint the flattened result (lint-resolved job).
+lint_resolved() {
+  local f out rc=0
+  for f in configuration.yaml dashboards/*.yaml; do
+    out="$TMP/resolved_$(basename "$f")"
+    "$VENV/bin/python" .github/scripts/resolve_ha_yaml.py "$f" . > "$out" || { rc=1; continue; }
+    yamllint -c .yamllint.yaml "$out" || rc=1
+  done
+  return $rc
+}
+
+# Same template extraction ha_check.yaml does before pytest.
+extract_templates() {
+  "$VENV/bin/python" .github/scripts/extract_templates.py . > "$TMP/templates.json"
+}
+
+step "YAML style (fix_yaml_style.py)" style_check
+step "yamllint" yamllint -c .yamllint.yaml .
+step "yamllint on resolved config + dashboards" lint_resolved
+step "Jinja template extraction" extract_templates
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo; echo "Failed: ${FAILED[*]}"; exit 1
+fi
+echo; echo "All local checks passed."
