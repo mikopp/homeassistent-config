@@ -9,7 +9,7 @@ checked against a full `ebusctl` dump of this bus.
 
 | Register | Fields |
 |---|---|
-| `ehp/Status` | `HcFlowTemp;HcPress;SourcePress;hcmode;hex` (flow T6 °C, bar, bar, enum, raw hex). Confirmed by exact value match against the standalone registers (`25.19;1.266;1.682;off;00`). `hcmode`: `0=off 1=cooling 3=heat 4=water` |
+| `ehp/Status` | `HcFlowTemp;HcPress;SourcePress;hcmode;hex` (flow T6 °C, bar, bar, enum, raw hex). Confirmed by exact value match against the standalone registers (`25.19;1.266;1.682;off;00`). `hcmode`: `0=off 1=cooling 3=heat 4=water` (an older config generation names it `hcmode2` and lacks `1`: raw `1` = cooling) |
 | `ehp/HcReturnTemp` | register `0A00`, internal sensor T5: `temp;sensor`, sensor = `ok\|circuit\|cutoff` |
 | `mc/Status0a` | `flowtemp;mixer;pump;onoff;flowtempdesired` (field 4 = current flow setpoint, integer °C) |
 | `mc/Status` | `flowtempdesired;onoff;flowtemp;tempdesired`: no modulation field; field 3 is a second setpoint, not a percentage |

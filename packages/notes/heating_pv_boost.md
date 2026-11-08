@@ -126,16 +126,21 @@ on the machine.
   "thermostat" it may undercut a boost. Raising `mc/TempDesired` overcomes the additive offset by
   construction, so a boost is never blocked, only possibly less effective; no declared max
   magnitude for the offset exists.
+- To settle the mechanism: watch `ebusd/mc/RoomTempOffset` (or
+  `ebusctl read -f -c mc RoomTempOffset`) while toggling at the VR 90. HA driving the toggle
+  would need its literal write, found only by a live capture during a toggle.
 - Holiday mode and `mc/Party` are unused (no Party button on the VR 90; holiday dates are 2015).
 
 ## Owner-side configuration
 
 - Loxone **no longer writes** `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
   (on change only, no heartbeat). Loxone does not control room valves.
-- **All loops and valves are open, bedrooms not throttled** (owner, 2026-11-06). Low water flow
+- **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
 - `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day, `low` at night).
-- Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150).
+- Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150); `ehp/CompHysteresis` 7 K at last
+  read (forced stop at setpoint + 7, e.g. 31 °C at a 24 °C setpoint; the 8–9 K cap below is
+  relative to this). Check `sensor.geotherm_heating_compressor_hysteresis` before relying on it.
 - **Backup heater disabled for heating:** `ehp/BackupModeHc` = `no_backup`,
   `ehp/BackupIntegral` = −600 (plain `-600`). While `no_backup`, deepening `CompIntegral` cannot
   start it (if enabled, it would start at −600 + CompIntegral, now −780).
@@ -164,7 +169,7 @@ on the machine.
   Slab boost only in `active_heating` (shoulder season mostly overheats). See the slab plan's
   "Control law".
 - **Compressor tuning (cycling plan):**
-  - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, 2026-10-30): short runs are a
+  - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts): short runs are a
     mild-weather effect.
   - Hysteresis headroom is small: at a 24 °C setpoint and `FlowTempMax` 35 °C the hysteresis can
     usefully grow to about 11 K, less when colder weather raises the setpoint.
@@ -206,8 +211,10 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
 
 ## Known biases / open issues
 
-- Which ebusd config generation this instance runs is unconfirmed; the dual enum parsing is cheap
-  insurance either way.
+- Which ebusd config generation this instance runs is unconfirmed. An older generation (the
+  `archived/` tree) leaves `ehp/Status` field 3 unnamed (`hcmode2`) with an enum lacking
+  `1=cooling`, so cooling would arrive as raw `1`; the published CSVs do not have this. Keep the
+  dual name/number parsing (incl. raw `1` → `cooling`) as cheap insurance.
 - `ehp/Status01` times out on this unit; re-check occasionally (second return-temp reading).
 - Raumaufschaltung: see "Room influence" (owner action open, mechanism unproven).
 

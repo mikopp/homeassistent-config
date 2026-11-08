@@ -135,11 +135,11 @@ mqtt:
     # ── Compressor cycling: observation only ──────────────────────────────────
     # Read-only views for diagnosing short compressor runs (plans/heating-compressor-cycling.md).
     # Register names and decodes are taken from the live catalog (08.ehp.csv / 50.ehp.mc.csv on
-    # ebus.github.io). All nine answered a forced `ebusctl read` on this unit (owner, 2026-10-30),
+    # ebus.github.io). All nine answered a forced `ebusctl read` on this unit (owner),
     # in the payload shapes parsed below; MQTT delivery depends on the bridge lines.
     #
     # Each of these needs two Mosquitto bridge lines (state `in`, `/get` `out`) — the bridge is
-    # an explicit allowlist, see packages/notes/heating_pv_boost.md "Transport".
+    # an explicit allowlist, see packages/notes/heating_pv_boost.md "Invariants".
     #
     # Single-value payloads use the empty-render guard: an unparsable payload renders '' and HA
     # keeps the last value instead of raising (see .claude/skills/ha-mqtt/SKILL.md).
@@ -720,7 +720,7 @@ template:
       # Reuses the repo's existing 48-hour outdoor-mean classifier rather than inventing a
       # date-based season. Both active_heating AND neutral permit COMFORT heating (target temp,
       # control state). Slab BOOSTING is narrower — active_heating only, gated separately in
-      # binary_sensor.heating_slab_mode_wanted (owner decision 2026-10-30).
+      # binary_sensor.heating_slab_mode_wanted (owner decision).
       - name: "Heating Season Active"
         unique_id: heating_season_active
         icon: mdi:snowflake-thermometer
