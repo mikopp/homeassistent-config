@@ -1,0 +1,9 @@
+# SPIKE (plans/test-execution.md Step 0): deps of the in-process layer. Step 1 replaces this with
+# requirements_test.txt + a version guard test.
+# PHACC pins the exact Home Assistant release (0.13.375 = homeassistant==2026.10.4); its year.month
+# must match the FROM line of .github/ha-versions/ha/Dockerfile.
+pytest-homeassistant-custom-component==0.13.375
+# Integration requirements PHACC does not install (pins from HA's own manifests at 2026.10.4).
+holidays==0.106  # workday
+cronsim==2.7  # utility_meter
+pytest-repeat  # --count=N for the stability gate

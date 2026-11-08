@@ -2,7 +2,7 @@
 
 ## Status
 - [x] Research and feasibility check (this file)
-- [ ] Step 0 spikes — awaiting approval
+- [x] Step 0 spikes: DONE, exit criterion met (see "Step 0 results"); awaiting approval for Step 1
 - [ ] Step 1 HA version single source
 - [ ] Step 2 in-process layer, Step 2b real MQTT broker
 - [ ] Step 3 real-HA layer
@@ -90,6 +90,68 @@ Residual risks, which the spike must close:
   - one airflow decision test;
   - one MQTT ingest test;
   - one Victron `time_pattern` accumulator test, fed through the real broker while `freezer` moves the clock.
+
+### Step 0 results (spike code: `tests/ha/`, marked SPIKE)
+How to run it: `uv venv -p 3.14 .venv-test && VIRTUAL_ENV=.venv-test uv pip install -r tests/ha/requirements.txt`, plus a `mosquitto` binary and `custom_components/climate_template` (CI downloads it). Then:
+
+```
+.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4
+```
+
+`--count=20` runs the stability gate.
+
+**Exit criterion met.** 7 spike tests, all in-process:
+- package load;
+- Shelly MQTT ingest;
+- two airflow decision ports;
+- Victron `time_pattern` battery accumulator, over real MQTT with `freezer`;
+- Victron `integration` grid import, over real MQTT with `freezer`;
+- Victron keep-alive publish (start and every 30 s).
+
+Stability: 140/140 for 7 tests × 20 rounds, and before the last test was added, 240/240 for 6 tests × 40 rounds.
+
+**Validity.** Each mutation of the YAML under test fails exactly the test that covers it:
+
+| Mutation | Caught by |
+|---|---|
+| Shelly Wh→kWh `/1000` changed to `/100` | ingest test |
+| integration `trapezoidal` changed to `left` | grid test |
+| `heating_season` forced to false in `airflow_decision.jinja` | decision test |
+| battery accumulator `/60000` changed to `/6000` | battery test |
+| wrong keep-alive topic | publish test |
+
+**How it works** (CONFIRMED by the runs above; the fixtures are in `tests/ha/conftest.py`):
+- **Config dir**: PHACC's `hass_config_dir` fixture is overridden with a staged copy of `packages/`, `custom_templates/`, `blueprints/`, `custom_components/`, `automations.yaml`, `scripts.yaml` and the fake secrets.
+- **Loading**: `async_hass_config_yaml(hass)` loads the config with packages merged. The `recorder:` key is dropped because `recorder_mock` owns the recorder.
+- **Bootstrap order**: HA is set to `CoreState.not_running`, every domain is set up concurrently, then `hass.async_start()`. Without this, templates and automations render before the `input_*` helpers exist, and `homeassistant: start` triggers never fire.
+- **Real MQTT**: a mosquitto per test on a free port, and `MockConfigEntry(domain="mqtt")` pointing at it. The fixture waits until `mqtt.is_connected` is true before start, so start-time publishes are not lost.
+  - Before publishing, the test waits until HA has subscribed to the topic, read from mosquitto's `-v` log, so a non-retained message cannot be lost.
+  - The broker fixture is set up before `hass`, so it is torn down after it.
+- **Clock**: `freezer` is requested after `ha`, then `freezer.tick()` plus `async_fire_time_changed`.
+  - freezegun also freezes `time.monotonic`, which stops asyncio timers. Real-I/O waits must therefore use real time (`freezegun.api.real_monotonic`, looked up at call time) and executor sleeps.
+  - A plain alias `x = freezegun.api.real_monotonic` gets frozen too, because freezegun replaces every attribute that equals `time.monotonic`. That alias was the spike's first hang.
+  - Freezing after start leaves timers due later unfired until a tick. The real MQTT link stayed stable through 60 s jumps (keepalive risk: not seen in 380 test runs).
+- **Not available in the test HA**:
+  - workday is a real `MockConfigEntry` (AT).
+  - `weather.get_forecasts` is an `async_mock_service` with a deterministic 49 h forecast.
+  - YAML timers that stay scheduled on the stopped HA are expected (`expected_lingering_timers`).
+
+**Findings about the config and the current suite** (CONFIRMED by these runs; to be fixed or tracked, not in Step 0):
+1. **Entity IDs depend on the old `.storage`.** The MQTT sensors in `victron.yaml` and `energy.yaml` have no `default_entity_id`.
+   - On a fresh registry they get IDs like `sensor.electrical_victron_energy_system_victron_grid_l1_power` and `sensor.pool_pool_pump_pool_pump_power`.
+   - Every Victron template reads `sensor.victron_grid_l1_power`, so a rebuild or restore without `.storage` breaks the whole Victron chain.
+   - The Docker suite hides this by seeding states under the production IDs. The spike pre-registers the production IDs as a stand-in.
+   - Proposed fix: add `default_entity_id` to these MQTT sensors (needs approval; touches YAML).
+2. **The workday fixture is invalid at the pin.** The YAML platform in `tests/custom_components.yaml` (`ha_yaml_config`) is rejected by HA ("does not support platform setup"), so CI never had a workday entity; the tests seed it.
+3. **The Docker suite uses live network data.** `weather.home` is the onboarded Met.no entity, so the 48 h forecast-mean sensor depends on the internet. In-process uses a deterministic stub.
+4. **Speed.** About 1.6 s of setup per test (the MQTT connect and the recorder-dependent sensors dominate) plus about 1 s of teardown.
+   - Measured: 7 tests in 9.4 s with 4 workers; 140 runs in 1m53s.
+   - Estimate for the 205 current tests: about 2.5–3 min with `-n 4`. That is the same order as Docker today (about 3.5 min), so the gain is in stability, coverage and local runs, not raw time.
+   - Optimisations for Step 2, unmeasured: a lighter setup for modules that need no MQTT or recorder, and caching the parsed config per session.
+5. **Two flakes found and fixed during the spike, both test bugs rather than harness bugs:**
+   - A real minute boundary during HA start can tick a `time_pattern` accumulator before the freeze, so the baseline must be read, not assumed.
+   - The 0→3000 W integration step spans real time before the freeze, so its area must come from HA's timestamps, not be rounded away.
+   - Rule for Step 2: every expectation is computed from HA's own timestamps or from a state read after freezing.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.
