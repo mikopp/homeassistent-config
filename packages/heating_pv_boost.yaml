@@ -519,14 +519,15 @@ schedule:
 
 # ── COMPRESSOR CYCLING STATISTICS ───────────────────────────────────────────────
 # Observation only (plans/heating-compressor-cycling.md). All built on
-# binary_sensor.heating_compressor_active (Shelly clamp > 500 W), so they count EVERY compressor
-# run — heating and hot water alike. sensor.heating_compressor_starts_daily (below) is the
-# heating-only start count from the machine's own counter.
+# binary_sensor.heating_compressor_heating_active (Shelly clamp > 500 W AND not in hot-water
+# mode), so hot-water (DHW) runs are EXCLUDED and only space-heating runs are counted.
+# sensor.heating_compressor_starts_daily (below) is the heating-only start count from the
+# machine's own counter, so the two now measure the same thing and should roughly agree.
 sensor:
   - platform: history_stats
     name: "Heating Compressor Runs Today"
     unique_id: heating_compressor_runs_today
-    entity_id: binary_sensor.heating_compressor_active
+    entity_id: binary_sensor.heating_compressor_heating_active
     state: "on"
     type: count
     start: "{{ today_at() }}"
@@ -535,7 +536,7 @@ sensor:
   - platform: history_stats
     name: "Heating Compressor Runtime Today"
     unique_id: heating_compressor_runtime_today
-    entity_id: binary_sensor.heating_compressor_active
+    entity_id: binary_sensor.heating_compressor_heating_active
     state: "on"
     type: time
     start: "{{ today_at() }}"
@@ -546,7 +547,7 @@ sensor:
   - platform: history_stats
     name: "Heating Compressor Duty Cycle 24h"
     unique_id: heating_compressor_duty_cycle_24h
-    entity_id: binary_sensor.heating_compressor_active
+    entity_id: binary_sensor.heating_compressor_heating_active
     state: "on"
     type: ratio
     end: "{{ now() }}"
@@ -734,7 +735,9 @@ template:
 
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
       # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight. Includes
-      # hot water and the circulation pump's standby draw, and YieldTotal moves in whole kWh, so
+      # hot water (DHW) and the circulation pump's standby draw — no DHW-free yield register
+      # exists, so unlike the run statistics above it cannot exclude hot water — and YieldTotal
+      # moves in whole kWh, so
       # read it as a day-over-day trend at the end of the day, not as an instantaneous COP.
       # 0 until at least 1 kWh of electricity has been used today (too coarse before that).
       - name: "Heating Efficiency Today"
@@ -795,13 +798,36 @@ template:
       # actually running is read from the Shelly clamp instead, which needs no extra ebus
       # register: measured idle circulation is ~83 W (standby ~9 W), a heating run ~1.8 kW, hot
       # water ~3.5 kW. 500 W sits well clear of both ends. Covers ANY compressor run (heating or
-      # hot water) — combine with sensor.geotherm_heating_hvac_action to tell them apart.
+      # hot water) — the cycling statistics use binary_sensor.heating_compressor_heating_active
+      # below instead, which drops the hot-water runs.
       - name: "Heating Compressor Active"
         unique_id: heating_compressor_active
         device_class: running
         icon: mdi:heat-pump
         availability: "{{ has_value('sensor.technikraum_heizung_heizung_power') }}"
         state: "{{ (states('sensor.technikraum_heizung_heizung_power') | float) > 500 }}"
+
+      # Compressor running for SPACE HEATING only: the clamp says "running" and the ebus
+      # hvac_action is not "water" (hot-water charging). Feeds the compressor-cycling statistics
+      # (runs/runtime/duty cycle/last run) so hot-water runs are excluded from them.
+      # Deliberately NOT binary_sensor.heating_dhw_active: that one holds on for 25 min after the
+      # last hot-water activity (delay_off), which would hide the next heating run and its start.
+      # hvac_action follows the generator mode immediately, so this sensor follows the real run.
+      # Edge case: a run that starts as heating and continues into hot water without the compressor
+      # stopping (seen 2026-11-06 05:35 -> 05:50) ends its heating segment when the mode flips to
+      # "water" (on -> off here, so last-run reports the heating part only); a run that starts as
+      # hot water and then turns to heating starts a new segment on the flip. Accepted: that is
+      # exactly the heating-only view wanted.
+      - name: "Heating Compressor Heating Active"
+        unique_id: heating_compressor_heating_active
+        device_class: running
+        icon: mdi:radiator
+        availability: >
+          {{ has_value('binary_sensor.heating_compressor_active')
+             and has_value('sensor.geotherm_heating_hvac_action') }}
+        state: >
+          {{ is_state('binary_sensor.heating_compressor_active', 'on')
+             and not is_state('sensor.geotherm_heating_hvac_action', 'water') }}
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -869,12 +895,12 @@ template:
 
   # ── Compressor cycling: length of the last run ─────────────────────────────
   # Fires when a run ends and measures it from the on→off transition itself, so it needs no
-  # stored start time. Counts every run (heating and hot water); compare with
-  # sensor.geotherm_heating_hvac_action history to tell them apart. Keeps its value until the
-  # next run ends.
+  # stored start time. Counts space-heating runs only (hot-water runs are excluded through
+  # binary_sensor.heating_compressor_heating_active; a heating run that rolls into hot water ends
+  # when the mode flips). Keeps its value until the next heating run ends.
   - trigger:
       - trigger: state
-        entity_id: binary_sensor.heating_compressor_active
+        entity_id: binary_sensor.heating_compressor_heating_active
         from: "on"
         to: "off"
     sensor:
@@ -1182,6 +1208,7 @@ group:
       - binary_sensor.heating_cooling_active
       - binary_sensor.heating_dhw_active
       - binary_sensor.heating_compressor_active
+      - binary_sensor.heating_compressor_heating_active
       - binary_sensor.heating_ebusd_online
       - binary_sensor.heating_loxone_online
       - binary_sensor.heating_slab_mode_wanted

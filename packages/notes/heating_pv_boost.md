@@ -63,8 +63,12 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   A baseline is 3 consecutive full days with comparable weather; note the daily mean outdoor
   temperature next to each day.
 - **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only).
-  `sensor.heating_compressor_runs_today` counts every Shelly run incl. hot water: cross-check only,
-  expect it higher.
+  `sensor.heating_compressor_runs_today` counts Shelly runs EXCLUDING hot water (step 8 of the
+  cycling plan; it uses `binary_sensor.heating_compressor_heating_active` = clamp > 500 W and
+  `hvac_action` ≠ `water`): should now roughly agree with the machine counter. A heating run that
+  rolls into hot water is cut at the mode flip. Runs/runtime/duty cycle/last run exclude hot water;
+  `sensor.heating_efficiency_today` still includes it (no DHW-free yield register). Baselines logged
+  before 2026-11-06 counted hot-water runs too.
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
   in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
   MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
@@ -205,8 +209,15 @@ Read-only sensors for `plans/heating-compressor-cycling.md`. Decodes from the li
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh |
 
 Also in the catalog, not read: `NumberCompStarts` (max starts/h, sets
-`TimeBetweenTwoCompStartsMin`), `mc/HeatingCurve` (conditional on `cfgheatsinktype`), pump-speed
-registers `Hc1PumpSpeedControlDirectCircuit*` (sw ≥ 407/414).
+`TimeBetweenTwoCompStartsMin`), `mc/HeatingCurve` (conditional on `cfgheatsinktype`),
+`ehp/CompStartsHwc` / `ehp/CompHoursHwc` (DHW-only counters; `CompStartsHc` excludes DHW).
+Heating-circuit pump registers live in **`50.ehp.mc.csv` (circuit `mc`), not `08.ehp.csv`**, and
+need unit software ≥ 407: `HcPumpStatus` (0 = speed-controlled HEP ok, ≥ 2 = no HEP),
+`HcPumpPWM` (actual %, 7 % = off), `Hc1PumpSpeedControlDirectCircuit` (setpoint while the
+compressor runs, writable, installer), `Hc1PumpSpeedControlDirectCircuitWhileO` (SW ≥ 414, while
+off). **This unit does not have them:** `ebusctl info` (owner, 2026-11-06) shows `EHP00 SW=0383
+HW=7201` at 08/23/25/50, below 407. The heating-circuit pump speed cannot be read or set over ebus.
+Any catalog entry gated `[id_sw>=…]` above 383 does not apply to this unit.
 
 **Start vs stop (HYPOTHESIS, from the register descriptions, not measured):** `CompIntegral` only
 sets when a run starts. A run ends when the integral is paid back or when flow exceeds
@@ -218,8 +229,10 @@ with the integral and the flow-vs-setpoint overshoot at the moment a run ends.
 ## Owner-side configuration (2026-10-30)
 
 - Loxone **no longer writes** `mc/OperatingMode`; it still publishes `warm_enough`.
-- Loxone does **not** control room valves. Room valves are fixed hydraulic throttling only
-  (bedrooms), no automatic actuation.
+- Loxone does **not** control room valves; there is no automatic actuation.
+- **All loops and valves are open, the bedrooms are not throttled** (owner, 2026-11-06). Earlier
+  notes about "fixed bedroom throttling" are superseded. Low water flow is a pump matter, not a
+  closed valve.
 - geoTHERM `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day,
   `low` at night). **Decided for Phase 2:** `auto` is normal operation; HA writes `on` only for
   Loxone "not warm enough" or a slab boost, then back to `auto` — never `low`. By day both give
@@ -313,9 +326,8 @@ whether the write starts/stops appearing, or a completely different message ID s
 room-based trim could write a compensating correction through `RoomTempOffset` as the room warms
 during a slab boost — partially undercutting the very over-charge the boost is trying to achieve,
 which is exactly the concern the original (pre-verification) reference plan's Task 3.1 was reacting
-to. But this design already does not use or need room-sensor trim: bedrooms are permanently
-hydraulically throttled and Loxone's `warm_enough` boolean is the sole comfort input the design
-honours (see the plan's "Rejected alternatives" section) — so "thermostat" mode's room compensation
+to. But this design already does not use or need room-sensor trim: Loxone's `warm_enough` boolean is
+the sole comfort input the design honours (bedrooms are not throttled, owner 2026-11-06) (see the plan's "Rejected alternatives" section) — so "thermostat" mode's room compensation
 is redundant with this architecture even outside a boost, not merely inconvenient during one. The
 pragmatic resolution folded into the plan: set Raumaufschaltung to **off** as a one-time Vaillant/VR
 90-side change, alongside setting a real `mc/TempDesiredLow` (see the plan's "Changes outside this

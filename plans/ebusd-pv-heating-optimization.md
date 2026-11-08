@@ -19,7 +19,7 @@ Each system does only what it uniquely knows:
 
 | System | Owns |
 |---|---|
-| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* No longer writes the heat pump (done 2026-10-30). Does **not** control room valves — those are fixed hydraulic throttling only. |
+| Loxone | Human comfort. Publishes one boolean: *is the house warm enough?* No longer writes the heat pump (done 2026-10-30). Does **not** control room valves. All loops and valves are open, no bedroom throttling (owner, 2026-11-06). |
 | Home Assistant | Energy. Computes PV surplus, decides slab mode, writes two registers. |
 | Vaillant | The machine. Weather compensation, VR 90 room influence, compressor protection, outdoor cutoff. |
 
@@ -93,7 +93,7 @@ under our own action.
   toggle is confirmed to exist and be ebus-communicated, but its own write is not in the public
   register catalog (only the continuous `mc/RoomTempOffset` "Raumaufschaltung" correction value
   is — see `packages/CLAUDE.md`). Since this design already doesn't use or need room-sensor trim
-  (bedrooms are permanently throttled; Loxone's boolean is the sole comfort input), the setting is
+  (Loxone's boolean is the sole comfort input; bedrooms are not throttled, all valves open — owner 2026-11-06), the setting is
   redundant with this architecture regardless of boost state — so the fix is a one-time manual
   change (below), not a register HA has to find and drive.
 - **HA writes `off` to stop heating.** Removing `off` from HA's vocabulary is what makes every

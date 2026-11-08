@@ -19,6 +19,8 @@ views:
             name: Hot water active (masks return temp)
           - entity: binary_sensor.heating_compressor_active
             name: Compressor running (Shelly > 500 W)
+          - entity: binary_sensor.heating_compressor_heating_active
+            name: Compressor running for heating (excl. hot water)
           - entity: binary_sensor.heating_cooling_active
           - entity: binary_sensor.geotherm_heating_backup_heater
           - entity: binary_sensor.heating_ebusd_online
@@ -53,7 +55,7 @@ views:
           - entity: sensor.heating_compressor_starts_daily
             name: Heating starts today (machine counter)
           - entity: sensor.heating_compressor_runs_today
-            name: All runs today (incl. hot water)
+            name: Heating runs today (excl. hot water)
           - entity: sensor.heating_compressor_average_run_today
             name: Average run today (target ≥ 20 min)
           - entity: sensor.heating_compressor_last_run
@@ -86,7 +88,8 @@ views:
           - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
           - entity: sensor.geotherm_heating_energy_integral
-          - entity: binary_sensor.heating_compressor_active
+          - entity: binary_sensor.heating_compressor_heating_active
+          - entity: sensor.wheatherstation_outdoor_temperature
           - entity: sensor.geotherm_heating_hvac_mode
 
       # ── 2. Slab boost status ───────────────────────────────────────────────
@@ -191,6 +194,7 @@ views:
           - binary_sensor.heating_slab_mode_wanted
           - binary_sensor.heating_dhw_active
           - binary_sensor.heating_compressor_active
+          - binary_sensor.heating_compressor_heating_active
           - binary_sensor.heating_cooling_active
           - binary_sensor.geotherm_heating_backup_heater
           - binary_sensor.heating_ebusd_online
