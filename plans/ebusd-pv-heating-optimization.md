@@ -92,7 +92,7 @@ under our own action.
 - **HA toggles the VR 90's "Raumaufschaltung" (off/thermostat) room-influence setting.** This
   toggle is confirmed to exist and be ebus-communicated, but its own write is not in the public
   register catalog (only the continuous `mc/RoomTempOffset` "Raumaufschaltung" correction value
-  is — see `packages/CLAUDE.md`). Since this design already doesn't use or need room-sensor trim
+  is — see `packages/notes/heating_pv_boost.md` "Room influence"). Since this design already doesn't use or need room-sensor trim
   (Loxone's boolean is the sole comfort input; bedrooms are not throttled, all valves open — owner 2026-11-06), the setting is
   redundant with this architecture regardless of boost state — so the fix is a one-time manual
   change (below), not a register HA has to find and drive.
@@ -113,9 +113,10 @@ and `binary_sensor.heating_slab_mode_wanted` computing the full decision without
 Seed every new MQTT-sourced entity in `baseline_states`; `test_templates.py` renders every `state:`
 template strictly and fails on a sentinel output.
 
-### 3. `packages/CLAUDE.md`
+### 3. `packages/notes/heating_pv_boost.md`
 
-Verified register findings that outlive this plan (see that file).
+Verified register findings that outlive this plan (see that note and
+`packages/notes/heating_pv_boost-registers.md`).
 
 ## Transport — getting `ebusd/#` to HA's broker
 
@@ -155,7 +156,7 @@ also repointed at the same time, an extra, coupled change this plan does not oth
 > reach ebusd. Live: one `topic ebusd/<circuit>/<name> in 0` line per state topic HA reads, one
 > `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
 > `ebusd/global/scan` `in` only. Every new register needs both lines — see
-> `packages/notes/heating_pv_boost.md` "Transport". Writes need a third kind of line:
+> `packages/notes/heating_pv_boost.md` "Invariants". Writes need a third kind of line:
 > `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`, see
 > `plans/heating-baseline-and-phase2-prerequisites.md` step 2). The snippet below is kept for the
 > history only.
@@ -222,7 +223,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
    fallback for `TempDesiredLow` specifically is `mc/Params` field 1.
 3. Leave `--mqttjson` **off**.
 4. Set VR 90 **Raumaufschaltung to "off"** (currently unconfirmed which value is live). This
-   design does not use room-sensor trim — see `packages/CLAUDE.md` — so leaving it on "thermostat"
+   design does not use room-sensor trim — see `packages/notes/heating_pv_boost.md` "Room influence" — so leaving it on "thermostat"
    only risks the VR 90 quietly undercutting a boost's `TempDesired` increase via
    `mc/RoomTempOffset`, never anything worse. Optional to confirm first with a live watch of
    `ebusd/mc/RoomTempOffset` while toggling the setting, if the mechanism is worth nailing down

@@ -76,7 +76,7 @@ homeassistant:
 create or edit `packages/<feature>.yaml`. Do NOT add it to configuration.yaml or
 the global automations/scripts files.
 
-HA YAML rules (helpers, template sensors, MQTT entity ids, device key) live in `.claude/rules/ha-yaml.md` and load automatically when a matching file is touched. Rules and package notes load only on Read/Edit of a matching file, not on Grep/Glob: after searching, read the YAML or note before relying on package facts.
+HA YAML rules (helpers, template sensors, entity ids, device key) live in `.claude/rules/ha-yaml.md` and load automatically when a matching file is touched. Rules and package notes load only on Read/Edit of a matching file, not on Grep/Glob: after searching, read the YAML or note before relying on package facts.
 
 ## Learnings — hard rule
 **Never write an unconfirmed learning** (one green CI run or "symptom went away" is not proof).

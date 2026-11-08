@@ -351,7 +351,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       rules are in `plans/heating-baseline-and-phase2-prerequisites.md` (steps 1 and 4).
       Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
       check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
-      35 °C (`FlowTempMax`). See the notes' "Cold weather" point.
+      35 °C (`FlowTempMax`). See `packages/notes/heating_pv_boost.md` "Cold weather".
 - [x] 7a. `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) added to the dashboard
       card and the "Why runs end" graph (owner request, 2026-10-30), with a test. Owner declined
       reading `BackupModeHc` (backup heater stays disabled) and a flow > 34 °C notification.

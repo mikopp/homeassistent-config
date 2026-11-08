@@ -13,9 +13,11 @@ stack trace, or deterministic repro. Never promote a grade without new evidence.
   `sensor.xxx`. **Never derive an entity ID from it** (e.g. unique_id `heating_loxone_warm_enough`
   does NOT give `binary_sensor.heating_loxone_warm_enough`).
 - The entity ID comes from `default_entity_id:` (YAML MQTT entities). Without it, HA builds it from
-  the device name + entity name (e.g. device "Loxone Heating" + name "Heating Loxone Warm Enough"
-  → `binary_sensor.loxone_heating_heating_loxone_warm_enough`), so entities with a `device:` block
-  get a device prefix that is not in `unique_id`.
+  the names like for any integration (rule "Entity IDs (all integrations)" in
+  `.claude/rules/ha-yaml.md`), so entities with a `device:` block get a device prefix that is not
+  in `unique_id` (e.g. device "Loxone Heating" + name "Heating Loxone Warm Enough" →
+  `binary_sensor.loxone_heating_heating_loxone_warm_enough`). A device with `suggested_area` can
+  add an area prefix on a new registration.
 - `default_entity_id:` only applies when the entity is first created. If the entity already exists
   in the registry, a UI rename wins and the YAML value is ignored.
 - **Every reference to an MQTT entity** (dashboards, templates, automations, groups, tests) must

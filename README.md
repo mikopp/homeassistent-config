@@ -70,7 +70,7 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
 
 *Phase 1 (current): read-only. Every sensor and the full decision are live, but nothing is written
 to the heat pump. See `plans/ebusd-pv-heating-optimization.md` for the rollout and
-`packages/notes/heating_pv_boost.md` for the verified ebusd register decodes.*
+`packages/notes/heating_pv_boost-registers.md` for the verified ebusd register decodes.*
 
 ### `packages/energy.yaml` — Metered Devices for the Energy Dashboard
 MQTT sensors for every individually metered appliance, plus the wallbox abstraction layer.
