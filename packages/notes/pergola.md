@@ -75,6 +75,16 @@ formulas, rain/frost protection). Design (state machine, formulas, deadband, ver
 | `binary_sensor.pergola_sun_shining` | shading needed |
 | `sensor.dach_{links,rechts}_priority_lock_originator` / `_lock_timer` | Somfy lock |
 
+### Recommended UI values
+Former defaults; set them in the UI after deploy (no `initial:`). The template `float(...)`
+fallbacks that mirror them go away with #142.
+
+| Helper | Value |
+|---|---|
+| `input_number.pergola_shading_sensitivity` | 0.9 (= 90 % of the baseline) |
+| `input_number.pergola_min_sun_elevation` | 10° |
+| `input_number.pergola_pv_conversion_factor` | 3.2 |
+
 Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their `id:` (e.g.
 `automation.pergola_cover_response`); the watchdogs and lock responders have numeric ids.
 

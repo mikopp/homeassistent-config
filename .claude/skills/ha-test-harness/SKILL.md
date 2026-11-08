@@ -18,6 +18,7 @@ Package-specific test facts live in the package notes (`packages/notes/<package>
   - Why: `jump_to_next` is forward-only (`if target_dt <= current_time: target_dt += timedelta(days=1)`); re-requesting a passed hour silently advances a full day (and every `platform: integration` step integrates 86400 s).
   - Check the package first (grep `sun.`, `now()`, `today_at`, `hour`). `test_pergola.py` needs them (sun elevation); `test_victron.py` did not.
   - Same for `jump_to_next(month=...)`: advances a full year once the month has passed.
+  - DISPROVED: month/year jumps (pergola fixtures reach ~2032) are NOT the CI hang cause; a docs-only commit hung with identical test code.
 - **Delayed trigger-based sensors are `unknown` after boot until the mocked clock crosses their delay** (CONFIRMED, airflow and heating tests).
   - Why it matters: tests silently piggyback on an earlier test's clock move; a green full-suite run hides this. Run a touched test file on its own before trusting it.
 - **Chaining several `jump_to_next()` calls in one test** — OBSERVED, mechanism DUBIOUS: `last_updated` stayed pinned to the reset timestamp on 2nd/3rd jumps.

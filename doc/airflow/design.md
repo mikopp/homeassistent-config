@@ -262,7 +262,8 @@ Key asymmetry:
 
 Indoor Schmitt (`indoor_dew ≥ dew_max` ON, stays on to `dew_target`) AND
 (`outdoor_dew ≥ dew_threshold` OR `outdoor_dew ≥ indoor_dew`). Broadly the inverse of free
-cooling: outdoor air is too humid to bring in.
+cooling: outdoor air is too humid to bring in. Gated OFF while `flush_needed` or `drying_needed` is
+on (low and flush/boost are opposite actions).
 
 ### AF-5.3b `heat_ventilation_low_needed` — hot-import protection
 
@@ -389,7 +390,9 @@ flowchart TD
     BO -- no --> LO{"low?"}
     LO -- yes --> SL["auto OFF, preset low<br/>(guard: skip if already)"]
     LO -- no --> FF{"medium?"}
-    FF -- yes --> SM["auto OFF, preset medium<br/>(only over a schedule at low)"]
+    FF -- yes --> RTA{"manual low?<br/>(auto off, preset low)"}
+    RTA -- yes --> RT["route-to-auto: auto ON<br/>(re-fires via auto_mode_on trigger)"]
+    RTA -- no --> SM["auto OFF, preset medium<br/>(only over a schedule at low)"]
     FF -- no --> RST{"auto decided<br/>and auto == off?"}
     RST -- yes --> RA["auto ON (restore)"]
     RST -- no --> NO2["no-op (already correct)"]

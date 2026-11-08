@@ -77,6 +77,7 @@ State manager (`mode: queued, max: 3`), first matching `choose` branch wins:
 - **Default**: `script.pergola_evaluate_state`.
 
 `script.pergola_exit_to_normal` (shared frost/override exit): if `wheatherstation_hourly_rain > 0`
+(`sensor.wheatherstation_hourly_rain`: rain in the last 60 min)
 → set `rain_stopped` and start the drain script; else `script.pergola_evaluate_state`.
 
 `script.pergola_evaluate_state` (`mode: restart`), first match wins:

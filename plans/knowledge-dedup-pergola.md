@@ -34,6 +34,8 @@ design read on demand only. No behaviour change.
    | `:529` | "+7 below 20°" | fix to 6 (matches code `:540`, `:1524`) |
    | `:53-63` | states list | keep, include `sun_down` (option at `:74`), pointer `#PG-2` |
    | `:1204`, `:1515-1518` | correction restated | one line + pointer |
+   | `:104-108` | "plan Step 6 (Phase 5)" | → `plans/pergola-field-calibration.md` |
+   | `:652` | "A_eff_flip ≈ 58°, COOLING_LOWER_BOUND ≈ 15.3°" | fix to a_flip 57, LB 15 (code, `#PG-4.2`) |
 2. [TODO] Fix yamllint comment warnings in touched blocks.
 3. [TODO] Check that `dashboards/Pergola-management.yaml` and `pergola_card.yaml` comments are
    consistent with the note (card-sync invariant). Comment-only.
