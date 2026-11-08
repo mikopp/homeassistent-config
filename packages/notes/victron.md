@@ -155,7 +155,8 @@ sensors advance on their own, so a held tick would drop that tick's delta. Needs
   and conftest `baseline_states` reset accumulators to `0.0` and the baselines to `unknown`.
 - Grid energy tests assert a before/after delta (`_grid_energy_baseline`): REST `set_state` cannot
   reset an `integration` sensor (VIC-11). The second seed is nudged by 1 W so the template chain
-  re-renders.
+  re-renders. The expected kWh comes from the source sensor's `last_updated` span, not a fixed
+  60 s: the step also contains real wall-clock time.
 - Each test uses at most one `fast_forward(timedelta(minutes=1))` (one trigger render);
   preconditions like "already baselined" are seeded with `set_state`. The module docstring says
   why `jump_to_next(hour=...)` is avoided.

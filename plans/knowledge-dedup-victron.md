@@ -80,3 +80,7 @@ Expected: Read + note 15.3k → ~10.5k tokens. No behaviour change.
   replacing a `total_increasing` sensor added to `ha-energy-metering` (OBSERVED once).
   Rejected: recording removed sensors as decisions (history), duplicated small facts, conftest detail.
   Optional follow-up: a GitHub issue for the skipped harness-ordering test.
+- CI on `df24a0a` (docs-only commit) failed `test_grid_import_energy_accumulates` (state 0.093, delta
+  not within 0.05 ± 0.002); the same code was green on `455cc8b` and master. Likely cause (not proven):
+  the integration step spans the mocked 60 s plus real wall-clock time, while the test expected exactly
+  60 s. Fix: both grid energy tests compute the expected kWh from the source sensor's `last_updated` span.
