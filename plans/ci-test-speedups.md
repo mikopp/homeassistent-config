@@ -33,7 +33,7 @@ deterministic reproduction), **OBSERVED** (real data, alternative explanation op
 unconfirmed learning") and `.claude/learnings.md` (graded learnings, since moved into the `ha-test-harness` / `ha-energy-metering` skills). Both came out of the
 debugging below; the learnings file also holds general HA lessons (integration platform, entity
 registry reclaim) that were learned on the Victron work — they reference
-`packages/victron.yaml` / `plans/victron-ac-referenced-accounting.md`, which land in the feature PR.
+`packages/victron.yaml` / the AC-referenced accounting plan (now `doc/victron/background.md#VIC-B3`), which land in the feature PR.
 
 ---
 
