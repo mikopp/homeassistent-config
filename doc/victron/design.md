@@ -44,7 +44,8 @@ investigations and superseded designs: `background.md` (not design-relevant).
    power, so HA downtime loses no energy (VIC-9).
 4. **The two domains are separate and each is internally exact** (VIC-5, VIC-6). The Energy
    Dashboard reads *energy* entities; live cards and W graphs read *power* entities. The battery
-   slot of the Energy Dashboard uses `victron_battery_energy_in/out`, not `victron_battery_ac_power`.
+   *energy* slot of the Energy Dashboard uses `victron_battery_energy_in/out`;
+   `victron_battery_ac_power` only feeds its power graph.
 5. **AC-coupled PV keeps its own device counter** (`pvinverter/20/Ac/Energy/Forward`): an
    independent measurement that never touches the MultiPlus, needs no η and must not be degraded
    to an integration.
@@ -54,7 +55,8 @@ investigations and superseded designs: `background.md` (not design-relevant).
 7. **True Multi DC power = battery voltage × `system/0/Dc/Vebus/Current`** (VIC-8), never
    `system/0/Dc/Vebus/Power`.
 8. **Grid energy uses `sensor: platform: integration`** (VIC-11); the other accumulators stay
-   per-minute trigger sensors.
+   per-minute trigger sensors. Scope choice: the η/loss accumulators need the shared gate (VIC-7),
+   so `integration` would need an extra gating template sensor each.
 
 ## VIC-4 Dependency graph (acyclic)
 
@@ -104,8 +106,8 @@ batt_ac   = mp_ac_net − solar_ac           (+ = discharging)
 
 ## VIC-6 Energy domain
 
-The battery accumulators are an **energy-domain residual against exactly the series the Energy
-Dashboard displays** for the other sources, every minute:
+The battery accumulators are an **energy-domain residual against the dashboard's own sources**,
+every minute (MPPT and AC PV as counter deltas, grid as the minute sample, see the last bullet):
 
 ```
 solar_inc = max(mppt_counter − mppt_baseline, 0) × η    # dashboard MPPT (= solar_yield_total_kwh step)
@@ -150,8 +152,8 @@ energy_in  += max(−batt_inc, 0);   energy_out += max(batt_inc, 0)
 - Consumers read η with `| float(100)` in the trigger block, `| float` in `solar_yield_watts`.
 - A clamp pinned at exactly 50 or 100 % for days means a sign or topology error; cross-check
   `mp_ac_net` against VRM "MultiPlus AC out".
-- Normal value ≈ 85 % (note). η is load dependent (note), the single ratio is a known
-  simplification.
+- Normal value ≈ 85 % (note). One ratio for all loads is a known simplification; load dependence
+  is only partly measured (note).
 - Accumulator history is never re-seeded automatically; after a fix to the η inputs the user resets
   both accumulators to 0 together (Developer Tools → States), else old data only dilutes.
 
@@ -159,8 +161,9 @@ energy_in  += max(−batt_inc, 0);   energy_out += max(batt_inc, 0)
 
 - `mp_dc = V_batt × I_vebus` from `system/0/Dc/Battery/Voltage` (BMS) and
   `system/0/Dc/Vebus/Current`. `system/0/Dc/Vebus/Power` follows the AC side on this system and is
-  not used (evidence in the note). Victron reports the Multi current negative while inverting, so
-  the sign matches VIC-2. BMS vs Multi terminal voltage differs by ~0.02 V (≈ 0.04 %), negligible.
+  not used (evidence in the note). The Multi current is negative while inverting (observed,
+  −8.1 A); positive while charging follows the convention and is test-covered, but no live
+  charging reading has been recorded. Re-check at a live charge. BMS vs Multi terminal voltage differs by ~0.02 V (≈ 0.04 %), negligible.
 - Why the Multi current and not `Dc/Battery/Power`: the battery monitor also sees other DC loads
   (MPPT self-consumption, GX, ~10 W), which would be booked as Multi loss. The Multi's net DC
   current already includes MPPT flow, so no `dc_pv` term is needed.
@@ -181,8 +184,8 @@ Used by `victron_solar_yield_total_kwh` (`state + max(Δ, 0) × η`) and the bat
 - The previous counter reading is the **state** of a dedicated trigger sensor,
   `victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh`
   (`src if available else this.state`), read with `states()`. No custom `attributes:` on trigger
-  sensors (story and grading in background). `this.state` self-reference is the pattern every
-  accumulator here uses.
+  sensors: state-only is simpler and matches the `this.state` pattern every accumulator here uses
+  (the attributes mechanism is UNPROVEN, `ha-templates` skill).
 - Baselines carry `device_class: energy` + `state_class: total_increasing` like every other
   self-referencing trigger sensor in the file (harmless; keeps them consistent).
 - **Sentinel:** `'unknown' | float(-1)` → `prev < 0` means "no baseline": the tick only re-baselines
@@ -191,17 +194,15 @@ Used by `victron_solar_yield_total_kwh` (`state + max(Δ, 0) × η`) and the bat
 - Counter reset / backwards jump: `max(Δ, 0)` adds nothing; the baseline re-anchors.
 - Source unavailable: the total holds and the baseline holds, so the next good tick picks up the
   whole gap in one delta (no energy lost).
-- Templates must not raise: a raising `state:` discards the render.
-- **Declaration order:** the baselines are declared AFTER their consumers in the block, so the
-  consumers read the previous tick's reading. That consumers see pre-tick values because of this
-  order is UNPROVEN (render order within one trigger pass was never demonstrated); reordering ⇒
-  re-run the counter-delta tests. Likewise η may lag its accumulators by one tick (UNPROVEN, see
-  note); η moves < 0.01 %/min past bootstrap, so a one-tick lag would be negligible.
+- **Declaration order:** the baselines are declared AFTER their consumers, intending that the
+  consumers read the previous tick's value. Whether order matters is UNPROVEN (note, "Decisions in
+  force"); reordering ⇒ re-run the counter-delta tests.
 
 ## VIC-10 Availability policy for derived sensors
 
 - "GX alive" signals are `ac_load_total_power` (all three load phases) and `grid_total_power` (all
-  three grid phases). `mp_ac_net`, `pv_net_power` and everything downstream gate on these.
+  three grid phases). `mp_ac_net` gates on load + grid (and everything downstream inherits it);
+  `pv_net_power` gates on the load side only.
 - An expired PV sensor (`dc_pv`, `ac_pv`, both `expire_after: 120`) means "not generating" = 0 W,
   not an outage: they are read with `| float(0)` and kept out of `availability:` in `mp_ac_net`,
   `solar_yield_watts`, `pv_net_power` and the battery residual. Putting them in `availability:`
@@ -217,14 +218,11 @@ Used by `victron_solar_yield_total_kwh` (`state + max(Δ, 0) × η`) and the bat
 - `victron_grid_energy_import/export` integrate `victron_grid_power_import/export` (non-negative
   half-waves of `grid_total_power`) with `method: trapezoidal`, `unit_prefix: k`, `round: 3`, on
   every source state change (~1-2 s MQTT cadence) instead of one sample per minute.
-- `device_class` / `state_class` are **invalid options** for `sensor.integration` (rejected by
-  `check_config`); the platform sets its own (`state_class: total`).
-- The running total lives in the entity's Python memory (`RestoreSensor`), not in its HA-visible
-  state: a REST `set_state` is overwritten on the next step and does not reset it (test impact in
-  the note).
-- A same-value re-post of a source does not propagate: template sensors listen to
-  `EVENT_STATE_CHANGED`, not `EVENT_STATE_REPORTED`, so an unchanged input re-renders nothing.
-- The integration sensor tolerates a source that does not exist yet at startup.
+- No `device_class` / `state_class` keys (the platform rejects them and sets its own).
+- Platform semantics (running total in memory, not resettable by `set_state`; missing source at
+  startup; statistics step when replacing a `total_increasing` sensor) and why a same-value
+  re-post does not reach it through the template chain: `ha-energy-metering` and `ha-templates`
+  skills.
 
 ## VIC-12 Entity identity rules for this package
 

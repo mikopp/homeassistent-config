@@ -23,6 +23,9 @@ stack trace, or deterministic repro. **OBSERVED** / **UNPROVEN** = weaker; never
   `'device_class' is an invalid option for 'sensor.integration'`). Why: the platform applies its own.
 - **Running total lives in the entity's Python memory** (restored via `RestoreSensor`), not its HA-visible state.
   - Why it matters: a `set_state()` override shows briefly, then the next step overwrites it from the old internal value. Cannot be reset via `set_state()`; tests need a before/after baseline delta.
+- **Replacing a trigger `total_increasing` sensor with it** (same entity_id after reclaim): it restarts at 0 with
+  `state_class: total`, and the compiled statistics `sum` stepped down once by the old total (OBSERVED once,
+  Victron #121). Fix: Developer Tools → Statistics, set that slot's *change* to ~0.001. Do not promise "no negative spike".
 
 ## Recorder vs Energy Dashboard
 - `recorder: purge_keep_days` does NOT touch the Energy Dashboard. Why: the dashboard reads long-term statistics, a separate store retained indefinitely.

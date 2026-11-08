@@ -16,9 +16,9 @@ Read VIC-B3/VIC-B4 with these in mind:
   Every `vebus_dc` / `victron_vebus_dc_power` in VIC-B3 is now `victron_multiplus_dc_power`; the
   MQTT sensor `victron_vebus_dc_power` was removed.
 - Custom `attributes:` baselines (VIC-B3 Steps 6/7) were replaced by state-only baseline sensors.
-  The `home-assistant/core#172847` explanation was **not** the cause (CI failures came from
-  chaining several `jump_to_next()` calls in one test); the attribute mechanism itself is
-  UNPROVEN either way. Same for the "render in declaration order, earlier write visible to later
+  The `home-assistant/core#172847` explanation was very likely not the cause (CI failures were
+  very likely from chaining several `jump_to_next()` calls in one test); the attribute mechanism
+  itself is UNPROVEN. Same for the "render in declaration order, earlier write visible to later
   read" claim: UNPROVEN, never demonstrated.
 - "No negative spike" for the grid integration platform switch: wrong; the compiled sum stepped
   down once and was corrected by hand (status update 2026-10-16).

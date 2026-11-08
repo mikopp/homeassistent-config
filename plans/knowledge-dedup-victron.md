@@ -1,6 +1,6 @@
 # Knowledge dedup: victron
 
-**Status:** IMPLEMENTED on `claude/serene-galileo-2eg2pr` (user approved the whole plan 2026-11-08); review pass pending. Follow-up 1 of 5 from PR #141 (knowledge structure, merged).
+**Status:** IMPLEMENTED on `claude/serene-galileo-2eg2pr` (user approved the whole plan 2026-11-08); review pass done (2 Sonnet subagents), corrections applied. Follow-up 1 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** conventions in `doc/KNOWLEDGE.md`, guards,
 `.claude/rules/packages/victron.md`: satisfied by PR #141. Branch `claude/knowledge-dedup-victron` off `master`.
@@ -52,10 +52,10 @@ Expected: Read + note 15.3k → ~10.5k tokens. No behaviour change.
    (test edits are comment/docstring only), then `git rm plans/victron-ac-referenced-accounting.md`.
 
 ### Phase D: verify and close
-8. [IN_PROGRESS] `yaml_semantic_equal.py master packages/victron.yaml` passes; `.github/scripts/ci-local.sh`
+8. [IN_PROGRESS] (local checks pass; CI `check_config` + pytest run only on a PR, not opened yet) `yaml_semantic_equal.py master packages/victron.yaml` passes; `.github/scripts/ci-local.sh`
    passes; `git ls-files --eol` clean; `grep -rn victron-ac-referenced-accounting` empty; note ≤ 24 KB.
    Push; CI `check_config` + pytest green.
-9. [TODO] Close: final check that every removed fact has a home; delete this plan in the PR's last commit.
+9. [IN_PROGRESS] Close (fact-home check done by review; plan deletion waits for the PR's last commit): final check that every removed fact has a home; delete this plan in the PR's last commit.
 
 ## Risks
 - Facts lost while moving: before deleting a comment, grep the target home for it.
@@ -71,3 +71,12 @@ Expected: Read + note 15.3k → ~10.5k tokens. No behaviour change.
   keep-alive, entity map, tests from YAML comments); `design.md` 17.2 KB.
 - Checks: `yaml_semantic_equal.py master packages/victron.yaml` OK; `ci-local.sh` all passed
   (Python 3.15.0b4 via uv); yamllint clean for victron.yaml; no CRLF.
+- Review (auditor + challenger subagents): no fact lost outright. Applied: VIC-6 lead no longer claims
+  exactness against the dashboard's grid series; VIC-10 `pv_net_power` gates on load only; Multi current
+  sign while charging marked not live-observed; load-dependent η marked partly measured, bias direction
+  added; declaration order / attributes stated as intent + UNPROVEN, unsourced "raising state" line
+  dropped; VIC-11 integration semantics replaced by a skill pointer; VIC-3.8 scope why; battery power
+  vs energy slot clarified; VIC-B1 "#172847 very likely not the cause"; statistics step-down on
+  replacing a `total_increasing` sensor added to `ha-energy-metering` (OBSERVED once).
+  Rejected: recording removed sensors as decisions (history), duplicated small facts, conftest detail.
+  Optional follow-up: a GitHub issue for the skipped harness-ordering test.

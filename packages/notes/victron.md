@@ -15,7 +15,9 @@ and `doc/victron/design.md`. Accounting model, formulas, sign table and identiti
   per minute for the battery residual (VIC-6). η only moves the Solar/Battery split.
 - Power and energy domains are each exact and deliberately NOT reconciled with each other (VIC-6).
 - `victron_multiplus_ac_net_power` (+ = inverting) and `victron_multiplus_dc_power`
-  (+ = charging) have opposite signs; conversion loss = `max(-(ac_net + dc), 0)` (VIC-8).
+  (+ = charging) have opposite signs; conversion loss = `max(-(ac_net + dc), 0)` (VIC-8). The
+  Multi current's sign was observed only while inverting (negative); positive while charging is
+  test-covered, not yet seen live.
 - `victron_multiplus_conversion_efficiency` always renders a number (no `availability:`;
   100 % bootstrap until `dc_in_energy` ≥ 1 kWh, clamp 50-100) (VIC-7).
 - Expired PV sensors and an expired Multi current mean 0, not an outage; the "GX alive" signals
@@ -44,10 +46,11 @@ Use `sensor.victron_multiplus_dc_power` (= battery voltage × `system/0/Dc/Vebus
 snapshot), so it is not the Multi's own DC power.
 
 ### Efficiency is load dependent
-At ~350 W the Multi loses ~15 % (≈ 80 % efficient; three devices idle-draw); at kW loads it is
-better. The long-run ratio η is dominated by low-load night inverting but is applied to daytime PV.
-Totals still close exactly; only the Solar/Battery split shifts. A load-dependent η would be a
-separate change.
+At ~350 W the Multi loses ~15 % (≈ 80 % efficient; three devices idle-draw), measured from one
+snapshot; better efficiency at kW loads is expected but not measured. The long-run ratio η is
+dominated by low-load night inverting but is applied to daytime PV: if efficiency rises with load,
+daytime Solar is under-credited and Battery over-credited. Totals still close exactly. A
+load-dependent η would be a separate change.
 
 ### Venus OS MQTT publishes on CHANGE only (proven from source)
 Python Venus services write values through velib `vedbus.py` `_local_set_value`
@@ -106,7 +109,7 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
 | `sensor.victron_multiplus_ac_out_energy`, `_dc_in_energy`, `_conversion_efficiency` | η |
 | `sensor.solar_yield_watts` | AC-referenced MPPT W (Energy Dashboard solar power) |
 | `sensor.victron_solar_yield_total_kwh` | AC-referenced MPPT kWh accumulator (Energy Dashboard solar energy) |
-| `sensor.victron_battery_ac_power` | power-domain battery residual (Energy Dashboard battery power) |
+| `sensor.victron_battery_ac_power` | power-domain battery residual (live / power graph; the dashboard's battery energy slot uses `battery_energy_in/out`) |
 | `sensor.victron_battery_energy_in`, `_out` | energy-domain battery residual (Energy Dashboard battery) |
 | `sensor.victron_solar_yield_dc_baseline_kwh`, `victron_ac_pv_energy_baseline_kwh` | previous counter readings |
 | `sensor.victron_pv_net_power`, `_pv_surplus_power` | whole-house PV balance (heating_pv_boost, heating dashboard) |
@@ -114,8 +117,10 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
 ## Decisions in force
 - AC-referenced accounting, η as long-run ratio, counter-delta solar, two exact domains, AC PV on
   its own counter, repointed dashboard IDs, true DC = V × I, grid on `integration`: VIC-3.
-- Baselines are separate state-only sensors declared AFTER their consumers; reordering ⇒ re-run
-  the counter-delta tests (whether order matters is UNPROVEN, VIC-9).
+- Baselines are separate state-only sensors declared AFTER their consumers, intending that the
+  consumers read the previous tick's value. UNPROVEN: render order within one trigger pass was
+  never demonstrated, so whether the order matters is unknown; reordering ⇒ re-run the
+  counter-delta tests (VIC-9).
 - η accumulators share one gate, duplicated inline; keep both copies identical (VIC-7).
 - No `utility_meter:`; monthly figures, if wanted, go back as YAML (VIC-12).
 
