@@ -22,8 +22,8 @@ formulas, rain/frost protection). Design (state machine, formulas, deadband, ver
   *State of Automation*, *States and Sensors*, *Parameters*. Exceptions today: the internal
   helpers `input_number.pergola_last_set_slat_angle` and `pergola_rain_recovery_step` are in
   neither (their sensors are).
-- **No `device_id:` / `device:` on template entities**, and no UI device assignment: both fail
-  (story → `doc/pergola/background.md#PG-B3`). Grouping is only via the group + card.
+- **No `device_id:` / `device:` on template entities**, and no UI device assignment: both fail.
+  Grouping is only via the group + card.
 - **No template wrappers** around `input_*` helpers. Automations and templates use the
   `input_*` entity IDs directly.
 - **One state writer set.** Only `pergola_state_manager`, `script.pergola_evaluate_state`,
@@ -124,6 +124,6 @@ Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their 
   `user_override`) and wait for `sensor.pergola_pv_power == 0` before triggering.
 
 ## Related
-- `doc/pergola/design.md`: current design. `doc/pergola/background.md`: history (guarded).
+- `doc/pergola/design.md`: current design.
 - `packages/heating_cooling_indicator.yaml`: source of the season.
 - `packages/victron.yaml`: PV source sensor.

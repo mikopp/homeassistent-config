@@ -713,7 +713,7 @@ def test_conversion_loss_energy_accumulates(
 @pytest.mark.skip(
     reason=(
         "Harness-order-dependent flake, not a production bug — see "
-        "doc/victron/background.md#VIC-B3, 'Skipped: harness ordering flake'. "
+        "the ha-test-harness skill (one skipped test, never root-caused). "
         "Reproduces deterministically in CI (2/2 runs, unaffected by a 5s->20s timeout bump) "
         "but only in this exact suite position: pytest_collection_modifyitems in conftest.py "
         "sorts tests alphabetically by nodeid, and this test lands immediately after another "

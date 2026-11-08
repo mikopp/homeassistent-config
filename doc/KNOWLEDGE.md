@@ -24,6 +24,13 @@ Rules:
   The symlink layout (note with its own `paths:` + symlink in `.claude/rules/packages/`) loads lazily.
 - **Background and sources are not design-relevant.** Never cite them as current behaviour; read
   them only when the user asks "why/how did this come about".
+- **Agent knowledge never refers to background or sources.** Root `CLAUDE.md`, rules, notes,
+  skills, design docs, YAML comments and tests must not link, cite or point to
+  `doc/<pkg>/background.md` or `doc/sources/` (no "story → background", no "worked example in
+  background"). A pointer invites the read the guard exists to prevent. If a fact matters, state it
+  where it is needed; if it does not, leave it out. Exempt: this file, the root `CLAUDE.md` homes
+  table and the `record-learning` routing table (they name background as a destination, not as
+  something to read), the guard in `.claude/settings.json`, and plans that route content there.
   Sources live under `doc/sources/<pkg>/` (one tree, easy to guard), not inside `doc/<pkg>/`.
   Guard (`.claude/settings.json` `permissions.ask`): `Read(/doc/**/background*.md)`,
   `Read(/doc/sources/**)`, `Bash(cat doc/**/background*)`, `Bash(cat doc/sources/*)`.
@@ -42,7 +49,7 @@ Rules:
 
 Test: *"If background were deleted tomorrow, could an agent still change the package correctly?"*
 If no, the fact is current and must not live only in background. A decision in force keeps its
-short why in the note or design doc plus a link, e.g. `(story → background.md#VIC-B2)`.
+short why in the note or design doc, with no link to background (K-1).
 
 ## K-3 Note template (`packages/notes/<pkg>.md`)
 
@@ -53,7 +60,7 @@ Never list background or sources. Sections, in order:
 2. Invariants
 3. Hardware / integration quirks
 4. Entity map (IDs from `default_entity_id` or ha-mcp lookup, never from `unique_id`)
-5. Decisions in force (one-line why + background link)
+5. Decisions in force (one-line why; no background link)
 6. Known biases / open issues
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
    skill). Above ~2 KB, split into `packages/notes/<pkg>-tests.md` with its own symlink rule and

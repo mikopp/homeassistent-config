@@ -2,8 +2,7 @@
 
 Current design of `packages/victron.yaml`. Where this doc and the YAML disagree, the YAML wins:
 fix this doc. Section IDs (`VIC-1` …) are stable; never renumber, mark retired IDs as gone.
-Hardware quirks, entity map, biases and open issues: `packages/notes/victron.md`. History,
-investigations and superseded designs: `background.md` (not design-relevant).
+Hardware quirks, entity map, biases and open issues: `packages/notes/victron.md`.
 
 ## VIC-1 Topology and goal
 
@@ -206,7 +205,8 @@ Used by `victron_solar_yield_total_kwh` (`state + max(Δ, 0) × η`) and the bat
 - An expired PV sensor (`dc_pv`, `ac_pv`, both `expire_after: 120`) means "not generating" = 0 W,
   not an outage: they are read with `| float(0)` and kept out of `availability:` in `mp_ac_net`,
   `solar_yield_watts`, `pv_net_power` and the battery residual. Putting them in `availability:`
-  once blanked the battery chain and the dashboard at night and biased η (background).
+  makes the battery chain and the dashboard's power view go unavailable every night, and freezes
+  one η accumulator while the other runs, which biases η.
 - `mp_dc` reads the Multi current with `| float(0)` (expired current = 0 A = nothing flowing) and
   gates only on the voltage; a real GX outage is still caught because every consumer pairs it with
   `mp_ac_net`.

@@ -8,7 +8,7 @@ paths:
 
 Current facts of the Victron package. Loads with `packages/victron.yaml`, `tests/test_victron.py`
 and `doc/victron/design.md`. Accounting model, formulas, sign table and identities:
-`doc/victron/design.md` (`VIC-n`). History: `doc/victron/background.md` (not design-relevant).
+`doc/victron/design.md` (`VIC-n`).
 
 ## Invariants
 - Power identity, any η: `solar_ac + ac_pv + grid + batt_ac == ac_load` (VIC-5). Energy identity
@@ -60,8 +60,8 @@ dbus-flashmq relays every signal it gets, has no de-dup and no periodic value re
 `/Dc/Vebus/Current` = 0.0 A while idle) is sent ONCE, so any `expire_after` shorter than "how long it
 can stay constant" WILL expire it. Size `expire_after` per topic and read an expired value as
 "unchanged", not "outage". Chain: dbus-systemcalc-py `delegates/multi.py` -> velib `vedbus.py` ->
-dbus-flashmq `src/state.cpp`; long-standing code, so any current Venus OS has it (provenance →
-background.md#VIC-B2). Only Python/vedbus producers were checked; C services (vecan, mk2) were not.
+dbus-flashmq `src/state.cpp`; every key line dates from 2014-2024 (`git log -S`), so any current
+Venus OS has it. Only Python/vedbus producers were checked; C services (vecan, mk2) were not.
 
 Checking it live: ha-mcp only offers long-term statistics (no raw state history), so an expiry shows
 only as missing 5-min rows. MQTT sensors do not expose `expire_after` as an attribute. For exact
@@ -126,7 +126,7 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
 
 ## `sensor.victron_solar_yield_total_kwh` is not the MPPT counter
 Template accumulator since #121: MPPT counter delta × η, starting from `this.state | float(0)`. It
-did not inherit the old MQTT sensor's value (story → background.md#VIC-B2); the statistics `sum`
+did not inherit the old MQTT sensor's value (5644.65 kWh → 0.61 kWh on 2026-10-16); the statistics `sum`
 stayed continuous, so the Energy Dashboard is fine. Never compare its state with the raw counter.
 
 ## Known small biases (documented, not fixed)
@@ -164,7 +164,7 @@ sensors advance on their own, so a held tick would drop that tick's delta. Needs
   reason in the decorator).
 
 ## Related
-- `doc/victron/design.md` (current design), `doc/victron/background.md` (history).
+- `doc/victron/design.md` (current design).
 - `ha-energy-metering` skill (platform moves, registry reclaim), `ha-mqtt` skill.
 - Consumers: `packages/pergola.yaml` (DC W, load total), `packages/heating_pv_boost.yaml`
   (PV net, AC PV, SOC), `dashboards/heating-dashboard.yaml`.

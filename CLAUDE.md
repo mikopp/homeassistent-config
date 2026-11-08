@@ -92,7 +92,7 @@ Details, limits and how to extend: `doc/KNOWLEDGE.md`.
 | `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture/derivations of complex packages; read on demand |
-| `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant, never cite as current behaviour |
+| `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant; never cite, and never link from agent knowledge |
 | YAML comments | what + one-line why + pointer to note/design |
 | `plans/` | open work and hypotheses only; deleted when done |
 | GitHub issues | confirmed bugs/flaky tests not fixed now; link `#n` from the note; plan only when work starts |

@@ -3,8 +3,7 @@
 **Scope:** `packages/airflow_cooling.yaml` (+ `packages/heating_cooling_indicator.yaml`)
 **Hardware:** Zehnder ComfoAir Q350 ERV via the ComfoConnect integration
 **Status:** Current design. Heading IDs (`AF-7.2`) are stable: never renumber, mark retired IDs as
-gone. History and superseded designs: `background.md` (not design-relevant). Package facts and
-rules: `packages/notes/airflow_cooling.md`. Where this doc and the YAML disagree, the YAML wins.
+gone. Package facts and rules: `packages/notes/airflow_cooling.md`. Where this doc and the YAML disagree, the YAML wins.
 
 ---
 
@@ -58,7 +57,7 @@ computed at the **target temperature** via the Magnus formula.
 >   *boost* (`humidity_drying_needed`) and the *heat-protect* low guard (`heat_ventilation_low_needed`).
 >
 > Smoothing on the weather-station chain is the boost sensor's only debounce: noise spikes cannot
-> falsely start/stop a boost (story → background.md#AF-B1).
+> falsely start/stop a boost.
 
 ### AF-2.2 Derived thresholds — dew point at target temp (Magnus)
 
@@ -82,7 +81,7 @@ computed at the **target temperature** via the Magnus formula.
 > **`drying_needed` has no `delay_on`/`delay_off`.** Its temp input is the smoothed
 > `airflow_wheatherstation_outdoor_temp_5min`, so the 5-min filter absorbs noise, and its
 > `flush_needed` input is already debounced 10 min. Boost start latency is therefore ~10 min (the
-> flush `delay_on`) (story → background.md#AF-B1).
+> flush `delay_on`).
 
 ### AF-2.4 Actuators (ComfoConnect)
 
@@ -207,7 +206,7 @@ stateDiagram-v2
 
 Cold start (no previous state) classifies at the midpoint of each band (≤ H + 0.5 heating,
 < P − 0.5 neutral, < A − 0.5 passive, else active). Unavailable while the 48h mean or either
-effective sensor has no value. Old hard-coded values: background.md#AF-B5.
+effective sensor has no value.
 
 ---
 
@@ -293,8 +292,7 @@ already-debounced sources — no extra debounce.
 > **State-based, not trigger-based (deliberate).** It derives from two *slow* binary sensors that
 > can sit steady for hours; a trigger-based version would restore its last state on HA restart and
 > recompute only on an input *change*, so it could come back **stale** and strand its consumer off
-> the low intent. A plain state template re-evaluates continuously and at startup
-> (story → background.md#AF-B3).
+> the low intent. A plain state template re-evaluates continuously and at startup.
 
 ### AF-5.4 `humidity_drying_needed` — the noisy boost
 
@@ -333,9 +331,8 @@ switch or climate. Unavailable unless every indicator holds a value (the automat
 | P4 | `free_cooling_available` | cool |
 | P5 | otherwise | comfort |
 
-No row keeps the current profile, so there is no stuck-`cool` / stuck-`warm` trap to recover from
-(story → background.md#AF-B2). P3's hysteresis memory is the sensor's previous
-`profile` attribute.
+No row keeps the current profile, so there is no stuck-`cool` / stuck-`warm` trap to recover from.
+P3's hysteresis memory is the sensor's previous `profile` attribute.
 
 **Ventilation**, first match wins: `drying` → **boost** · `flush` → **medium** · moisture-low or
 heat-low → **low** · profile chosen by P4 (free cooling) → **medium** · otherwise **auto**.
@@ -347,7 +344,7 @@ heat-low → **low** · profile chosen by P4 (free cooling) → **medium** · ot
 
 | Example | state | profile | ventilation |
 |---|---|---|---|
-| active_heating + free cooling available (background.md#AF-B4) | heating | warm | auto |
+| active_heating + free cooling available | heating | warm | auto |
 | neutral/cooling + free cooling | free_cooling | cool | medium |
 | hot real outdoor + free cooling (cool intake) | heat_protection | cool | low |
 | humid outdoor in active_heating | moisture_protection | warm | low |
@@ -503,8 +500,7 @@ flip it.
 > by a continuously-drifting numeric filter (outdoor temp/dew, weather-station temp), so it recomputes
 > within ~1 debounce after a restart. `ventilation_low_needed` and `airflow_cooling_state` are
 > **state-based on purpose**: they derive from *slow binary* sensors (`moisture_low`, `heat_low`, the
-> indicators), so trigger-based + restore could leave them stale for hours (story →
-> background.md#AF-B3). Rule: a template binary_sensor whose inputs are only other binary sensors
+> indicators), so trigger-based + restore could leave them stale for hours. Rule: a template binary_sensor whose inputs are only other binary sensors
 > must be state-based. See `packages/notes/airflow_cooling.md`.
 
 ---
@@ -515,8 +511,7 @@ The full input → output mapping is the decision table in AF-6 (source:
 `custom_templates/airflow_decision.jinja`), plus the controller guards in AF-7.1: Away skips the
 preset/auto_mode half, a running boost is never cancelled, and every write is idempotent. The
 decision-table tests in `tests/test_airflow.py` (`test_decision_*`) pin each row. The decision is
-stateless apart from P3's dry-retention hysteresis, so there is no `keep` row
-(story → background.md#AF-B2).
+stateless apart from P3's dry-retention hysteresis, so there is no `keep` row.
 
 ---
 
@@ -534,4 +529,3 @@ a mixing valve between full heat recovery (bypass 0 %, efficiency η_max) and re
   closed) and `input_number.airflow_bypass_efficiency_min` (0.00-0.30, bypass known fully open).
 - Output: B floored to **15 % steps**, clamped 0-100 %; `none` when `|h_ra − h_oa| < 0.5` kJ/kg
   (delta too small); unavailable unless all six filter sensors have values.
-- Method source (raw LLM answer, not design-relevant): `doc/sources/airflow/estimated-bypass-percentage-evr.md`.

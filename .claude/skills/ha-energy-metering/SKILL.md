@@ -37,7 +37,6 @@ stack trace, or deterministic repro. **OBSERVED** / **UNPROVEN** = weaker; never
      Why: the registry key is `platform + unique_id` (`entity_platform.py::_async_derive_object_ids`); `default_entity_id:` only suggests, loses the collision, and you get `_2`.
   3. History follows the **entity_id string** (`recorder/entity_registry.py::_async_entity_id_changed`), so the rename carries it.
   4. Rename within ~5 min of restart. Why: `statistics_meta.py::update_statistic_id` refuses if the target statistic_id exists, so the `_2` entity must not have compiled statistics yet.
-  - Worked example (history, Victron #121): `doc/victron/background.md#VIC-B3`, "Deploy runbook".
 - **Derive deploy/migration docs from `git diff origin/master...HEAD` (and `git log -S`), never from the live system.**
   - Why: the HA host runs whatever was last pulled, so ha-mcp state and the registry describe the old world (a runbook once told the user to repoint helpers the branch had already deleted).
   - Use the live system only for values to record beforehand and UI-only `.storage` state (Energy Dashboard prefs, dashboards, UI helpers) not in the repo.

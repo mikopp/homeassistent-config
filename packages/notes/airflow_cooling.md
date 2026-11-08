@@ -24,7 +24,7 @@ CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
   `sensor.airflow_cooling_state` and of nothing that writes the device. The controller, the drying
   boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
   attributes. Never wire an indicator straight into an automation — why: consumers that each
-  re-implement the season rules disagree (story → `doc/airflow/background.md#AF-B4`).
+  re-implement the season rules disagree.
 - The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
   applying it cannot change it. Priority/season rules live in one place:
   `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
@@ -66,7 +66,7 @@ Full inventory with roles: design `AF-2` (inputs, thresholds, indicators, actuat
 A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
 **state-based** (plain `state:`, no `trigger:`). Trigger-based template sensors restore their last
 state on HA **restart** and recompute only when an input **changes** — so a derived-from-binaries
-sensor can restore **stale** and never resync (story → `doc/airflow/background.md#AF-B3`).
+sensor can restore **stale** and never resync.
 Reserve trigger-based + restore for **primary** decision sensors driven by continuously-drifting
 numeric filters (outdoor temp/dew, weather-station temp): there the drift guarantees a recompute
 within ~1 debounce after restart, and restoring preserves the 10-min delay + `this.state` Schmitt
