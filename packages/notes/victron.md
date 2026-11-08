@@ -1,3 +1,10 @@
+---
+paths:
+  - "packages/victron.yaml"
+  - "tests/test_victron.py"
+  - "plans/victron-*.md"
+  - "plans/knowledge-dedup-victron.md"
+---
 # Victron package notes (`packages/victron.yaml`)
 
 Read before touching `packages/victron.yaml`. Hardware: GX `c0619ab4c19e`, MPPT 279 (DC solar),
@@ -60,6 +67,7 @@ harmless: `ac_net_power` is then about -40..-50 W (Multi idle draw from AC), `dc
 `ac_out_energy` and `dc_in_energy` both advance only when `ac_net > 0` AND `dc < 0` and both inputs
 are available (condition duplicated inline in each template; keep identical). Mismatched signs add
 to neither, so skew ticks cannot bias η. Existing totals are not re-seeded; the old ones dilute.
+UNPROVEN: η may lag its accumulators by one tick (a former comment attributed this to in-pass render order; never demonstrated). Do not rely on same-tick consistency between η and the accumulators.
 
 ## Known small biases (documented, not fixed)
 - Conversion loss is clamped per sample (`max(-(ac_net+dc), 0)`), so negative excursions are

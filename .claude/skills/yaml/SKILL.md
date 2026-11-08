@@ -1,6 +1,6 @@
 ---
 name: yaml
-description: Best practices for Home Assistant automations, templates, blueprints, scripts, scenes, and YAML configuration
+description: Best practices for Home Assistant automations, templates, blueprints, scripts, scenes, and YAML configuration. General style only; this repo's binding rules are in .claude/rules/ha-yaml.md.
 ---
 
 # Home Assistant YAML & Automation Best Practices
@@ -15,7 +15,7 @@ This skill provides comprehensive patterns for writing correct, efficient, and m
 - [ ] Has descriptive `alias:`
 - [ ] Has `description:` explaining behavior
 - [ ] Uses appropriate `mode:` (single/restart/queued/parallel)
-- [ ] All templates have defaults: `| float(0)`, `| int(0)`
+- [ ] Defaults (`| float(0)`, `| int(0)`) only on sensor reads without an `availability:` guard; never on helpers or in guarded `state:` templates
 - [ ] Trigger IDs for complex automations
 - [ ] Conditions ordered by likelihood of failure (fastest first)
 
@@ -228,15 +228,16 @@ action:
 
 ## 5. Templates (Jinja2)
 
-### ALWAYS Use Defaults
+### Defaults Only for Unguarded Sensor Reads
 
 ```jinja2
-{{ states('sensor.temp') | float(0) }}           {# Default 0 if invalid #}
-{{ states('sensor.count') | int(0) }}            {# Integer with default #}
+{{ states('sensor.temp') | float(0) }}           {# Unguarded sensor read: default 0 if invalid #}
+{{ states('sensor.count') | int(0) }}            {# Unguarded sensor read: integer with default #}
+{{ states('input_number.x') | float }}           {# Helper: never a default #}
 {{ state_attr('entity', 'attr') | default(0) }}  {# Attribute default #}
 ```
 
-**Critical:** Since HA 2021.10, template filters error on invalid input without defaults.
+**Critical:** Since HA 2021.10, template filters error on invalid input without defaults. Use a default only on reads of sensors that have no `availability:` guard. Never on helpers (`input_number`, `input_boolean`, `input_select`, `input_datetime`), and never inside a `state:` template guarded by `availability:`; there a default hides real errors.
 
 ### Check Availability
 
@@ -260,9 +261,9 @@ template:
         state: >
           {% set profile = states('input_select.home_profile') %}
           {% if profile in ['Away', 'Night', 'Vacation'] %}
-            {{ states('input_number.temp_global_away') | float(16) }}
+            {{ states('input_number.temp_global_away') | float }}
           {% else %}
-            {{ states('input_number.temp_study_comfort') | float(22) }}
+            {{ states('input_number.temp_study_comfort') | float }}
           {% endif %}
         availability: >
           {{ states('input_select.home_profile') not in ['unavailable', 'unknown'] }}
@@ -641,7 +642,7 @@ template: !include_dir_merge_list templates/
 
 1. **Always include `id:`** on automations (required for traces)
 2. **Always use `unique_id:`** on template sensors (enables UI customization)
-3. **Always provide defaults** in templates: `| float(0)`, `| int(0)`
+3. **Defaults only on unguarded sensor reads** (`| float(0)`, `| int(0)`); never on helpers or in `availability:`-guarded `state:` templates
 4. **Always include `device_class:`** on sensors
 5. **Prefer state triggers** over template triggers
 6. **Use `mode: queued`** for event-driven automations

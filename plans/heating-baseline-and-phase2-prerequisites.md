@@ -168,7 +168,7 @@ ha-mcp) checks:
   the first full run; `sensor.heating_compressor_runs_today` matches the observed number of runs.
 - The three settings sensors are not `unavailable`.
 
-Results go into the cycling plan's Observations, not into `.claude/learnings.md` (not proven
+Results go into the cycling plan's Observations, not recorded via the `record-learning` skill (not proven
 mechanisms, just checks).
 
 ## Step 6 — Cross-reference edits to the existing plans (docs only) — approved, run last

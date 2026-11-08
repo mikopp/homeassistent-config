@@ -1,14 +1,14 @@
-# Airflow Cooling & Humidity — Architecture Design
+# Airflow cooling & humidity: design
 
 **Scope:** `packages/airflow_cooling.yaml` (+ `packages/heating_cooling_indicator.yaml`)
 **Hardware:** Zehnder ComfoAir Q350 ERV via the ComfoConnect integration
-**Status:** Living document — reflects the dew-point + dew-difference-flush design.
-
-> Related plan: [estimated-bypass-percentage-evr.md](estimated-bypass-percentage-evr.md) (bypass estimation method).
+**Status:** Current design. Heading IDs (`AF-7.2`) are stable: never renumber, mark retired IDs as
+gone. History and superseded designs: `background.md` (not design-relevant). Package facts and
+rules: `packages/notes/airflow_cooling.md`. Where this doc and the YAML disagree, the YAML wins.
 
 ---
 
-## 1. Purpose
+## AF-1 Purpose
 
 Drive the ERV's **temperature profile** (`warm` / `comfort` / `cool`) and **ventilation level**
 (auto / low / medium / boost) automatically, to:
@@ -25,9 +25,9 @@ computed at the **target temperature** via the Magnus formula.
 
 ---
 
-## 2. Entity inventory
+## AF-2 Entity inventory
 
-### Inputs — filter sensors (5-min time-weighted average, throttled)
+### AF-2.1 Inputs — filter sensors (5-min time-weighted average, throttled)
 
 | Entity | Source | Meaning |
 |---|---|---|
@@ -57,10 +57,10 @@ computed at the **target temperature** via the Magnus formula.
 > - any decision that **raises or holds down flow** is guarded by the **real outdoor** temp: the
 >   *boost* (`humidity_drying_needed`) and the *heat-protect* low guard (`heat_ventilation_low_needed`).
 >
-> Smoothing on the weather-station chain replaces the boost sensor's old `delay_on` debounce — noise
-> spikes can no longer falsely start/stop a boost.
+> Smoothing on the weather-station chain is the boost sensor's only debounce: noise spikes cannot
+> falsely start/stop a boost (story → background.md#AF-B1).
 
-### Derived thresholds — dew point at target temp (Magnus)
+### AF-2.2 Derived thresholds — dew point at target temp (Magnus)
 
 | Entity | From helper | Used as |
 |---|---|---|
@@ -68,7 +68,7 @@ computed at the **target temperature** via the Magnus formula.
 | `sensor.airflow_dew_point_target` | `airflow_target_humidity` | comfort target / free-cooling ceiling |
 | `sensor.airflow_dew_point_max` | `airflow_max_humidity` | moisture-problem ceiling |
 
-### Decision binary sensors
+### AF-2.3 Decision binary sensors
 
 | Entity | Fires when | Debounce |
 |---|---|---|
@@ -77,27 +77,27 @@ computed at the **target temperature** via the Magnus formula.
 | `binary_sensor.airflow_moisture_ventilation_low_needed` | outdoor too humid to import | `delay_on`/`delay_off` 10 min |
 | `binary_sensor.airflow_heat_ventilation_low_needed` | **real outdoor** too warm to import (≥ indoor) | `delay_on`/`delay_off` 10 min |
 | `binary_sensor.airflow_ventilation_low_needed` | combined low intent — moisture **or** heat | none (OR of debounced sources) |
-| `binary_sensor.airflow_humidity_drying_needed` | flush **and** weather-gated (smoothed) **and** scheduled (boost) | `delay_off` 10 min only |
+| `binary_sensor.airflow_humidity_drying_needed` | flush **and** weather-gated (smoothed) **and** scheduled (boost) | none (0.3 °C `this.state` hysteresis on the temp gate) |
 
-> **`drying_needed` has no `delay_on`.** Its temp input is now the smoothed
-> `airflow_wheatherstation_outdoor_temp_5min`, so the 5-min filter absorbs noise that `delay_on`
-> used to guard against. Dropping `delay_on` cuts boost start latency by 10 min (was flush 10 +
-> drying 10 = 20 min; now ~10 min). `delay_off` kept to avoid premature boost stop.
+> **`drying_needed` has no `delay_on`/`delay_off`.** Its temp input is the smoothed
+> `airflow_wheatherstation_outdoor_temp_5min`, so the 5-min filter absorbs noise, and its
+> `flush_needed` input is already debounced 10 min. Boost start latency is therefore ~10 min (the
+> flush `delay_on`) (story → background.md#AF-B1).
 
-### Actuators (ComfoConnect)
+### AF-2.4 Actuators (ComfoConnect)
 
 `select.comfoconnect_pro_temperature_profile` (warm/comfort/cool) ·
 `switch.comfoconnect_pro_boost` + `number.comfoconnect_pro_boost_time` ·
 `select.comfoconnect_pro_ventilation_preset` (low/medium) + `switch.comfoconnect_pro_auto_mode`.
 
-### Read-only views
+### AF-2.5 Read-only views
 
-`climate.airflow_climate` (hvac_mode + hvac_action) · `sensor.airflow_bypass_estimation`.
-`sensor.airflow_cooling_state` is **not** a view: it is the single decision (§6).
+`climate.airflow_climate` (hvac_mode + hvac_action) · `sensor.airflow_bypass_estimation` (AF-12).
+`sensor.airflow_cooling_state` is **not** a view: it is the single decision (AF-6).
 
 ---
 
-## 3. Data flow
+## AF-3 Data flow
 
 Indicators feed **one** decision sensor; every automation that changes the device reads only that
 decision. The decision never reads the outputs, so applying it cannot change it.
@@ -172,32 +172,48 @@ flowchart LR
 
 ---
 
-## 4. Season state machine — `sensor.heating_cooling_indicator`
+## AF-4 Season state machine — `sensor.heating_cooling_indicator`
 
 A Schmitt-trigger state machine over the **48-hour mean** outdoor temperature
-(`sensor.wheatherstation_outdoor_temperature_48h_mean`). Wide hysteresis bands prevent the
-season from flapping day-to-day. This is the **season context** consumed by the profile logic.
+(`sensor.wheatherstation_outdoor_temperature_48h_mean`), defined in
+`packages/heating_cooling_indicator.yaml`. Wide hysteresis bands prevent the season from flapping
+day-to-day. This is the **season context** consumed by the profile logic.
+
+Thresholds are `input_number` helpers (set in the UI, no `initial:`; chosen values 12 / 16 / 20 °C):
+
+| Symbol | Helper | Effective value |
+|---|---|---|
+| H | `input_number.heating_indicator_heating_below` | as set |
+| P | `input_number.heating_indicator_passive_cooling_above` | `sensor.heating_indicator_passive_cooling_effective` = max(P, H + 2) |
+| A | `input_number.heating_indicator_active_cooling_above` | `sensor.heating_indicator_active_cooling_effective` = max(A, P_eff + 2) |
+
+Hysteresis is **not** a setting: fixed 1 °C relative to each threshold. The +2 °C clamp keeps the
+bands from overlapping whatever is typed in.
 
 ```mermaid
 stateDiagram-v2
     [*] --> neutral
-    active_heating --> neutral: mean ≥ 6 °C
-    neutral --> active_heating: mean ≤ 5 °C
-    neutral --> passive_cooling: mean ≥ 11 °C
-    passive_cooling --> neutral: mean ≤ 10 °C
-    passive_cooling --> active_cooling: mean ≥ 16 °C
-    active_cooling --> passive_cooling: mean ≤ 15 °C
+    active_heating --> neutral: mean ≥ H + 1
+    neutral --> active_heating: mean ≤ H
+    neutral --> passive_cooling: mean ≥ P
+    passive_cooling --> neutral: mean ≤ P − 1
+    passive_cooling --> active_cooling: mean ≥ A
+    active_cooling --> passive_cooling: mean ≤ A − 1
 
     note right of neutral
         "cooling season" = passive_cooling OR active_cooling
     end note
 ```
 
+Cold start (no previous state) classifies at the midpoint of each band (≤ H + 0.5 heating,
+< P − 0.5 neutral, < A − 0.5 passive, else active). Unavailable while the 48h mean or either
+effective sensor has no value. Old hard-coded values: background.md#AF-B5.
+
 ---
 
-## 5. Decision sensors
+## AF-5 Decision sensors
 
-### 5.1 `free_cooling_available` — temperature free cooling
+### AF-5.1 `free_cooling_available` — temperature free cooling
 
 All four must hold (indoor-temp uses a 0.5 °C Schmitt: ON at `target`, stays on to `target − 0.5`):
 
@@ -214,7 +230,7 @@ temperature can free-cool it — a 26 °C room is cooled by 22 °C air even thou
 never be driven below outdoor temperature. `temp_diff` carries a 0.5 °C release band (`min_temp_diff
 − 0.5`, clamped at 0, while ON) to damp flip-flop as the room converges on the outdoor temperature.
 
-### 5.2 `humidity_flush_needed` — cool-profile moisture flush
+### AF-5.2 `humidity_flush_needed` — cool-profile moisture flush
 
 Two OR branches, both requiring a real outdoor→indoor moisture **difference**
 (`margin_ok = outdoor_dew + min_dew_diff − h < indoor_dew`). A `0.3 °C` `this.state` hysteresis
@@ -242,20 +258,21 @@ Key asymmetry:
   non-urgent flush never overcools a cool room.
 - In **active_heating**, only Branch 1 is allowed.
 
-### 5.3 `moisture_ventilation_low_needed` — humid-import protection
+### AF-5.3 `moisture_ventilation_low_needed` — humid-import protection
 
 Indoor Schmitt (`indoor_dew ≥ dew_max` ON, stays on to `dew_target`) AND
 (`outdoor_dew ≥ dew_threshold` OR `outdoor_dew ≥ indoor_dew`). Broadly the inverse of free
-cooling: outdoor air is too humid to bring in.
+cooling: outdoor air is too humid to bring in. Gated OFF while `flush_needed` or `drying_needed` is
+on (low and flush/boost are opposite actions).
 
-### 5.3b `heat_ventilation_low_needed` — hot-import protection
+### AF-5.3b `heat_ventilation_low_needed` — hot-import protection
 
-The **temperature symmetric** of §5.3: the direct analog of that sensor's `outdoor_dew ≥ indoor_dew`
+The **temperature symmetric** of AF-5.3: the direct analog of that sensor's `outdoor_dew ≥ indoor_dew`
 term is `outdoor_temp ≥ indoor_temp`, on the **real outdoor** (weather-station) temp. Schmitt:
 turns ON when real outdoor reaches indoor, stays ON until it falls `min_temp_diff` below indoor.
-Gated OFF while a flush or the drying boost runs (mirrors §5.3). Forces LOW when outdoor air is too
+Gated OFF while a flush or the drying boost runs (mirrors AF-5.3). Forces LOW when outdoor air is too
 warm to import at volume — importing it adds net heat *and* saturates the underground duct's cooling
-reservoir (see §2). Because hot outdoor air is usually also humid, this and §5.3 frequently coincide;
+reservoir (see AF-2.1). Because hot outdoor air is usually also humid, this and AF-5.3 frequently coincide;
 heat protection additionally covers hot-but-dry spells the dew-point guard misses.
 
 **Design intent (not just a consequence).** A hot day with acceptable indoor humidity is **always**
@@ -267,39 +284,39 @@ sparing the reservoir). A boost (HIGH) can never coincide with heat, since `dryi
 weather-station `< target`. So: comfortable indoor humidity + hot outside ⇒ **LOW**; too-moist
 indoor + hot-but-dry outside ⇒ a medium flush is allowed.
 
-### 5.3c `ventilation_low_needed` — combined low intent
+### AF-5.3c `ventilation_low_needed` — combined low intent
 
 `moisture_ventilation_low_needed` **OR** `heat_ventilation_low_needed`. Display/history only — the
-decision (§6) reads the two guards separately to label heat vs moisture protection. Pure OR of two
+decision (AF-6) reads the two guards separately to label heat vs moisture protection. Pure OR of two
 already-debounced sources — no extra debounce.
 
-> **State-based, not trigger-based (deliberate).** Because it derives from two *slow* binary sensors
-> that can sit steady for hours, a trigger-based version would restore its last state on HA restart
-> and only recompute on an input *change* — so it could come back **stale** (`off` while `heat_low`
-> is `on`) and never recompute, stranding its consumer off the low intent (observed: `heat_protection`
-> all day yet preset stuck at medium). A plain state template re-evaluates continuously and at
-> startup, so it can't go stale.
+> **State-based, not trigger-based (deliberate).** It derives from two *slow* binary sensors that
+> can sit steady for hours; a trigger-based version would restore its last state on HA restart and
+> recompute only on an input *change*, so it could come back **stale** and strand its consumer off
+> the low intent. A plain state template re-evaluates continuously and at startup
+> (story → background.md#AF-B3).
 
-### 5.4 `humidity_drying_needed` — the noisy boost
+### AF-5.4 `humidity_drying_needed` — the noisy boost
 
 ```
 flush_needed
-AND NOT low_active
-AND airflow_wheatherstation_outdoor_temp_5min < target_temp  # smoothed REAL outdoor, not intake
-AND in_schedule                                              # workday / non-workday window
+AND airflow_wheatherstation_outdoor_temp_5min < target_temp + h  # smoothed REAL outdoor, not intake
+AND in_schedule                                                  # workday / non-workday window
+# h = 0.3 °C while ON (this.state hysteresis)
 ```
 
 The cool-profile flush deliberately **ignores** the schedule and weather station; only the boost
 is schedule- and weather-gated. The temp input is the **smoothed** weather-station sensor
-(`| float(99)` fail-safe kept: unavailable → 99 °C → gate fails → no boost). `delay_on` removed;
-`delay_off` 10 min kept (see §2 decision-sensor note).
+(`| float(99)` fail-safe: unavailable → 99 °C → gate fails → no boost). No moisture-low guard:
+`low_needed` is gated OFF whenever `flush_needed` is on, so a guard would be redundant and would
+form a `low_needed → drying_needed → low_needed` cycle. No `delay_on`/`delay_off` (see AF-2.3).
 
 ---
 
-## 6. The decision — `sensor.airflow_cooling_state`
+## AF-6 The decision — `sensor.airflow_cooling_state`
 
 A **state-based** template sensor (it derives from slow binary indicators, so it must never
-restore stale — §10). Its state and its `profile` / `ventilation` attributes all render from one
+restore stale — AF-10). Its state and its `profile` / `ventilation` attributes all render from one
 Jinja macro, `custom_templates/airflow_decision.jinja`, so the reason shown on the dashboard and the
 outputs applied can never disagree. Inputs: `automatic_enabled`, the season, `free_cooling_available`,
 `humidity_flush_needed`, `humidity_drying_needed`, `moisture_ventilation_low_needed`,
@@ -317,7 +334,7 @@ switch or climate. Unavailable unless every indicator holds a value (the automat
 | P5 | otherwise | comfort |
 
 No row keeps the current profile, so there is no stuck-`cool` / stuck-`warm` trap to recover from
-(the former Blocks 3/4/5 collapse into P5). P3's hysteresis memory is the sensor's previous
+(story → background.md#AF-B2). P3's hysteresis memory is the sensor's previous
 `profile` attribute.
 
 **Ventilation**, first match wins: `drying` → **boost** · `flush` → **medium** · moisture-low or
@@ -330,7 +347,7 @@ heat-low → **low** · profile chosen by P4 (free cooling) → **medium** · ot
 
 | Example | state | profile | ventilation |
 |---|---|---|---|
-| active_heating + free cooling available (2026-10-23) | heating | warm | auto |
+| active_heating + free cooling available (background.md#AF-B4) | heating | warm | auto |
 | neutral/cooling + free cooling | free_cooling | cool | medium |
 | hot real outdoor + free cooling (cool intake) | heat_protection | cool | low |
 | humid outdoor in active_heating | moisture_protection | warm | low |
@@ -345,12 +362,12 @@ heat-low → **low** · profile chosen by P4 (free cooling) → **medium** · ot
 
 ---
 
-## 7. Actuator automations
+## AF-7 Actuator automations
 
 Two automations drive the actuators. The **controller** owns profile + preset + auto_mode
 deterministically; **boost** is isolated with its own hardware-timer mechanics.
 
-### 7.1 `airflow_ventilation_controller` (mode: queued)
+### AF-7.1 `airflow_ventilation_controller` (mode: queued)
 
 Applies the decision **idempotently** — no two automations fight over preset/auto_mode. `queued`
 (not restart) so a rapid second trigger never aborts a partial auto-off→preset apply. Triggers: the
@@ -373,7 +390,9 @@ flowchart TD
     BO -- no --> LO{"low?"}
     LO -- yes --> SL["auto OFF, preset low<br/>(guard: skip if already)"]
     LO -- no --> FF{"medium?"}
-    FF -- yes --> SM["auto OFF, preset medium<br/>(only over a schedule at low)"]
+    FF -- yes --> RTA{"manual low?<br/>(auto off, preset low)"}
+    RTA -- yes --> RT["route-to-auto: auto ON<br/>(re-fires via auto_mode_on trigger)"]
+    RTA -- no --> SM["auto OFF, preset medium<br/>(only over a schedule at low)"]
     FF -- no --> RST{"auto decided<br/>and auto == off?"}
     RST -- yes --> RA["auto ON (restore)"]
     RST -- no --> NO2["no-op (already correct)"]
@@ -382,7 +401,7 @@ flowchart TD
 Service order in low/medium: **auto_mode off first, then preset** (schedule can't override the
 manual preset mid-apply).
 
-#### Airflow-increase guard invariants (load-bearing)
+#### AF-7.1.1 Airflow-increase guard invariants (load-bearing)
 
 Raising the ventilation **rate** — the medium bump, or the high boost — is what pulls outdoor air
 into the house in volume, so every increase is guarded. Opening the cool **profile** (bypass) is a
@@ -414,17 +433,31 @@ action — dry air, at **medium** never high (the boost's weather-station `< tar
 in heat) — and mould/condensation safety is the one thing allowed to raise flow on a hot day. It is
 **not** a cooling increase escaping the temperature guard.
 
-### 7.2 `airflow_humidity_drying_boost` (mode: queued)
+### AF-7.2 `airflow_humidity_drying_boost` (mode: queued)
 
-Starts a 60-min boost when the decision's `ventilation` becomes `boost`, re-arms it seamlessly
-(re-sends boost ON at countdown < 5 min) while boost is still decided, and stops it when the
-decision leaves boost for a real non-boost level (an unavailable decision never stops a boost).
-Gated `automatic_enabled == on` + `away == off`. Boost never touches profile/preset/auto_mode;
-the controller never touches boost.
+Reads only the decision's `ventilation` attribute. The boost switch is the only state. Gated
+`automatic_enabled == on`, Away not explicitly `on` (`unknown`/`unavailable` = not away), and a
+decision with a value. Boost never touches profile/preset/auto_mode; the controller never touches
+boost.
+
+**A boost starts only on an edge into boost, never from a level:**
+
+| Trigger id | Edge | Action |
+|---|---|---|
+| `boost_decided` | `ventilation` from a real non-boost value (`medium`/`low`/`auto`/`off`) to `boost` | 60-min boost ON, even if one runs (restarts its timer, adopts a manual boost) |
+| `away_ended` | Away → `off` while boost is decided **and** the boost switch is off | 60-min boost ON (never touches a running boost's timer) |
+| `rearm_due` | countdown `number.comfoconnect_pro_boost_time` < 5 while boost is decided and the switch is on | re-send boost ON: the unit restarts its timer at full duration, switch stays on, no notify |
+| `boost_not_decided` | `ventilation` leaves `boost` for a real non-boost level | boost OFF (an unavailable decision drops the attribute and never stops a boost) |
+
+**Not an edge** (starts / re-arms nothing, so it can never reset a running 60-min timer): a HA
+restart (there is deliberately no `homeassistant: start` trigger), a reload, and the decision going
+`unavailable → boost`. Away `unknown → off` at HA start does count as `away_ended` (accepted).
+A boost turned off by hand stays off until the next edge. Residual risk (accepted): if the single
+re-arm run is dropped, the boost lapses and restarts only at the next edge.
 
 ---
 
-## 8. `hvac_action` (climate display)
+## AF-8 `hvac_action` (climate display)
 
 `climate.airflow_climate`'s `hvac_action` shows what the **device** does: `drying` when the decision
 is a flush (`moisture_flush_boost` / `moisture_flush_cooling`) **and** the profile is `cool`;
@@ -434,7 +467,7 @@ flip it.
 
 ---
 
-## 9. Tunable parameters
+## AF-9 Tunable parameters
 
 | Helper | Role |
 |---|---|
@@ -442,18 +475,20 @@ flip it.
 | `airflow_target_humidity` | comfort dew target / free-cooling ceiling |
 | `airflow_min_humidity` / `airflow_max_humidity` | dry-air floor / moisture-problem ceiling |
 | `airflow_min_dew_diff` | required outdoor→indoor dew margin |
-| `airflow_min_temp_diff` | required outdoor→target temp margin |
-| `airflow_bypass_efficiency_max/min` | bypass-estimation calibration |
+| `airflow_min_temp_diff` | required intake temp margin: below the current room temp (free cooling), below target (flush gate); heat-low release band |
+| `airflow_bypass_efficiency_max/min` | bypass-estimation calibration (AF-12) |
+| `heating_indicator_*` | season thresholds (AF-4) |
 | `schedule.airflow_boost_workday` / `_non_workday` | boost time windows |
 
 ---
 
-## 10. Anti-flip-flop mechanisms (summary)
+## AF-10 Anti-flip-flop mechanisms (summary)
 
 | Mechanism | Where | Effect |
 |---|---|---|
-| 10-min `delay_on`/`delay_off` | free/flush/low sensors (`drying`: `delay_off` only) | caps decision rate at ~10 min |
-| 5-min filter on weather temp | `wheatherstation_outdoor_temp_5min` | replaces boost `delay_on`; absorbs noise spikes |
+| 10-min `delay_on`/`delay_off` | free/flush/moisture-low/heat-low sensors (`drying`: none) | caps decision rate at ~10 min |
+| 5-min filter on weather temp | `wheatherstation_outdoor_temp_5min` | the boost sensor's debounce; absorbs noise spikes |
+| 0.3 °C hysteresis (`this.state`) | `drying_needed` weather-station gate | damps boost start/stop at the target edge |
 | idempotent unified controller | preset + auto_mode | single owner, no cross-automation hand-off race |
 | 0.3 °C dew hysteresis (`this.state`) | flush sensor branches | damps the flush feedback loop |
 | 0.5 °C indoor-temp Schmitt | free cooling + flush temp gate | cooling can't disable its own trigger |
@@ -467,20 +502,36 @@ flip it.
 > *trigger-based* and restore on restart to preserve the delay + Schmitt hysteresis; each is driven
 > by a continuously-drifting numeric filter (outdoor temp/dew, weather-station temp), so it recomputes
 > within ~1 debounce after a restart. `ventilation_low_needed` and `airflow_cooling_state` are
-> **state-based on purpose**: it derives from only two *slow binary* sensors (`moisture_low`, `heat_low`),
-> so trigger-based + restore could leave them stale for hours (it did — `off` while `heat_low` was on
-> all day). Rule: a template binary_sensor whose inputs are only other binary sensors must be
-> state-based. See `packages/CLAUDE.md`.
+> **state-based on purpose**: they derive from *slow binary* sensors (`moisture_low`, `heat_low`, the
+> indicators), so trigger-based + restore could leave them stale for hours (story →
+> background.md#AF-B3). Rule: a template binary_sensor whose inputs are only other binary sensors
+> must be state-based. See `packages/notes/airflow_cooling.md`.
 
 ---
 
-## 11. Complete state transition reference
+## AF-11 Complete state transition reference
 
-The full input → output mapping is the decision table in §6 (source:
-`custom_templates/airflow_decision.jinja`), plus the controller guards in §7.1: Away skips the
+The full input → output mapping is the decision table in AF-6 (source:
+`custom_templates/airflow_decision.jinja`), plus the controller guards in AF-7.1: Away skips the
 preset/auto_mode half, a running boost is never cancelled, and every write is idempotent. The
-decision-table tests in `tests/test_airflow.py` (`test_decision_*`) pin each row.
+decision-table tests in `tests/test_airflow.py` (`test_decision_*`) pin each row. The decision is
+stateless apart from P3's dry-retention hysteresis, so there is no `keep` row
+(story → background.md#AF-B2).
 
-The previous per-block matrix (Blocks 1–5, `keep` traps C7/N3/C8/W1/W2/H6) is obsolete: the
-decision is stateless apart from P3's dry-retention hysteresis, so there is no `keep` row left.
-The current design is described in §6 (decision) and §7 (actuators).
+---
+
+## AF-12 Bypass estimation — `sensor.airflow_bypass_estimation`
+
+Read-only estimate of the bypass opening (the unit does not report it). The ERV core is treated as
+a mixing valve between full heat recovery (bypass 0 %, efficiency η_max) and residual recovery
+(bypass 100 %, leakage/housing gain, η_min).
+- Inputs: 5-min filtered outdoor (intake), supply and extract temp + RH; station pressure
+  `sensor.wheatherstation_absolute_pressure` (hPa / 10 → kPa, fallback 1013.25 hPa).
+- Moist-air enthalpy per stream: Magnus saturation pressure → humidity ratio
+  `w = 0.622·pv/(P−pv)` → `h = 1.006·T + w·(2501 + 1.86·T)` kJ/kg.
+- Enthalpy efficiency `η = (h_sa − h_oa)/(h_ra − h_oa)`; bypass `B = (η_max − η)/(η_max − η_min)`.
+- Calibration helpers: `input_number.airflow_bypass_efficiency_max` (0.50-1.00, bypass known
+  closed) and `input_number.airflow_bypass_efficiency_min` (0.00-0.30, bypass known fully open).
+- Output: B floored to **15 % steps**, clamped 0-100 %; `none` when `|h_ra − h_oa| < 0.5` kJ/kg
+  (delta too small); unavailable unless all six filter sensors have values.
+- Method source (raw LLM answer, not design-relevant): `doc/sources/airflow/estimated-bypass-percentage-evr.md`.

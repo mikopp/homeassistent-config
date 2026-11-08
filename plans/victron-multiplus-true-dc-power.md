@@ -184,7 +184,7 @@ Energy Dashboard wiring. Only the DC reference feeding η and the loss changes.
 14. [DONE] `plans/victron-ac-referenced-accounting.md`: strike the "systemcalc computes V×I / always
     DC" claim (Context section) with a pointer to this plan; keep the rest.
 15. [DONE] Line endings: `git ls-files --eol` — nothing may show `w/crlf` or `i/crlf`.
-16. [TODO] Add a `.claude/learnings.md` entry **only after** step 20 verifies on the live system
+16. [TODO] Record a learning via the `record-learning` skill **only after** step 20 verifies on the live system
     (CLAUDE.md: never log an unconfirmed learning). The MQTT numbers above are direct observations,
     so the note in step 5 is fine now; a learning that claims a *cause* is not.
 
