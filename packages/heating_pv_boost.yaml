@@ -1,20 +1,13 @@
 # --- EBUSD PV HEATING OPTIMISATION ---
-# Phase 1: READ-ONLY DECISION LAYER.
+# Phase 1: read-only decision layer. Everything here observes and decides; NOTHING writes to the
+# heat pump yet, so the thresholds can be calibrated on live data first. Rollout (Phases 2/3):
+# plans/ebusd-pv-heating-optimization.md.
+# → packages/notes/heating_pv_boost.md (facts, invariants); register decodes in
+#   packages/notes/heating_pv_boost-registers.md.
 #
-# Everything here observes and decides; NOTHING writes to the heat pump yet. The purpose of this
-# phase is to run the full decision against live data for several days so the thresholds — above
-# all the return-temperature saturation point — can be calibrated before any register is written.
-#
-# Hardware context and verified ebusd register decodes live in packages/notes/heating_pv_boost.md.
-#
-# ebusd MQTT payload format: plain ';'-separated values (NOT --mqttjson, which must stay off
-# because the Loxone integration consumes these same topics in this format). Multi-field messages
-# are therefore parsed positionally; the field list is documented inline at each sensor.
-#
-# Enum values arrive inconsistently as either a decoded name or a raw number, and which one is not
-# predictable from the register's declared type (live: mc/OperatingMode reads "low" while
-# mc/CoolingRequestHc2 reads "0"). Every enum read below accepts BOTH forms so that updating the
-# ebusd configuration later cannot break the control logic.
+# ebusd payloads are plain ';'-separated values (--mqttjson must stay off: Loxone reads the same
+# topics), so multi-field messages are parsed positionally; field lists are inline at each sensor.
+# Every enum read accepts BOTH a decoded name and a raw number (which one arrives is unpredictable).
 
 mqtt:
   sensor:
@@ -25,15 +18,9 @@ mqtt:
     # never a setting anyone chooses. Do not confuse it with sensor.geotherm_heating_hvac_mode below,
     # which reads mc/OperatingMode, the configured setting (HVAC MODE).
     #
-    # ehp/Status fields (confirmed by exact value match against the standalone registers,
-    # and against https://ebus.github.io/de/vaillant/08.ehp.csv — the currently-served
-    # definitions; the archived/ CSVs in a local ebusd-configuration checkout are stale):
-    #   0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
-    # hcmode enum: 0=off 1=cooling 3=heat 4=water. An OLDER config generation (not the one
-    # currently served) names this field "hcmode2" with an enum lacking 1=cooling, so cooling
-    # would arrive as the raw "1" there — confirmed absent from the current config, but which
-    # generation this ebusd instance runs is unconfirmed, so both forms are still accepted.
-    # See packages/notes/heating_pv_boost.md for the full verification.
+    # ehp/Status fields: 0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
+    # hcmode enum: 0=off 1=cooling 3=heat 4=water; name and number both accepted.
+    # → packages/notes/heating_pv_boost-registers.md
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
       default_entity_id: sensor.geotherm_heating_hvac_action
@@ -57,20 +44,10 @@ mqtt:
           {% else %}unknown{% endif %}
         {% endif %}
 
-    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT'S flow temperature. Named
-    # explicitly "circuit" rather than a bare "flow temp", because a different, separate
-    # register — ehp/FlowTemp (VF2), the system-wide flow sensor — also exists on this bus and
-    # answers a different question; a generic name would risk colliding with it if that
-    # register is ever added. (The register's own "Hc" abbreviation is not reused in the entity
-    # id — HA derives entity_id from the friendly `name:` via slugify, not from `unique_id:`,
-    # confirmed against a real boot's entity registry, so id and name must always match after
-    # slugifying; spelling "circuit" out in both keeps that guaranteed rather than relying on
-    # a name/id pair staying in sync by hand.) Also the freshness reference for
-    # binary_sensor.heating_ebusd_online — force_update is required for that: the value only
-    # changes while liquid is actually flowing (compressor running, or passive circulation from
-    # another circuit), so a fully-off system keeps republishing the SAME reading. Without
-    # force_update, HA's default no-op suppression would stop bumping last_updated on those
-    # repeats, and the liveness check would falsely read "offline" every time heating sits idle.
+    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT's flow temperature ("circuit"
+    # because ehp/FlowTemp (VF2), the system-wide flow sensor, is a different register).
+    # Freshness reference for binary_sensor.heating_ebusd_online: force_update keeps last_updated
+    # moving while an idle system republishes the same value, or liveness would read "offline".
     - name: "Heating Circuit Flow Temp"
       unique_id: heating_circuit_flow_temp
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp
@@ -88,14 +65,7 @@ mqtt:
     # ehp/HcReturnTemp (register 0A00, internal return sensor T5). Fields: 0 temp °C | 1 sensor
     # status (ok/circuit/cutoff). Readings are only emitted when the sensor reports "ok", so a
     # faulted probe holds the last good value rather than publishing a garbage temperature.
-    #
-    # STATUS (2026-09-18 live ebusctl test): confirmed to answer a forced read cleanly —
-    # temp=23.56 sensor=ok — so the register and the hardware behind it both work end to end.
-    # Not yet confirmed to publish on MQTT UNPROMPTED (i.e. via ebusd's own background poll,
-    # without an explicit forced read) — that is a separate question from "does the register
-    # work", and is what actually determines whether this sensor is live after deploy. If it
-    # stays unavailable, enable polling by publishing "?5" to ebusd/ehp/HcReturnTemp/get — see
-    # the post-deploy steps in plans/.
+    # Polled via automation.heating_ebusd_poll_registration (priority 3).
     - name: "Heating Circuit Return Temp"
       unique_id: heating_circuit_return_temp
       default_entity_id: sensor.geotherm_heating_circuit_return_temp
@@ -109,16 +79,9 @@ mqtt:
         {% if f | count > 1 and f[1] | trim | lower == 'ok' %}{{ f[0] | float | round(2) }}{% endif %}
 
     # ── The only human knob ───────────────────────────────────────────────────
-    # mc/TempDesiredLow (Absenktemperatur). Every setpoint HA will write in Phase 2 is derived
+    # mc/TempDesiredLow (Absenktemperatur). Every setpoint HA will write (Phase 2) is derived
     # from this value, so it is the one register a person is expected to change.
-    #
-    # STATUS (2026-09-18 live ebusctl test): confirmed to answer a forced read cleanly —
-    # value=21.0 °C — the same register/hardware-works confirmation as ehp/HcReturnTemp above,
-    # and the SAME open question: not yet confirmed to publish on MQTT unprompted. This is the
-    # single most important register to see arrive live, since every setpoint HA writes in
-    # Phase 2 is derived from it — if it stays unavailable after deploy, apply the same "?5" fix
-    # to ebusd/mc/TempDesiredLow/get. Documented fallback if it never arrives at all:
-    # mc/Params field 1 (same value, but a 9-field positional parse).
+    # Polled at priority 7; fallback if it never arrives: mc/Params field 1 (9-field parse).
     - name: "Heating Temp Desired Low"
       unique_id: heating_temp_desired_low
       default_entity_id: sensor.geotherm_heating_temp_desired_low
@@ -146,10 +109,9 @@ mqtt:
 
     # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
     # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
-    # generator's real-time activity (HVAC action). This is what the control law will write in
-    # Phase 2/3: "auto" normally, "on" for "not warm enough" or a boost, "off" only in cooling
-    # season (passive/active_cooling) — never "low". See the plan's control law. Read-only here
-    # in Phase 1.
+    # generator's real-time activity (HVAC action). Phase 2 control law writes "auto" normally,
+    # "on" for "not warm enough" or a boost, "off" only in cooling season, never "low"
+    # (→ packages/notes/heating_pv_boost.md "Decisions in force"). Read-only in Phase 1.
     #
     # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
     # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.
@@ -645,7 +607,7 @@ template:
              and is_state('binary_sensor.heating_dhw_active', 'off') }}
         state: "{{ states('sensor.geotherm_heating_circuit_return_temp') | float | round(2) }}"
 
-      # ── The setpoint HA will command in Phase 2 ───────────────────────────
+      # ── The setpoint HA will command (Phase 2) ────────────────────────────
       # Derived, never captured. Because this can always be recomputed there is nothing to save
       # and restore across a boost or an HA restart, which is what removes the whole
       # capture/restore mechanism a stateful design would need.
@@ -719,7 +681,8 @@ template:
       # (hydraulic plans 1/3, no buffer — this house). Plotted next to the actual flow temp on the
       # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
       # cut the run short. In cold weather it also shows how close the stop point comes to
-      # mc/FlowTempMax (35 °C) — the cue to step the hysteresis back (packages/notes "Cold weather").
+      # mc/FlowTempMax (35 °C): the cue to step the hysteresis back
+      # (→ packages/notes/heating_pv_boost.md "Cold weather").
       - name: "Heating Compressor Stop Temp"
         unique_id: heating_compressor_stop_temp
         unit_of_measurement: "°C"
@@ -852,7 +815,8 @@ template:
              and (now() - s.last_updated).total_seconds() < 86400 }}
 
       # ── THE DECISION ──────────────────────────────────────────────────────
-      # Phase 1 computes this but nothing acts on it. Phase 3 turns it into register writes.
+      # Computed but not acted on yet; register writes come later
+      # (plans/ebusd-pv-heating-optimization.md).
       #
       # Two thresholds, not one: a single number would chatter around the boundary. The Schmitt
       # logic reads this.state, so once charging it holds until surplus falls below the lower
@@ -917,26 +881,10 @@ template:
 # ── AUTOMATIONS ─────────────────────────────────────────────────────────────────
 automation:
   # ── ebusd MQTT poll-priority registration ─────────────────────────────────
-  # All ten decision registers plus the nine compressor-cycling observation registers answer a
-  # forced read but are not confirmed to auto-publish without one. ehp/Status was originally
-  # assumed to be the
-  # exception, self-publishing every few seconds — that held only while the compressor was
-  # actively running; idle/passive circulation let it go quiet, so it is now registered like every
-  # other register (see the sensor comments above and packages/notes/heating_pv_boost.md).
-  # Publishing "?N" (N = priority digit 1-9) to a register's ".../get" topic both performs a read
-  # AND enables ONGOING automatic polling at that priority going forward — an empty payload to the
-  # same topic is a one-time read only. Priority is a relative scheduling weight ("polled every
-  # Nth poll cycle"), not a documented number of seconds — validate real cadence once deployed
-  # (see plans/ebusd-pv-heating-optimization.md) and retune the tiers below if needed.
-  #
-  # Confirmed (not assumed): ebusd does NOT retain a runtime-set poll priority across its own
-  # process restart. This automation re-asserts all of them on HA start and whenever ebusd is seen
-  # to come back (either global/running or the bus-data liveness sensor) or its bus scan
-  # completes — "recompute and re-assert, no state to recover", the same self-healing approach
-  # planned for Phase 3's watchdog. Every trigger funnels through one condition — the scan must
-  # not currently read "running" — so a registration is never issued while ebusd's message
-  # catalog might still be mid-discovery; on a scan-in-progress restart, the fourth trigger
-  # (scan → finished/OK) is what actually fires the registration once it is safe.
+  # Publishes "?N" to every read register's ".../get" topic: a read now plus ongoing polling at
+  # relative priority N. ebusd forgets these on restart, so they are re-asserted on HA start,
+  # ebusd running, bus data back and scan finished/OK; never while the scan reads "running".
+  # → packages/notes/heating_pv_boost.md "Polling"
   - alias: "Heating: ebusd poll registration"
     id: heating_ebusd_poll_registration
     description: "Register/refresh ebusd polling priorities once its bus scan is not in progress"
@@ -959,11 +907,8 @@ automation:
         value_template: "{{ states('sensor.ebusd_heating_ebusd_scan_status') != 'running' }}"
     actions:
       # Tier 1 (priority 3) — the primary numeric decision driver and the signal that masks it
-      # during a DHW cycle, plus ehp/Status: flow temp, hvac_action, and the liveness reference.
-      # Previously assumed to self-publish unprompted "every few seconds", which only held while
-      # the compressor was actively running — idle/passive circulation let it go quiet far past
-      # the liveness window. Registered explicitly like every other register, for the same
-      # consistent cadence regardless of heating state.
+      # during a DHW cycle, plus ehp/Status: flow temp, hvac_action, and the liveness reference
+      # (it goes quiet while the compressor idles, so it is registered too).
       - action: mqtt.publish
         data:
           topic: "ebusd/ehp/Status/get"
@@ -994,7 +939,7 @@ automation:
         data:
           topic: "ebusd/uih/CoolingActive/get"
           payload: "?5"
-      # Tier 3 (priority 7) — the human knob (changes rarely) plus Phase 1 read-only telemetry.
+      # Tier 3 (priority 7) — the human knob (changes rarely) plus read-only telemetry.
       - action: mqtt.publish
         data:
           topic: "ebusd/mc/TempDesiredLow/get"

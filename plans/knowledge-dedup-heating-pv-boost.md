@@ -1,6 +1,6 @@
 # Knowledge dedup: heating_pv_boost
 
-**Status:** PLAN ONLY. Follow-up 2 of 5 from PR #141 (knowledge structure, merged).
+**Status:** Steps 1-6 DONE (on `claude/gallant-thompson-yz8dss`); step 7 in review. Follow-up 2 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** conventions, guards, `doc/` layout: satisfied by PR #141; `.github/scripts/yaml_semantic_equal.py` (added by PR #144;
 if that is not merged yet, take the script from its branch).
@@ -27,7 +27,7 @@ Expected cost: Read + note 21.4k → ~14k tokens. No behaviour change.
 ## Steps
 
 ### Phase A: note split
-1. [TODO] Split the note:
+1. [DONE] Split the note:
    | Section | Action |
    |---|---|
    | Header, bus participants, transport allowlist | keep |
@@ -38,11 +38,12 @@ Expected cost: Read + note 21.4k → ~14k tokens. No behaviour change.
    | Owner-side configuration (2026-10-30) | keep |
    | Hardware limits, separate mode axes | keep |
    | `TempDesiredLow` only human knob (5.7 KB) | ~0.8 KB: the only knob; `mc/RoomTempOffset` write-only/unusable; `mc` ≠ `rcc` offset; Raumaufschaltung off (owner action); boost overcomes the additive offset; Party/holiday unused. CORRECTION story, hypotheses 1/2, search log, "reference plan Task 3.1" → background |
-2. [TODO] Note to the `doc/KNOWLEDGE.md` template; link the registers file and background.
-3. [TODO] Repoint references to moved decodes (YAML comments, plans, tests): grep for section names.
+2. [DONE] Note to the `doc/KNOWLEDGE.md` template; link the registers file. Background is NOT
+   linked (K-1 forbids pointers from agent knowledge to background).
+3. [DONE] Repoint references to moved decodes (YAML comments, plans, tests): grep for section names.
 
 ### Phase B: YAML comments (comment-only)
-4. [TODO] Per block:
+4. [DONE] Per block:
    | Lines | Content | Action |
    |---|---|---|
    | `:92-98`, `:115` | STATUS 2026-09-18 live ebusctl test | background |
@@ -51,10 +52,10 @@ Expected cost: Read + note 21.4k → ~14k tokens. No behaviour change.
    | `:895-899` | "ehp/Status was originally assumed…" | background |
    | `:893-913` | poll registration (≈ note copy) | 3 lines + note pointer |
    | `:1-6`, `:112`, `:134`, `:150`, `:427`, `:647`, `:829` | Phase 1/2/3 roadmap | condense, point to `plans/ebusd-pv-heating-optimization.md` |
-5. [TODO] Fix yamllint comment warnings in touched blocks.
+5. [DONE] Fix yamllint comment warnings in touched blocks.
 
 ### Phase C: verify and close
-6. [TODO] `yaml_semantic_equal.py master packages/heating_pv_boost.yaml` passes; `ci-local.sh`
+6. [DONE] `yaml_semantic_equal.py master packages/heating_pv_boost.yaml` passes; `ci-local.sh`
    passes; `git ls-files --eol` clean; note ≤ 24 KB (target ≤ 12 KB). Push; CI green.
 7. [TODO] Close: every removed fact has a home; delete this plan in the PR's last commit.
 
