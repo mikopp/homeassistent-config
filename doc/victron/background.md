@@ -1,4 +1,83 @@
-# Victron: AC-referenced Solar & Battery for the HA Energy Dashboard
+Background only: not design-relevant; current design is design.md.
+
+# Victron: background
+
+History, investigations and superseded designs for `packages/victron.yaml`. Never cite this file
+as current behaviour; the current design is `doc/victron/design.md`, current package facts are in
+`packages/notes/victron.md`. IDs `VIC-B<n>` are stable. VIC-B3 and VIC-B4 are the two implemented
+plans kept as written at the time (headings demoted); they contain claims that were later
+corrected, listed in VIC-B1.
+
+## VIC-B1 Corrections to the text below
+
+Read VIC-B3/VIC-B4 with these in mind:
+- "`system/0/Dc/Vebus/Power` is always DC (systemcalc computes V × I)": **disproven** 2026-10-17;
+  on this system it follows the AC side. Replaced by V × `Dc/Vebus/Current` in #130 (VIC-B4).
+  Every `vebus_dc` / `victron_vebus_dc_power` in VIC-B3 is now `victron_multiplus_dc_power`; the
+  MQTT sensor `victron_vebus_dc_power` was removed.
+- Custom `attributes:` baselines (VIC-B3 Steps 6/7) were replaced by state-only baseline sensors.
+  The `home-assistant/core#172847` explanation was very likely not the cause (CI failures were
+  very likely from chaining several `jump_to_next()` calls in one test); the attribute mechanism
+  itself is UNPROVEN. Same for the "render in declaration order, earlier write visible to later
+  read" claim: UNPROVEN, never demonstrated.
+- "No negative spike" for the grid integration platform switch: wrong; the compiled sum stepped
+  down once and was corrected by hand (status update 2026-10-16).
+- "`this.state` restores from the last MQTT value" for `victron_solar_yield_total_kwh`: wrong, see
+  VIC-B2.
+- All six utility meters and the two new ones were deleted; Step 9's "keep all six" is void.
+- Expected η band "92-95 %": the measured value with true DC power is about 85 %.
+- `victron_vebus_dc_current` uses `expire_after: 600`, not the 120 of the VIC-B4 design table (#137).
+- η accumulators: independent half-wave clamps (VIC-B3 Step 2) were replaced by one shared gate
+  (#137).
+- Test anchoring with `jump_to_next(hour=10, ...)` described in VIC-B3 was later replaced by a
+  single `fast_forward(timedelta(minutes=1))` per test (see the module docstring of
+  `tests/test_victron.py`).
+- HA source reads in VIC-B3 were at 2026.8.1 (`.HA_VERSION`, since removed); the pin is now the
+  `FROM` line of `.github/ha-versions/ha/Dockerfile`.
+
+## VIC-B2 Stories moved out of the YAML comments and the note
+
+- **Repoint, history.** `sensor.solar_yield_watts` and `sensor.victron_solar_yield_total_kwh` were
+  raw MQTT DC passthroughs until #121 (2026-10-16). The first implementation added new AC entities;
+  the user proposed reusing the dashboard's IDs instead so no Energy Dashboard source swap and no
+  history break were needed (VIC-B3 "Revision: repoint instead of duplicate"). The comment that
+  this was "a zero-touch restart" was wrong: the registry key includes the platform.
+- **`victron_solar_yield_total_kwh` state reset.** An earlier YAML comment promised that
+  `this.state` would restore from the last MQTT-driven value and keep growing. It did not: long-term
+  statistics went from 5644.65 kWh (2026-10-15) to 0.61 kWh (2026-10-16) because the new template
+  started from `this.state | float(0)`. The statistics `sum` stayed continuous (1606 → 1609 → 1612),
+  so the Energy Dashboard counted ~2.7 kWh that day instead of ~10 and was otherwise unaffected.
+  Whether it was also reset by hand is unknown.
+- **The #126 bug.** The two new raw-DC MQTT sensors lacked `default_entity_id`, so HA created them
+  as `sensor.technikraum_victron_energy_system_victron_solar_yield_dc_*`; pergola PV read 0 W and
+  the AC solar total stayed at 0 until they were renamed in the UI.
+- **Formula before #121:** `batt_ac = ac_load − grid − dc_pv − ac_pv`, every term `| float(0)`, no
+  availability. It subtracted DC watts from AC watts, charging the whole conversion loss to the
+  battery and overstating solar.
+- **Grid energy before the integration platform** lived in the trigger block, sampling
+  `victron_grid_power_import/export` once a minute (`this.state + power/60000`). That discarded
+  almost all of the 1-2 s MQTT resolution; the error scaled with load spikiness between samples.
+  Its comment claimed `template:` was needed "so it initialises after all source entities exist";
+  the integration docs showed that premise did not hold.
+- **Baseline attributes / #172847 / declaration order.** Full story in VIC-B3 "CI fix" and
+  "Correction". The YAML used to explain the baseline sensors with the #172847 trace and the claim
+  that an earlier entity's write is visible to a later entity's `states()` read in the same pass;
+  both are UNPROVEN and must not be cited as behaviour.
+- **`victron_vebus_dc_current` 600 s (#137).** Recorder history (2026-10-30) showed the current
+  changes about every second at any non-zero load; no constant non-zero reading for 2+ min was seen
+  in ~5 days. It was raised from 120 s because an expired current read as 0 A booked the whole AC
+  load as conversion loss while charging.
+- **Change-only publishing, provenance.** The velib / dbus-flashmq key lines were traced with
+  `git log -S`; every one dates from 2014-2024, so any current Venus OS has the behaviour.
+- **Shared η gate (#137).** Before, each accumulator had its own half-wave clamp, so a tick where
+  only one side looked inverting advanced one side and biased η.
+
+## VIC-B3 Plan as implemented: AC-referenced accounting (#121, #126-#128, CI fixes)
+
+Formerly the plan file for this feature, kept as written; references to the two plan files are
+rewritten as VIC-B3 / VIC-B4.
+
+### Victron: AC-referenced Solar & Battery for the HA Energy Dashboard
 
 **Status:** IMPLEMENTED — repo-side changes complete, CI green (see "CI fix" section below); deploy
 (with entity-registry reclaim) pending.
@@ -11,9 +90,9 @@ it. Once that PR is merged: `git rebase --onto master ci/test-speedups` (the spe
 
 ---
 
-## Context
+#### Context
 
-### The problem
+##### The problem
 
 `sensor.victron_battery_ac_power` (victron.yaml:274-284) currently computes:
 
@@ -31,13 +110,13 @@ Consequences today:
   `(1-η) × E_mppt / E_batt`, exceeding 30 % on high-sun, low-cycling days).
 - The loss is invisible — not graphable, not attributable.
 
-### What the investigation established
+##### What the investigation established
 
 Victron publishes **no** AC-side battery or AC-side DC-PV topic. ~~`system/0/Dc/Vebus/Power` is
 always DC (systemcalc computes it as `/Dc/0/Voltage × /Dc/0/Current`)~~ **— DISPROVEN 2026-10-17:**
 on this system `Dc/Vebus/Power` follows the AC side (−337 W while V × I = 425 W; VRM shows the same
 mismatch). The true DC power is `Dc/Vebus/Current` × battery voltage — see
-`plans/victron-multiplus-true-dc-power.md`. The AC-referencing must therefore be derived.
+VIC-B4. The AC-referencing must therefore be derived.
 
 Tracing `Ac/Consumption` in `dbus-systemcalc-py` gives
 `(grid − vebus ActiveIn + pv_on_grid) + vebus Ac/Out + pv_on_output`. This system has **no separate
@@ -55,7 +134,7 @@ defect is the `dc_pv` term. **No new MQTT topics are required** — subscribing 
 `vebus/276/Ac/ActiveIn/P` and `Ac/Out/P` would yield an algebraically identical value, so they are
 deliberately omitted.
 
-### Sign conventions (the easiest thing to get wrong here)
+##### Sign conventions (the easiest thing to get wrong here)
 
 | Quantity | Entity | Positive means |
 |---|---|---|
@@ -69,7 +148,7 @@ deliberately omitted.
 
 `mp_ac_net` and `vebus_dc` carry **opposite** conventions. Every consumer must account for that.
 
-### Intended outcome
+##### Intended outcome
 
 Solar and Battery become AC-referenced, so the Energy Dashboard describes what the house actually
 received; conversion loss becomes explicit and graphable; and **both the power and the energy domain
@@ -77,7 +156,7 @@ close exactly**.
 
 ---
 
-## Decisions taken (agreed with user — do not re-litigate)
+#### Decisions taken (agreed with user — do not re-litigate)
 
 1. **AC-referenced model + loss diagnostics.** Losses are subtracted from Solar/Battery, not shown as
    a dashboard consumption device. AC-accurate headline numbers and a visible loss bar are mutually
@@ -98,9 +177,9 @@ close exactly**.
 
 ---
 
-## The maths
+#### The maths
 
-### Power domain
+##### Power domain
 
 ```
 mp_ac_net = ac_load - grid_net - ac_pv          (measured, + = inverting)
@@ -126,7 +205,7 @@ eventually leave via the inverter. Guaranteed here — the Multi is the only DC-
 `solar_ac + ac_pv + grid + (mp_ac_net - solar_ac) = ac_load` — the `solar_ac` term cancels. η only
 shifts the split between the Solar and Battery buckets, never the total.
 
-### Energy domain
+##### Energy domain
 
 The Energy Dashboard mixes **device counters** (MPPT `Yield/System`, AC-PV `Ac/Energy/Forward`) with
 **per-minute integration** (grid). Today the battery accumulators integrate the `batt_ac` *power*
@@ -152,7 +231,7 @@ per minute:
 By construction `solar_inc + ac_pv_inc + grid_inc + (out - in) = load_inc` **exactly**. Every source
 keeps its best available measurement — no counter is degraded to an integration.
 
-### Accepted, deliberate divergence between the domains
+##### Accepted, deliberate divergence between the domains
 
 `∫battery_ac_power ≠ battery_energy_out − battery_energy_in` exactly. Each is exact in its own
 domain, and HA never compares them: nothing integrates power sensors to fill energy charts, and
@@ -160,7 +239,7 @@ nothing differentiates energy to produce power. (The one component that *would* 
 Riemann-sum `integration` platform, which this repo deliberately does not use.) Document this in the
 file so a future reader does not "fix" it.
 
-### Conversion loss — needs no η, measured directly
+##### Conversion loss — needs no η, measured directly
 
 Because `mp_ac_net` and `vebus_dc` carry opposite conventions, both directions collapse to one
 branchless formula:
@@ -180,7 +259,7 @@ Both are kept, unchanged.
 
 ---
 
-## Expected accuracy impact
+#### Expected accuracy impact
 
 | Figure | Today | After | Change |
 |---|---|---|---|
@@ -212,9 +291,9 @@ relative to battery throughput. Re-run this comparison after a week on the real
 
 ---
 
-## Implementation
+#### Implementation
 
-### Dependency graph (verified acyclic)
+##### Dependency graph (verified acyclic)
 
 ```
 mqtt ──► grid_total ──┐
@@ -243,19 +322,19 @@ is a strict DAG.
 3. *Cold start.* MQTT sensors arrive before the first minute tick; accumulators are `unknown` for up
    to 60 s → η = 100 % → exactly today's behaviour. No window where `batt_ac` is wrong in a new way.
 
-### Step 0 — add `availability:` to `victron_ac_load_total_power` (victron.yaml:258-266)
+##### Step 0 — add `availability:` to `victron_ac_load_total_power` (victron.yaml:258-266)
 
 Currently unguarded, in violation of the CLAUDE.md rule, and it now feeds `mp_ac_net` — a silently
 zero phase would corrupt `mp_ac_net`, `batt_ac` and both η accumulators. Add the three-phase guard
 and drop the `| float(0)` defaults, matching `victron_grid_total_power` directly above it.
 
-### Step 1 — new plain sensor `victron_multiplus_ac_net_power`
+##### Step 1 — new plain sensor `victron_multiplus_ac_net_power`
 
 `ac_load - grid_net - ac_pv`, with availability over all three. Extracting this shared subexpression
 means `batt_ac`, the accumulators and `conversion_loss` read one entity instead of repeating a
 seven-sensor sum. Comment must record the systemcalc derivation and the opposite sign convention.
 
-### Step 2 — η accumulators (append to the existing `- trigger: time_pattern /1` block)
+##### Step 2 — η accumulators (append to the existing `- trigger: time_pattern /1` block)
 
 ```
 victron_multiplus_ac_out_energy += max( mp_ac_net, 0) / 60000
@@ -265,7 +344,7 @@ victron_multiplus_dc_in_energy  += max(-vebus_dc,  0) / 60000
 Only the **inverting** direction, both half-waves clamped at 0. Charging is excluded on purpose:
 charge efficiency differs from discharge efficiency, and the solar attribution only needs inverting.
 
-### Step 3 — `victron_multiplus_conversion_efficiency` (plain, `%`)
+##### Step 3 — `victron_multiplus_conversion_efficiency` (plain, `%`)
 
 ```
 if either accumulator unknown/unavailable, or E_dc_in < 1.0 kWh:  100.0
@@ -277,11 +356,11 @@ division path. **No `availability:` template** — this sensor is defined to alw
 that `solar_ac`/`batt_ac` can never go unavailable because of it. Omit `device_class` (`power_factor`
 is the only `%` class and would mislabel it).
 
-### Step 4 — `victron_solar_yield_ac_watts` (plain, `W`)
+##### Step 4 — `victron_solar_yield_ac_watts` (plain, `W`)
 
 `dc_pv * eta/100`, availability over `dc_pv` and the efficiency sensor.
 
-### Step 5 — rewrite `victron_battery_ac_power` (keep entity_id, unique_id, sign)
+##### Step 5 — rewrite `victron_battery_ac_power` (keep entity_id, unique_id, sign)
 
 ```
 batt_ac = mp_ac_net - solar_ac
@@ -291,7 +370,7 @@ Entity ID, `unique_id` and the positive=discharging convention are preserved. Ad
 Comment must state that this is the **power-domain** residual, serving live cards only, and is
 deliberately not the integral of the energy sensors.
 
-### Step 6 — `victron_solar_yield_ac_total_kwh` (trigger block, delta-based)
+##### Step 6 — `victron_solar_yield_ac_total_kwh` (trigger block, delta-based)
 
 Carries the previous MPPT lifetime reading in an attribute:
 
@@ -320,7 +399,7 @@ Verified semantics: `state:` and `attributes:` render in one pass against the *p
 **cannot raise** — if `state:` throws, HA discards the whole render including attributes, dropping
 the baseline.
 
-### Step 7 — rewrite `victron_battery_energy_in/out` as an energy-domain residual
+##### Step 7 — rewrite `victron_battery_energy_in/out` as an energy-domain residual
 
 This is the "adjust Battery Energy In/Out if needed" item. Entity IDs, `unique_id`s and the
 `utility_meter` bindings all stay put; only the formula changes.
@@ -331,7 +410,7 @@ deliberate — reading a sibling sensor's delta would reintroduce the same-tick 
 
 Same `-1` sentinel, `max(delta, 0)` reset guard, and hold-on-unavailable behaviour as Step 6.
 
-### Step 8 — loss diagnostics
+##### Step 8 — loss diagnostics
 
 | Entity | Kind | Definition |
 |---|---|---|
@@ -349,7 +428,7 @@ Same `-1` sentinel, `max(delta, 0)` reset guard, and hold-on-unavailable behavio
 
 `victron_system_losses_power/energy` (victron.yaml:291-300, 347-352) are **unchanged**.
 
-### Step 9 — `utility_meter`
+##### Step 9 — `utility_meter`
 
 Add two, **keep all six existing ones**:
 
@@ -362,7 +441,7 @@ victron_solar_ac_monthly:         source: sensor.victron_solar_yield_ac_total_kw
 `victron_solar_ac_monthly` *is* the monthly MPPT→AC conversion loss, which is worth having. Not
 swapping it also avoids resetting its history.
 
-### Step 10 — audit and report unused sensors (report only, no deletions)
+##### Step 10 — audit and report unused sensors (report only, no deletions)
 
 Deliverable: a table of every entity in `packages/victron.yaml` classified by consumer. **Nothing is
 deleted without explicit approval** — this step produces the list, a follow-up decides.
@@ -413,7 +492,7 @@ automation or test): all six existing `utility_meter` entities.
 Note the current branch is `remove-unused-victron-sensors`, so this audit is on-theme; commit
 `b98803f` already removed six such sensors.
 
-### Step 11 — project-rule compliance pass
+##### Step 11 — project-rule compliance pass
 
 `availability:` on every new sensor reading a non-guaranteed source; no `| float(default)` where a
 guard already applies; no `device:` key in `template:` (unsupported — assign via UI, see Deploy); a
@@ -421,7 +500,7 @@ comment describing each part, matching the file's existing density.
 
 ---
 
-## Test impact
+#### Test impact
 
 **All 13 existing assertions still pass unchanged.** η only leaves the 100 % bootstrap once
 `E_dc_in` exceeds 1.0 kWh, which requires `vebus_dc < 0` **during a time jump**. Auditing every seed
@@ -455,7 +534,7 @@ residual also reproduces the old values:
 **This is incidental, not robust.** A future test that seeds a negative `vebus_dc` and jumps 20+
 minutes would silently flip assertions :109 and :118. The conftest seeds below make it deterministic.
 
-### Required test changes
+##### Required test changes
 
 1. **`tests/conftest.py` — `baseline_states`**: seed the new accumulators to `"0.0"` so η is
    deterministically at bootstrap in every test —
@@ -469,7 +548,7 @@ minutes would silently flip assertions :109 and :118. The conftest seeds below m
    directly controllable, since `inverter_efficiency` is a plain template sensor that recomputes when
    they change.
 
-### New tests
+##### New tests
 
 | Area | Cases |
 |---|---|
@@ -490,7 +569,7 @@ independent.
 
 ---
 
-## Verification
+#### Verification
 
 1. `pytest tests/ -v` — all 13 existing assertions still green (if any moves, η left the bootstrap
    and the conftest seeds were not applied correctly), new tests green.
@@ -513,7 +592,7 @@ independent.
 
 ---
 
-## Revision: repoint instead of duplicate (post-implementation)
+#### Revision: repoint instead of duplicate (post-implementation)
 
 The plan as first implemented created NEW entities (`victron_solar_yield_ac_watts`,
 `victron_solar_yield_ac_total_kwh`) and left the original `solar_yield_watts` /
@@ -537,7 +616,7 @@ formulas instead, and give the raw DC readings NEW entity IDs
   the "does it track DC or AC now" question never arises. Deploy runbook step 4 covers deleting
   their orphaned registry rows.
 
-### The entity-registry catch — this is NOT a zero-touch restart
+##### The entity-registry catch — this is NOT a zero-touch restart
 
 Initial assumption (told to the user, and **wrong**) was that keeping the same `unique_id` across the
 platform change (`mqtt:` → `template:`) would be enough for HA to treat it as the same entity and
@@ -574,7 +653,7 @@ dark, no lifetime total resets to zero.
 
 ---
 
-## Deploy runbook (complete) — user actions, not deployable by `git pull` alone
+#### Deploy runbook (complete) — user actions, not deployable by `git pull` alone
 
 Re-derived against the *implemented* `packages/victron.yaml` (not the original design) and against
 the live install: Energy Dashboard prefs read via `energy/get_prefs`, entity list read via the
@@ -584,7 +663,7 @@ Total manual UI work: **4 entity-registry reclaims** (step 2), **9 orphan deleti
 sensors in step 3 + 6 removed monthly meters in step 4), **0 decisions**, **0 Energy Dashboard
 changes**, plus optional device assignment. Only step 2 is time-sensitive.
 
-### 0. Pre-flight (before pulling)
+##### 0. Pre-flight (before pulling)
 
 Note the current values so the post-deploy continuity check is meaningful:
 
@@ -596,14 +675,14 @@ Note the current values so the post-deploy continuity check is meaningful:
 | `sensor.victron_solar_mppt_monthly` | 207.44 kWh — *record it if you care; the meter is deleted by this deploy, see step 4* |
 | `sensor.victron_battery_energy_in` / `_out` | 809.335 / 539.072 kWh |
 
-### 1. Pull, check, restart
+##### 1. Pull, check, restart
 
 1. `git pull` on the HA host.
 2. Developer Tools → YAML → **Check configuration**.
 3. **Full restart** (not a YAML reload): the new `sensor: platform: integration` entities and the
    removal of `mqtt:` sensors both need a real restart.
 
-### 2. Entity-registry reclaim — 4 entities
+##### 2. Entity-registry reclaim — 4 entities
 
 **Why this is needed:** the entity registry is keyed by **`platform` + `unique_id`**, not
 `unique_id` alone. Four entities keep their `unique_id` but change platform in this deploy, so HA
@@ -644,7 +723,7 @@ The same source file confirms the states-table rename path
 (`recorder/entity_registry.py::_async_entity_id_changed` → `update_states_metadata`), so raw
 history follows the rename too.
 
-### 3. Delete the orphans of removed entities — 3 entities
+##### 3. Delete the orphans of removed entities — 3 entities
 
 These three are deleted from `packages/victron.yaml` in this branch and have no replacement. Their
 registry rows survive the restart as permanent `unavailable` clutter until deleted:
@@ -660,7 +739,7 @@ Settings → Devices & Services → Entities → filter for `unavailable` → de
 If you also want their long-term statistics gone (`system_losses_energy` has ~263 kWh recorded),
 Developer Tools → Statistics → delete. Optional; leaving them costs only DB rows.
 
-### 4. Monthly utility meters — delete all six, nothing to repoint
+##### 4. Monthly utility meters — delete all six, nothing to repoint
 
 **Correction to an earlier draft of this section (which was wrong twice over).** The six
 `utility_meter`s were never UI helpers: they were defined in `packages/victron.yaml` (added in
@@ -697,7 +776,7 @@ are untouched, so nothing about grid/battery/solar accounting depends on this cl
 `packages/victron.yaml` in a new commit rather than creating UI helpers — that keeps them in
 version control like everything else here.
 
-### 5. Energy Dashboard — verify only, no changes
+##### 5. Energy Dashboard — verify only, no changes
 
 Read live from `.storage/energy`; every configured statistic id is preserved by this deploy:
 
@@ -715,7 +794,7 @@ Read live from `.storage/energy`; every configured statistic id is preserved by 
 completed for that entity — fix the reclaim rather than re-selecting a `_2` entity in the dropdown
 (re-selecting would permanently fork the history).
 
-### 6. Device assignment (optional, cosmetic)
+##### 6. Device assignment (optional, cosmetic)
 
 `device:` is not supported in template YAML, so every entity that moved into `template:` loses its
 Victron device link. Settings → Devices & Services → Entities → assign to "Victron Energy System":
@@ -734,7 +813,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 `victron_multiplus_dc_in_energy`, `victron_solar_yield_dc_baseline_kwh`,
 `victron_ac_pv_energy_baseline_kwh` — they exist only to feed other sensors.
 
-### 7. Verification
+##### 7. Verification
 
 **After ~2 minutes** (the `/1` trigger has fired at least twice):
 - `sensor.victron_solar_yield_dc_baseline_kwh` equals the current
@@ -767,7 +846,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
   change exists to make visible. (No monthly meters exist any more — see step 4 — so this is a
   manual comparison over whatever window you pick.)
 
-### One-off artifacts to expect (not bugs)
+##### One-off artifacts to expect (not bugs)
 
 1. **Grid energy counters restart from 0.** `sensor.victron_grid_energy_import`/`_export` are now
    `platform: integration` entities with their own `RestoreSensor` memory, which is empty on first
@@ -788,7 +867,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 
 ---
 
-## Known risks
+#### Known risks
 
 1. **η bootstrap window.** For the first hours after deploy η = 100 % and the sensors behave exactly
    as today. Intentional and self-correcting, but do not read day one as the final result.
@@ -809,7 +888,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 
 ---
 
-## Status
+#### Status
 
 - [x] Step 0 — `availability:` on `victron_ac_load_total_power`
 - [x] Step 1 — `victron_multiplus_ac_net_power`
@@ -845,7 +924,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
 - [ ] Deployed by user via `git pull` + entity-registry reclaim for the 2 repointed entities
       (see "Revision: repoint instead of duplicate" — NOT a plain Energy Dashboard dropdown swap)
 
-### Status update 2026-10-16 — post-deploy findings
+##### Status update 2026-10-16 — post-deploy findings
 
 - [x] Deploy done on the live host (full restart, 4 registry reclaims, orphan cleanup).
 - [x] **Bug found live:** the two new raw-DC MQTT sensors (`victron_solar_yield_dc_watts`,
@@ -861,7 +940,7 @@ Optionally mark as **Diagnostic**: `victron_multiplus_ac_out_energy`,
       0.001). The earlier runbook claim of "no negative spike" was wrong.
 - [ ] η, loss accounting and battery-out still need real inverting time to verify.
 
-### Status update 2026-10-16 (evening) — regression: PV expiry made power sensors unavailable at night
+##### Status update 2026-10-16 (evening) — regression: PV expiry made power sensors unavailable at night
 
 Found live via ha-mcp (read-only), HA 2026.10.1, ~20:20 local (after sunset):
 
@@ -914,7 +993,7 @@ statistics already compiled with the low η are not rewritten.
 - [ ] CI green
 - [ ] Deployed + η accumulators re-seeded by user
 
-### Status update 2026-10-16 (late) — SOC / PV counters `unknown` after a YAML reload
+##### Status update 2026-10-16 (late) — SOC / PV counters `unknown` after a YAML reload
 
 - **Observed (live, HA 2026.10.1):** after the user reloaded YAML (not a restart),
   `sensor.victron_battery_soc`, `sensor.victron_solar_yield_dc_total_kwh` and
@@ -945,7 +1024,7 @@ statistics already compiled with the low η are not rewritten.
 - [ ] CI green
 - [ ] Deployed; confirm SOC survives a restart
 
-### Status update 2026-10-17 — ~24 h post-deploy check (ha-mcp, read-only, HA 2026.10.1)
+##### Status update 2026-10-17 — ~24 h post-deploy check (ha-mcp, read-only, HA 2026.10.1)
 
 Verified live (evening, ~20:05 local, after sunset):
 - [x] Power identity holds: load 475 = solar 0 + AC PV 0 + grid 15 + battery_ac 460.
@@ -995,7 +1074,7 @@ Update 2026-10-17 (evening) — problem 2 explained from a VRM screenshot (user)
   DC reference — existing loss/η formulas then work unchanged (same sign convention). Expect
   load-dependent η (~80 % at ~350 W, higher at kW loads; three Multi devices idle-draw adds up).
 
-### Status update 2026-10-11 — master merge
+##### Status update 2026-10-11 — master merge
 
 - [x] Feature rebuilt as one commit on top of current `master` (a1ddd6d); the CI / test-suite work
       that used to share this branch ships separately (`ci/test-speedups`). The workflow is
@@ -1026,7 +1105,7 @@ Update 2026-10-17 (evening) — problem 2 explained from a VRM screenshot (user)
       This branch is stacked on that PR and must be rebased onto `master` after it merges; its CI
       only means anything with the HTTP shim and timeouts in place.
 
-## Naming (post-implementation correction)
+#### Naming (post-implementation correction)
 
 While implementing, the new conversion-stage sensors were initially named with a bare "Inverter"
 (`victron_inverter_efficiency`, `victron_inverter_energy_ac_out/dc_in`,
@@ -1053,7 +1132,7 @@ unchanged) · **Solar Yield** = solarcharger/279 MPPT, DC and AC variants (uncha
 accepted wart — the user chose not to rename the pre-existing `victron_vebus_dc_power` to avoid
 touching a deployed entity.
 
-## Final audit (re-verified against the implemented file)
+#### Final audit (re-verified against the implemented file)
 
 Confirms the Step 10 preliminary audit — no changes to the classification, plus the new entities:
 
@@ -1072,7 +1151,7 @@ internally and by `pergola.yaml`):** `victron_solar_yield_dc_watts`, `victron_so
 **New, internal only:** `victron_multiplus_ac_out_energy`, `victron_multiplus_dc_in_energy` (feed
 `victron_multiplus_conversion_efficiency` only).
 
-### Removed (user-requested cleanup, post-implementation)
+##### Removed (user-requested cleanup, post-implementation)
 
 Two groups deleted after a full re-audit against the final file, `pergola.yaml`, and your confirmed
 dashboard entity list:
@@ -1104,7 +1183,7 @@ was dropped from `_seed()` and its conftest.py baseline seed removed — nothing
 Final entity count: 30 sensors (was 34), 0 `utility_meter`s (was 8) — the `utility_meter:` key is
 removed from the file entirely.
 
-## CI fix: custom `attributes:` on trigger sensors don't survive across ticks (post-implementation)
+#### CI fix: custom `attributes:` on trigger sensors don't survive across ticks (post-implementation)
 
 PR #101's CI (`ha_check.yaml`, real HA container at this repo's pinned `.HA_VERSION`, 2026.8.1) failed
 2 of the new tests: `test_solar_yield_ac_total_baselines_then_applies_delta` and
@@ -1179,7 +1258,7 @@ In/Out) pairs `device_class: energy` + `state_class: total_increasing`. Added th
 both baseline sensors to match the only pattern actually proven reliable in this repo's CI — this
 turned out to be a red herring (see the correction below), but is harmless/correct to keep.
 
-## Correction: the real root cause was the test harness, not HA's trigger-attribute engine
+#### Correction: the real root cause was the test harness, not HA's trigger-attribute engine
 
 The `device_class`/`state_class` fix above did **not** change the symptom at all — same failure,
 identical down to the timestamp. That ruled it out and prompted a diagnostic push (temporary
@@ -1224,7 +1303,7 @@ tick" precondition can be seeded directly via `set_state` instead of requiring a
 
 32 tests total in the file after the split (was 30 before this CI-fix round).
 
-## Skipped: harness ordering flake
+#### Skipped: harness ordering flake
 
 Even after the split, one test still failed deterministically (2/2 CI runs, identical failure
 both times, so not a run-to-run flake): `test_solar_yield_ac_total_captures_baseline_on_first_tick`.
@@ -1256,9 +1335,9 @@ capture-then-apply transition by `test_solar_yield_ac_total_applies_delta_once_b
 
 31 of 32 tests active; 1 skipped with a documented reason.
 
-## Follow-up: grid import/export accuracy (post-CI-fix)
+#### Follow-up: grid import/export accuracy (post-CI-fix)
 
-### Context
+##### Context
 
 User flagged that `victron_grid_energy_import/export` sample `victron_grid_power_import/export`
 once a minute (the same `this.state + power/60000` Riemann-sum pattern used throughout this file)
@@ -1267,7 +1346,7 @@ publishes grid power over MQTT every 1-2s, so this throws away almost all of tha
 error scales with how spiky the load is between samples (steady loads integrate near-exactly;
 short high-power spikes are either fully counted or fully missed depending on tick timing).
 
-### Decision
+##### Decision
 
 Scope: **grid import/export only** (user's choice — the two sensors this was raised about), not
 the MultiPlus AC-out/DC-in/conversion-loss accumulators, which use the same pattern but feed η
@@ -1284,7 +1363,7 @@ platform can source from them directly.
 with 1-2s MQTT cadence the effective sampling resolution goes from 60s to ~1-2s — the same
 trapezoidal-vs-left-Riemann accuracy gain plus a ~30-60x sampling-rate improvement.
 
-### Verified against this repo's pinned HA version (2026.8.1) before implementing
+##### Verified against this repo's pinned HA version (2026.8.1) before implementing
 
 The removed trigger-based sensors carry this comment: *"Lives in `template:` (not
 `sensor: platform: integration`) so it initialises after all source entities exist."* Checked this
@@ -1297,7 +1376,7 @@ startup (same graceful-degradation behavior as any `states()` template read), an
 integrating once the source shows up. The old comment's premise does not hold for this version;
 proceeding with `integration:` platform.
 
-### Config
+##### Config
 
 ```yaml
 sensor:
@@ -1334,7 +1413,7 @@ entity-registry reclaim** as the earlier solar-yield repoint: after deploy, dele
 `integration`-platform entity onto the freed entity_id. See "Revision: repoint instead of
 duplicate" above for the exact procedure — identical steps, different entities.
 
-### recorder note (user asked, answered before implementing)
+##### recorder note (user asked, answered before implementing)
 
 Energy Dashboard reads long-term statistics (`statistics`/`statistics_short_term` tables), built
 by the recorder from state changes — **not** live state. `recorder: exclude:`-ing an entity stops
@@ -1346,7 +1425,7 @@ statistics, which are retained indefinitely regardless. Chosen instead of a full
 reduces disk growth from the higher-frequency integration updates without touching anything the
 Energy Dashboard depends on.
 
-### Status
+##### Status
 - [x] Remove `victron_grid_energy_import`/`_export` from the trigger-based sensor block
 - [x] Add the two `platform: integration` sensors (new top-level `sensor:` key in victron.yaml)
 - [x] `tests/test_victron.py` — rewrote `test_grid_import_energy_accumulates` and
@@ -1368,7 +1447,7 @@ Energy Dashboard depends on.
 - [x] Config/test-file validation: `yaml.safe_load` on `packages/victron.yaml` (no duplicate
       `unique_id`s, 32 total across the file) and `ast.parse` on the two edited test files.
 
-### Three real CI-round-trip fixes (not anticipated in the design above)
+##### Three real CI-round-trip fixes (not anticipated in the design above)
 
 1. **`device_class`/`state_class` are invalid config keys for `sensor.integration`** — CI's
    config check rejected them outright (`'device_class' is an invalid option for
@@ -1409,3 +1488,247 @@ CI run pending for this fix (status line at the top of this document will be upd
 
 - [ ] Deploy note: add the entity-registry reclaim for these 2 entities to the Deploy steps section
 - [ ] Update "Final audit" entity list / counts elsewhere in this doc once CI confirms green
+
+## VIC-B4 Plan as implemented: true MultiPlus DC power (#130)
+
+Formerly the plan file for this fix, kept as written (plan references rewritten as VIC-B3 / VIC-B4).
+
+### Victron: true MultiPlus DC power (replace the AC-derived `Dc/Vebus/Power`)
+
+**Status:** IMPLEMENTED on `fix/victron-true-dc-power` (PR open) — phases 1-4 done, `pytest` not run locally (CI only); phase 5 (deploy) and 6 (live verification) are user/follow-up steps.
+**Target files:** `packages/victron.yaml`, `tests/test_victron.py`, `tests/conftest.py`,
+`packages/notes/victron.md` (new), `packages/CLAUDE.md` (index row),
+VIC-B3 (correct a wrong claim)
+**Branch:** user decision 2026-10-17: implement on the current branch. That branch's PR (#128) was already merged, so the work moved to `fix/victron-true-dc-power` off `origin/master`.
+**Follows from:** VIC-B3, status updates 2026-10-17.
+
+---
+
+#### 1. Overview
+
+##### The problem
+
+The AC-referenced accounting (PR #121) assumes `sensor.victron_vebus_dc_power`
+(MQTT `system/0/Dc/Vebus/Power`) is the **true DC power** of the MultiPlus. It is not. It follows the
+**AC side**, so every quantity built on "DC in vs AC out" is wrong:
+
+| Evidence (user MQTT listen + VRM screenshots, 2026-10-17, snapshots not perfectly synced) | |
+|---|---|
+| `Dc/Vebus/Current` × battery voltage | −8.1 A × 52.5 V = **425 W** |
+| `Dc/Vebus/Power` | **−337 W** — does not match V×I |
+| `Dc/Battery/Power` (BMS, true DC) | −435 W (= 52.5 V × −8.3 A) |
+| VRM "Inverter AC/DC" | 52.48 V × −7.7 A = 404 W, but shows **−302 W** |
+| 26 h of hourly means | `ac_net_power` ≈ −`vebus_dc_power` within ~1 W at 2.5 kW inverting and 1.9 kW charging |
+
+Consequences live today:
+- `victron_multiplus_conversion_loss_power` ≈ 0 W (a real MultiPlus loses ~15 % at ~350 W). Loss
+  energy since deploy: 0.139 kWh — wrong.
+- `victron_multiplus_dc_in_energy` ≈ `ac_out_energy`, so `victron_multiplus_conversion_efficiency`
+  is meaningless (≈ 99–100 %), and with it the AC-referenced solar yield
+  (`solar_yield_watts`, `victron_solar_yield_total_kwh`) and the battery in/out split.
+- Occasionally `ac_net_power` > −`vebus_dc_power` (physically impossible) — sampling noise on two
+  AC-derived numbers.
+- Totals (power and energy identities) are **not** affected — they close for any η. Only the
+  Solar/Battery split and the loss diagnostics are.
+
+Not a cause, but a wrong claim to correct: the AC-referenced plan states that
+`Dc/Vebus/Power` is "always DC (systemcalc computes it as `/Dc/0/Voltage × /Dc/0/Current`)". The
+data above contradicts this for this system. Why Victron publishes an AC-like value there is
+**not established** and not needed for the fix.
+
+##### The fix
+
+Build the Multi's true DC power ourselves from two values that **are** real DC:
+`system/0/Dc/Vebus/Current` (the Multi's own DC current) × battery voltage. Expose it as a **new**
+entity (user decision: new entity ID, not a reclaim of the old one), repoint the three consumers, and
+remove the AC-derived sensor.
+
+Sign convention is deliberately identical to the old sensor — **positive = charging (AC→DC),
+negative = inverting (DC→AC)** — because Victron reports the Multi current negative while
+discharging (confirmed: −8.1 A). So the existing formulas keep working unchanged:
+
+```
+multiplus_dc = V_batt × I_vebus                       (new, W)
+loss         = max(-(mp_ac_net + multiplus_dc), 0)    (unchanged formula)
+dc_in       += max(-multiplus_dc, 0) / 60000          (unchanged formula)
+```
+
+Why `Dc/Vebus/Current` × V and not `Dc/Battery/Power`: the battery monitor also sees every other DC
+load (MPPT self-consumption, GX, …) — about 10 W of the 435 W in the snapshot — which would be
+booked as Multi loss. The Multi's own current isolates the conversion stage, and its net DC current
+already includes MPPT flow when the sun is up (no `dc_pv` term needed).
+
+---
+
+#### 2. Design
+
+##### New entities
+
+| Entity (`default_entity_id`) | Kind | Source | Notes |
+|---|---|---|---|
+| `sensor.victron_vebus_dc_current` | MQTT, A | `N/c0619ab4c19e/system/0/Dc/Vebus/Current` | `device_class: current`, `state_class: measurement`, `expire_after: 120` (fluctuating, same policy as the power sensors) |
+| `sensor.victron_battery_voltage` | MQTT, V | `N/c0619ab4c19e/system/0/Dc/Battery/Voltage` | `device_class: voltage`, `state_class: measurement`, `expire_after: 86400` (slow diagnostic, same reasoning and value as `victron_battery_soc`: needed so a restart restores it) |
+| `sensor.victron_multiplus_dc_power` | template, W | `V × I` of the two above | MultiPlus prefix = conversion-stage naming scheme from the AC-referenced plan. `device_class: power`, `state_class: measurement` |
+
+All three MQTT/template entities pin their ID with `default_entity_id` — the 2026-10-16 bug (#126)
+was exactly missing that on a `device:`-carrying MQTT sensor, which made HA prefix the ID with the
+area/device name.
+
+##### `victron_multiplus_dc_power` details
+- `state: round(V × I, 0)`.
+- `availability:` on the **voltage** only. The current is read with `| float(0)`: an expired current
+  sensor means "no DC current flowing" (the GX does not re-publish an unchanged value), exactly the
+  reasoning already used for expired PV sensors (`victron_pv_net_power`, `solar_yield_watts`).
+  This deliberately deviates from the repo's "no `float(default)`" rule; an inline comment must say
+  why. A real GX outage is still caught — `ac_net_power` (its partner in every consumer) requires
+  `ac_load_total_power` and `grid_total_power`.
+- Voltage source: the BMS voltage differs from the Multi's terminal voltage by ~0.02 V (52.50 vs
+  52.48 in the VRM screenshot) → ≈ 0.04 % error, negligible. If `vebus/276/Dc/0/Voltage` turns
+  out to be published, it is a drop-in alternative; not worth a third topic now.
+
+##### Consumers to repoint (found by grep, all in `packages/victron.yaml`)
+1. `victron_multiplus_conversion_loss_power` — state (l.527) and availability (l.535).
+2. `victron_multiplus_dc_in_energy` — state (l.575) and its comment (l.557-559).
+3. Comments only: header sign-convention note (l.19), `ac_net_power` comment (l.345), loss comment
+   (l.515-519).
+
+##### Removed
+`sensor.victron_vebus_dc_power` (MQTT block l.131-144) — after the repoint it has no consumer, and
+keeping a sensor that looks like DC power but is AC-derived is a trap. Same "no consumer → remove"
+rule already applied to the dead chain. Its registry row becomes an orphan the user deletes.
+
+##### Known consequence — documented, deliberately NOT fixed here
+The Multi's efficiency is load dependent (~80 % at ~350 W from the snapshot, higher at kW loads;
+three Multi devices idle-draw add up). The single long-run ratio η is therefore dominated by
+low-load night inverting but is applied to **daytime** PV, which flows at higher power: solar AC is
+slightly under-credited, the battery residual absorbs the difference. Both domains still close
+exactly. A load-dependent η is a separate design change, out of scope.
+
+##### What this does not change
+Power and energy identities, `solar_yield_watts` / `victron_solar_yield_total_kwh` formulas,
+`victron_battery_ac_power`, battery in/out residual, `victron_multiplus_ac_net_power`, the
+Energy Dashboard wiring. Only the DC reference feeding η and the loss changes.
+
+---
+
+#### 3. Implementation steps
+
+##### Phase 0 — Diagnosis (done)
+1. [DONE] Establish that `Dc/Vebus/Power` is AC-derived — see evidence table; recorded in
+   VIC-B3 (status updates 2026-10-17).
+2. [DONE] Confirm both topics exist and carry real DC values (user MQTT listen:
+   `Dc/Vebus/Current` = −8.1, `Dc/Battery/Voltage` = 52.5, both JSON `{"value": …}`).
+3. [DONE] This plan — approved by the user 2026-10-17.
+
+##### Phase 1 — Branch and notes
+4. [DONE] Branch: `fix/victron-restore-slow-sensors` was already merged (#128), so a new branch `fix/victron-true-dc-power` off `origin/master`.
+   *Dependency:* approval of this plan.
+5. [DONE] Create `packages/notes/victron.md` and flip the `victron.yaml` row in
+   `packages/CLAUDE.md` from "— (none yet)" to the note. Content (observations only, no
+   unproven cause): `Dc/Vebus/Power` ≠ V×I and tracks AC net (numbers above); the true-DC recipe;
+   sign convention; the load-dependent-η caveat; the `expire_after` policy pointer. Read
+   `packages/notes/` index rule first (CLAUDE.md of `packages/`).
+
+##### Phase 2 — `packages/victron.yaml`
+6. [DONE] Add the two MQTT sensors (`victron_vebus_dc_current`, `victron_battery_voltage`) in the
+   VEBus/Battery sections, with `default_entity_id`, `device: *victron_device`, the standard
+   `value_json is defined and value.value is not none` guard in `value_template`, and a comment for
+   each. Current rounded to 2 decimals, voltage to 2.
+   *Dependency:* step 4. *Note:* `expire_after` values per the design table; update the policy
+   comment at the top of the file to list the two new sensors.
+7. [DONE] Add template sensor `victron_multiplus_dc_power` next to
+   `victron_multiplus_ac_net_power` (`default_entity_id: sensor.victron_multiplus_dc_power`),
+   comment records: why not `Dc/Vebus/Power`, sign convention, the `float(0)` current justification.
+   *Dependency:* step 6.
+8. [DONE] Repoint `victron_multiplus_conversion_loss_power` (state + availability) and
+   `victron_multiplus_dc_in_energy` to `sensor.victron_multiplus_dc_power`; formulas unchanged.
+   Update the three comment blocks listed in the design (l.19, l.345, l.515-519, l.557-559).
+   *Dependency:* step 7.
+9. [DONE] Delete the `victron_vebus_dc_power` MQTT block (l.131-144) and update the header
+   comment. Re-grep the repo for `victron_vebus_dc_power` — expect zero hits outside `plans/`.
+   *Dependency:* step 8.
+
+##### Phase 3 — Tests
+10. [DONE] `tests/conftest.py` `baseline_states`: replace the `victron_vebus_dc_power` seed with
+    `sensor.victron_vebus_dc_current` = `"0"` (A) and `sensor.victron_battery_voltage` = `"50"` (V),
+    so `victron_multiplus_dc_power` starts at 0 W and η stays at its 100 % bootstrap.
+11. [DONE] `tests/test_victron.py` `_seed(...)`: keep the `vebus_dc` parameter (it now means
+    "true DC power in W") and implement it as `voltage = 50 V`, `current = vebus_dc / 50`, so
+    V×I == `vebus_dc` and every existing assertion (l.257-290, 539-567) is unchanged. Docstring
+    updated.
+    *Dependency:* step 10.
+12. [DONE] New tests:
+    | Case | Assert |
+    |---|---|
+    | inverting | V=52.5, I=−8.1 → `victron_multiplus_dc_power` = −425 |
+    | charging | V=52.5, I=+20 → +1050 |
+    | realistic loss | ac_load 351/grid 12 → ac_net 339, V=52.5, I=−8.1 → loss = 86 |
+    | current expired (`unavailable`) | power = 0, **not** unavailable (voltage present) |
+    | voltage `unavailable` | power `unavailable`, loss `unavailable` |
+    | η leaves bootstrap on real data | seed `dc_in`/`ac_out` via `_seed_eta`-style accumulators, not via the removed sensor |
+    | regression | `sensor.victron_vebus_dc_power` is absent from the config / not referenced |
+    Also confirm `_reset_energy` needs no change (it resets accumulators, not these inputs).
+    *Dependency:* step 11.
+13. [IN_PROGRESS] `pytest tests/ -v` NOT run (no HA core / docker here) — CI is the real run. Done instead: whole-file `yaml` parse OK, 43 unique_id/default_entity_id values with no duplicates, zero `victron_vebus_dc_power` references left outside `plans/`, and the new Jinja (V×I, expired current → 0, loss 86 W) evaluated on the live HA with `ha_eval_template` (read-only). Original text: run `pytest tests/ -v`. Not runnable locally (no HA core / docker in this environment,
+    see the AC-referenced plan) → CI is the real run. Local substitutes: `yaml.safe_load` parse,
+    unique_id / default_entity_id duplicate check, and the new Jinja evaluated against the live HA
+    with `ha_eval_template` (read-only).
+    *Dependency:* steps 9-12.
+
+##### Phase 4 — Docs and hygiene
+14. [DONE] VIC-B3: strike the "systemcalc computes V×I / always
+    DC" claim (Context section) with a pointer to this plan; keep the rest.
+15. [DONE] Line endings: `git ls-files --eol` — nothing may show `w/crlf` or `i/crlf`.
+16. [TODO] Record a learning via the `record-learning` skill **only after** step 20 verifies on the live system
+    (CLAUDE.md: never log an unconfirmed learning). The MQTT numbers above are direct observations,
+    so the note in step 5 is fine now; a learning that claims a *cause* is not.
+
+##### Phase 5 — Deploy (user actions; `git pull` is the user's, never mine)
+17. [TODO] User: `git pull` on the HA host → Developer Tools → YAML → Check configuration →
+    **full restart**, not a reload. A restart fires the "Initial Full Publish" automation, so the two
+    new MQTT sensors get a value immediately; a reload does not (suppress-republish never re-sends
+    an unchanged voltage). Fallback after a reload: publish an empty payload to
+    `R/c0619ab4c19e/keepalive`.
+18. [TODO] User: Settings → Devices & Services → Entities → delete the orphaned
+    `sensor.victron_vebus_dc_power`. Optional: assign the new template entity
+    `sensor.victron_multiplus_dc_power` to the "Victron Energy System" device (`device:` is not
+    supported in template YAML).
+19. [TODO] User: **re-seed the η accumulators to 0 again**, same Developer Tools → States steps as
+    earlier (`victron_multiplus_ac_out_energy`, `victron_multiplus_dc_in_energy`, within a minute of
+    each other, at night). Reason: the 2026-10-17 20:17 reset restarted them from 0, but since then
+    `dc_in` has been integrating the AC-derived value. Optionally also `victron_multiplus_conversion_loss_energy`
+    (0.139 kWh of near-zero-loss history). Compiled statistics are not rewritten.
+
+##### Phase 6 — Verification (live, read-only via ha-mcp)
+20. [TODO] After ~2 min:
+    - `sensor.victron_multiplus_dc_power` ≈ `Dc/Battery/Power` (MQTT) within ~15-25 W of other DC
+      load, same sign; **not** ≈ `victron_multiplus_ac_net_power` any more.
+    - `victron_multiplus_conversion_loss_power` clearly > 0 (tens of W at ~350 W, hundreds of W at
+      kW loads), never stuck at 0.
+    - `victron_multiplus_conversion_efficiency` = 100.0 (bootstrap).
+    After the first overnight inverting (`dc_in` ≥ 1.0 kWh): η in a plausible 80-95 %, not pinned at
+    50 or 100. Power identity still holds (`solar_yield_watts + victron_ac_inverter_power +
+    victron_grid_total_power + victron_battery_ac_power == victron_ac_load_total_power`).
+    After ~24 h: energy identity (solar AC + AC PV + net grid + battery out−in vs ∫load) still
+    within ~1 %; no new ERROR in the system log from `victron`.
+
+---
+
+#### 4. Risks and open points
+
+1. **Current sign / availability on other firmware states.** Confirmed negative while discharging;
+   not yet seen while charging. Verified by test + the live check after the first charge.
+2. **Expired-current-as-0 hides a stale topic.** Accepted (same as PV); GX outages are still caught
+   by `ac_net_power`'s availability.
+3. **Loss is an upper bound on pure conversion loss** only if the Multi's own DC current includes
+   anything but the conversion stage; the snapshots suggest it does not.
+4. **η semantic limit** (load dependent) — see Design; separate change if wanted.
+5. **Mid-tick sampling:** `ac_net` and `multiplus_dc` are still independently sampled; the ≥ 0
+   clamp on the loss stays.
+
+#### 5. Decisions
+
+- New entity, not a registry reclaim of `victron_vebus_dc_power` — user, 2026-10-17.
+- Entity name `sensor.victron_multiplus_dc_power` (MultiPlus prefix scheme) — **proposed**, change
+  on request.
+- Voltage from the BMS topic `system/0/Dc/Battery/Voltage` — **proposed**.

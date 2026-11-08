@@ -5,7 +5,7 @@ Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** satisfied by PR #141, which created `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
 `packages/notes/pergola.md`, `.claude/rules/packages/pergola.md`, and
 `plans/pergola-field-calibration.md`. Also needs `.github/scripts/yaml_semantic_equal.py`
-(victron plan step 1). Branch `claude/knowledge-dedup-pergola` off `master`.
+(added by PR #144). Branch `claude/knowledge-dedup-pergola` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
 
 ## Overview

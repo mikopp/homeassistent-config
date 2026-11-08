@@ -2,8 +2,8 @@
 
 **Status:** PLAN ONLY. Follow-up 2 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
-**Depends on:** conventions, guards, `doc/` layout: satisfied by PR #141; `.github/scripts/yaml_semantic_equal.py` from
-`plans/knowledge-dedup-victron.md` step 1 (if victron is not merged yet, do that step here).
+**Depends on:** conventions, guards, `doc/` layout: satisfied by PR #141; `.github/scripts/yaml_semantic_equal.py` (added by PR #144;
+if that is not merged yet, take the script from its branch).
 Branch `claude/knowledge-dedup-heating` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
 

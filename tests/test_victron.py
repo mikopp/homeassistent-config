@@ -21,7 +21,7 @@ the mocked clock has already passed silently advances a FULL DAY. Anchoring ever
 step integrate 86400 s in one trapezoid.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from ha_integration_test_harness import HomeAssistant, TimeMachine
@@ -122,6 +122,23 @@ def _grid_energy_baseline(ha: HomeAssistant, entity_id: str) -> float:
     already pushed them to some nonzero total.
     """
     return float(ha.get_state(entity_id)["state"])
+
+
+def _updated_at(ha: HomeAssistant, entity_id: str) -> float:
+    """Return an entity's `last_updated` as a POSIX timestamp (container clock).
+
+    Used to compute the expected `platform: integration` step from HA's own timestamps:
+    the integration bills avg_power × (new_state.last_updated − old_state.last_reported), and
+    that span is the mocked fast_forward PLUS real wall-clock time spent on REST calls, assert
+    polling and the docker exec behind fast_forward. A fixed "60 s worth" expectation is
+    therefore only right on a fast runner.
+    """
+    return datetime.fromisoformat(ha.get_state(entity_id)["last_updated"]).timestamp()
+
+
+def _trapezoid_kwh(w_old: float, w_new: float, seconds: float) -> float:
+    """Energy of one trapezoidal integration step in kWh."""
+    return (w_old + w_new) / 2 * seconds / 3_600_000
 
 
 def _seed_eta(ha: HomeAssistant, *, ac_out: float, dc_in: float) -> None:
@@ -369,19 +386,30 @@ def test_grid_import_energy_accumulates(
     at all. The 1 W step keeps the trapezoidal average (3000+3001)/2 = 3000.5 W indistinguishable
     from 3000 W at this test's tolerance while still forcing a real state change.
 
+    The expected energy is computed from the source sensor's own timestamps (see
+    _updated_at): the step spans the 1-minute fast_forward plus real wall-clock time, so a
+    fixed 0.05 kWh only held on a fast runner. The step must still be at least ~30 s long,
+    which proves the fast_forward reached the container clock.
+
     One clock op: fast_forward(1 min). No absolute anchor — see the module docstring for why
     jump_to_next(hour=...) is avoided throughout this file.
     """
+    src = "sensor.victron_grid_power_import"
     _seed(home_assistant, grid_l1=3000)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", "3000.0", timeout=5)
+    home_assistant.assert_entity_state(src, "3000.0", timeout=5)
+    t_old = _updated_at(home_assistant, src)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
     export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
 
     time_machine.fast_forward(timedelta(minutes=1))
     _seed(home_assistant, grid_l1=3001)
+    home_assistant.assert_entity_state(src, "3001.0", timeout=5)
+    step_s = _updated_at(home_assistant, src) - t_old
+    assert step_s >= 30, f"fast_forward did not reach the container clock (step {step_s:.1f} s)"
+    expected = _trapezoid_kwh(3000, 3001, step_s)
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_import",
-        lambda s: abs((float(s) - baseline) - 0.05) < 0.002,
+        lambda s: abs((float(s) - baseline) - expected) < 0.002,
         timeout=TICK_TIMEOUT,
     )
     # No export flow this whole test -> export total must not have moved.
@@ -396,18 +424,25 @@ def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
     """~1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
-    for why this asserts a relative delta rather than an absolute reset-then-value, and why the
-    second seed nudges the value by 1 W instead of repeating it exactly."""
+    for why this asserts a relative delta rather than an absolute reset-then-value, why the
+    second seed nudges the value by 1 W instead of repeating it exactly, and why the expected
+    energy comes from the source sensor's timestamps."""
+    src = "sensor.victron_grid_power_export"
     _seed(home_assistant, grid_l1=-1800)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", "1800.0", timeout=5)
+    home_assistant.assert_entity_state(src, "1800.0", timeout=5)
+    t_old = _updated_at(home_assistant, src)
     baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
     import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
 
     time_machine.fast_forward(timedelta(minutes=1))
     _seed(home_assistant, grid_l1=-1801)
+    home_assistant.assert_entity_state(src, "1801.0", timeout=5)
+    step_s = _updated_at(home_assistant, src) - t_old
+    assert step_s >= 30, f"fast_forward did not reach the container clock (step {step_s:.1f} s)"
+    expected = _trapezoid_kwh(1800, 1801, step_s)
     home_assistant.assert_entity_state(
         "sensor.victron_grid_energy_export",
-        lambda s: abs((float(s) - baseline) - 0.03) < 0.002,
+        lambda s: abs((float(s) - baseline) - expected) < 0.002,
         timeout=TICK_TIMEOUT,
     )
     home_assistant.assert_entity_state(
@@ -470,7 +505,7 @@ def test_night_no_grid_energy_accumulates(
 
 
 # ── AC-referenced accounting tests ──────────────────────────────────────────────
-# See plans/victron-ac-referenced-accounting.md for the full design rationale.
+# Design: doc/victron/design.md (VIC-5..VIC-9).
 
 
 def test_multiplus_ac_net_inverting(home_assistant: HomeAssistant) -> None:
@@ -678,7 +713,7 @@ def test_conversion_loss_energy_accumulates(
 @pytest.mark.skip(
     reason=(
         "Harness-order-dependent flake, not a production bug — see "
-        "plans/victron-ac-referenced-accounting.md, 'Skipped: harness ordering flake'. "
+        "the ha-test-harness skill (one skipped test, never root-caused). "
         "Reproduces deterministically in CI (2/2 runs, unaffected by a 5s->20s timeout bump) "
         "but only in this exact suite position: pytest_collection_modifyitems in conftest.py "
         "sorts tests alphabetically by nodeid, and this test lands immediately after another "

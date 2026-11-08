@@ -23,6 +23,9 @@ stack trace, or deterministic repro. **OBSERVED** / **UNPROVEN** = weaker; never
   `'device_class' is an invalid option for 'sensor.integration'`). Why: the platform applies its own.
 - **Running total lives in the entity's Python memory** (restored via `RestoreSensor`), not its HA-visible state.
   - Why it matters: a `set_state()` override shows briefly, then the next step overwrites it from the old internal value. Cannot be reset via `set_state()`; tests need a before/after baseline delta.
+- **Replacing a trigger `total_increasing` sensor with it** (same entity_id after reclaim): it restarts at 0 with
+  `state_class: total`, and the compiled statistics `sum` stepped down once by the old total (OBSERVED once,
+  Victron #121). Fix: Developer Tools → Statistics, set that slot's *change* to ~0.001. Do not promise "no negative spike".
 
 ## Recorder vs Energy Dashboard
 - `recorder: purge_keep_days` does NOT touch the Energy Dashboard. Why: the dashboard reads long-term statistics, a separate store retained indefinitely.
@@ -34,7 +37,6 @@ stack trace, or deterministic repro. **OBSERVED** / **UNPROVEN** = weaker; never
      Why: the registry key is `platform + unique_id` (`entity_platform.py::_async_derive_object_ids`); `default_entity_id:` only suggests, loses the collision, and you get `_2`.
   3. History follows the **entity_id string** (`recorder/entity_registry.py::_async_entity_id_changed`), so the rename carries it.
   4. Rename within ~5 min of restart. Why: `statistics_meta.py::update_statistic_id` refuses if the target statistic_id exists, so the `_2` entity must not have compiled statistics yet.
-  - Full worked runbook: `plans/victron-ac-referenced-accounting.md`.
 - **Derive deploy/migration docs from `git diff origin/master...HEAD` (and `git log -S`), never from the live system.**
   - Why: the HA host runs whatever was last pulled, so ha-mcp state and the registry describe the old world (a runbook once told the user to repoint helpers the branch had already deleted).
   - Use the live system only for values to record beforehand and UI-only `.storage` state (Energy Dashboard prefs, dashboards, UI helpers) not in the repo.

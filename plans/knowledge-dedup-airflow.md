@@ -4,7 +4,7 @@
 Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** satisfied by PR #141 (`doc/airflow/design.md` with §4 and §7.2 fixed, bypass
 section added, `background.md`, `sources/`). Also needs `.github/scripts/yaml_semantic_equal.py`
-(victron plan step 1). Branch `claude/knowledge-dedup-airflow` off `master`.
+(added by PR #144). Branch `claude/knowledge-dedup-airflow` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
 
 ## Overview
