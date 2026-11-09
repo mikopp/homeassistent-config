@@ -13,6 +13,7 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
 | `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
+| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. `doc/tests/background.md` for the test framework) | guarded like package background | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
@@ -53,7 +54,7 @@ short why in the note or design doc, with no link to background (K-1).
 
 ## K-3 Note template (`packages/notes/<pkg>.md`)
 
-Frontmatter `paths:` lists the package YAML, its tests, and `doc/<pkg>/design.md` if one exists.
+Frontmatter `paths:` lists the package YAML, its tests (`tests/ha/test_<pkg>.py`, plus any `tests/e2e/` file that tests the package), and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
 
 1. Header: scope, rule paths, design-doc link
@@ -64,7 +65,7 @@ Never list background or sources. Sections, in order:
 6. Known biases / open issues
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
    skill). Above ~2 KB, split into `packages/notes/<pkg>-tests.md` with its own symlink rule and
-   `paths:` only `tests/test_<pkg>.py`.
+   `paths:` only the package's test files (`tests/ha/test_<pkg>.py`, `tests/e2e/…`).
 8. Related
 
 Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and stories to background.
@@ -93,7 +94,7 @@ Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and sto
   `ln -s ../../../packages/notes/<pkg>.md .claude/rules/packages/<pkg>.md` and commit the symlink.
 - **Complex package** (K-4 threshold): add `doc/<pkg>/design.md` and put it in the note's `paths:`.
 - **New cross-package topic:** a skill in `.claude/skills/<topic>/SKILL.md`; the first words of its
-  description carry the trigger.
+  description carry the trigger. Its history goes to `doc/<topic>/background.md` (K-1), never into the skill.
 - **One home per fact.** Every other place points to it; never copy.
 - **Every plan's last step:** distil the result into note / design / skill, move the story to
   background, update pointers, check the note is ≤ 24 KB, then DELETE the plan.
