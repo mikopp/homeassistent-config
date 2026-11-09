@@ -5,7 +5,6 @@ paths:
   - "tests/test_airflow.py"
   - "dashboards/airflow-dashboard.yaml"
   - "doc/airflow/design.md"
-  - "plans/knowledge-dedup-airflow.md"
 ---
 # airflow_cooling package notes (`packages/airflow_cooling.yaml`)
 
@@ -106,4 +105,3 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 ## Related
 - `doc/airflow/design.md` — current design (`AF-*` IDs).
 - `packages/heating_cooling_indicator.yaml` — season indicator consumed by the decision.
-- `plans/knowledge-dedup-airflow.md` — open YAML comment dedup.

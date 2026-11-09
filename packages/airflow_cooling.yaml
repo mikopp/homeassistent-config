@@ -613,9 +613,8 @@ template:
           - binary_sensor.workday
           - schedule.airflow_boost_workday
           - schedule.airflow_boost_non_workday
-    # No homeassistant:start trigger — restore last state at boot instead of letting the
-    # delay_off hold the sensor unknown for 10 min when it should settle off (same reasoning
-    # as the other decision sensors). Runtime off-transitions still get the 10-min debounce.
+    # No homeassistant:start trigger — restore the last state at boot instead of re-evaluating
+    # (same reasoning as the other decision sensors). This sensor has no delay_on/delay_off.
     binary_sensor:
       - unique_id: airflow_humidity_drying_needed
         name: "Airflow Humidity Drying Needed"
