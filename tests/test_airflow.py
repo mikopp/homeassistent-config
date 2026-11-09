@@ -3,9 +3,13 @@
 sensor.airflow_cooling_state is the SINGLE decision of the airflow automation: its state is the
 reason label, its `profile` / `ventilation` attributes are what gets applied. It reads only the
 indicators (free cooling, flush, drying, moisture/heat low guards, heating_cooling_indicator,
-indoor dew vs dew_point_min) and never the outputs, so it is fully observable in CI — the
-decision-table tests below seed the indicators and assert state + attributes directly
+indoor dew vs dew_point_min) and never the outputs, so it is fully observable in tests — the
+decision-table tests seed the indicators and assert state + attributes directly
 (decision table: custom_templates/airflow_decision.jinja).
+
+MOVED to the in-process layer (plans/test-execution.md, Step 2, item 2): the decision-table,
+bypass-estimation and dew-point-threshold tests now live in tests/ha/test_airflow.py. The
+controller, boost, indicator, reload and template-render tests below stay here until item 4.
 
 automation.airflow_ventilation_controller applies that decision — temperature profile (Section 1,
 runs even during Away) plus ventilation preset / auto_mode (Section 2, skipped while Away) —
@@ -170,62 +174,6 @@ def test_airflow_auto_disabled(home_assistant: HomeAssistant) -> None:
     home_assistant.assert_entity_state("select.comfoconnect_pro_temperature_profile",
                                        "comfort", timeout=3)
 
-
-# ── Bypass estimation tests ──────────────────────────────────────────────────────────────
-# η_max=0.818 (Zehnder Q350 enthalpy efficiency interpolated at 150 m³/h between
-#   100 m³/h=85.9% and 200 m³/h=77.7%), η_min=0.05.
-# Pre-computed expected values:
-#   baseline: h_oa≈33.55, h_sa≈35.67, h_ra≈42.75 kJ/kg → η≈0.231 → b_raw≈0.765 → 75%
-#   clamped_zero: T_sa=T_ra → η=1.0 → b_raw<0 → clamped to 0%
-#   clamped_hundred: T_sa=T_oa → η≈0 → b_raw>1 → clamped to 100%
-#   inconclusive: T_oa≈T_ra, same humidity → |h_ra-h_oa|<0.5 → unavailable
-
-
-def test_bypass_baseline(home_assistant: HomeAssistant) -> None:
-    """Baseline stubs give η≈0.231, which maps to 75% (nearest 15-step)."""
-    # Baseline already seeds: T_oa=16, T_dew=8.5, T_sa=19.5, RH_sa=45, T_ra=21, RH_ra=55
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "75", timeout=5)
-
-
-def test_bypass_clamped_zero(home_assistant: HomeAssistant) -> None:
-    """Supply air equals return air → η=1.0 → b_raw<0 → bypass clamped to 0%."""
-    attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "21.0", attrs)
-    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "55.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
-
-
-def test_bypass_clamped_hundred(home_assistant: HomeAssistant) -> None:
-    """Supply air equals outdoor air → η≈0 → b_raw>1 → bypass clamped to 100%."""
-    attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "16.0", attrs)
-    # RH≈61% matches OA (T_oa=16, T_dew=8.5 → RH_oa≈61%)
-    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "61.0",
-                             {"unit_of_measurement": "%", "device_class": "humidity"})
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "100", timeout=5)
-
-
-def test_bypass_near_closed_floors_to_zero(home_assistant: HomeAssistant) -> None:
-    """Floor rounding: b_raw in (7.5%, 15%) must show 0%, not round up to 15%.
-
-    T_sa=20.0, RH_sa=55 (baseline T_oa=16, T_ra=21, RH_ra=55, η_max=0.818, η_min=0.05):
-      h_oa≈33.55, h_sa≈40.41, h_ra≈42.75 → η≈0.746 → b_raw≈9.4% → floor(0.625)=0 → 0%.
-    With symmetric round(0.625)=1 the old code returned 15% — regression guard.
-    """
-    attrs_t = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    attrs_h = {"unit_of_measurement": "%", "device_class": "humidity"}
-    home_assistant.set_state("sensor.airflow_supply_air_temp_5min", "20.0", attrs_t)
-    home_assistant.set_state("sensor.airflow_supply_air_humidity_5min", "55.0", attrs_h)
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "0", timeout=5)
-
-
-def test_bypass_unavailable_when_input_missing(home_assistant: HomeAssistant) -> None:
-    """has_value guard: a missing filter input → sensor.airflow_bypass_estimation unavailable."""
-    # Baseline seeds all six inputs → bypass computes 75 (see test_bypass_baseline).
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "75", timeout=5)
-    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "unavailable", {})
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unavailable", timeout=5)
 
 # ── Controller: ventilation preset / auto_mode (Section 2) ───────────────────────────────
 
@@ -415,22 +363,6 @@ def test_drying_low_moisture_guard_prevents_boost(home_assistant: HomeAssistant)
     home_assistant.set_state("sensor.wheatherstation_outdoor_temperature", "16.0", temp_attrs)
     home_assistant.assert_entity_state("binary_sensor.airflow_humidity_drying_needed",
                                        "off", timeout=5)
-
-
-def test_bypass_inconclusive(home_assistant: HomeAssistant) -> None:
-    """Indoor ≈ outdoor conditions → |h_ra−h_oa|<0.5 → state template returns none → 'unknown'.
-
-    Sensor availability is True (all sources set), so HA uses 'unknown' rather than
-    'unavailable' when the state template itself returns none.
-    """
-    temp_attrs = {"unit_of_measurement": "°C", "device_class": "temperature"}
-    hum_attrs = {"unit_of_measurement": "%", "device_class": "humidity"}
-    # Set outdoor and extract to same temperature/humidity so delta is negligible
-    home_assistant.set_state("sensor.airflow_outdoor_temp_5min", "20.0", temp_attrs)
-    home_assistant.set_state("sensor.airflow_outdoor_air_humidity_5min", "55.0", hum_attrs)
-    home_assistant.set_state("sensor.airflow_extract_air_temp_5min", "20.0", temp_attrs)
-    home_assistant.set_state("sensor.airflow_extract_air_humidity_5min", "55.0", hum_attrs)
-    home_assistant.assert_entity_state("sensor.airflow_bypass_estimation", "unknown", timeout=5)
 
 
 # ── Medium ventilation preset tests ───────────────────────────────────────────────────────
@@ -757,8 +689,6 @@ def test_ventilation_low_needed_derives_from_heat(home_assistant: HomeAssistant)
                                        "off", timeout=5)
 
 
-
-
 # ── Free cooling absolute humidity gate tests ─────────────────────────────────────────────
 # The dew_max gate prevents free cooling when outdoor air warmed to target_temp would
 # exceed target_humidity. Tests render the gate sub-expression directly via the HA
@@ -864,46 +794,6 @@ def test_free_cooling_dew_max_shifts_with_target_humidity(home_assistant: HomeAs
     assert _render(home_assistant, gate_tmpl) == "True"
 
 
-# ── Dew-point threshold sensor tests ──────────────────────────────────────────────────────
-# sensor.airflow_dew_point_{min,target,max} centralise the Magnus dew-point formula: each
-# humidity helper expressed as the dew point it implies at the target temperature. The
-# refactored humidity logic references these sensors instead of recomputing the formula.
-
-
-def test_dew_point_threshold_sensors_match_inline_formula(home_assistant: HomeAssistant) -> None:
-    """Each dew-point threshold sensor reproduces the inline Magnus formula for its helper.
-
-    Centralisation check: the sensors must match the formula the old inline computations used,
-    so decisions referencing them behave identically to the previous inline code.
-    """
-    for sensor, helper in (
-        ("sensor.airflow_dew_point_min", "airflow_min_humidity"),
-        ("sensor.airflow_dew_point_target", "airflow_target_humidity"),
-        ("sensor.airflow_dew_point_max", "airflow_max_humidity"),
-    ):
-        tmpl = (
-            "{%- set T  = states('input_number.airflow_cooling_target_temperature') | float -%}"
-            "{%- set RH = states('input_number." + helper + "') | float -%}"
-            "{%- set ps = 0.61078 * e ** (17.27 * T / (T + 237.3)) -%}"
-            "{%- set pv = ps * RH / 100 -%}"
-            "{%- set expected = (237.3 * (pv / 0.61078) | log"
-            " / (17.27 - (pv / 0.61078) | log)) | round(2) -%}"
-            "{{ (states('" + sensor + "') | float - expected) | abs < 0.01 }}"
-        )
-        assert _render(home_assistant, tmpl) == "True", f"{sensor} does not match inline formula"
-
-
-def test_dew_point_target_sensor_matches_free_cooling_dew_max(home_assistant: HomeAssistant) -> None:
-    """sensor.airflow_dew_point_target equals the free-cooling dew_max threshold (≈12.09°C baseline).
-
-    Ties the centralised sensor to the already-tested free-cooling absolute-humidity gate.
-    """
-    expected = float(_render(home_assistant, _DEW_MAX_TMPL))
-    tmpl = ("{{ (states('sensor.airflow_dew_point_target') | float - "
-            + repr(expected) + ") | abs < 0.01 }}")
-    assert _render(home_assistant, tmpl) == "True"
-
-
 # ── Ventilation-low dew-point boundary tests ──────────────────────────────────────────────
 # binary_sensor.airflow_moisture_ventilation_low_needed's dew condition mirrors free cooling's
 # dew_max: it turns ON when outdoor_dew clears a humidity-derived dew point and stays ON until
@@ -998,188 +888,6 @@ def test_low_needed_relative_fallback_fires_below_dew_threshold(home_assistant: 
     home_assistant.set_state("sensor.airflow_outdoor_dew_5min", "13.0", temp_attrs)
     home_assistant.set_state("sensor.airflow_min_indoor_dew_5min", "10.0", temp_attrs)
     assert _render(home_assistant, _low_needed_dew_gate("airflow_max_humidity")) == "True"
-
-
-# ── Decision table: sensor.airflow_cooling_state ──────────────────────────────────────────
-# THE single decision. State = reason label; attributes profile + ventilation = what the
-# controller and the boost apply. Reads only the indicators, never the outputs. Baseline dew
-# thresholds: min 45% → dew_min ≈ 9.08°C (retention enters below 8.98, leaves at 9.08);
-# indoor dew 12.0 is in band. Each test seeds every indicator explicitly via _seed_indicators.
-
-
-def test_decision_off_when_auto_disabled(home_assistant: HomeAssistant) -> None:
-    """Automation disabled → 'off' with no outputs, whatever the indicators say."""
-    _seed_indicators(home_assistant, free="on")
-    _assert_decision(home_assistant, "off", "off", "off")
-
-
-def test_decision_free_cooling_cooling_season(home_assistant: HomeAssistant) -> None:
-    """Free cooling in cooling season → cool profile + medium rate."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_cooling", free="on")
-    _assert_decision(home_assistant, "free_cooling", "cool", "medium")
-
-
-def test_decision_active_heating_ignores_free_cooling(home_assistant: HomeAssistant) -> None:
-    """2026-10-23 regression: active_heating + free cooling available → heating, warm, auto.
-
-    Free cooling is never used in heating season: neither the cool profile nor the medium bump.
-    """
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating", free="on")
-    _assert_decision(home_assistant, "heating", "warm", "auto")
-
-
-def test_decision_active_heating(home_assistant: HomeAssistant) -> None:
-    """Active heating, indoor dew in band → heating, warm, auto."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating")
-    _assert_decision(home_assistant, "heating", "warm", "auto")
-
-
-def test_decision_flush(home_assistant: HomeAssistant) -> None:
-    """Humidity flush (no boost) → cool profile + medium rate."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, flush="on")
-    _assert_decision(home_assistant, "moisture_flush_cooling", "cool", "medium")
-
-
-def test_decision_flush_overrides_heating(home_assistant: HomeAssistant) -> None:
-    """A heating-season flush (moisture above max) still opens the bypass: flush beats heating."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating", flush="on")
-    _assert_decision(home_assistant, "moisture_flush_cooling", "cool", "medium")
-
-
-def test_decision_drying_boost(home_assistant: HomeAssistant) -> None:
-    """Flush + drying (boost schedule, cool weather station) → boost on top of the cool profile."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, flush="on", drying="on")
-    _assert_decision(home_assistant, "moisture_flush_boost", "cool", "boost")
-
-
-def test_decision_flush_wins_over_low_guard(home_assistant: HomeAssistant) -> None:
-    """Flush and a low guard both on (transient, during the guards' 10-min delay) → flush wins.
-
-    The guards are gated off by flush in the sensors; the decision encodes the same priority
-    so a lagging guard can never hold the rate low while flushing.
-    """
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, flush="on", moist="on")
-    _assert_decision(home_assistant, "moisture_flush_cooling", "cool", "medium")
-
-
-def test_decision_heat_protection_keeps_free_cooling_profile(home_assistant: HomeAssistant) -> None:
-    """Hot real outdoor + cool intake (free cooling) → bypass open at LOW rate."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, free="on", heat="on")
-    _assert_decision(home_assistant, "heat_protection", "cool", "low")
-
-
-def test_decision_heat_protection_without_free_cooling(home_assistant: HomeAssistant) -> None:
-    """Hot real outdoor, no free cooling → comfort profile at LOW rate."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, heat="on")
-    _assert_decision(home_assistant, "heat_protection", "comfort", "low")
-
-
-def test_decision_moisture_protection(home_assistant: HomeAssistant) -> None:
-    """Humid outdoor → moisture_protection at LOW rate (heat + moist also reports moisture)."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, moist="on", heat="on")
-    _assert_decision(home_assistant, "moisture_protection", "comfort", "low")
-
-
-def test_decision_moisture_protection_in_heating(home_assistant: HomeAssistant) -> None:
-    """Protections only lower the rate; the season still picks the profile (warm in heating)."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating", moist="on")
-    _assert_decision(home_assistant, "moisture_protection", "warm", "low")
-
-
-def test_decision_moisture_retention_neutral(home_assistant: HomeAssistant) -> None:
-    """Dry indoor air (dew 8.0 < dew_min 9.08) in neutral season → warm to retain moisture."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, indoor_dew="8.0")
-    _assert_decision(home_assistant, "moisture_retention", "warm", "auto")
-
-
-def test_decision_moisture_retention_beats_free_cooling(home_assistant: HomeAssistant) -> None:
-    """Dry indoor + free cooling available (neutral) → retention wins: warm, no medium bump."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, indoor_dew="8.0", free="on")
-    _assert_decision(home_assistant, "moisture_retention", "warm", "auto")
-
-
-def test_decision_moisture_retention_in_heating(home_assistant: HomeAssistant) -> None:
-    """Dry indoor in active heating → warm, labelled moisture_retention."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating", indoor_dew="8.0")
-    _assert_decision(home_assistant, "moisture_retention", "warm", "auto")
-
-
-def test_decision_dry_in_cooling_season_is_comfort(home_assistant: HomeAssistant) -> None:
-    """Cooling season is exempt from retention (indoor dew naturally dips in summer) → comfort."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_cooling", indoor_dew="8.0")
-    _assert_decision(home_assistant, "comfort", "comfort", "auto")
-
-
-def test_decision_humid_neutral_is_comfort(home_assistant: HomeAssistant) -> None:
-    """Humid indoor, no flush possible, neutral season → comfort (no 'keep current profile').
-
-    The old controller left a warm profile in place here (no block matched); the decision is
-    stateless, so every reason maps to one profile and nothing can get stuck.
-    """
-    _enable_auto(home_assistant)
-    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "warm", {})
-    _seed_indicators(home_assistant, indoor_dew="14.0")
-    _assert_decision(home_assistant, "comfort", "comfort", "auto")
-
-
-def _render_decision(home_assistant: HomeAssistant, prev_profile: str) -> str:
-    """Render the decision macro directly with an explicit previous profile (hysteresis memory)."""
-    return _render(home_assistant,
-                   "{% from 'airflow_decision.jinja' import airflow_decision %}"
-                   f"{{{{ airflow_decision('{prev_profile}') }}}}")
-
-
-def test_decision_retention_hysteresis(home_assistant: HomeAssistant) -> None:
-    """Dry retention enters 0.1°C below dew_min and leaves at dew_min (memory = previous profile).
-
-    dew 9.03 sits between the enter edge (8.98) and the leave edge (9.08): from comfort it stays
-    comfort, from warm it stays warm. Rendered via the macro with an explicit previous profile —
-    in CI, changing the dew re-renders the trigger-based indicators to 'unknown' for a moment,
-    which makes the sensor unavailable and drops its stored profile.
-    """
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, indoor_dew="9.03")
-    _assert_decision(home_assistant, "comfort", "comfort", "auto")
-    assert _render_decision(home_assistant, "comfort") == "comfort|comfort|auto"
-    assert _render_decision(home_assistant, "warm") == "moisture_retention|warm|auto"
-    _seed_indicators(home_assistant, indoor_dew="9.2")
-    _assert_decision(home_assistant, "comfort", "comfort", "auto")
-    assert _render_decision(home_assistant, "warm") == "comfort|comfort|auto"
-
-
-def test_decision_ignores_outputs(home_assistant: HomeAssistant) -> None:
-    """The decision never reads the device: changing profile/boost/preset leaves it unchanged."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant, season="active_heating", free="on")
-    _assert_decision(home_assistant, "heating", "warm", "auto")
-    home_assistant.set_state("select.comfoconnect_pro_temperature_profile", "cool", {})
-    home_assistant.set_state("switch.comfoconnect_pro_boost", "on", {})
-    home_assistant.set_state("climate.airflow_climate", "auto", {"hvac_action": "cooling"})
-    _assert_decision(home_assistant, "heating", "warm", "auto")
-
-
-def test_decision_unavailable_when_indicator_missing(home_assistant: HomeAssistant) -> None:
-    """Any indicator without a value → decision unavailable (automations then do nothing)."""
-    _enable_auto(home_assistant)
-    _seed_indicators(home_assistant)
-    _assert_decision(home_assistant, "comfort", "comfort", "auto")
-    home_assistant.set_state("binary_sensor.airflow_free_cooling_available", "unavailable", {})
-    home_assistant.assert_entity_state(_DECISION, "unavailable", timeout=5)
 
 
 # ── Humidity flush sensor tests ───────────────────────────────────────────────────────────

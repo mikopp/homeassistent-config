@@ -154,6 +154,8 @@ The `tests/` directory contains a `pytest` suite:
 |------|----------|
 | `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
 | `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
+| `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table) |
+| `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
+| `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
 | `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
 | `test_victron.py` | Template sensor correctness for energy accumulation and mode detection |
-| `test_wallbox.py` | Wallbox wrapper sensors: unit normalisation (W/kW, Wh/kWh) and availability propagation |

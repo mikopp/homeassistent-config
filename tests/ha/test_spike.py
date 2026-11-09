@@ -1,6 +1,7 @@
 """Step 0 spike tests (plans/test-execution.md): prove the in-process layer is valid and stable.
 
 Ports of a few Docker tests; each is replaced when its package migrates (Step 2, items 2-5).
+The two airflow decision ports moved into tests/ha/test_airflow.py (item 2).
 """
 
 from __future__ import annotations
@@ -49,71 +50,6 @@ async def test_mqtt_ingest_shelly_pool_pump(ha: HomeAssistant, broker: Broker) -
     await wait_state(ha, eid("shelly_pool_pump_energy"), "12.346")
     await wait_state(ha, eid("shelly_pool_pump_voltage"), "231.0")
 
-
-
-# ── Airflow decision (custom_templates/airflow_decision.jinja) ────────────────
-_DECISION = "sensor.airflow_cooling_state"
-_INPUTS = {  # same values as tests/conftest.py::baseline_inputs (production thresholds)
-    "input_number.airflow_cooling_target_temperature": 21.5,
-    "input_number.airflow_min_dew_diff": 2.0,
-    "input_number.airflow_min_temp_diff": 1.5,
-    "input_number.airflow_target_humidity": 55,
-    "input_number.airflow_min_humidity": 45,
-    "input_number.airflow_max_humidity": 55,
-    "input_number.heating_indicator_heating_below": 12,
-    "input_number.heating_indicator_passive_cooling_above": 16,
-    "input_number.heating_indicator_active_cooling_above": 20,
-}
-
-
-async def _set_inputs(hass: HomeAssistant) -> None:
-    for eid, value in _INPUTS.items():
-        await hass.services.async_call(
-            "input_number", "set_value", {"entity_id": eid, "value": value}, blocking=True
-        )
-
-
-async def _seed_indicators(
-    hass: HomeAssistant, *, season: str = "neutral", free: str = "off", flush: str = "off"
-) -> None:
-    """Same order as tests/test_airflow.py::_seed_indicators (season first)."""
-    hass.states.async_set("sensor.airflow_min_indoor_dew_5min", "12.0",
-                          {"unit_of_measurement": "°C", "device_class": "temperature"})
-    hass.states.async_set("sensor.heating_cooling_indicator", season)
-    for eid, val in (
-        ("binary_sensor.airflow_humidity_flush_needed", flush),
-        ("binary_sensor.airflow_humidity_drying_needed", "off"),
-        ("binary_sensor.airflow_moisture_ventilation_low_needed", "off"),
-        ("binary_sensor.airflow_heat_ventilation_low_needed", "off"),
-        ("binary_sensor.airflow_free_cooling_available", free),
-    ):
-        hass.states.async_set(eid, val)
-    await hass.async_block_till_done()
-
-
-def _assert_decision(hass: HomeAssistant, state: str, profile: str, ventilation: str) -> None:
-    s = hass.states.get(_DECISION)
-    assert (s.state, s.attributes.get("profile"), s.attributes.get("ventilation")) == (
-        state, profile, ventilation
-    )
-
-
-async def test_decision_active_heating_ignores_free_cooling(ha: HomeAssistant) -> None:
-    """Port of test_airflow.py: active_heating + free cooling → heating, warm, auto."""
-    await _set_inputs(ha)
-    await ha.services.async_call("input_boolean", "turn_on",
-        {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"}, blocking=True)
-    await _seed_indicators(ha, season="active_heating", free="on")
-    _assert_decision(ha, "heating", "warm", "auto")
-
-
-async def test_decision_free_cooling_cooling_season(ha: HomeAssistant) -> None:
-    """Port of test_airflow.py: free cooling in cooling season → cool + medium."""
-    await _set_inputs(ha)
-    await ha.services.async_call("input_boolean", "turn_on",
-        {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"}, blocking=True)
-    await _seed_indicators(ha, season="active_cooling", free="on")
-    _assert_decision(ha, "free_cooling", "cool", "medium")
 
 
 # ── Victron: real broker + moved clock ────────────────────────────────────────

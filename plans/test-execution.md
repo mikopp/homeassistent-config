@@ -9,7 +9,8 @@
   - [x] Mosquitto clear vs restart: measured, restart kept; isolation proof `tests/ha/test_broker_isolation.py`
   - [x] Shared fixtures in `tests/ha/conftest.py`: `seed`, `apply_baseline` (data moved to `tests/baseline.py`, shared with the Docker suite), `Clock`/`clock`, autouse `log_guard` + `allow_log` marker, action stubs
   - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
-  - [ ] Migration items 2–5
+  - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
+  - [ ] Migration items 3–5
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
@@ -193,13 +194,54 @@ Run: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/
 
 **What the guard and fixtures revealed** (CONFIRMED in these runs unless marked):
 1. Test-environment issues, fixed in the fixtures: the pergola watchdogs' template condition (`states.cover.dach_links.last_updated`) errored on `homeassistant: start` because the Somfy entities did not exist (now seeded before start); airflow automations then called `select.select_option` etc. (now stubbed); the Shelly ingest test payload lacked `output` (`value_json.output` warning; real devices always send it).
-2. Config issue, tolerated by name in `_KNOWN_CONFIG_LOGS`, YAML fix needs approval: `sensor.victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh` render the string `unknown` (source and `this.state` both unknown) into a numeric energy sensor, logged as ERROR on each `time_pattern` tick before the Venus counters arrive. Proposed fix: render `none`. Production impact UNPROVEN (restored state normally covers it). Candidate GitHub issue.
-3. More registry-dependent entity ids (same class as #146), CONFIRMED on a fresh registry: filter `airflow_min_indoor_dew_5min` becomes `sensor.airflow_avg_indoor_dew_5min` (name "Avg"), filter `airflow_wheatherstation_outdoor_temp_5min` → `sensor.airflow_weatherstation_outdoor_temp_5min`, filter `wheatherstation_outdoor_temperature_15min` → `sensor.weatherstation_outdoor_temperature_15min` (so the 48h statistics sensor, which reads `sensor.wheatherstation_outdoor_temperature_15min`, has no source on a fresh install), statistics 48h mean → `sensor.weatherstation_outdoor_temperature_48h_mean`. Templates read the production ids. Candidate addition to #146.
+2. Config issue, tolerated by name in `_KNOWN_CONFIG_LOGS`, YAML fix needs approval: `sensor.victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh` render the string `unknown` (source and `this.state` both unknown) into a numeric energy sensor, logged as ERROR on each `time_pattern` tick before the Venus counters arrive. Proposed fix: render `none`. Production impact UNPROVEN (restored state normally covers it). Tracked in #147.
+3. More registry-dependent entity ids (same class as #146), CONFIRMED on a fresh registry: filter `airflow_min_indoor_dew_5min` becomes `sensor.airflow_avg_indoor_dew_5min` (name "Avg"), filter `airflow_wheatherstation_outdoor_temp_5min` → `sensor.airflow_weatherstation_outdoor_temp_5min`, filter `wheatherstation_outdoor_temperature_15min` → `sensor.weatherstation_outdoor_temperature_15min` (so the 48h statistics sensor, which reads `sensor.wheatherstation_outdoor_temperature_15min`, has no source on a fresh install), statistics 48h mean → `sensor.weatherstation_outdoor_temperature_48h_mean`. Templates read the production ids. Added to #146 (issue comment).
 4. A pre-start seed selected by "entity does not exist yet" once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it (the config entity became `_2`). Hence the explicit prefix list, and `test_packages_load` now asserts no `_2` ids.
 5. `http` binds `0.0.0.0:8123` (not listening) in every in-process test. Configuring it explicitly (localhost, free port) starts HA 2026.10's pending-HTTP-config trial, which reverts and restarts HA once 5 min pass on the mocked clock (seen: "Pending HTTP config was not confirmed"). Left at the default. HYPOTHESIS: a local HA on 8123 would push the test HA into the http fallback chain.
-6. `extract_templates.py` scanned `.venv-test` (5 runtime templates from HA's own YAML) and took 4 s locally: hidden directories are now pruned (CI output unchanged: its checkout has none). It also silently skips the blueprints (`!input` is not a known tag, the YAMLError is swallowed), so their templates (8 lines with `{{` in two blueprints) are never checked (CONFIRMED: 0 extracted from `blueprints/`; fix later, out of this chunk).
+6. `extract_templates.py` scanned `.venv-test` (5 runtime templates from HA's own YAML) and took 4 s locally: hidden directories are now pruned (CI output unchanged: its checkout has none). It also silently skips the blueprints (`!input` is not a known tag, the YAMLError is swallowed), so their templates (8 lines with `{{` in two blueprints) are never checked (CONFIRMED: 0 extracted from `blueprints/`; fix later, out of this chunk). Tracked in #148.
 
 **Migration item 1 done.** `tests/ha/test_templates.py`: one test, one HA, `apply_baseline`, then every extracted template rendered with `Template(...).async_render(parse_result=False)` like `/api/template`; strict for state templates (error, undefined variable via `log_fn`, sentinel output), lenient for runtime templates; all failures in one assert. 112 state + 97 runtime templates, about 5 s including HA boot. Mutation checks (temp copy): a state template reading a missing entity → "sentinel output: 'unknown'" naming file and template; a runtime template with an unknown filter → "TemplateAssertionError: No filter named 'bogus_filter'". The Docker `tests/test_templates.py`, the CI extraction step and `TEMPLATES_JSON` are removed.
+
+### Step 2 results, item 2 (wallbox, heating_cooling_indicator, airflow decision/bypass/thresholds)
+New: `tests/ha/test_wallbox.py`, `tests/ha/test_heating_cooling_indicator.py`, `tests/ha/test_airflow.py` (`test_decision_table`, `test_bypass_estimation`, `test_dew_point_thresholds`). Each is ONE test on one fresh HA that applies the baseline, loops over a case table, resets every input it uses before each case and CHECKS the reset (a value no case expects, so no case can pass on a leftover), collects failures and fails with one assert listing every failing case (a failed reset is listed and the case still runs).
+
+Mapping, Docker → in-process (41 Docker tests removed, nothing dropped):
+| Docker | Cases now | Notes |
+|---|---|---|
+| `tests/test_wallbox.py`, 7 tests | 7 | file deleted |
+| `tests/test_heating_cooling_indicator.py`, 6 tests | 6 | file deleted; every case now checks both effective sensors (Docker: only the one it relied on) |
+| `test_airflow.py::test_decision_*`, 20 tests | 20 | the two spike ports in `test_spike.py` removed too (same cases) |
+| `test_airflow.py::test_bypass_*`, 6 tests | 6 + 2 new | new: pressure fallback, η_max read from its helper; every case now also sets the station pressure (Docker: never seeded, always the fallback) |
+| `test_airflow.py::test_dew_point_*`, 2 tests | 1 + 3 new | both old tests compared the sensors with a Jinja COPY of the formula at baseline; now an independent Python Magnus with literal anchors (9.08 / 12.08 °C). New cases with distinct humidities and both target-temperature ends: at baseline max = target (55 %), so a max/target mix-up was invisible |
+
+How inputs are driven:
+- Real paths: input_number/input_boolean actions; the season of the decision is the REAL `sensor.heating_cooling_indicator`, driven through its seeded 48h mean (one mean per season, reached from neutral in at most two steps).
+- Seeded (no real path without the clock, item 4): the go-e sources (MQTT discovery, not in this repo), the 48h mean (statistics over a filter, and registry-dependent id #146), the airflow delayed indicators and the 5-min filter outputs. Seeding order for the indicators as in the Docker suite (dew, season, flush, drying, low guards, free cooling).
+- The indicator's previous state (`this.state`) is pinned only after the mean is set to a value that holds it, and the test checks the pin held. CONFIRMED in this run: pinning the indicator to a state its mean does not support makes the self-referencing template re-render on its own change, and more than two self-triggered renders in a row log "Template loop detected" (`template_entity.py`, limit = number of templates; the log guard caught it). The Docker airflow tests pin the indicator this way about 30 times; their logs are not checked.
+- The retention "from warm" memory is checked on the macro (`Template` render, as the Docker test did over `/api/template`): a dew change re-renders the indicators to `unknown`, so the real sensor goes unavailable and drops its stored profile.
+
+Mutation checks (temp edit, reverted with `git checkout`, never committed), each fails with the case(s) named:
+| Mutation | Failing case(s) |
+|---|---|
+| wallbox kW `* 1000` → `* 100` | `power_kw_source_converted_to_w` |
+| wallbox energy `unit == 'Wh'` → `'kWh'` | every reset (Wh path), `energy_wh_…`, `energy_kwh_…` |
+| indicator heating hysteresis `heat + 1` → `heat + 0.5` | `heating_hysteresis_is_one_degree_above_the_threshold` |
+| active-effective clamp `cool + 2` → `cool + 1` | `order_is_enforced_…`, `effective_thresholds_show_the_clamp` |
+| decision `heat and not moist` → `heat` | `moisture_protection` |
+| decision retention enter edge `dew_min - 0.1` → `dew_min` | `retention_hysteresis` |
+| bypass `round(0, 'floor')` → `'common'` | `near_closed_floors_to_zero`, `efficiency_max_from_helper` |
+| `dew_point_max` reads the target humidity | every reset, `distinct_humidities`, `warm_target`, `cool_target` (not `baseline`: max = target there) |
+
+Case independence: all five tables also pass with their case order reversed (temporary module, not committed).
+
+Stability and time: `tests/ha` 16 tests in 15 s (`-n 4`); `--count=20 -n 4`: 320/320, 3m21s wall. New tests: setup 2.3–3.0 s each (HA boot), call 0.6 s (wallbox, bypass), 0.8 s (indicator, dew points), 2.6 s (decision table, 20 cases).
+
+Stayed in the Docker `tests/test_airflow.py` (65 tests, all collect; suite 203 → 162):
+- controller, drying boost, medium preset, away, edge-only boost and controller consistency tests: automations (item 4/5, assert through real triggers instead of `automation.trigger`);
+- heat protection and reload-recovery tests: delayed indicators (delay_on/off, clock: item 4);
+- the dew_max gate, low-needed boundary, flush, drying and hvac_action tests: they render a COPY of a YAML formula over `/api/template`, so they test the copy, not the config (CONFIRMED drift: the drying copy reads the raw `sensor.wheatherstation_outdoor_temperature`, the real `airflow_humidity_drying_needed` reads its 5-min filter `sensor.airflow_wheatherstation_outdoor_temp_5min`). Replace them in item 4 with tests of the real sensors through their inputs and the clock, not a port of the copies.
+
+No config bug found by these tests.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

@@ -8,6 +8,17 @@
 
 Deferred by the owner: fix it another time. Tracked in GitHub issue #146.
 
+#146 also covers the registry-dependent IDs of the airflow and weather-station filter and statistics sensors (not MQTT, same cause; `plans/test-execution.md`, Step 2 results, finding 3). Step 1 research must include them:
+
+| unique_id (platform) | Fresh registry gives | Config reads |
+|---|---|---|
+| `airflow_min_indoor_dew_5min` (filter) | `sensor.airflow_avg_indoor_dew_5min` | `sensor.airflow_min_indoor_dew_5min` |
+| `airflow_wheatherstation_outdoor_temp_5min` (filter) | `sensor.airflow_weatherstation_outdoor_temp_5min` | `sensor.airflow_wheatherstation_outdoor_temp_5min` |
+| `wheatherstation_outdoor_temperature_15min` (filter) | `sensor.weatherstation_outdoor_temperature_15min` | `sensor.wheatherstation_outdoor_temperature_15min` (source of the 48h statistics sensor) |
+| `wheatherstation_outdoor_temperature_48h_mean` (statistics) | `sensor.weatherstation_outdoor_temperature_48h_mean` | `sensor.wheatherstation_outdoor_temperature_48h_mean` |
+
+Filter and statistics sensors may not support `default_entity_id`; Step 1 must check that in the source at the pin.
+
 ## Problem (CONFIRMED by the in-process spike, HA 2026.10.4)
 - **How HA picks an ID.** HA gives an entity its ID once, at first registration, and stores it in `.storage`. Later YAML changes do not move it. Without `default_entity_id:`, HA builds the ID from area + device + entity name (`.claude/rules/ha-yaml.md`).
 - **Which sensors.** Most MQTT sensors in `packages/victron.yaml` and all in `packages/energy.yaml` have no `default_entity_id`. `packages/heating_pv_boost.yaml` (ebusd) has not been checked.

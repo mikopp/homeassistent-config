@@ -3,6 +3,7 @@ paths:
   - "packages/airflow_cooling.yaml"
   - "custom_templates/airflow_decision.jinja"
   - "tests/test_airflow.py"
+  - "tests/ha/test_airflow.py"
   - "dashboards/airflow-dashboard.yaml"
   - "doc/airflow/design.md"
   - "plans/knowledge-dedup-airflow.md"
@@ -17,7 +18,8 @@ you must not break.
 
 ## Invariants
 ### Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
-CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
+CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1 (since moved to
+`tests/ha/test_airflow.py::test_decision_table`).
 - **Indicators feed only the decision; consumers read only the decision.** The indicators
   (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
   `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
