@@ -3,6 +3,7 @@ paths:
   - "packages/energy.yaml"
   - "tests/test_wallbox.py"
   - "tests/test_shelly_pool_pump.py"
+  - "plans/energy-live-entity-ids.md"
 ---
 # energy package notes (`packages/energy.yaml`)
 
@@ -66,7 +67,8 @@ the `ha-mqtt` skill.
 
 ## Entity map
 MQTT entities here have no `default_entity_id`, so their ids are not derivable (rule in
-`.claude/rules/ha-yaml.md`); look them up via ha-mcp `ha_get_entity(unique_id=...)`.
+`.claude/rules/ha-yaml.md`); look them up via ha-mcp `ha_get_entity(unique_id=...)`. Live lookup
+is open: `plans/energy-live-entity-ids.md`.
 
 | Entity | unique_id | Notes |
 |---|---|---|
@@ -85,7 +87,7 @@ MQTT entities here have no `default_entity_id`, so their ids are not derivable (
   reporting a misleading 0.
 
 ## Known biases / open issues
-- `tests/test_shelly_pool_pump.py` seeds the same entity it asserts (`set_state` →
+- #156: `tests/test_shelly_pool_pump.py` seeds the same entity it asserts (`set_state` →
   `assert_entity_state`), so it never renders the YAML `value_template` (Wh→kWh etc.); it also
   checks `sensor.pool_pump_temperature`, which `packages/energy.yaml` does not define.
 
