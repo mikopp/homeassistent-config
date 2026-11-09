@@ -468,6 +468,13 @@ async def ha(
     """
     await load_repo_config(hass, mqtt_port=broker.port)
     yield hass
+    # Automations off first: unloading MQTT flips its entities to unavailable, which fired
+    # automations whose `mqtt.publish` then waited 10 s for a client that was gone (seen:
+    # "Heating: ebusd poll registration", 10 s of teardown in the tests that moved the clock).
+    if hass.services.has_service("automation", "turn_off"):
+        await hass.services.async_call(
+            "automation", "turn_off", {"entity_id": "all"}, blocking=True
+        )
     loaded = [e for e in hass.config_entries.async_entries() if e.state is ConfigEntryState.LOADED]
     for entry in loaded:
         await hass.config_entries.async_unload(entry.entry_id)
