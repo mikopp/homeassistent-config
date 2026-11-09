@@ -10,7 +10,8 @@
   - [x] Shared fixtures in `tests/ha/conftest.py`: `seed`, `apply_baseline` (data moved to `tests/baseline.py`, shared with the Docker suite), `Clock`/`clock`, autouse `log_guard` + `allow_log` marker, action stubs
   - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
   - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
-  - [ ] Migration items 3–5
+  - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
+  - [ ] Migration items 4–5
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
@@ -240,6 +241,58 @@ Stayed in the Docker `tests/test_airflow.py` (65 tests, all collect; suite 203 �
 - controller, drying boost, medium preset, away, edge-only boost and controller consistency tests: automations (item 4/5, assert through real triggers instead of `automation.trigger`);
 - heat protection and reload-recovery tests: delayed indicators (delay_on/off, clock: item 4);
 - the dew_max gate, low-needed boundary, flush, drying and hvac_action tests: they render a COPY of a YAML formula over `/api/template`, so they test the copy, not the config (CONFIRMED drift: the drying copy reads the raw `sensor.wheatherstation_outdoor_temperature`, the real `airflow_humidity_drying_needed` reads its 5-min filter `sensor.airflow_wheatherstation_outdoor_temp_5min`). Replace them in item 4 with tests of the real sensors through their inputs and the clock, not a port of the copies.
+
+No config bug found by these tests.
+
+### Step 2 results, item 3 (heating_pv_boost, Victron instant power, Shelly pool pump)
+New: `tests/ha/test_victron.py` (`test_instant_power_table` + the three Victron spike tests, moved unchanged), `tests/ha/test_heating_pv_boost.py` (`test_surplus_table`, `test_compressor_table`, `test_cooling_interlock`, `test_target_temp`), `tests/ha/test_shelly_pool_pump.py` (`test_pool_pump_sensors`). Same table pattern as item 2 (one test per table, reset checked per case, one assert naming every failing case); a case may have further steps without a reset (`then`), for the Docker tests that asserted a transition.
+
+**MQTT-fed inputs go only over the real broker (Step 2b).** Venus OS `{"value": x}`, ebusd `;`-separated strings (names and raw enum numbers), Shelly Pro 3EM `em:0`/`emdata:0` and Plus Plug S `switch:0` JSON. The tests use `apply_baseline(hass, mqtt=False)` (new: skips states of registry-`mqtt` entities, since a seed over an MQTT entity hides the next same-value message) or no baseline. "Unavailable" is what production sees: a real `expire_after` (the Clock moves past it, the other inputs are republished), or an `expire_after` sensor that never got a message (starts unavailable; ebusd registers without expiry start `unknown`). Those two never-published cases run as a startup phase before the table (`multiplus_dc_power_unavailable_without_voltage`, the stop temp's missing hysteresis): the voltage's expiry is 24 h, ebusd has none.
+
+Still seeded (no real path without the clock, item 4): the η accumulators (trigger-based minute ticks), the two `history_stats` sensors behind the average run, the 48h outdoor mean (drives the REAL indicator, as in item 2). The efficiency's daily meters are the REAL `utility_meter`s: reset per case with `utility_meter.reset`, fed by the ebusd YieldTotal and Shelly energy counters (not item 4: no cycle, no clock).
+
+Mapping, Docker → in-process (64 Docker tests removed; Docker suite 162 → 98, collects):
+| Docker | Now | Notes |
+|---|---|---|
+| `tests/test_victron.py`, 31 instant-power tests | 32 cases + startup phase | `pv_net_treats_unavailable_pv_as_zero_but_load_outage_as_unavailable` split in two; `multiplus_dc_power_unavailable_without_voltage` is the startup phase; new: empty / `{"value": null}` payload keeps the last value. Unavailable inputs now expire for real (Docker: REST "unavailable") |
+| `test_victron.py::test_battery_discharge_energy_accumulates`, `::test_grid_import_energy_accumulates` | the spike ports (moved) | spike grid test is the stronger version (exact 60 s step) |
+| spike `test_victron_keepalive_published` | moved | asserts both published keep-alive payloads |
+| `tests/test_heating_pv_boost.py`, 10 surplus tests | 10 cases + 1 new | new: the heating clamp's sensor expires → unavailable. House load split in integers (MQTT rounds to W; Docker seeded load/3 floats) |
+| compressor active (1, 3 asserts) | 1 case, 3 steps | clamp gone = real expiry |
+| heating active (3) | 3 cases | hcmode as name and raw number (`3`, `4`) |
+| average run (1, 2 steps), stop temp (1, 2 steps), efficiency (1, 2 steps) | 1 case + step; 1 case + startup phase; 2 cases | efficiency through the real meters |
+| cooling interlock (1) | 1 case + 4 new | new: each ebusd signal alone, raw `1` = cooling |
+| target temp (3) | 3 cases | season via the real indicator |
+| `tests/test_shelly_pool_pump.py`, 10 tests (file deleted) | 9 cases + spike ingest case | every case checks all five entities. **Dropped:** `test_temperature_sensor`: `sensor.pool_pump_temperature` exists in no YAML; the Docker test read back its own seed. Spike `test_mqtt_ingest_shelly_pool_pump` = case `ingest_rounds_like_the_firmware_values` |
+
+Stayed in Docker (item 4, they need the clock): heating DHW return mask (delay_off 25 min), master-switch decision (delay_off 20 min), the two `heating_compressor_last_run` tests (`last_changed` span); Victron η accumulator ticks (2), grid export, night no-grid, conversion loss energy, the four solar-yield counter-delta tests (one still skipped), the two battery residual tests. `tests/ha/test_spike.py` keeps only `test_packages_load`.
+
+Mutation checks (in place, restored with `git checkout`, never committed), each fails naming the case(s):
+| Mutation | Failing case(s) |
+|---|---|
+| victron ac_net `- ac_pv` → `+ ac_pv` | every reset (ac_net, battery, loss) and the cases reading them (98 checks) |
+| victron grid L2 value_template `value / 10` | `grid_import_half_wave`, `grid_export_half_wave`, `night_solar_off_battery_discharge` |
+| victron Multi current `expire_after: 600` → `6000` | `multiplus_dc_power_expired_current_reads_zero` |
+| victron keep-alive payload `["suppress-republish"]` → `[]` | `test_victron_keepalive_published` (shows the published payload) |
+| heating surplus PV cap removed | `…heater_leads_the_victron_load`, `surplus_never_exceeds_pv_generation` |
+| heating hcmode raw `4` no longer → water | `heating_active_is_off_for_a_hot_water_run step 2` |
+| energy Heizung `total_act / 1000` → `/ 100` | both efficiency cases (meter and efficiency) |
+| energy Heizung power `total_act_power` → `a_act_power` | every surplus reset and most surplus cases |
+| heating interlock: cooling request ignored | `cooling_interlock_cooling_request step 2` |
+| heating target `tdl + 1` → `tdl + 2` | every target reset, the two in-season cases |
+| energy pool pump `aenergy.total / 1000` → `/ 100` | every reset, `energy_wh_to_kwh_conversion`, `pump_running_scenario`, … |
+| energy pool pump switch without `lower` | every case and reset (switch `unknown`) |
+
+Case independence: all six tables also pass with their case order reversed (temporary module, not committed).
+
+Stability and time: `tests/ha` 21 tests in 23 s (`-n 4`); `--count=20 -n 4`: 420/420, 5m07s wall. Call medians (20 runs): Victron table 2.6 s (33 cases), surplus 1.1 s, compressor 1.0 s, target 0.6 s, interlock 0.55 s, pool pump 0.5 s, moved Victron accumulator/keep-alive 0.1–0.3 s; setup 1.7–1.9 s each (HA boot).
+
+Harness changes (CONFIRMED by measurement in this chunk):
+- A QoS 1 publish with `wait_for_publish` took 44 ms (Nagle + delayed ACK on localhost). `set_tcp_nodelay true` in the mosquitto config and `TCP_NODELAY` on the test client: 8–10 ms; pipelining (`Broker.send`, flushed by `mqtt_sync`): ~1 ms. The Victron table went from 34 s to 3 s.
+- `mqtt_sync(hass, broker)`: one fresh value on `ebusd/ehp/Integral` (subscribed, read by nothing) proves every earlier message was handled (one client, in-order delivery). Needed before a clock move (a late message would re-arm its expiry on the moved clock) and before a seed (an MQTT change can start a refresh that overwrites the seed: seen with history_stats).
+- `check_states`, `near`, `at_least`, `is_state` in `tests/ha/conftest.py` for the tables.
+- Seen once per run until handled: at teardown of the compressor table, history_stats queried the stopped recorder ("cannot schedule new futures after shutdown"). The test now ends with the history_stats source unavailable. HYPOTHESIS: HA's shutdown flips an MQTT input, and the refresh that follows runs after the recorder stopped.
+- Registry facts used: the Shelly Pro 3EM entities get their production ids (`sensor.technikraum_heizung_heizung_power`) on a fresh registry (the surplus test asserts it); utility_meter registers `<unique_id>_single_tariff`; the pool pump sensors get `sensor.pool_pool_pump_pool_pump_*` (#146).
 
 No config bug found by these tests.
 

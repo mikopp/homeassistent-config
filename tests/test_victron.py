@@ -1,4 +1,8 @@
-"""Victron MQTT energy system tests.
+"""Victron MQTT energy system tests that still need the Docker harness (accumulators).
+
+The instant-power (template-only) tests, the battery-discharge and grid-import accumulator
+tests and the keep-alive test run in-process in tests/ha/test_victron.py (plans/
+test-execution.md, Step 2, item 3). The accumulator tests left here move in item 4.
 
 Verifies the full chain:
   MQTT sensor values (seeded via set_state; MQTT broker absent in CI)
@@ -6,7 +10,7 @@ Verifies the full chain:
   → energy accumulation sensors — most are trigger-based (the `time_pattern: minutes: "/1"`
     block in packages/victron.yaml), except sensor.victron_grid_energy_import/export, which
     are `platform: integration` and instead integrate on every source state change/report
-    (see test_grid_import_energy_accumulates for why those two assert a relative baseline
+    (see test_grid_export_energy_accumulates for why those two assert a relative baseline
     delta rather than an absolute value).
 
 CLOCK HANDLING: every time-dependent test here uses exactly one
@@ -141,101 +145,9 @@ def _trapezoid_kwh(w_old: float, w_new: float, seconds: float) -> float:
     return (w_old + w_new) / 2 * seconds / 3_600_000
 
 
-def _seed_eta(ha: HomeAssistant, *, ac_out: float, dc_in: float) -> None:
-    """Force the inverter-efficiency accumulators directly, hence eta = ac_out/dc_in * 100.
-
-    sensor.victron_multiplus_conversion_efficiency is a plain template sensor that recomputes whenever
-    these two change, so this makes eta directly controllable in a test without needing to
-    run a real minute of accumulation first.
-    """
-    attrs_kwh = {
-        "unit_of_measurement": "kWh",
-        "device_class": "energy",
-        "state_class": "total_increasing",
-    }
-    ha.set_state("sensor.victron_multiplus_ac_out_energy", str(ac_out), attrs_kwh)
-    ha.set_state("sensor.victron_multiplus_dc_in_energy", str(dc_in), attrs_kwh)
-
-
-# ── Template sensor tests ─────────────────────────────────────────────────────
-# No time jump needed — just seed MQTT sensors and assert derived template values.
-
-
-def test_grid_import_half_wave(home_assistant: HomeAssistant) -> None:
-    """Grid import: L1=200, L2=200, L3=100 → total=500 W, import=500, export=0."""
-    _seed(home_assistant, grid_l1=200, grid_l2=200, grid_l3=100)
-    home_assistant.assert_entity_state("sensor.victron_grid_total_power", "500.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", "500.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
-
-
-def test_grid_export_half_wave(home_assistant: HomeAssistant) -> None:
-    """Grid export: L1=−300, L2=−200, L3=−200 → total=−700 W, export=700, import=0."""
-    _seed(home_assistant, grid_l1=-300, grid_l2=-200, grid_l3=-200)
-    home_assistant.assert_entity_state("sensor.victron_grid_total_power", "-700.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", "700.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", lambda s: float(s) == 0.0, timeout=5)
-
-
-def test_ac_load_total(home_assistant: HomeAssistant) -> None:
-    """AC load total: L1=500, L2=400, L3=300 → total=1200 W."""
-    _seed(home_assistant, ac_l1=500, ac_l2=400, ac_l3=300)
-    home_assistant.assert_entity_state("sensor.victron_ac_load_total_power", "1200.0", timeout=5)
-
-
-def test_battery_ac_power_night(home_assistant: HomeAssistant) -> None:
-    """Night: ac_load=102, grid=10, solar=0 → battery_ac = 102-10 = +92 W (discharging, positive).
-
-    HA Power usage = solar(0) + grid(10) + battery(92) = 102 W = actual AC load.
-    """
-    _seed(home_assistant, grid_l1=10, ac_l1=102)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 92, timeout=5)
-
-
-def test_battery_ac_power_solar_charging(home_assistant: HomeAssistant) -> None:
-    """Solar surplus charges battery: dc_pv=1200, ac_load=600, grid=0 → battery_ac = −600 W (charging, negative).
-
-    HA Power usage = solar(1200) + grid(0) + battery(−600) = 600 W = actual AC load.
-    """
-    _seed(home_assistant, dc_pv=1200, ac_l1=600)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -600, timeout=5)
-
-
-def test_battery_ac_power_grid_exporting(home_assistant: HomeAssistant) -> None:
-    """Solar covers load and exports: dc_pv=800, ac_load=600, grid=−200 → battery_ac = 0.
-
-    HA Power usage = solar(800) + grid(−200) + battery(0) = 600 W = actual AC load.
-    """
-    _seed(home_assistant, dc_pv=800, grid_l1=-200, ac_l1=600)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 0.0, timeout=5)
-
-
-def test_pv_net_and_surplus_are_ac_referenced(home_assistant: HomeAssistant) -> None:
-    """MPPT 4000 W DC at η 90 % → 3600 W AC; AC PV 1000; house load 2500 → net 2100 = surplus 2100."""
-    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
-    _seed(home_assistant, dc_pv=4000, ac_inverter=1000, ac_l1=2500)
-    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == 2100, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 2100, timeout=5)
-
-
-def test_pv_surplus_clamps_at_zero_but_net_stays_signed(home_assistant: HomeAssistant) -> None:
-    """PV short of load: dc_pv=500 + ac_pv=0 (η 100 %), load 1200 → net −700, surplus 0."""
-    _seed(home_assistant, dc_pv=500, ac_l1=1200)
-    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == -700, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 0, timeout=5)
-
-
-def test_pv_net_treats_unavailable_pv_as_zero_but_load_outage_as_unavailable(
-    home_assistant: HomeAssistant,
-) -> None:
-    """Night: inverter asleep (unavailable) → PV 0 W, net = −load. GX outage (phases gone) → unavailable."""
-    _seed(home_assistant, ac_l1=500)
-    home_assistant.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
-    home_assistant.assert_entity_state("sensor.victron_pv_net_power", lambda s: float(s) == -500, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_pv_surplus_power", lambda s: float(s) == 0, timeout=5)
-    for phase in ("l1", "l2", "l3"):
-        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
-    home_assistant.assert_entity_state("sensor.victron_pv_net_power", "unavailable", timeout=5)
+# ── η accumulator tests ───────────────────────────────────────────────────────
+# The instant-power (template-only) tests moved to tests/ha/test_victron.py
+# (plans/test-execution.md, Step 2, item 3); what is left here moves the clock (item 4).
 
 
 def _expire_pv(ha: HomeAssistant) -> None:
@@ -247,32 +159,6 @@ def _expire_pv(ha: HomeAssistant) -> None:
     """
     ha.set_state("sensor.victron_dc_pv_total_power", "unavailable", {})
     ha.set_state("sensor.victron_ac_inverter_power", "unavailable", {})
-
-
-def test_battery_power_chain_survives_expired_pv_at_night(home_assistant: HomeAssistant) -> None:
-    """Night, PV sensors expired: load 351, grid 12 → ac_net 339, solar 0, battery +339 W.
-
-    Regression: these sensors used to go unavailable with the PV sensors, so the Energy
-    Dashboard's power usage (solar + AC PV + battery + grid) collapsed to just the grid term.
-    """
-    _seed(home_assistant, grid_l1=12, ac_l1=351)
-    _expire_pv(home_assistant)
-    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 339, timeout=5)
-    home_assistant.assert_entity_state("sensor.solar_yield_watts", lambda s: float(s) == 0, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 339, timeout=5)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) >= 0, timeout=5
-    )
-
-
-def test_battery_power_chain_still_unavailable_on_gx_outage(home_assistant: HomeAssistant) -> None:
-    """GX outage (load phases gone) must still read unavailable even though PV now falls back to 0."""
-    _seed(home_assistant, grid_l1=12, ac_l1=351)
-    _expire_pv(home_assistant)
-    for phase in ("l1", "l2", "l3"):
-        home_assistant.set_state(f"sensor.victron_ac_load_{phase}", "unavailable", {})
-    home_assistant.assert_entity_state("sensor.victron_multiplus_ac_net_power", "unavailable", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", "unavailable", timeout=5)
 
 
 def test_eta_accumulators_keep_pace_when_ac_pv_expired(
@@ -336,97 +222,25 @@ def test_eta_accumulators_gate_on_both_signs(
     home_assistant.assert_entity_state(dc_in, lambda s: abs(float(s) - 0.011) < 0.0005, timeout=TICK_TIMEOUT)
 
 
-# ── Night scenario test ───────────────────────────────────────────────────────
-
-
-def test_night_solar_off_battery_discharge(home_assistant: HomeAssistant) -> None:
-    """Night scenario: solar off, battery discharging 600 W, grid supplying 1000 W.
-
-    Grid: L1=400, L2=350, L3=250 → total 1000 W import.
-    Battery: −600 W (discharging). VEBus: −600 W (inverter mode).
-    DC PV: 0 W, AC inverter: 0 W (solar fully off).
-    VEBus output entirely attributed to battery (no PV available).
-    """
-    _seed(
-        home_assistant,
-        grid_l1=400, grid_l2=350, grid_l3=250,
-        vebus_dc=-600,
-        dc_pv=0, ac_inverter=0, solar_dc=0,
-    )
-    home_assistant.assert_entity_state("sensor.victron_grid_power_import", "1000.0", timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_power_export", lambda s: float(s) == 0.0, timeout=5)
-
-
 # ── Energy accumulation tests ─────────────────────────────────────────────────
 # Pattern: jump to :00 boundary, reset energy counters, seed power, assert source
 # settled, jump to :01 → fires the time_pattern:/1 trigger, assert accumulated kWh.
 # Formula: power_W / 60000 kWh per minute.
 
 
-def test_grid_import_energy_accumulates(
-    home_assistant: HomeAssistant, time_machine: TimeMachine
-) -> None:
-    """~3000 W grid import held for 1 min adds ~0.05 kWh (trapezoidal integral of grid power).
-
-    sensor.victron_grid_energy_import is `platform: integration` (packages/victron.yaml), which
-    integrates on every source state change/report rather than a fixed clock, and keeps its
-    running total in the entity's own memory — not resettable via set_state(). So this asserts
-    a relative delta from a captured baseline, not an absolute value from a reset zero. The
-    baseline is captured AFTER settling at 3000 W (not before), so the state transition into
-    3000 W (over an unknown elapsed time since whatever the source last was) is absorbed into
-    the baseline itself, leaving only the controlled 1-minute step to be measured.
-
-    The second seed uses 3001 W, not 3000 again: classic `template:` sensors (victron_grid_total_
-    power, victron_grid_power_import — the whole chain between the raw MQTT leaf and this
-    integration source) only re-render on a genuine EVENT_STATE_CHANGED, never on
-    EVENT_STATE_REPORTED (same-value re-report) — confirmed against this repo's pinned HA
-    2026.8.1 source (homeassistant/helpers/event.py, async_track_template_result's internal
-    listener is EVENT_STATE_CHANGED-only). Re-posting the identical 3000 therefore would never
-    propagate through the chain, and the integration sensor would never see a second data point
-    at all. The 1 W step keeps the trapezoidal average (3000+3001)/2 = 3000.5 W indistinguishable
-    from 3000 W at this test's tolerance while still forcing a real state change.
-
-    The expected energy is computed from the source sensor's own timestamps (see
-    _updated_at): the step spans the 1-minute fast_forward plus real wall-clock time, so a
-    fixed 0.05 kWh only held on a fast runner. The step must still be at least ~30 s long,
-    which proves the fast_forward reached the container clock.
-
-    One clock op: fast_forward(1 min). No absolute anchor — see the module docstring for why
-    jump_to_next(hour=...) is avoided throughout this file.
-    """
-    src = "sensor.victron_grid_power_import"
-    _seed(home_assistant, grid_l1=3000)
-    home_assistant.assert_entity_state(src, "3000.0", timeout=5)
-    t_old = _updated_at(home_assistant, src)
-    baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
-    export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
-
-    time_machine.fast_forward(timedelta(minutes=1))
-    _seed(home_assistant, grid_l1=3001)
-    home_assistant.assert_entity_state(src, "3001.0", timeout=5)
-    step_s = _updated_at(home_assistant, src) - t_old
-    assert step_s >= 30, f"fast_forward did not reach the container clock (step {step_s:.1f} s)"
-    expected = _trapezoid_kwh(3000, 3001, step_s)
-    home_assistant.assert_entity_state(
-        "sensor.victron_grid_energy_import",
-        lambda s: abs((float(s) - baseline) - expected) < 0.002,
-        timeout=TICK_TIMEOUT,
-    )
-    # No export flow this whole test -> export total must not have moved.
-    home_assistant.assert_entity_state(
-        "sensor.victron_grid_energy_export",
-        lambda s: float(s) == export_baseline,
-        timeout=5,
-    )
-
-
 def test_grid_export_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
-    """~1800 W grid export held for 1 min adds ~0.03 kWh. See test_grid_import_energy_accumulates
-    for why this asserts a relative delta rather than an absolute reset-then-value, why the
-    second seed nudges the value by 1 W instead of repeating it exactly, and why the expected
-    energy comes from the source sensor's timestamps."""
+    """~1800 W grid export held for 1 min adds ~0.03 kWh (trapezoidal integral of grid power).
+
+    sensor.victron_grid_energy_export is `platform: integration`: it keeps its running total in
+    the entity's memory, not resettable via set_state(), so this asserts a relative delta from
+    a baseline captured AFTER settling at 1800 W. The second seed is 1801 W, not 1800 again:
+    the template chain between the MQTT leaf and the integration source re-renders only on a
+    real state change. The expected energy comes from the source sensor's own timestamps
+    (_updated_at): the step spans the 1-minute fast_forward plus real wall-clock time. The
+    import counterpart (and the stronger exact version of this check) is
+    tests/ha/test_victron.py::test_grid_import_energy_accumulates."""
     src = "sensor.victron_grid_power_export"
     _seed(home_assistant, grid_l1=-1800)
     home_assistant.assert_entity_state(src, "1800.0", timeout=5)
@@ -452,26 +266,6 @@ def test_grid_export_energy_accumulates(
     )
 
 
-def test_battery_discharge_energy_accumulates(
-    home_assistant: HomeAssistant, time_machine: TimeMachine
-) -> None:
-    """1200 W battery discharge supplying 1200 W AC load (no grid, no solar) × 1 min = 0.02 kWh.
-
-    battery_ac_power = -(ac_load - grid - dc_pv - ac_pv) = -(1200 - 0 - 0 - 0) = -1200 W.
-    Energy accumulates from the AC-equivalent half-wave, not the DC battery sensor.
-    """
-    _reset_energy(home_assistant)
-    _seed(home_assistant, ac_l1=1200)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == 1200, timeout=5)
-    time_machine.fast_forward(timedelta(minutes=1))
-    home_assistant.assert_entity_state(
-        "sensor.victron_battery_energy_out",
-        lambda s: abs(float(s) - 0.02) < 0.001,
-        timeout=TICK_TIMEOUT,
-    )
-    home_assistant.assert_entity_state("sensor.victron_battery_energy_in", "0.0", timeout=5)
-
-
 def test_night_no_grid_energy_accumulates(
     home_assistant: HomeAssistant, time_machine: TimeMachine
 ) -> None:
@@ -480,8 +274,8 @@ def test_night_no_grid_energy_accumulates(
     battery_ac_power = -(1500 - 0 - 0 - 0) = -1500 W → energy_out accumulates.
     Grid energy import/export totals must not move: a zero-power trapezoidal step is exactly
     zero area regardless of elapsed time, so they should equal their own pre-test baseline
-    (not literal "0.0" — see test_grid_import_energy_accumulates for why these two entities
-    cannot be reset to zero via set_state()).
+    (not literal "0.0" — `platform: integration` totals live in entity memory and cannot be
+    reset to zero via set_state(); see test_grid_export_energy_accumulates).
     """
     import_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_import")
     export_baseline = _grid_energy_baseline(home_assistant, "sensor.victron_grid_energy_export")
@@ -506,191 +300,6 @@ def test_night_no_grid_energy_accumulates(
 
 # ── AC-referenced accounting tests ──────────────────────────────────────────────
 # Design: doc/victron/design.md (VIC-5..VIC-9).
-
-
-def test_multiplus_ac_net_inverting(home_assistant: HomeAssistant) -> None:
-    """Inverting: ac_load=1000, grid=200 import, ac_pv=100 → mp_ac_net = 1000-200-100 = 700 W."""
-    _seed(home_assistant, ac_l1=1000, grid_l1=200, ac_inverter=100)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_ac_net_power", lambda s: float(s) == 700, timeout=5
-    )
-
-
-def test_multiplus_ac_net_charging(home_assistant: HomeAssistant) -> None:
-    """Charging: ac_load=200, grid=1000 import → mp_ac_net = 200-1000-0 = -800 W."""
-    _seed(home_assistant, ac_l1=200, grid_l1=1000)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_ac_net_power", lambda s: float(s) == -800, timeout=5
-    )
-
-
-def test_inverter_efficiency_bootstrap(home_assistant: HomeAssistant) -> None:
-    """Both accumulators at the conftest baseline 0.0 kWh → eta = 100 % bootstrap."""
-    _seed_eta(home_assistant, ac_out=0.0, dc_in=0.0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_efficiency", lambda s: float(s) == 100.0, timeout=5
-    )
-
-
-def test_inverter_efficiency_below_threshold_still_bootstraps(home_assistant: HomeAssistant) -> None:
-    """E_dc_in < 1.0 kWh (not enough inverting yet) → still 100 % even though a ratio exists."""
-    _seed_eta(home_assistant, ac_out=0.8, dc_in=0.9)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_efficiency", lambda s: float(s) == 100.0, timeout=5
-    )
-
-
-def test_inverter_efficiency_accumulated(home_assistant: HomeAssistant) -> None:
-    """Real ratio once past the 1.0 kWh threshold: 9.0/10.0 → 90 %."""
-    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_efficiency", lambda s: float(s) == 90.0, timeout=5
-    )
-
-
-def test_inverter_efficiency_clamped_low(home_assistant: HomeAssistant) -> None:
-    """A 10 % raw ratio is clamped up to the 50 % floor, never allowed to corrupt the split."""
-    _seed_eta(home_assistant, ac_out=1.0, dc_in=10.0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_efficiency", lambda s: float(s) == 50.0, timeout=5
-    )
-
-
-def test_inverter_efficiency_clamped_high(home_assistant: HomeAssistant) -> None:
-    """A 120 % raw ratio (measurement noise) is clamped down to the 100 % ceiling."""
-    _seed_eta(home_assistant, ac_out=12.0, dc_in=10.0)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_efficiency", lambda s: float(s) == 100.0, timeout=5
-    )
-
-
-def test_solar_yield_ac_watts_bootstrap(home_assistant: HomeAssistant) -> None:
-    """At eta=100% bootstrap, solar_ac_watts equals dc_pv exactly — today's behaviour."""
-    _seed_eta(home_assistant, ac_out=0.0, dc_in=0.0)
-    _seed(home_assistant, dc_pv=1000)
-    home_assistant.assert_entity_state(
-        "sensor.solar_yield_watts", lambda s: float(s) == 1000, timeout=5
-    )
-
-
-def test_solar_yield_ac_watts_discounted_by_eta(home_assistant: HomeAssistant) -> None:
-    """eta=90% → solar_ac_watts = 1000 * 0.90 = 900 W."""
-    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
-    _seed(home_assistant, dc_pv=1000)
-    home_assistant.assert_entity_state(
-        "sensor.solar_yield_watts", lambda s: float(s) == 900, timeout=5
-    )
-
-
-def test_battery_ac_power_with_eta(home_assistant: HomeAssistant) -> None:
-    """Regression guard proving eta actually reaches battery_ac_power, not just solar.
-
-    eta=90%, dc_pv=1200, ac_load=600, no grid/ac_pv:
-      mp_ac_net = 600 - 0 - 0 = 600
-      solar_ac  = 1200 * 0.90 = 1080
-      batt_ac   = 600 - 1080 = -480  (charging)
-    """
-    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
-    _seed(home_assistant, dc_pv=1200, ac_l1=600)
-    home_assistant.assert_entity_state(
-        "sensor.victron_battery_ac_power", lambda s: float(s) == -480, timeout=5
-    )
-
-
-def test_power_domain_identity_holds_with_eta(home_assistant: HomeAssistant) -> None:
-    """solar_ac + ac_pv + grid + batt_ac == ac_load, exactly, for a non-trivial eta.
-
-    eta=90%, dc_pv=2000, ac_pv=500, grid=-300 (exporting), ac_load=1200:
-      mp_ac_net = 1200 - (-300) - 500 = 1000
-      solar_ac  = 2000 * 0.90 = 1800
-      batt_ac   = 1000 - 1800 = -800
-      identity: 1800 + 500 + (-300) + (-800) = 1200 == ac_load
-    """
-    _seed_eta(home_assistant, ac_out=9.0, dc_in=10.0)
-    _seed(home_assistant, dc_pv=2000, ac_inverter=500, grid_l1=-300, ac_l1=1000, ac_l2=200)
-    home_assistant.assert_entity_state("sensor.victron_ac_load_total_power", lambda s: float(s) == 1200, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_grid_total_power", lambda s: float(s) == -300, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_ac_inverter_power", lambda s: float(s) == 500, timeout=5)
-    home_assistant.assert_entity_state("sensor.solar_yield_watts", lambda s: float(s) == 1800, timeout=5)
-    home_assistant.assert_entity_state("sensor.victron_battery_ac_power", lambda s: float(s) == -800, timeout=5)
-    # 1800 + 500 + (-300) + (-800) == 1200 == ac_load, the identity itself.
-
-
-def test_conversion_loss_inverting(home_assistant: HomeAssistant) -> None:
-    """Inverting: mp_ac_net=950 (from ac_load), vebus_dc=-1000 → loss = -(950-1000) = 50 W."""
-    _seed(home_assistant, ac_l1=950, vebus_dc=-1000)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 50, timeout=5
-    )
-
-
-def test_conversion_loss_charging(home_assistant: HomeAssistant) -> None:
-    """Charging: mp_ac_net=-1000 (from grid), vebus_dc=950 → loss = -(-1000+950) = 50 W."""
-    _seed(home_assistant, grid_l1=1000, vebus_dc=950)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 50, timeout=5
-    )
-
-
-def test_conversion_loss_clamped_to_zero(home_assistant: HomeAssistant) -> None:
-    """All sensors at 0 → loss = 0 (clamped, no negative values from sampling skew)."""
-    _seed(home_assistant)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 0.0, timeout=5
-    )
-
-
-def _seed_multiplus_dc(ha: HomeAssistant, *, volts: str, amps: str) -> None:
-    """Seed the two raw inputs of sensor.victron_multiplus_dc_power directly (V and A)."""
-    ha.set_state("sensor.victron_battery_voltage", volts,
-                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
-    ha.set_state("sensor.victron_vebus_dc_current", amps,
-                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
-
-
-def test_multiplus_dc_power_inverting_is_negative(home_assistant: HomeAssistant) -> None:
-    """Real snapshot 2026-10-17: 52.5 V × −8.1 A = −425 W (the AC-derived topic said −337 W)."""
-    _seed_multiplus_dc(home_assistant, volts="52.5", amps="-8.1")
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_dc_power", lambda s: float(s) == -425, timeout=5
-    )
-
-
-def test_multiplus_dc_power_charging_is_positive(home_assistant: HomeAssistant) -> None:
-    """52.5 V × +20 A = +1050 W, same sign convention as the old vebus power (+ = charging)."""
-    _seed_multiplus_dc(home_assistant, volts="52.5", amps="20")
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_dc_power", lambda s: float(s) == 1050, timeout=5
-    )
-
-
-def test_multiplus_dc_power_expired_current_reads_zero(home_assistant: HomeAssistant) -> None:
-    """An expired current (expire_after: 600, i.e. nothing flowing or Multi gone) → 0 W, not unavailable."""
-    _seed_multiplus_dc(home_assistant, volts="52.5", amps="unavailable")
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_dc_power", lambda s: float(s) == 0, timeout=5
-    )
-
-
-def test_multiplus_dc_power_unavailable_without_voltage(home_assistant: HomeAssistant) -> None:
-    """No voltage → no power, and the loss sensor that consumes it follows."""
-    _seed_multiplus_dc(home_assistant, volts="unavailable", amps="-8.1")
-    home_assistant.assert_entity_state("sensor.victron_multiplus_dc_power", "unavailable", timeout=5)
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", "unavailable", timeout=5
-    )
-
-
-def test_conversion_loss_realistic_from_true_dc(home_assistant: HomeAssistant) -> None:
-    """Real snapshot: ac_load 351, grid 12 → mp_ac_net 339; 52.5 V × −8.1 A = −425 W DC → loss 86 W.
-
-    Regression guard for the bug this replaced: with the AC-derived Dc/Vebus/Power the loss read ~0.
-    """
-    _seed(home_assistant, ac_l1=351, grid_l1=12)
-    _seed_multiplus_dc(home_assistant, volts="52.5", amps="-8.1")
-    home_assistant.assert_entity_state(
-        "sensor.victron_multiplus_conversion_loss_power", lambda s: float(s) == 86, timeout=5
-    )
 
 
 def test_conversion_loss_energy_accumulates(

@@ -138,11 +138,15 @@ async def seed(hass: HomeAssistant, states: Mapping[str, SeedValue]) -> None:
     await hass.async_block_till_done()
 
 
-async def apply_baseline(hass: HomeAssistant) -> None:
+async def apply_baseline(hass: HomeAssistant, *, mqtt: bool = True) -> None:
     """Apply the whole shared baseline: helper actions, input_number values, then the states.
 
     Same order as the Docker suite's `baseline_inputs` + `baseline_states`. Helpers are set
     through their real actions, so their own entities and listeners see a normal change.
+
+    `mqtt=False` leaves out the states of MQTT entities (registry platform `mqtt`), for tests
+    that drive those over the real broker (Step 2b): a seed would write over the MQTT entity's
+    state without the entity knowing, so a later message with the same value would not show.
     """
     for domain, action, data in BASELINE.BASELINE_ACTIONS:
         await hass.services.async_call(domain, action, data, blocking=True)
@@ -150,7 +154,13 @@ async def apply_baseline(hass: HomeAssistant) -> None:
         await hass.services.async_call(
             "input_number", "set_value", {"entity_id": eid, "value": value}, blocking=True
         )
-    await seed(hass, BASELINE.BASELINE_STATES)
+    registry = er.async_get(hass)
+    states = {
+        e: v
+        for e, v in BASELINE.BASELINE_STATES.items()
+        if mqtt or (entry := registry.async_get(e)) is None or entry.platform != "mqtt"
+    }
+    await seed(hass, states)
     # Second pass: a later seed can re-render an entity seeded earlier. The delayed trigger-based
     # airflow indicators (delay_on/delay_off never elapsed, so no internal state) re-render to
     # `unknown` when their inputs are seeded after them (ha-test-harness skill, "Seed trigger
@@ -161,7 +171,7 @@ async def apply_baseline(hass: HomeAssistant) -> None:
         hass,
         {
             e: v
-            for e, v in BASELINE.BASELINE_STATES.items()
+            for e, v in states.items()
             if (s := hass.states.get(e)) is None or s.state != v[0]
         },
     )
@@ -232,8 +242,11 @@ class Broker:
     def __init__(self, workdir: Path) -> None:
         self.port = _free_port()
         conf = workdir / "mosquitto.conf"
+        # set_tcp_nodelay: without it every QoS 1 ack waited ~40 ms (Nagle + delayed ACK on
+        # localhost; measured 44 ms per publish, 8-10 ms with it).
         conf.write_text(
             f"listener {self.port} 127.0.0.1\nallow_anonymous true\npersistence false\n"
+            "set_tcp_nodelay true\n"
         )
         self.log = workdir / "mosquitto.log"
         self._proc = subprocess.Popen(
@@ -252,11 +265,14 @@ class Broker:
                     raise RuntimeError(f"mosquitto did not start: {self.log.read_text()}")
                 threading.Event().wait(0.02)
         self.received: list[tuple[str, str]] = []
+        self._pending: list[paho.MQTTMessageInfo] = []
         self._client = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="pytest")
         self._client.on_message = lambda _c, _u, m: self.received.append(
             (m.topic, m.payload.decode())
         )
         self._client.connect("127.0.0.1", self.port)
+        # No Nagle on the test client either (see `set_tcp_nodelay` above).
+        self._client.socket().setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._client.subscribe("#")
         self._client.loop_start()
 
@@ -265,6 +281,22 @@ class Broker:
         if isinstance(payload, (dict, list)):
             payload = json.dumps(payload)
         self._client.publish(topic, payload, qos=1, retain=retain).wait_for_publish(5)
+
+    def send(self, topic: str, payload: Any) -> None:
+        """Publish without waiting for the ack (QoS 1, in order); `flush` waits for all of them.
+
+        Waiting per message costs a few ms each (executor hop plus ack round trip, measured
+        ~8 ms); a case table publishes hundreds, so it pipelines them and flushes once.
+        """
+        if isinstance(payload, (dict, list)):
+            payload = json.dumps(payload)
+        self._pending.append(self._client.publish(topic, payload, qos=1))
+
+    def flush(self, timeout: float = 5) -> None:
+        """Wait until the broker acked every `send` so far."""
+        for info in self._pending:
+            info.wait_for_publish(timeout)
+        self._pending.clear()
 
     def wait_subscribed(self, topic: str, timeout: float = 5) -> None:
         """Wait until some client other than ours subscribed to `topic` (mosquitto -v log).
@@ -453,6 +485,106 @@ async def wait_state(
             )
         # Real sleep in the executor: lets socket I/O on the loop run even under a frozen clock.
         await hass.async_add_executor_job(threading.Event().wait, 0.01)
+
+
+# ── MQTT helpers for case tables (plans/test-execution.md, Step 2b) ──────────────
+async def publish(hass: HomeAssistant, broker: Broker, topic: str, payload: Any) -> None:
+    """Publish like a device would, pipelined (`Broker.send`); `mqtt_sync` waits for delivery.
+
+    A coroutine so a test reads the same either way; it does not wait for the broker's ack.
+    """
+    broker.send(topic, payload)
+
+
+async def wait_subscribed(hass: HomeAssistant, broker: Broker, *topics: str) -> None:
+    """Wait until HA subscribed to every topic, so no non-retained publish can be lost."""
+    for topic in topics:
+        await hass.async_add_executor_job(broker.wait_subscribed, topic)
+
+
+# Sync channel: ebusd's energy integral. HA subscribes to it (packages/heating_pv_boost.yaml) and
+# no template, automation or other sensor reads it (only the group and a dashboard), so a
+# publish there moves nothing but its own sensor.
+_SYNC_TOPIC = "ebusd/ehp/Integral"
+
+
+async def mqtt_sync(hass: HomeAssistant, broker: Broker) -> None:
+    """Return once HA has processed every message published before this call.
+
+    One client publishes in order and mosquitto delivers to HA in order, so once a fresh value
+    on the sync topic shows in its sensor, all earlier messages were handled too; the final
+    `async_block_till_done` (in `wait_state`) lets the templates they touched re-render. This
+    replaces one `wait_state` per input, and also covers inputs whose state does not change
+    (an ignored empty payload, a republished value).
+    """
+    count = hass.data.get("mqtt_sync_count")
+    if count is None:
+        await wait_subscribed(hass, broker, _SYNC_TOPIC)
+        count = 1000  # far from any real integral value, never repeated within a test
+    count += 1
+    hass.data["mqtt_sync_count"] = count
+    # The sync message goes out behind every pending `send` on the same connection.
+    await publish(hass, broker, _SYNC_TOPIC, str(count))
+    await hass.async_add_executor_job(broker.flush)
+    sync_id = entity_id(hass, "sensor", "mqtt", "heating_energy_integral")
+    await wait_state(hass, sync_id, lambda s: _is_number(s) and float(s) == count)
+
+
+def _is_number(state: str) -> bool:
+    """True when a state string parses as a float (not unknown/unavailable/'')."""
+    try:
+        float(state)
+    except ValueError:
+        return False
+    return True
+
+
+# ── Expectation predicates and checks for case tables ─────────────────────────
+# Each predicate carries a readable __doc__, which a failing check prints as "want …".
+def near(expected: float, tolerance: float = 1e-6) -> Callable[[str], bool]:
+    """Predicate: the state is a number within `tolerance` of `expected` (default: equal)."""
+
+    def check(state: str) -> bool:
+        return _is_number(state) and abs(float(state) - expected) <= tolerance
+
+    check.__doc__ = f"{expected}" if tolerance <= 1e-6 else f"≈{expected} (±{tolerance})"
+    return check
+
+
+def at_least(minimum: float) -> Callable[[str], bool]:
+    """Predicate: the state is a number >= `minimum`."""
+
+    def check(state: str) -> bool:
+        return _is_number(state) and float(state) >= minimum
+
+    check.__doc__ = f">= {minimum}"
+    return check
+
+
+def is_state(expected: str) -> Callable[[str], bool]:
+    """Predicate: the state string equals `expected` exactly."""
+
+    def check(state: str) -> bool:
+        return state == expected
+
+    check.__doc__ = repr(expected)
+    return check
+
+
+def check_states(
+    hass: HomeAssistant,
+    ids: Mapping[str, str],
+    expect: Mapping[str, Callable[[str], bool]],
+    where: str,
+) -> list[str]:
+    """Compare each entity (key → entity id in `ids`) with its predicate; one message per miss."""
+    failures = []
+    for key, check in expect.items():
+        state = hass.states.get(ids[key])
+        got = state.state if state else None
+        if got is None or not check(got):
+            failures.append(f"{where}: {key} ({ids[key]}) = {got!r}, want {check.__doc__}")
+    return failures
 
 
 # ── Clock ─────────────────────────────────────────────────────────────────────

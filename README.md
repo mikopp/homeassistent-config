@@ -158,4 +158,8 @@ The `tests/` directory contains a `pytest` suite:
 | `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
 | `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
 | `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
-| `test_victron.py` | Template sensor correctness for energy accumulation and mode detection |
+| `ha/test_victron.py` | In-process, real MQTT broker: Victron instant-power formulas (Venus OS payloads, expiry), battery and grid accumulators, keep-alive publish |
+| `test_victron.py` | Victron energy accumulators (η ticks, export, conversion loss, counter-delta baselines, battery residual) |
+| `ha/test_heating_pv_boost.py` | In-process, real MQTT broker: PV surplus, compressor and cycling formulas, cooling interlock, derived setpoint (ebusd, Shelly and Victron payloads) |
+| `test_heating_pv_boost.py` | Heating tests that need the clock: hot-water return mask, master-switch decision, last compressor run |
+| `ha/test_shelly_pool_pump.py` | In-process, real MQTT broker: pool pump Shelly payloads through the real value_templates |

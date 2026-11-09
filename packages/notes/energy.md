@@ -2,6 +2,7 @@
 paths:
   - "packages/energy.yaml"
   - "tests/ha/test_wallbox.py"
+  - "tests/ha/test_shelly_pool_pump.py"
   - "plans/knowledge-dedup-energy.md"
 ---
 # energy.yaml — Energy Dashboard metering

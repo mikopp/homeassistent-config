@@ -2,6 +2,7 @@
 paths:
   - "packages/heating_pv_boost.yaml"
   - "tests/test_heating_pv_boost.py"
+  - "tests/ha/test_heating_pv_boost.py"
   - "dashboards/heating-dashboard.yaml"
   - "plans/heating-*.md"
   - "plans/ebusd-*.md"
@@ -219,6 +220,11 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
 - Raumaufschaltung: see "Room influence" (owner action open, mechanism unproven).
 
 ## Tests
+
+In-process (`tests/ha/test_heating_pv_boost.py`, real broker, ebusd/Shelly/Victron payloads):
+surplus, compressor and cycling formulas, cooling interlock, derived setpoint. Docker
+(`tests/test_heating_pv_boost.py`): the four tests that need the clock (DHW mask, master-switch
+decision, last run).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
 `unknown` after boot; tests need `fast_forward(26 min)` first. Earlier test files hide this.

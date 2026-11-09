@@ -1,19 +1,15 @@
-"""Step 0 spike tests (plans/test-execution.md): prove the in-process layer is valid and stable.
+"""Step 0 spike test (plans/test-execution.md) that has no package home: the package load.
 
-Ports of a few Docker tests; each is replaced when its package migrates (Step 2, items 2-5).
-The two airflow decision ports moved into tests/ha/test_airflow.py (item 2).
+The other spike tests moved into their package files as the packages migrated (Step 2):
+the two airflow decision ports into tests/ha/test_airflow.py (item 2); the Shelly ingest into
+tests/ha/test_shelly_pool_pump.py and the Victron accumulator and keep-alive tests into
+tests/ha/test_victron.py (item 3).
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-
-from conftest import Broker, Clock, entity_id, wait_state
-
-POOL = "shelly/shellyplusplugs-pool-pump/status/switch:0"
 
 
 async def test_packages_load(ha: HomeAssistant) -> None:
@@ -28,103 +24,3 @@ async def test_packages_load(ha: HomeAssistant) -> None:
     # took a config entity's id before the entity registered).
     taken = [e.entity_id for e in er.async_get(ha).entities.values() if e.entity_id.endswith("_2")]
     assert not taken, taken
-
-
-async def test_mqtt_ingest_shelly_pool_pump(ha: HomeAssistant, broker: Broker) -> None:
-    """A real Shelly payload runs through the real value_templates (Wh → kWh)."""
-    await ha.async_add_executor_job(broker.wait_subscribed, POOL)
-    broker.publish(
-        POOL,
-        {
-            "output": True,  # a real switch status always carries it (relay binary_sensor)
-            "apower": 597.66,
-            "voltage": 231.04,
-            "current": 2.6123,
-            "aenergy": {"total": 12345.6},
-        },
-    )
-    def eid(uid: str) -> str:
-        return entity_id(ha, "sensor", "mqtt", uid)
-
-    await wait_state(ha, eid("shelly_pool_pump_power"), "597.7")
-    await wait_state(ha, eid("shelly_pool_pump_energy"), "12.346")
-    await wait_state(ha, eid("shelly_pool_pump_voltage"), "231.0")
-
-
-
-# ── Victron: real broker + moved clock ────────────────────────────────────────
-_GX = "N/c0619ab4c19e"
-_TOPICS = {
-    "grid_l1": "system/0/Ac/Grid/L1/Power",
-    "grid_l2": "system/0/Ac/Grid/L2/Power",
-    "grid_l3": "system/0/Ac/Grid/L3/Power",
-    "ac_l1": "system/0/Ac/Consumption/L1/Power",
-    "ac_l2": "system/0/Ac/Consumption/L2/Power",
-    "ac_l3": "system/0/Ac/Consumption/L3/Power",
-    "dc_pv": "system/0/Dc/Pv/Power",
-    "ac_pv": "pvinverter/20/Ac/Power",
-    "vebus_i": "system/0/Dc/Vebus/Current",
-    "batt_v": "system/0/Dc/Battery/Voltage",
-}
-
-
-async def _publish_gx(ha: HomeAssistant, broker: Broker, **values: float) -> None:
-    """Publish Venus OS payloads ({"value": x}) for every power topic (defaults 0, 50 V)."""
-    vals = {k: 0.0 for k in _TOPICS} | {"batt_v": 50.0} | values
-    for key, topic in _TOPICS.items():
-        await ha.async_add_executor_job(broker.wait_subscribed, f"{_GX}/{topic}")
-        await ha.async_add_executor_job(broker.publish, f"{_GX}/{topic}", {"value": vals[key]})
-
-
-async def test_battery_discharge_energy_accumulates(
-    ha: HomeAssistant, broker: Broker, clock: Clock
-) -> None:
-    """Port: 1200 W battery discharge × one time_pattern minute = 0.02 kWh (fed over MQTT)."""
-    await _publish_gx(ha, broker, ac_l1=1200)
-    await wait_state(ha, "sensor.victron_battery_ac_power", lambda s: s not in ("unknown", "unavailable") and float(s) == 1200)
-    # Trigger-based accumulator: `unknown` until its first time_pattern tick (this.state → 0).
-    # A real minute boundary during HA start (before the freeze) may already have ticked it.
-    st = ha.states.get("sensor.victron_battery_energy_out").state
-    before = 0.0 if st == "unknown" else float(st)
-    await clock.advance(timedelta(minutes=1))
-    out = float(ha.states.get("sensor.victron_battery_energy_out").state)
-    assert abs((out - before) - 0.02) < 0.001
-    assert float(ha.states.get("sensor.victron_battery_energy_in").state) == 0.0
-
-
-async def test_grid_import_energy_accumulates(
-    ha: HomeAssistant, broker: Broker, clock: Clock
-) -> None:
-    """0→3000→1000 W import; the 3000→1000 step is EXACTLY 60 s (frozen clock) → exact kWh.
-
-    Stronger than the Docker port (3000→3001 W, tolerance 2 Wh, which `method: left` also
-    passed). The 0→3000 step spans HA start → freeze (real time, load dependent), so its area is
-    computed from HA's own timestamps rather than assumed zero; the displayed total rounds to
-    1 Wh (`round: 3`), hence the 0.6 Wh tolerance.
-    """
-    src = "sensor.victron_grid_power_import"
-    prev = ha.states.get(src)
-    assert prev.state == "0"
-    await _publish_gx(ha, broker, grid_l1=3000)
-    await wait_state(ha, src, "3000.0")
-    first_s = ha.states.get(src).last_updated_timestamp - prev.last_reported_timestamp
-    await clock.advance(timedelta(minutes=1))
-    await _publish_gx(ha, broker, grid_l1=1000)
-    await wait_state(ha, src, "1000.0")
-    expected = ((0 + 3000) / 2 * first_s + (3000 + 1000) / 2 * 60) / 3_600_000
-    total = float(ha.states.get("sensor.victron_grid_energy_import").state)
-    assert abs(total - expected) < 0.0006, (total, expected, first_s)
-    assert ha.states.get("sensor.victron_grid_energy_export").state in ("0.0", "0.000", "unknown")
-
-
-async def test_victron_keepalive_published(
-    ha: HomeAssistant, broker: Broker, clock: Clock
-) -> None:
-    """Automations really publish: empty keep-alive on HA start, suppress-republish every 30 s."""
-    topic = f"R/{_GX[2:]}/keepalive"
-    await ha.async_add_executor_job(broker.wait_received, topic, "")
-    mark = len(broker.received)
-    await clock.advance(30)
-    await ha.async_add_executor_job(
-        broker.wait_received, topic, '{"keepalive-options":["suppress-republish"]}', mark
-    )
