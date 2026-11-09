@@ -137,7 +137,7 @@ Stability: 140/140 for 7 tests × 20 rounds, and before the last test was added,
   - YAML timers that stay scheduled on the stopped HA are expected (`expected_lingering_timers`).
 
 **Findings about the config and the current suite** (CONFIRMED by these runs; to be fixed or tracked, not in Step 0):
-1. **Entity IDs depend on the old `.storage`.** The MQTT sensors in `victron.yaml` and `energy.yaml` have no `default_entity_id`.
+1. **Entity IDs depend on the old `.storage`.** Deferred to its own plan, `plans/mqtt-default-entity-id.md`. The MQTT sensors in `victron.yaml` and `energy.yaml` have no `default_entity_id`.
    - On a fresh registry they get IDs like `sensor.electrical_victron_energy_system_victron_grid_l1_power` and `sensor.pool_pool_pump_pool_pump_power`.
    - Every Victron template reads `sensor.victron_grid_l1_power`, so a rebuild or restore without `.storage` breaks the whole Victron chain.
    - The Docker suite hides this by seeding states under the production IDs. The spike pre-registers the production IDs as a stand-in.
