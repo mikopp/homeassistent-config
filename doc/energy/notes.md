@@ -32,7 +32,7 @@ Corollaries:
 - **Declare `device_class` / `state_class` on the wrapper.** Some discovery payloads omit
   `state_class` (go-e's `total_energy_charged` does), which alone makes an entity unselectable in the
   Energy Dashboard. The wrapper is where that is fixed.
-- **Lifetime counters use `state_class: total_increasing`**, so HA absorbs a counter reset and
+- **Lifetime counters use `state_class: total_increasing`**, so HA absorbs a counter reset (e.g. a charger factory reset) and
   baselines on the first observed value instead of booking the pre-existing total as consumption.
 - **Never merge two sources into one statistic id.** Two chargers' lifetime counters have different
   absolute baselines; if the new one reads higher, `total_increasing` books the difference as real
@@ -45,8 +45,8 @@ Corollaries:
 Loxone publishes only on change, has no heartbeat (an idle appliance is silent for hours or days),
 publishes a 0 when a draw ends and retains its last value for new subscribers. So the Loxone sensors
 have **no `expire_after`**: it would turn them unavailable while idle and break the Energy
-Dashboard; the held last value is the true draw (running) or 0 (idle). Their `value_template`
-passes an empty payload through as `''` (kept last value, no warning) — rule and source evidence in
+Dashboard; the held last value is the true draw (running) or 0 (idle). Loxone sometimes publishes
+an empty payload; their `value_template` passes it through as `''` (kept last value, no warning) — rule and source evidence in
 the `ha-mqtt` skill.
 
 ## Hardware / integration quirks
@@ -61,7 +61,8 @@ the `ha-mqtt` skill.
 - Shelly lifetime counters reset only on a factory reset; `total_increasing` absorbs a reboot dip.
 - All Shelly entities use `expire_after: 120`; the Loxone ones have none (invariant above).
 - The go-e source entities are owned by the MQTT integration; their ids can change if the device is
-  re-paired. Only the wallbox wrapper's `state:`/`availability:` reference them.
+  re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the test
+  seeds in `tests/test_wallbox.py` and `tests/conftest.py` must change with them.
 
 ## Entity map
 MQTT entities here have no `default_entity_id`, so their ids are not derivable (rule in
