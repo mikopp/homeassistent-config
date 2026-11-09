@@ -24,7 +24,8 @@ views:
           attribute: current_tilt_position
       # ── Pergola Automations ───────────────────────────────────────────────────────────
       # Grid of tile cards matching the area-overview automation style.
-      # Lists all automations defined in packages/pergola.yaml.
+      # Tiles for the pergola automations in packages/pergola.yaml, except
+      # pergola_sync_heating_from_indicator (not on this dashboard).
       - type: heading
         heading: Automations
         heading_level: 2

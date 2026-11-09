@@ -1,6 +1,6 @@
 # Knowledge dedup: pergola
 
-**Status:** PLAN ONLY. Follow-up 3 of 5 from PR #141 (knowledge structure, merged).
+**Status:** IN PROGRESS (steps 1-4 done on `claude/modest-ptolemy-pmpdxy`). Follow-up 3 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** satisfied by PR #141, which created `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
 `packages/notes/pergola.md`, `.claude/rules/packages/pergola.md`, and
@@ -23,7 +23,9 @@ design read on demand only. No behaviour change.
 ## Steps
 
 ### Phase A: YAML comments (comment-only)
-1. [TODO] Per block:
+1. [DONE] Per block (all rows done; also: rules 5–8 → 5–9 in comments, drain-script headings
+   renamed to the 1–4 step counter, stale reverse-conversion / "Step 2" / sun-speed comments dropped,
+   "No post-deploy UI steps" replaced by "set helpers in the UI"). YAML 1722 → 1431 lines:
    | Lines | Content | Action |
    |---|---|---|
    | `:1` | "(Phase 1: Foundation)" | replace with a package summary + design link |
@@ -36,12 +38,14 @@ design read on demand only. No behaviour change.
    | `:1204`, `:1515-1518` | correction restated | one line + pointer |
    | `:104-108` | "plan Step 6 (Phase 5)" | → `plans/pergola-field-calibration.md` |
    | `:652` | "A_eff_flip ≈ 58°, COOLING_LOWER_BOUND ≈ 15.3°" | fix to a_flip 57, LB 15 (code, `#PG-4.2`) |
-2. [TODO] Fix yamllint comment warnings in touched blocks.
-3. [TODO] Check that `dashboards/Pergola-management.yaml` and `pergola_card.yaml` comments are
+2. [DONE] (no warnings before or after) Fix yamllint comment warnings in touched blocks.
+3. [DONE] (card matches group; dashboard grid comment fixed, it omits the sync automation —
+   recorded in the note) Check that `dashboards/Pergola-management.yaml` and `pergola_card.yaml` comments are
    consistent with the note (card-sync invariant). Comment-only.
 
 ### Phase B: flag, do not fix
-4. [TODO] `pergola.yaml:398-405` uses `| float(122)`-style defaults on `input_number`, which root
+4. [DONE] Already tracked as GitHub issue #142 (open), linked from the note; not duplicated into
+   the calibration plan (K-1: issues are the home for confirmed bugs). `pergola.yaml:398-405` uses `| float(122)`-style defaults on `input_number`, which root
    CLAUDE forbids. This is code, not a comment. Record it in `plans/pergola-field-calibration.md` as
    an open item; the user decides whether to fix it separately (it needs a test run).
 

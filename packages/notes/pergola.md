@@ -6,7 +6,6 @@ paths:
   - "dashboards/elements/pergola_card.yaml"
   - "doc/pergola/design.md"
   - "plans/pergola-*.md"
-  - "plans/knowledge-dedup-pergola.md"
 ---
 # Pergola package notes (`packages/pergola.yaml`)
 
@@ -102,15 +101,16 @@ Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their 
 
 ## Known biases / open issues
 - **Helper fallback defaults contradict the repo rule (open, user decides).**
-  `pergola.yaml:397-405` (and more templates in the file) read helpers with `| float(122)`,
-  `| float(5)` etc. `.claude/rules/ha-yaml.md` forbids fallback defaults on `input_*` helpers and
-  on guarded sensor reads. This is code, not a comment: fixing it needs a test run. Tracked in
-  `plans/knowledge-dedup-pergola.md` step 4. → GitHub issue #142
+  The `sensor.pergola_slat_angle` template (and most other templates in the file) read helpers
+  and guarded sensors with `| float(122)`, `| float(5)`, `| float(15.3)` etc.
+  `.claude/rules/ha-yaml.md` forbids fallback defaults on `input_*` helpers and on guarded sensor
+  reads. This is code, not a comment: fixing it needs a test run. → GitHub issue #142
 - Field calibration (PV factor, shading sensitivity, wall azimuth, drain angles, rain lock):
   `plans/pergola-field-calibration.md`.
-- YAML comments still point to the deleted `doc/pergola-roof-automation.md` /
-  `doc/pergola-slat-formula-analysis.md` (`:2`, `:14`, `:322`), say "+7" (`:529`) and cite
-  "plan Step N". Fix: `plans/knowledge-dedup-pergola.md`. Trust the code and design doc.
+- The `alias:`/`description:` of `pergola_state_manager` and `script.pergola_evaluate_state`
+  still say "rules 5–8"; the rules are 5–9 (incl. `sun_down`) (`PG-2.2`). UI text only (data, not
+  comments), left for a code change.
+- The dashboard's automation grid omits `automation.pergola_sync_heating_from_indicator`.
 - Flaky test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN).
 
 ## Tests (`tests/test_pergola.py`)
