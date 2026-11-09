@@ -11,6 +11,8 @@ from datetime import timedelta
 
 from ha_integration_test_harness import HomeAssistant, TimeMachine
 
+from baseline import BASELINE_ACTIONS, BASELINE_NUMBERS, BASELINE_STATES
+
 
 # ── Bound every HTTP call the harness makes ──────────────────────────────────────────────
 # ha_integration_test_harness (pinned at v0.11.0) calls requests.get/post/delete with NO
@@ -86,57 +88,17 @@ def default_weather_entity_id(home_assistant: HomeAssistant) -> None:
 
 
 # ── Per-test baseline fixtures ───────────────────────────────────────────────────────────
+# The data lives in tests/baseline.py, shared with the in-process layer (tests/ha), so both
+# suites seed the same baseline. These fixtures only apply it over REST, in the data's order.
 
 
 @pytest.fixture(autouse=True)
 def baseline_inputs(home_assistant: HomeAssistant) -> None:
     """Reset all pergola and airflow input helpers to known-good values before each test."""
     ha = home_assistant
-    ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_automatic_enabled"})
-    # The indicator→pergola_heating sync automation is disabled by default so the baseline
-    # indicator seed ("neutral" = heating season) cannot flip pergola_heating behind the tests.
-    # Its own tests turn it on explicitly.
-    ha.call_action("automation", "turn_off",
-                   {"entity_id": "automation.pergola_sync_heating_from_indicator"})
-    ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.pergola_heating"})
-    ha.call_action("input_boolean", "turn_on",  {"entity_id": "input_boolean.pergola_cooling_optimized"})
-    ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.airflow_cooling_automatic_enabled"})
-    ha.call_action("input_boolean", "turn_off", {"entity_id": "input_boolean.heating_pv_boost_enabled"})
-    ha.call_action("input_select", "select_option", {
-        "entity_id": "input_select.pergola_automation_state",
-        "option": "sun_automatik_cooling",
-    })
-    for entity_id, value in {
-        "input_number.pergola_pv_conversion_factor": 3.2,
-        "input_number.pergola_shading_sensitivity": 0.9,
-        "input_number.pergola_min_sun_elevation": 10,
-        "input_number.pergola_deadband_angle": 5,
-        "input_number.pergola_rain_recovery_step": 0,
-        "input_number.pergola_last_set_slat_angle": 0,
-        "input_number.airflow_cooling_target_temperature": 21.5,
-        "input_number.airflow_min_dew_diff": 2.0,
-        "input_number.airflow_min_temp_diff": 1.5,
-        "input_number.airflow_target_humidity": 55,
-        "input_number.airflow_min_humidity": 45,
-        "input_number.airflow_max_humidity": 55,
-        "input_number.pergola_max_tilt_angle": 122,
-        "input_number.pergola_wall_azimuth": 204,
-        "input_number.pergola_slat_width": 22,
-        "input_number.pergola_slat_pivot_spacing": 20,
-        "input_number.pergola_slat_thickness": 3,
-        "input_number.airflow_bypass_efficiency_max": 0.818,
-        "input_number.airflow_bypass_efficiency_min": 0.05,
-        "input_number.heating_boost_offset": 1.5,
-        "input_number.heating_pv_surplus_threshold": 1500,
-        "input_number.heating_pv_deficit_threshold": 500,
-        "input_number.heating_pv_min_battery_soc": 70,
-        "input_number.heating_return_temp_max": 30,
-        # Production values for the indicator thresholds (heating below / passive cooling
-        # above / active cooling above).
-        "input_number.heating_indicator_heating_below": 12,
-        "input_number.heating_indicator_passive_cooling_above": 16,
-        "input_number.heating_indicator_active_cooling_above": 20,
-    }.items():
+    for domain, action, data in BASELINE_ACTIONS:
+        ha.call_action(domain, action, data)
+    for entity_id, value in BASELINE_NUMBERS.items():
         ha.call_action("input_number", "set_value", {"entity_id": entity_id, "value": value})
 
 
@@ -147,219 +109,8 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     Runs after baseline_inputs to ensure input helpers are set before external stubs;
     this matters for template sensors that read both.
     """
-    ha = home_assistant
-    # Sun — seeded to midday above_horizon; may be overwritten by the sun integration
-    # within seconds if the fake time is set to night. Tests that need a specific sun
-    # position use the midday_sun fixture which uses the time machine.
-    ha.set_state("sun.sun", "above_horizon", {"elevation": 45, "azimuth": 180})
-    # Victron solar charger (MQTT — broker absent in CI). Raw DC input — the repointed
-    # sensor.solar_yield_watts (AC-referenced, packages/victron.yaml) is computed from
-    # sensor.victron_dc_pv_total_power instead, not from this one.
-    ha.set_state("sensor.victron_solar_yield_dc_watts", "1500",
-                 {"unit_of_measurement": "W", "device_class": "power"})
-    # Victron MQTT sensors — all power sensors at 0 W so template sensors start
-    # at 0 and energy accumulators do not advance during unrelated tests.
-    attrs_w = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
-    # Multi DC power is a template of battery voltage × Multi DC current (packages/victron.yaml);
-    # 50 V × 0 A = 0 W keeps η at its 100 % bootstrap in every test.
-    ha.set_state("sensor.victron_battery_voltage", "50",
-                 {"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement"})
-    ha.set_state("sensor.victron_vebus_dc_current", "0",
-                 {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"})
-    ha.set_state("sensor.victron_dc_pv_total_power", "0", attrs_w)
-    ha.set_state("sensor.victron_grid_l1_power", "0", attrs_w)
-    ha.set_state("sensor.victron_grid_l2_power", "0", attrs_w)
-    ha.set_state("sensor.victron_grid_l3_power", "0", attrs_w)
-    ha.set_state("sensor.victron_ac_load_l1", "0", attrs_w)
-    ha.set_state("sensor.victron_ac_load_l2", "0", attrs_w)
-    ha.set_state("sensor.victron_ac_load_l3", "0", attrs_w)
-    ha.set_state("sensor.victron_ac_inverter_power", "0", attrs_w)
-    ha.set_state("sensor.victron_battery_soc", "50",
-                 {"unit_of_measurement": "%", "device_class": "battery", "state_class": "measurement"})
-    # Raw DC lifetime counter — feeds the repointed sensor.victron_solar_yield_total_kwh
-    # (AC-referenced) via counter-delta, and the battery energy residual's mppt_src.
-    ha.set_state("sensor.victron_solar_yield_dc_total_kwh", "0.0",
-                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    ha.set_state("sensor.victron_ac_inverter_energy_total_kwh", "0.0",
-                 {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"})
-    # VEBus/MultiPlus conversion-efficiency accumulators (trigger template sensors,
-    # packages/victron.yaml). Seeded to 0.0 so sensor.victron_multiplus_conversion_efficiency
-    # is deterministically at its 100 % bootstrap in every test that does not explicitly
-    # exercise eta — without this, minute ticks from unrelated tests would slowly accumulate
-    # into it.
-    attrs_kwh = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
-    ha.set_state("sensor.victron_multiplus_ac_out_energy", "0.0", attrs_kwh)
-    ha.set_state("sensor.victron_multiplus_dc_in_energy", "0.0", attrs_kwh)
-    ha.set_state("sensor.victron_multiplus_conversion_loss_energy", "0.0", attrs_kwh)
-    # sensor.victron_solar_yield_total_kwh is now the REPOINTED AC-referenced accumulator
-    # (see packages/victron.yaml's repoint note) — same reset pattern as the other trigger
-    # accumulators above.
-    ha.set_state("sensor.victron_solar_yield_total_kwh", "0.0", attrs_kwh)
-    # Counter-delta baselines (victron.yaml, own dedicated state-only sensors — not custom
-    # attributes, see that file's comment) reset to literal 'unknown' so every test starts
-    # un-baselined, same semantics the -1 sentinel used to get from an empty attribute.
-    ha.set_state("sensor.victron_solar_yield_dc_baseline_kwh", "unknown", {})
-    ha.set_state("sensor.victron_ac_pv_energy_baseline_kwh", "unknown", {})
-    # go-e Charger wallbox (MQTT auto-discovery — broker absent in CI). These are
-    # the SOURCE entities behind sensor.wallbox_power / sensor.wallbox_energy.
-    # Seeded in the go-e API v2 native units (nrg[11] in W, eto in Wh) so the
-    # wrappers' unit normalisation is exercised on the conversion path.
-    ha.set_state("sensor.go_echarger_homekopp_power_total", "0",
-                 {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
-    ha.set_state("sensor.go_echarger_homekopp_total_energy_charged", "3500",
-                 {"unit_of_measurement": "Wh", "device_class": "energy"})
-    # Weather station (UDP integration — absent in CI)
-    ha.set_state("sensor.wheatherstation_outdoor_temperature", "18.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.wheatherstation_solar_radiation", "650",
-                 {"unit_of_measurement": "W/m²"})
-    ha.set_state("sensor.wheatherstation_uv_index", "5", {})
-    ha.set_state("sensor.wheatherstation_hourly_rain", "0",
-                 {"unit_of_measurement": "mm"})
-    ha.set_state("sensor.wheatherstation_rain_rate", "0",
-                 {"unit_of_measurement": "mm/h"})
-    # 14 °C classifies as "neutral" (12 < 14 < 16) — consistent with the seeded indicator state
-    # below, so a real re-render of sensor.heating_cooling_indicator (triggered by a helper
-    # change) cannot flip the seed to another season behind unrelated tests.
-    ha.set_state("sensor.wheatherstation_outdoor_temperature_48h_mean", "14.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    # Sun-shining binary_sensor — seeded on so evaluate_state Rule 6 (not_enough_sun)
-    # does not fire unexpectedly. The template has delay_on/delay_off that prevent it
-    # reaching "on" naturally within a CI test run.
-    ha.set_state("binary_sensor.pergola_sun_shining", "on", {})
-    # Somfy cover priority-lock sensors (UI integration — absent in CI)
-    ha.set_state("sensor.dach_links_priority_lock_originator", "none", {})
-    ha.set_state("sensor.dach_rechts_priority_lock_originator", "none", {})
-    ha.set_state("sensor.dach_links_priority_lock_timer", "0", {})
-    ha.set_state("sensor.dach_rechts_priority_lock_timer", "0", {})
-    # Somfy covers (UI integration — absent in CI)
-    ha.set_state("cover.dach_links", "open", {"current_tilt_position": 50})
-    ha.set_state("cover.dach_rechts", "open", {"current_tilt_position": 50})
-    # ComfoConnect (absent in CI)
-    ha.set_state("select.comfoconnect_pro_temperature_profile", "comfort", {})
-    ha.set_state("select.comfoconnect_pro_ventilation_preset", "medium", {})
-    ha.set_state("switch.comfoconnect_pro_auto_mode", "on", {})
-    ha.set_state("switch.comfoconnect_pro_away_function", "off", {})
-    ha.set_state("switch.comfoconnect_pro_boost", "off", {})
-    ha.set_state("climate.airflow_climate", "auto", {"hvac_action": "fan"})
-    ha.set_state("number.comfoconnect_pro_boost_time", "0",
-                 {"unit_of_measurement": "min", "min": 0, "max": 1092, "step": 1})
-    # Workday integration (absent in CI) — seeded to workday so tests are deterministic
-    ha.set_state("binary_sensor.workday", "on", {})
-    # Schedule helpers (UI-only, absent in CI) — workday schedule on, non-workday off by default
-    ha.set_state("schedule.airflow_boost_workday", "on", {})
-    ha.set_state("schedule.airflow_boost_non_workday", "off", {})
-    # Flush + drying binary sensors — reset to 'off' so tests start with a clean state machine.
-    # REST-setting them to 'on' in automation tests decouples the state machine from the
-    # template engine's internal _state; this reset re-syncs them before each test.
-    # NOTE: baseline max_humidity==target_humidity==55 → dew_point_max==dew_point_target, so the
-    # flush sensor's Branch 1 and Branch 2 collapse; branch-distinguishing tests set max_humidity=60.
-    ha.set_state("binary_sensor.airflow_humidity_flush_needed", "off", {})
-    ha.set_state("binary_sensor.airflow_humidity_drying_needed", "off", {})
-    # Heat-protection guard + combined low intent (moisture OR heat) — start clean so the decision
-    # (sensor.airflow_cooling_state) does not pick up a stale low guard from a previous test.
-    ha.set_state("binary_sensor.airflow_heat_ventilation_low_needed", "off", {})
-    ha.set_state("binary_sensor.airflow_ventilation_low_needed", "off", {})
-    # Remaining inputs of sensor.airflow_cooling_state (the single decision): its availability
-    # requires every indicator to hold a value, and these two would otherwise sit 'unknown' after
-    # boot until their 10-min delay elapses.
-    ha.set_state("binary_sensor.airflow_free_cooling_available", "off", {})
-    ha.set_state("binary_sensor.airflow_moisture_ventilation_low_needed", "off", {})
-    ha.set_state("sensor.comfoconnect_pro_extract_air_temperature", "21.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.comfoconnect_pro_extract_air_humidity", "55",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.comfoconnect_pro_extract_air_dew_point", "12.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.comfoconnect_pro_outdoor_air_temperature", "16.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.comfoconnect_pro_outdoor_air_dewpoint", "8.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.comfoconnect_pro_outdoor_air_humidity", "61",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.comfoconnect_pro_supply_air_temperature", "19.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.comfoconnect_pro_supply_air_humidity", "45",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.comfoconnect_pro_supply_fan_volume", "150",
-                 {"unit_of_measurement": "m³/h"})
-    # Airflow filter sensors (platform:filter does not compute in CI; seed directly)
-    ha.set_state("sensor.airflow_outdoor_temp_5min", "16.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_outdoor_dew_5min", "8.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_outdoor_air_humidity_5min", "61.0",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.airflow_supply_air_temp_5min", "19.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_supply_air_humidity_5min", "45.0",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.airflow_extract_air_temp_5min", "21.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_extract_air_humidity_5min", "55.0",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    ha.set_state("sensor.airflow_min_indoor_dew_5min", "12.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_avg_indoor_temp_5min", "22.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.airflow_avg_indoor_humidity_5min", "55.0",
-                 {"unit_of_measurement": "%", "device_class": "humidity"})
-    # Smoothed real-outdoor (weather-station) temp — gates the drying boost and heat protection.
-    # Seed at target (21.5): below indoor (22) so heat protection is OFF, and not < target so the
-    # drying-boost gate stays false — keeps both guards inert in the baseline.
-    ha.set_state("sensor.airflow_wheatherstation_outdoor_temp_5min", "21.5",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    # Heating/cooling indicator (template sensor from another package)
-    ha.set_state("sensor.heating_cooling_indicator", "neutral", {})
-    # Shelly Pro 3EM on the heating circuit (MQTT). Load-bearing for sensor.heating_pv_surplus,
-    # which subtracts it so the surplus figure is invariant under the heat pump's own draw.
-    ha.set_state("sensor.technikraum_heizung_heizung_power", "0",
-                 {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
-    # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
-    # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
-    ha.set_state("sensor.geotherm_heating_hvac_action", "off", {})
-    ha.set_state("sensor.geotherm_heating_circuit_flow_temp", "25.2",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.geotherm_heating_circuit_return_temp", "24.9",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.geotherm_heating_temp_desired_low", "21.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.geotherm_heating_temp_desired", "21.0",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.geotherm_heating_hvac_mode", "low", {})
-    # ebusd bridge status — "finished" is the steady/safe state (scan not in progress), so the
-    # poll-registration automation's condition gate passes by default in tests.
-    ha.set_state("sensor.ebusd_heating_ebusd_scan_status", "finished", {})
-    ha.set_state("binary_sensor.ebusd_heating_ebusd_running", "on", {})
-    # ebusd interlock inputs — all inactive, so the baseline permits heating.
-    ha.set_state("binary_sensor.geotherm_heating_cooling_demand", "off", {})
-    ha.set_state("binary_sensor.geotherm_heating_cooling_request", "off", {})
-    ha.set_state("binary_sensor.geotherm_heating_cooling_active_uih", "off", {})
-    ha.set_state("binary_sensor.geotherm_heating_hwc_active", "off", {})
-    ha.set_state("binary_sensor.geotherm_heating_backup_heater", "off", {})
-    # Loxone comfort signal — "not warm enough", i.e. the house wants heat.
-    ha.set_state("binary_sensor.loxone_heating_heating_loxone_warm_enough", "off", {})
-    # Compressor-cycling observation (ebusd MQTT): integral mid-pause, settings as tuned by the
-    # owner (start −180 °min), lifetime counters at plausible values.
-    ha.set_state("sensor.geotherm_heating_energy_integral", "-90", {"unit_of_measurement": "°min"})
-    ha.set_state("binary_sensor.geotherm_heating_compressor_demand", "off", {})
-    ha.set_state("sensor.geotherm_heating_circuit_flow_temp_desired", "26",
-                 {"unit_of_measurement": "°C", "device_class": "temperature"})
-    ha.set_state("sensor.geotherm_heating_compressor_start_integral", "-180",
-                 {"unit_of_measurement": "°min"})
-    ha.set_state("sensor.geotherm_heating_compressor_hysteresis", "7", {"unit_of_measurement": "K"})
-    ha.set_state("sensor.geotherm_heating_backup_start_integral", "-600",
-                 {"unit_of_measurement": "°min"})
-    ha.set_state("sensor.geotherm_heating_compressor_starts", "20000",
-                 {"state_class": "total_increasing", "unit_of_measurement": "count"})
-    ha.set_state("sensor.geotherm_heating_compressor_hours", "15000",
-                 {"unit_of_measurement": "h", "device_class": "duration"})
-    ha.set_state("sensor.geotherm_heating_yield_total", "60000",
-                 {"unit_of_measurement": "kWh", "device_class": "energy"})
-    # Daily meters behind sensor.heating_efficiency_today (utility_meter; its source energy
-    # sensors are MQTT and absent in CI, so seed the meters directly).
-    ha.set_state("sensor.heating_yield_daily", "0", {"unit_of_measurement": "kWh"})
-    ha.set_state("sensor.heating_electricity_daily", "0", {"unit_of_measurement": "kWh"})
+    for entity_id, (state, attributes) in BASELINE_STATES.items():
+        home_assistant.set_state(entity_id, state, attributes)
 
 
 # ── Shared time-machine fixtures ─────────────────────────────────────────────────────────

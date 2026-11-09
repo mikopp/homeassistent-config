@@ -4,7 +4,13 @@
 - [x] Research and feasibility check (this file)
 - [x] Step 0 spikes: DONE, exit criterion met (see "Step 0 results")
 - [x] Step 1 HA version single source: DONE. `requirements_test.txt` (PHACC pin) replaces `tests/ha/requirements.txt`; `tests/ha/test_versions.py` guards Dockerfile year.month = PHACC's HA, holidays/cronsim = HA manifest pins, Python >= HA's; Dependabot pip entry for `/`; CLAUDE.md line
-- [ ] Step 2 in-process layer, Step 2b real MQTT broker
+- [ ] Step 2 in-process layer, Step 2b real MQTT broker (see "Step 2 results")
+  - [x] Spike module-scoped `hass` (tier 1): works, but not clean; function scope kept, tier-1 tables become one looping test (decision below)
+  - [x] Mosquitto clear vs restart: measured, restart kept; isolation proof `tests/ha/test_broker_isolation.py`
+  - [x] Shared fixtures in `tests/ha/conftest.py`: `seed`, `apply_baseline` (data moved to `tests/baseline.py`, shared with the Docker suite), `Clock`/`clock`, autouse `log_guard` + `allow_log` marker, action stubs
+  - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
+  - [ ] Migration items 2–5
+  - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
 - [ ] Step 5 knowledge update
@@ -91,7 +97,7 @@ Residual risks, which the spike must close:
   - one MQTT ingest test;
   - one Victron `time_pattern` accumulator test, fed through the real broker while `freezer` moves the clock.
 
-### Step 0 results (spike code: `tests/ha/`, marked SPIKE)
+### Step 0 results (spike tests: `tests/ha/test_spike.py`; the fixtures are final since Step 2)
 How to run it: `uv venv -p 3.14 .venv-test && VIRTUAL_ENV=.venv-test uv pip install -r requirements_test.txt`, plus a `mosquitto` binary and `custom_components/climate_template` (CI downloads it). Then:
 
 ```
@@ -152,6 +158,48 @@ Stability: 140/140 for 7 tests × 20 rounds, and before the last test was added,
    - A real minute boundary during HA start can tick a `time_pattern` accumulator before the freeze, so the baseline must be read, not assumed.
    - The 0→3000 W integration step spans real time before the freeze, so its area must come from HA's timestamps, not be rounded away.
    - Rule for Step 2: every expectation is computed from HA's own timestamps or from a state read after freezing.
+
+### Step 2 results (first chunk: spikes, shared fixtures, migration item 1)
+Run: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4 -q -p no:logging`.
+13 tests (7 spike, 2 broker isolation, 1 templates, 3 version guards). Stability `--count=20 -n 4`: 260/260, 2m19s wall (Step 0: 140 runs in 1m53s).
+
+**Module-scoped `hass` (tier 1): feasible, NOT clean; function scope kept.** Verified against PHACC 0.13.375 source (`plugins.py`, `common.py`) and a throw-away proof (one module fixture, 20 decision tests, then 100 with `--count=5`):
+- Measured: module HA setup 1.4 s, teardown 1.4 s once per module, then about 40 ms per test (100 tests in 5.5 s). Function scope: about 2–2.5 s setup + 0.1–0.8 s teardown per test.
+- Why not clean (each CONFIRMED in the proof or the source):
+  - PHACC's `hass`, `recorder_mock`, `enable_custom_integrations`, `socket_enabled`, `freezer` are all function-scoped. A module HA must be built by hand with `async_test_home_assistant`, plus its own config-entry unload, `async_stop(force=True)` (the context manager does not stop HA; without it `INSTANCES` is left behind) and loop exception handler (the `hass` fixture's re-raise of loop exceptions is lost).
+  - The recorder needs PHACC's private `plugins._async_init_recorder_component`, without the patches `async_test_recorder` applies.
+  - Per test, PHACC's `reset_globals` clears the frame helper and `verify_cleanup` asserts the default time zone is UTC, so every test must re-install the frame helper and Europe/Vienna.
+  - `http` (a dependency of calendar/person/mqtt) binds a socket at setup; module setup runs before the function-scoped `socket_enabled`, so sockets must be enabled by hand.
+  - `verify_cleanup` checks lingering tasks/timers on the function loop, not the module loop: the per-test leak checks no longer see the shared HA. The log guard (function scope) does not see the module's boot logs.
+  - xdist `load` splits a module across workers (one HA per worker per module); interleaved modules re-create it. Needs `--dist loadfile`/`loadgroup`.
+- Decision: stay function-scoped. For tier-1 tables (decision, bypass, wallbox, Victron power math, indicator thresholds) use the `test_templates.py` pattern instead: ONE test on one fresh HA loops over the cases, resets the inputs it uses per case, collects failures, one assert. Same speed as module scope, no PHACC workarounds. A failing case still names itself in the assert message.
+
+**Mosquitto clear vs restart: restart kept.** Measured in-situ (pytest, `-n 0`, 40 tests of the isolation proof):
+| Variant | Cost per test |
+|---|---|
+| Restart, SIGTERM (Step 0 code) | 137 ms (median; graceful shutdown ≈ 110 ms) |
+| Restart, SIGKILL (adopted; `persistence false`, nothing to save) | 23.5 ms |
+| One broker per worker, cleared (subscribe `#`, sentinel round trip, empty retained per topic, 5 retained topics) | 23.6 ms (20 topics: 53 ms; 0 topics: 1.1 ms) |
+- Clear is not faster, and it needs workarounds: PHACC's thread check fails the first test (the session paho thread appears during its setup), and `wait_subscribed` would see the previous test's subscriptions in the shared log (needs a per-test log offset).
+- Isolation proof `tests/ha/test_broker_isolation.py` (A leaves retained messages and self-checks that the probe sees them; B asserts no retained message on `#`), `-n 0 --count=20 --repeat-scope=module`, both orders (A,B,… and B,A,…): restart 40/40 each; clear 40/40; control without clearing: B failed 20/20, so the proof is sensitive.
+- Side finding, fixed: `Broker.stop()` called paho `loop_stop()` before `disconnect()`, so the network thread sat out its 1 s `select()` timeout: 1.0 s of every test's teardown. Teardown is now 0.1–0.8 s; the rest is unexplained (HYPOTHESIS: HA's own MQTT client shutdown).
+
+**Shared fixtures (`tests/ha/conftest.py`).**
+- `tests/baseline.py`: the baseline data (helper actions, input_number values, 99 states) moved out of `tests/conftest.py` as pure data; the Docker fixtures now loop over it. Equivalence checked by recording both fixtures' calls against a fake harness: 133 identical calls in the same order. The Docker suite still collects (203 tests).
+- `seed(hass, states)`, `apply_baseline(hass)` (actions, numbers, states, then a second pass that restores entries a later seed re-rendered: the delayed airflow indicators fell back to `unknown`, the known seeding-order gotcha).
+- `load_repo_config(hass, mqtt_port=…)` + `ha`: also stubs the actions of integrations the test HA lacks (`async_mock_service`, calls in `hass.data["service_calls"]`), and seeds the entities of those integrations (explicit prefix list) BEFORE start.
+- `Clock` (`clock` fixture): `freezer.tick`/`move_to` + `async_fire_time_changed` + `async_block_till_done`. Background tasks are NOT awaited by default (CONFIRMED hang): MQTT's "re-subscribe and birth" task sleeps until a discovery cooldown measured on `time.monotonic`, which freezer stops, so `wait_background_tasks=True` right after start waits until the test timeout. Opt in with `background=True`.
+- Autouse `log_guard`: fails setup, call or teardown on WARNING+ from `homeassistant.helpers.frame`, any `homeassistant.*` "deprecated" message, or a template error (template helper/integration loggers, or a message naming TemplateError/UndefinedError/template variable/`'template' condition`). Opt-out per test: `@pytest.mark.allow_log(regex, reason=...)`. Mutation-checked: a frame report, a template-integration error and a Shelly payload without `output` each fail; an allowed pattern and an unrelated warning pass.
+
+**What the guard and fixtures revealed** (CONFIRMED in these runs unless marked):
+1. Test-environment issues, fixed in the fixtures: the pergola watchdogs' template condition (`states.cover.dach_links.last_updated`) errored on `homeassistant: start` because the Somfy entities did not exist (now seeded before start); airflow automations then called `select.select_option` etc. (now stubbed); the Shelly ingest test payload lacked `output` (`value_json.output` warning; real devices always send it).
+2. Config issue, tolerated by name in `_KNOWN_CONFIG_LOGS`, YAML fix needs approval: `sensor.victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh` render the string `unknown` (source and `this.state` both unknown) into a numeric energy sensor, logged as ERROR on each `time_pattern` tick before the Venus counters arrive. Proposed fix: render `none`. Production impact UNPROVEN (restored state normally covers it). Candidate GitHub issue.
+3. More registry-dependent entity ids (same class as #146), CONFIRMED on a fresh registry: filter `airflow_min_indoor_dew_5min` becomes `sensor.airflow_avg_indoor_dew_5min` (name "Avg"), filter `airflow_wheatherstation_outdoor_temp_5min` → `sensor.airflow_weatherstation_outdoor_temp_5min`, filter `wheatherstation_outdoor_temperature_15min` → `sensor.weatherstation_outdoor_temperature_15min` (so the 48h statistics sensor, which reads `sensor.wheatherstation_outdoor_temperature_15min`, has no source on a fresh install), statistics 48h mean → `sensor.weatherstation_outdoor_temperature_48h_mean`. Templates read the production ids. Candidate addition to #146.
+4. A pre-start seed selected by "entity does not exist yet" once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it (the config entity became `_2`). Hence the explicit prefix list, and `test_packages_load` now asserts no `_2` ids.
+5. `http` binds `0.0.0.0:8123` (not listening) in every in-process test. Configuring it explicitly (localhost, free port) starts HA 2026.10's pending-HTTP-config trial, which reverts and restarts HA once 5 min pass on the mocked clock (seen: "Pending HTTP config was not confirmed"). Left at the default. HYPOTHESIS: a local HA on 8123 would push the test HA into the http fallback chain.
+6. `extract_templates.py` scanned `.venv-test` (5 runtime templates from HA's own YAML) and took 4 s locally: hidden directories are now pruned (CI output unchanged: its checkout has none). It also silently skips the blueprints (`!input` is not a known tag, the YAMLError is swallowed), so their templates (8 lines with `{{` in two blueprints) are never checked (CONFIRMED: 0 extracted from `blueprints/`; fix later, out of this chunk).
+
+**Migration item 1 done.** `tests/ha/test_templates.py`: one test, one HA, `apply_baseline`, then every extracted template rendered with `Template(...).async_render(parse_result=False)` like `/api/template`; strict for state templates (error, undefined variable via `log_fn`, sentinel output), lenient for runtime templates; all failures in one assert. 112 state + 97 runtime templates, about 5 s including HA boot. Mutation checks (temp copy): a state template reading a missing entity → "sentinel output: 'unknown'" naming file and template; a runtime template with an unknown filter → "TemplateAssertionError: No filter named 'bogus_filter'". The Docker `tests/test_templates.py`, the CI extraction step and `TEMPLATES_JSON` are removed.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

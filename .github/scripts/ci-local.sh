@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run the Docker-free CI checks locally (mirrors yaml-lint.yml and the
-# template-extraction step of ha_check.yaml). Not covered here, because they
-# need Docker: `check_config` and all pytest runs.
+# Run the Docker-free CI checks locally (mirrors yaml-lint.yml), plus a smoke run
+# of the template extractor that tests/ha/test_templates.py uses. Not covered
+# here, because they need Docker: `check_config` and the Docker pytest runs.
 #
 # Prerequisites (macOS): brew install yamllint python@3.15
 # Usage:  .github/scripts/ci-local.sh        (run from anywhere)
@@ -56,7 +56,7 @@ lint_resolved() {
   return $rc
 }
 
-# Same template extraction ha_check.yaml does before pytest.
+# Smoke run of the extractor (tests/ha/test_templates.py renders its output).
 extract_templates() {
   "$VENV/bin/python" .github/scripts/extract_templates.py . > "$TMP/templates.json"
 }

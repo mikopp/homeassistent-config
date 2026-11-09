@@ -123,10 +123,9 @@ Runs on every push. Validates the full configuration and executes the test suite
 3. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
 4. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
 5. Runs `homeassistant --script check_config` to catch invalid configuration
-6. Extracts all Jinja2 templates from YAML files into `/tmp/templates.json`
-7. Runs `pytest tests/` against a session-scoped live HA container — covers template rendering correctness and automation scenario tests
-8. Posts a PR comment with truncated pytest output on failure
-9. Writes full results to the Actions Job Summary
+6. Runs `pytest tests/` against a session-scoped live HA container — covers automation scenario tests
+7. Posts a PR comment with truncated pytest output on failure
+8. Writes full results to the Actions Job Summary
 
 **Run the Docker-free checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15`; builds `.venv` itself). `check_config` and pytest require Docker and run only in CI.
 
@@ -153,7 +152,7 @@ The `tests/` directory contains a `pytest` suite:
 
 | File | Coverage |
 |------|----------|
-| `test_templates.py` | Renders every state template and runtime template extracted from YAML; asserts no rendering errors |
+| `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
 | `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
 | `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
 | `test_victron.py` | Template sensor correctness for energy accumulation and mode detection |
