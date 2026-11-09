@@ -1,13 +1,12 @@
 ---
 paths:
   - "packages/victron.yaml"
-  - "tests/test_victron.py"
   - "tests/ha/test_victron.py"
   - "doc/victron/design.md"
 ---
 # Victron package notes (`packages/victron.yaml`)
 
-Current facts of the Victron package. Loads with `packages/victron.yaml`, `tests/test_victron.py`,
+Current facts of the Victron package. Loads with `packages/victron.yaml`,
 `tests/ha/test_victron.py` and `doc/victron/design.md`. Accounting model, formulas, sign table and identities:
 `doc/victron/design.md` (`VIC-n`).
 
@@ -153,22 +152,11 @@ sensors advance on their own, so a held tick would drop that tick's delta. Needs
 ## Tests
 In-process (`tests/ha/test_victron.py`, real broker): `test_instant_power_table` covers every
 instant-power template, fed with Venus OS payloads; "unavailable" is a real `expire_after` (Clock)
-or a sensor that never got a message. The η accumulators are seeded. Also the battery accumulator,
-the grid `integration` and the keep-alive publish.
-
-Docker (`tests/test_victron.py`, accumulator tests until they move in-process):
-- `_seed(vebus_dc=…)` means Multi DC power in W: it seeds 50 V and current `vebus_dc / 50`.
-- `_seed_eta(ac_out=, dc_in=)` sets the two accumulators to control η directly. `_reset_energy`
-  and conftest `baseline_states` reset accumulators to `0.0` and the baselines to `unknown`.
-- Grid energy tests assert a before/after delta (`_grid_energy_baseline`): REST `set_state` cannot
-  reset an `integration` sensor (VIC-11). The second seed is nudged by 1 W so the template chain
-  re-renders. The expected kWh comes from the source sensor's `last_updated` span, not a fixed
-  60 s: the step also contains real wall-clock time.
-- Each test uses at most one `fast_forward(timedelta(minutes=1))` (one trigger render);
-  preconditions like "already baselined" are seeded with `set_state`. The module docstring says
-  why `jump_to_next(hour=...)` is avoided.
-- `test_solar_yield_ac_total_captures_baseline_on_first_tick` is skipped (harness ordering flake;
-  reason in the decorator).
+or a sensor that never got a message. The η accumulators are seeded in that table only. The
+accumulator tests run real minute ticks on a frozen clock (one fresh HA each, nothing seeded):
+battery, η gate, conversion loss, solar-yield counter delta and battery residual chains, grid
+`integration` import/export (exact 60 s steps), and the keep-alive publish. No Docker tests left
+for this package.
 
 ## Related
 - `doc/victron/design.md` (current design).

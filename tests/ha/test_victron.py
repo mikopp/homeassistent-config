@@ -1,15 +1,18 @@
 """Victron power-domain formulas and accumulators (packages/victron.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration item 3. Replaces the 31 instant-power tests of the
-Docker tests/test_victron.py (one case each; the one two-step test is split into two cases)
-and holds the three Victron tests moved unchanged from the Step 0 spike (battery accumulator,
-grid `integration`, keep-alive publish). The other accumulator tests (η ticks, export, conversion
-loss energy, counter-delta baselines, battery residual) stay in the Docker file until item 4.
+plans/test-execution.md, Step 2, migration items 3 and 4. Replaces every test of the former
+Docker tests/test_victron.py: item 3 the 31 instant-power tests (one case each; the one
+two-step test is split into two cases) and the battery/grid accumulator spike ports; item 4
+the 11 accumulator tests left (η gate, export, night, conversion loss, solar-yield counter
+delta incl. the skipped first-tick test, battery residual), now on real minute ticks.
 
 `test_instant_power_table`: ONE test on one fresh HA loops over the cases (tier 1 in the plan:
 stateless formulas). Every case first publishes a reset vector and checks that the derived
 sensors show it, then publishes the case's inputs and checks its expectations; all failures are
 collected into one assert that names each failing case.
+
+The accumulator tests (section "Accumulators driven by real minute ticks"): ONE fresh HA each
+(tier 3), real ticks on the frozen clock, nothing seeded.
 
 How the inputs get in:
 - Every Victron MQTT sensor is driven over the real broker with Venus OS payloads
@@ -17,17 +20,17 @@ How the inputs get in:
 - "Unavailable" is what production sees: the MQTT sensor's `expire_after` elapsed (Clock), or
   the sensor never received a message (expire_after sensors start unavailable, see
   `test_instant_power_table`'s startup phase). The Docker suite wrote "unavailable" over REST.
-- The two η accumulators (`victron_multiplus_ac_out_energy` / `_dc_in_energy`) are trigger-based
-  time_pattern sensors: a real path needs minute ticks (item 4), so they are seeded, as in the
-  Docker suite. Their self-reference (`this.state`) makes the seed what the next tick builds on.
-- The clock is frozen for the whole table (`clock` fixture), so no real minute boundary can tick
-  the accumulators mid-case; it moves only for an expiry case.
+- In the instant-power table the two η accumulators (`victron_multiplus_ac_out_energy` /
+  `_dc_in_energy`) are seeded to set η per case; their self-reference (`this.state`) makes the
+  seed what the next tick builds on. The clock is frozen for the whole table (`clock`
+  fixture), so no minute tick can change them mid-case; it moves only for an expiry case.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
@@ -365,3 +368,299 @@ async def test_victron_keepalive_published(
     await ha.async_add_executor_job(
         broker.wait_received, topic, '{"keepalive-options":["suppress-republish"]}', mark
     )
+
+
+# ── Accumulators driven by real minute ticks (plans/test-execution.md, Step 2, item 4) ──────
+# Replace the Docker η, export, night, conversion-loss, solar-yield counter-delta and battery
+# residual tests. ONE fresh HA per test (tier 3: the accumulators' `this.state` and the
+# `integration` totals cannot be reset), no seeded accumulator or baseline: every value is what
+# the real trigger block (`time_pattern: minutes: "/1"`) built from the published inputs.
+#
+# A tick: publish every input (the GX pushes continuously; power expires after 120 s), sync,
+# advance 60 s on the frozen clock, aligned to half past a minute (`Clock.align`). That crosses
+# exactly one minute boundary, so the block renders exactly once. The expected value of an accumulator is computed from its state read
+# right before the tick with the template's own arithmetic (`round(x + w / 60000, 3)`), so the
+# check is exact. The Docker suite allowed one tick per test ("the harness's time_pattern
+# trigger only reliably re-fires on the FIRST clock advance"); in-process any number of ticks
+# chain, which is what makes the skipped `captures_baseline_on_first_tick` deterministic.
+_COUNTERS = {  # lifetime counters (kWh), expire_after 7 days
+    "mppt_total": "solarcharger/279/Yield/System",
+    "acpv_total": "pvinverter/20/Ac/Energy/Forward",
+}
+_WEEK = 604800  # the counters' expire_after
+_ACC = {key: ("sensor", "template", uid) for key, uid in {
+    "ac_out_energy": "victron_multiplus_ac_out_energy",
+    "dc_in_energy": "victron_multiplus_dc_in_energy",
+    "batt_in": "victron_battery_energy_in",
+    "batt_out": "victron_battery_energy_out",
+    "loss_energy": "victron_multiplus_conversion_loss_energy",
+    "solar_total": "victron_solar_yield_total_kwh",
+    "mppt_baseline": "victron_solar_yield_dc_baseline_kwh",
+    "acpv_baseline": "victron_ac_pv_energy_baseline_kwh",
+}.items()} | {
+    "ac_net": ("sensor", "template", "victron_multiplus_ac_net_power"),
+    "dc_power": ("sensor", "template", "victron_multiplus_dc_power"),
+    "loss": ("sensor", "template", "victron_multiplus_conversion_loss_power"),
+    "eta": ("sensor", "template", "victron_multiplus_conversion_efficiency"),
+    "grid_import_power": ("sensor", "template", "victron_grid_power_import"),
+    "grid_export_power": ("sensor", "template", "victron_grid_power_export"),
+    "grid_import": ("sensor", "integration", "victron_grid_energy_import"),
+    "grid_export": ("sensor", "integration", "victron_grid_energy_export"),
+    "mppt_counter": ("sensor", "mqtt", "victron_solar_yield_dc_total_kwh"),
+}
+
+
+class _Ticker:
+    """Publishes a Victron input vector, ticks the minute block and checks accumulator deltas."""
+
+    def __init__(self, hass: HomeAssistant, broker: Broker, clock: Clock) -> None:
+        self.hass, self.broker, self.clock = hass, broker, clock
+        self.ids = {key: entity_id(hass, *spec) for key, spec in _ACC.items()}
+        self.failures: list[str] = []
+
+    async def start(self) -> None:
+        """Align the clock to half past a minute (`Clock.align`: one tick per 60 s move), then
+        wait until HA subscribed to every topic a test publishes."""
+        await self.clock.align()
+        topics = [t for t, _ in _INPUTS.values()] + list(_COUNTERS.values())
+        await wait_subscribed(self.hass, self.broker, *(f"{_GX}/{t}" for t in topics))
+
+    async def publish(
+        self, *, skip: frozenset[str] = frozenset(), counters: dict[str, float] | None = None,
+        **values: float,
+    ) -> None:
+        """Publish every power input (defaults 0 W / 0 A / 50 V; `vebus_dc` = Multi DC power in
+        W at 50 V) except `skip`, and the given lifetime counters; then sync."""
+        vals = dict(_DEFAULTS)
+        for key, value in values.items():
+            if key == "vebus_dc":
+                vals["vebus_i"] = _vebus_current(value)
+            else:
+                vals[key] = float(value)
+        await _publish_inputs(self.hass, self.broker, vals, skip)
+        for key, value in (counters or {}).items():
+            await publish(self.hass, self.broker, f"{_GX}/{_COUNTERS[key]}", {"value": value})
+        await mqtt_sync(self.hass, self.broker)
+
+    def value(self, key: str) -> float:
+        """An accumulator's current value; a trigger sensor that never ticked counts as 0."""
+        state = self.hass.states.get(self.ids[key]).state
+        return 0.0 if state in ("unknown", "unavailable") else float(state)
+
+    async def tick(self, **publish_kwargs: Any) -> dict[str, float]:
+        """Publish (`publish` arguments), read every accumulator, advance one minute.
+
+        Returns the values read BEFORE the tick, for the expectations of `check`.
+        """
+        await self.publish(**publish_kwargs)
+        before = {k: self.value(k) for k in _ACC if self._numeric_or_unknown(k)}
+        await self.clock.advance(60)
+        return before
+
+    def _numeric_or_unknown(self, key: str) -> bool:
+        state = self.hass.states.get(self.ids[key]).state
+        return state in ("unknown", "unavailable") or _is_float(state)
+
+    def check(self, where: str, expect: dict[str, Callable[[str], bool]]) -> None:
+        """Collect a failure for every entity (key of _ACC) not matching its predicate."""
+        self.failures += check_states(self.hass, self.ids, expect, where)
+
+    def done(self) -> None:
+        """One assert listing every failed check."""
+        assert not self.failures, (
+            f"{len(self.failures)} accumulator check(s) failed:\n" + "\n".join(self.failures)
+        )
+
+
+def _is_float(state: str) -> bool:
+    """True when the state parses as a number."""
+    try:
+        float(state)
+    except ValueError:
+        return False
+    return True
+
+
+def _plus(before: float, watts: float) -> Callable[[str], bool]:
+    """Predicate: one tick of `watts` added with the template's arithmetic and rounding."""
+    return near(round(before + watts / 60000, 3))
+
+
+async def test_eta_accumulators_keep_pace_when_ac_pv_expired(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """AC PV asleep: ac_out must integrate alongside dc_in, or η drifts down every night.
+
+    Docker case: load 351, grid 12 → ac_net 339 W (ac_out +339/60000); Multi DC −345 W
+    (dc_in +345/60000). Both PV sensors never got a message (expire_after: unavailable), as a
+    sleeping inverter. Two ticks in a row, each checked.
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    night = {"grid_l1": 12, "ac_l1": 351, "vebus_dc": -345, "skip": _PV}
+    await t.publish(**night)
+    t.check("inputs", {"ac_net": near(339), "dc_power": near(-345)})
+    for n in (1, 2):
+        before = await t.tick(**night)
+        t.check(f"tick {n}", {"ac_out_energy": _plus(before["ac_out_energy"], 339),
+                              "dc_in_energy": _plus(before["dc_in_energy"], 345)})
+    t.done()
+
+
+async def test_eta_accumulators_gate_on_both_signs(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """Both η accumulators need ac_net > 0 AND dc < 0; a mismatched tick adds to NEITHER.
+
+    Docker: three ticks, only the total after the third was checked. Here each tick is
+    checked on its own: (1) ac_net +600 / dc +660 adds nothing, (2) ac_net −600 / dc −660 adds
+    nothing, (3) ac_net +600 / dc −660 adds 0.010 / 0.011.
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    steps = [
+        ("charging current while AC inverts", {"ac_l1": 600, "vebus_dc": 660}, (600, 660), False),
+        ("inverting current while AC charges", {"grid_l1": 600, "vebus_dc": -660}, (-600, -660),
+         False),
+        ("both inverting (control)", {"ac_l1": 600, "vebus_dc": -660}, (600, -660), True),
+    ]
+    for where, inputs, (ac_net, dc), adds in steps:
+        await t.publish(**inputs)
+        t.check(f"{where}: inputs", {"ac_net": near(ac_net), "dc_power": near(dc)})
+        before = await t.tick(**inputs)
+        t.check(where, {
+            "ac_out_energy": _plus(before["ac_out_energy"], 600 if adds else 0),
+            "dc_in_energy": _plus(before["dc_in_energy"], 660 if adds else 0),
+        })
+    t.done()
+
+
+async def test_grid_export_energy_accumulates(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """1800 → 1000 W export; the second step is EXACTLY 60 s (frozen clock) → exact kWh.
+
+    Replaces the Docker test (1800 → 1801 W, a relative delta from a session-long total with
+    a 2 Wh tolerance). Same construction as `test_grid_import_energy_accumulates`: the first
+    step (0 → 1800 W) spans HA start → the publish, so its area comes from HA's timestamps;
+    the total rounds to 1 Wh (`round: 3`). The import total does not move.
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    src = t.ids["grid_export_power"]
+    prev = ha.states.get(src)
+    import_before = ha.states.get(t.ids["grid_import"]).state
+    await t.publish(grid_l1=-1800)
+    t.check("1800 W export", {"grid_export_power": near(1800)})
+    first_s = ha.states.get(src).last_updated_timestamp - prev.last_reported_timestamp
+    await clock.advance(60)
+    await t.publish(grid_l1=-1000)
+    expected = (float(prev.state) + 1800) / 2 * first_s / 3_600_000 + (1800 + 1000) / 2 * 60 / 3_600_000
+    t.check("after 60 s at 1800 W, now 1000 W", {"grid_export": near(expected, 0.0006),
+                                                  "grid_import": is_state(import_before)})
+    t.done()
+
+
+async def test_night_no_grid_energy_accumulates(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """Night: no grid flow, 1500 W load from the battery → grid totals stay, batt_out grows.
+
+    Docker: batt_out "> 0" and the grid totals equal to a session baseline. Here exact: the
+    residual falls back to the power domain (no lifetime counters: never published), so
+    batt_out += 1500/60000 = 0.025 and batt_in += 0 per tick; a zero-power `integration` step
+    has zero area.
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    night = {"ac_l1": 1500, "skip": _PV}
+    await t.publish(**night)
+    t.check("inputs", {"grid_import_power": near(0), "grid_export_power": near(0)})
+    grid = {k: ha.states.get(t.ids[k]).state for k in ("grid_import", "grid_export")}
+    for n in (1, 2):
+        before = await t.tick(**night)
+        t.check(f"tick {n}", {"batt_out": _plus(before["batt_out"], 1500),
+                              "batt_in": _plus(before["batt_in"], 0),
+                              "grid_import": is_state(grid["grid_import"]),
+                              "grid_export": is_state(grid["grid_export"])})
+    t.done()
+
+
+async def test_conversion_loss_energy_accumulates(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """600 W loss (load 600 W, Multi DC −1200 W) adds 0.010 kWh per tick (two ticks)."""
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    inputs = {"ac_l1": 600, "vebus_dc": -1200}
+    await t.publish(**inputs)
+    t.check("inputs", {"loss": near(600)})
+    for n in (1, 2):
+        before = await t.tick(**inputs)
+        t.check(f"tick {n}", {"loss_energy": _plus(before["loss_energy"], 600)})
+    t.done()
+
+
+async def test_solar_yield_ac_total_counter_delta(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """The AC solar total follows the MPPT lifetime counter through its baseline, tick by tick.
+
+    Replaces the four Docker counter-delta tests, which each seeded the "already baselined"
+    precondition and allowed one tick; `captures_baseline_on_first_tick` was skipped as a
+    harness ordering flake. Here it is the first step of one chain on real ticks:
+      1. no baseline yet: the tick holds the total and captures the baseline (100.0);
+      2. +0.5 kWh: added 1:1 (η 100 % bootstrap), baseline 100.5;
+      3. counter reset to 10.0: delta clamped to 0, baseline re-anchors to 10.0;
+      4. counter expires (expire_after 7 days): total and baseline hold;
+      5. new: the counter returns at 12.0: the next tick takes the whole gap (+2.0).
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    start = t.value("solar_total")
+    t.check("start: no baseline", {"mppt_baseline": is_state("unknown")})
+    await t.tick(counters={"mppt_total": 100.0})
+    t.check("1. first tick captures the baseline", {"solar_total": near(start),
+                                                    "mppt_baseline": near(100.0)})
+    await t.tick(counters={"mppt_total": 100.5})
+    t.check("2. delta applied", {"solar_total": near(round(start + 0.5, 3)),
+                                 "mppt_baseline": near(100.5)})
+    await t.tick(counters={"mppt_total": 10.0})
+    t.check("3. counter reset clamped", {"solar_total": near(round(start + 0.5, 3)),
+                                         "mppt_baseline": near(10.0)})
+    # 4. Let the counter expire for real, then one more tick with it unavailable. (The tick
+    #    inside the long move may run before or after the expiry; both give the same result,
+    #    since the counter still equals the baseline.)
+    await clock.advance(_WEEK + 1)
+    await t.tick()
+    t.check("4. counter unavailable holds", {"mppt_counter": _UNAV,
+                                             "solar_total": near(round(start + 0.5, 3)),
+                                             "mppt_baseline": near(10.0)})
+    await t.tick(counters={"mppt_total": 12.0})
+    t.check("5. next tick takes the whole gap", {"solar_total": near(round(start + 2.5, 3)),
+                                                 "mppt_baseline": near(12.0)})
+    t.done()
+
+
+async def test_battery_energy_residual(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
+    """Battery accumulators: power-domain bootstrap, then the energy-domain counter delta.
+
+    Replaces the Docker `…_bootstrap_before_baseline` and `…_uses_counter_delta_once_baselined`
+    (the second seeded both baselines). Chain on real ticks, all power 0 W:
+      1. both counters arrive (50.0 / 20.0), no baseline yet: the power fallback adds nothing,
+         the tick captures both baselines;
+      2. MPPT +1.0, AC PV +0.2 kWh, no load or grid: the whole 1.2 kWh charged the battery
+         (batt_in += 1.0 × η 1.0 + 0.2), batt_out += 0.
+    """
+    t = _Ticker(ha, broker, clock)
+    await t.start()
+    before = await t.tick(skip=_PV, counters={"mppt_total": 50.0, "acpv_total": 20.0})
+    t.check("1. bootstrap tick", {"batt_in": _plus(before["batt_in"], 0),
+                                  "batt_out": _plus(before["batt_out"], 0),
+                                  "mppt_baseline": near(50.0), "acpv_baseline": near(20.0)})
+    before = await t.tick(skip=_PV, counters={"mppt_total": 51.0, "acpv_total": 20.2})
+    t.check("2. counter delta", {"batt_in": near(round(before["batt_in"] + 1.2, 3)),
+                                 "batt_out": near(before["batt_out"]),
+                                 "mppt_baseline": near(51.0), "acpv_baseline": near(20.2),
+                                 "eta": near(100)})
+    t.done()

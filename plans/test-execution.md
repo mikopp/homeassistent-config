@@ -11,7 +11,7 @@
   - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
   - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
   - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
-  - [ ] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost done (see "Step 2 results, item 4"); Victron, airflow in progress
+  - [ ] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron done (see "Step 2 results, item 4"); airflow in progress
   - [ ] Migration item 5 (pergola)
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
@@ -326,6 +326,25 @@ Mutation checks (in place, restored with `git checkout`), each fails naming the 
 | heating-only sensor ignores hcmode `water` | history: runs 3, runtime 0.75; last run: hot-water checks |
 | runs_today counts `off` | `no run today` (1), runs 3, average 10.0 |
 | yield meter `cycle: weekly` | `after midnight` (9), `next day` |
+
+**Victron** (`tests/ha/test_victron.py`, section "Accumulators driven by real minute ticks"; Docker file deleted). A tick = publish every input, sync, advance 60 s (exactly one `/1` boundary); every expectation is computed from the accumulator's state read just before the tick with the template's own arithmetic (`round(x + W/60000, 3)`), so all checks are exact. Nothing is seeded.
+| Docker (11) | Now (7 tests) | Notes |
+|---|---|---|
+| `test_eta_accumulators_keep_pace_when_ac_pv_expired` | same name | two ticks, each checked exactly (Docker ±0.001); PV never published (= asleep) |
+| `test_eta_accumulators_gate_on_both_signs` | same name | each of the three ticks checked on its own (Docker: only the total after the third) |
+| `test_grid_export_energy_accumulates` | same name | exact 60 s step 1800 → 1000 W, first step from HA timestamps, ±0.6 Wh (Docker: 1800 → 1801 W relative to a session total, ±2 Wh); import total unchanged |
+| `test_night_no_grid_energy_accumulates` | same name | batt_out exactly +0.025/tick (Docker: "> 0"), grid totals unchanged over two ticks |
+| `test_conversion_loss_energy_accumulates` | same name | two ticks |
+| `test_solar_yield_ac_total_captures_baseline_on_first_tick` (**skipped** in Docker), `…_applies_delta_once_baselined`, `…_counter_reset_clamped_to_zero`, `…_holds_on_source_unavailable` | `test_solar_yield_ac_total_counter_delta` | ONE chain on real ticks: capture → +0.5 → reset clamp → real 7-day expiry holds → new: the returning counter's whole gap is added on the next tick. **The skipped flake is deterministic in-process**: 40/40 alone and 20/20 in the file run (no harness, no session state). Its Docker symptom ("the second jump never re-fires the trigger") is UNPROVEN as a harness fault, but a similar in-process cause was found and fixed (tick skip, below) |
+| `test_battery_energy_residual_bootstrap_before_baseline`, `…_uses_counter_delta_once_baselined` | `test_battery_energy_residual` | chain: bootstrap tick captures both baselines, next tick +1.2 kWh in (Docker seeded the baselines) |
+
+Two in-process flakes found by the stability runs and fixed (harness, not config):
+- **Minute tick skipped** (1 in ~60 ticks; seen as `tick 2: loss_energy 0.01, want 0.02`). CONFIRMED in `helpers/event.py` (`_TrackUTCTimeChange`): a `time_pattern` tick is scheduled at hh:mm:00 + a random 0.05-0.5 s, `async_fire_time_changed` fires what is due up to 0.5 s past the new time and patches "now" to that, and the listener reschedules from now + 1 s; if the tick fell in the first second of the move, the next minute's slot is already behind "now + 1 s" and is skipped. Fix: `Clock.align()` moves to half past a minute before ticking (`_Ticker.start`), so every tick is mid-move. After: 0 skips in 210 + 220 runs.
+- **Test MQTT client dropped after the 7-day move** (2 in 60 runs of the counter-delta test: "Message publish failed: The client is not currently connected"). HYPOTHESIS (same mechanism as HA's client above, not traced for the test client): its paho keep-alive runs on the frozen monotonic, and a move before the PINGRESP was read counts as a timeout. Fix: the test client connects with `keepalive=0` (local real-time broker). After: 40/40 alone, 220/220 for the whole file.
+
+Stability: `tests/ha/test_victron.py --count=20 -n 4`: 220/220, 4m13s.
+
+Mutation checks (in place, restored): ac_out gate without `ac > 0` → `inverting current while AC charges: ac_out -0.01`; loss energy `/60000` → `/6000` → both loss ticks; solar total clamp removed → steps 3-5 (-90.0); export integration `trapezoidal` → `left` → 0.030 vs 0.0233; battery residual AC-PV counter term dropped → `2. counter delta: batt_in 1.0, want 1.2`; batt_out halved → night ticks (and the battery spike test).
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

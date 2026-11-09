@@ -274,7 +274,11 @@ class Broker:
         self._client.on_message = lambda _c, _u, m: self.received.append(
             (m.topic, m.payload.decode())
         )
-        self._client.connect("127.0.0.1", self.port)
+        # keepalive=0: no keep-alive pings. paho times them on time.monotonic, which freezer
+        # moves with the HA clock; after a long move (a 7-day expiry) the test client saw its
+        # own ping as timed out and dropped the connection ("Message publish failed: The client
+        # is not currently connected", 2 in 60 runs). The broker is local and real-time.
+        self._client.connect("127.0.0.1", self.port, keepalive=0)
         # No Nagle on the test client either (see `set_tcp_nodelay` above).
         self._client.socket().setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._client.subscribe("#")
@@ -629,6 +633,23 @@ class Clock:
         """Jump to an absolute (aware) time and run everything that came due."""
         self._freezer.move_to(when)
         await self._fire(background)
+
+    async def align(self, second: int = 30) -> None:
+        """Move forward to the next wall-clock minute at `second` (default: half past).
+
+        For tests that count minute ticks (`time_pattern: minutes: "/1"`) with 60 s moves.
+        A tick is scheduled at hh:mm:00 plus a random 0.05-0.5 s; a move fires what is due up
+        to 0.5 s past the new time and the tick reschedules from "now + 1 s". When the frozen
+        clock sits just after a tick's slot (within about a second), that reschedule skips
+        the next minute, so one 60 s move fires no tick (seen: 1 in about 60 ticks, a
+        conversion-loss accumulator that did not grow on its second tick). With the clock at
+        half past, every tick lies mid-move: exactly one per 60 s move.
+        """
+        now = dt_util.utcnow()
+        target = now.replace(second=second, microsecond=0)
+        if target <= now:
+            target += timedelta(minutes=1)
+        await self.move_to(target)
 
     async def hold(
         self,
