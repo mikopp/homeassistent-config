@@ -108,11 +108,6 @@ The other helpers' values are on each helper in the YAML (baselines: `doc/pergol
   reads. This is code, not a comment: fixing it needs a test run. → GitHub issue #142
 - Field calibration (PV factor, shading sensitivity, wall azimuth, drain angles, rain lock):
   `plans/pergola-field-calibration.md`.
-- The `alias:`/`description:` of `pergola_state_manager` and `script.pergola_evaluate_state`
-  still say "rules 5–8"; the rules are 5–9 (incl. `sun_down`) (`PG-2.2`). UI text only (data, not
-  comments), left for a code change.
-- The dashboard's automation grid has no tile for `automation.pergola_sync_heating_from_indicator`
-  (open question: add one? user decides).
 - Flaky test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN).
 
 ## Tests (`tests/test_pergola.py`)

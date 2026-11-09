@@ -41,6 +41,8 @@ views:
           - type: tile
             entity: automation.pergola_not_enough_sun_exit
           - type: tile
+            entity: automation.pergola_sync_heating_from_indicator
+          - type: tile
             entity: automation.inactivity_watchdog_dach_links
           - type: tile
             entity: automation.inactivity_watchdog_dach_rechts

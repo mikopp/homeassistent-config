@@ -661,7 +661,7 @@ automation:
 
     description: >
       Evaluates rules 1–4 (frost, rain, rain_stopped, user_override) directly and
-      delegates rules 5–8 to script.pergola_evaluate_state. Triggers on all inputs
+      delegates rules 5–9 to script.pergola_evaluate_state. Triggers on all inputs
       that can cause a state transition; the choose block determines what (if anything)
       to do on each trigger.
     triggers:
@@ -1130,10 +1130,10 @@ script:
   # Callers: state manager default, exit_to_normal, end of the post-rain drain. Never checks
   # rules 1–4; callers guarantee they do not apply. → doc/pergola/design.md#PG-2.2
   pergola_evaluate_state:
-    alias: "Pergola: Evaluate State (Rules 5–8)"
+    alias: "Pergola: Evaluate State (Rules 5–9)"
 
     description: >
-      Evaluates rules 5–8 (no_sun_behind_house → not_enough_sun → heating → cooling)
+      Evaluates rules 5–9 (sun_down → no_sun_behind_house → not_enough_sun → heating → cooling)
       and writes the result to input_select.pergola_automation_state. Called from
       the state manager default branch and from the post-rain recovery script.
     sequence:
