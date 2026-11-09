@@ -84,7 +84,8 @@ State manager (`mode: queued, max: 3`), first matching `choose` branch wins:
 5. `sun_down`: PV power and solar radiation both read exactly 0 (`float(-1)` fail-safe: an
    unavailable sensor skips this rule).
 6. `no_sun_behind_house`: `sun.sun` below horizon, or elevation ≤ `pergola_min_sun_elevation`
-   (sun shines under the roof), or azimuth outside `wall_azimuth ± 90`.
+   (sun shines under the roof), or azimuth outside `wall_azimuth ± 90`. Geometry only: not
+   delayed and independent of `sun_shining`.
 7. `not_enough_sun`: `binary_sensor.pergola_sun_shining` is `off`.
 8. `sun_automatik_heating`: `input_boolean.pergola_heating` is `on`.
 9. `sun_automatik_cooling`: default.
