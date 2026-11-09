@@ -154,10 +154,9 @@ The `tests/` directory contains a `pytest` suite:
 |------|----------|
 | `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
 | `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
-| `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table) |
+| `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table); on a frozen clock the real indicators (delays, hysteresis), controller and drying-boost automations on real triggers, drying schedules, climate hvac_action, reload recovery |
 | `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
 | `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
-| `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
 | `ha/test_victron.py` | In-process, real MQTT broker: Victron instant-power formulas (Venus OS payloads, expiry); on real minute ticks the energy accumulators (η, conversion loss, counter-delta baselines, battery residual) and the grid import/export integration; keep-alive publish |
 | `ha/test_heating_pv_boost.py` | In-process, real MQTT broker: PV surplus, compressor and cycling formulas, cooling interlock, derived setpoint (ebusd, Shelly and Victron payloads); on a frozen clock the hot-water return mask, slab decision delays, last compressor run, history_stats and daily meter reset |
 | `ha/test_shelly_pool_pump.py` | In-process, real MQTT broker: pool pump Shelly payloads through the real value_templates |

@@ -333,6 +333,10 @@ jobs:
         run: |
           pytest tests/ --ignore=tests/test_pergola.py -v --timeout=90 --timeout-method=thread 2>&1 | tee /tmp/pytest_rest_output.txt
           exit_code=${PIPESTATUS[0]}
+          # Exit 5 = no tests collected: every non-pergola Docker test moved in-process
+          # (tests/ha, plans/test-execution.md Step 2 item 4). Kept as a no-op until Step 4
+          # replaces this workflow.
+          if [ "$exit_code" -eq 5 ]; then exit_code=0; fi
           exit $exit_code
 
       # ── 9. Write test output to Job Summary (always visible in Actions UI) ──

@@ -2,7 +2,6 @@
 paths:
   - "packages/airflow_cooling.yaml"
   - "custom_templates/airflow_decision.jinja"
-  - "tests/test_airflow.py"
   - "tests/ha/test_airflow.py"
   - "dashboards/airflow-dashboard.yaml"
   - "doc/airflow/design.md"
@@ -93,17 +92,16 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 - `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
   default on a helper that the repo rule forbids (code, not fixed in a docs step). → GitHub issue #142
 
-## Tests (`tests/test_airflow.py`)
-- Seed season/dew first, then the delayed indicators (`_seed_indicators`) — CONFIRMED; otherwise a
-  season/dew change re-renders the REST-seeded indicators to `unknown` (harness pattern:
-  ha-test-harness skill).
-- Clock-order dependency, CONFIRMED by breaking it: the delayed indicators (`delay_on`/`delay_off`
-  = 10 min, no `homeassistant:start` trigger) are `unknown` after boot until the mocked clock crosses
-  the delay. Any test asserting a definite on/off from them needs its own `fast_forward` first —
-  removing the one in `_assert_recomputes_after_reload` broke two unrelated tests later in nodeid order.
-- Latent fragility: the file pins `sensor.heating_cooling_indicator` via `set_state()` ~30×; that
-  only holds because the seeded 48h mean happens to keep those states (the indicator re-renders from
-  its inputs). If a pin stops sticking, drive the mean instead.
+## Tests (`tests/ha/test_airflow.py`, in-process; no Docker tests left)
+- Item-2 tables (decision, bypass, dew points) seed the indicators: seed season/dew first, then the
+  delayed indicators — CONFIRMED; otherwise a season/dew change re-renders the seeded indicators to
+  `unknown` (no internal state without the delay).
+- Item-4 tests drive the REAL indicators through the seeded 5-min filter outputs and the clock
+  (10 min delays, `this.state` hysteresis), the real workday/schedules (clock moved to a known
+  weekday), and the automations on real triggers; effects are the recorded ComfoConnect/phone calls.
+- CONFIRMED config bug, `test_drying_boost_unavailable_to_boost_does_not_fire` (strict xfail):
+  a flush input going briefly unavailable restarts a running boost (decision unavailable →
+  medium → boost is a real edge). Details: `plans/test-execution.md`, item 4 results.
 
 ## Related
 - `doc/airflow/design.md` — current design (`AF-*` IDs).

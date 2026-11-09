@@ -11,7 +11,7 @@
   - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
   - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
   - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
-  - [ ] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron done (see "Step 2 results, item 4"); airflow in progress
+  - [x] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron, airflow → in-process; their Docker files deleted; only `tests/test_pergola.py` (18 tests, item 5) is left in Docker (see "Step 2 results, item 4")
   - [ ] Migration item 5 (pergola)
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
@@ -297,7 +297,7 @@ Harness changes (CONFIRMED by measurement in this chunk):
 
 No config bug found by these tests.
 
-### Step 2 results, item 4 (in progress; filled per package)
+### Step 2 results, item 4 (heating_pv_boost, Victron, airflow)
 Harness changes (`tests/ha/conftest.py`), each CONFIRMED in this chunk:
 - **Freezing fires every boot-time timer.** freezer replaces `time.monotonic`, which is asyncio's `loop.time()`, with the frozen wall-clock timestamp (printed in a test: loop time 1.79e9 s after the freeze vs real monotonic ~2000 s). Every timer scheduled before the freeze (a delay_on/off started at boot, time_pattern ticks, expire_after) is then overdue and fires at whatever loop iteration comes next. The `clock` fixture now fires them itself (`advance(0)`), so a test starts deterministic: e.g. `heating_dhw_active` is already `off`, not its boot `unknown`. Consequence: an "unknown until the delay passes after boot" state cannot be observed in-process (the Docker tests only worked around it).
 - **MQTT keep-alive across clock moves.** paho times its keep-alive on `time.monotonic` too: a move of at least 60 s sends a PINGREQ; a second move before the PINGRESP was read (real socket I/O) counts as a ping timeout and drops the connection (seen: a move to tomorrow 10:00 right after the fixture's `advance(0)` → "Error talking to MQTT: The client is not currently connected", subscriptions lost). `Clock` now waits (real time, bounded) after every move until no ping is open.
@@ -345,6 +345,56 @@ Two in-process flakes found by the stability runs and fixed (harness, not config
 Stability: `tests/ha/test_victron.py --count=20 -n 4`: 220/220, 4m13s.
 
 Mutation checks (in place, restored): ac_out gate without `ac > 0` → `inverting current while AC charges: ac_out -0.01`; loss energy `/60000` → `/6000` → both loss ticks; solar total clamp removed → steps 3-5 (-90.0); export integration `trapezoidal` → `left` → 0.030 vs 0.0233; battery residual AC-PV counter term dropped → `2. counter delta: batt_in 1.0, want 1.2`; batt_out halved → night ticks (and the battery spike test).
+
+**airflow** (`tests/ha/test_airflow.py`, section "Item 4"; Docker `tests/test_airflow.py` deleted). Nothing of the decision chain is seeded: the five indicators (trigger-based, delay_on/off 10 min, `this.state` hysteresis) are driven through the seeded 5-min filter outputs (no real source here; their ComfoConnect sources are untouched, so the filters never overwrite the seeds) and the clock; the season is the real indicator via its 48h mean; workday and both boost schedules are the real helpers (clock moved to a working Wednesday 07:01 and to the next weekday public holiday, from the `holidays` package); the automations run on real triggers with their real conditions. Effects = calls recorded by the stubbed ComfoConnect/phone actions, attributed to the automation that made them by the context of its `automation_triggered` event, so the climate entity's own calls do not count. Each looping table resets to a reference scenario whose every value is past each hysteresis' release edge, and checks the reset.
+
+New harness pieces (in the test module): `airflow_ha` (baseline before the freeze, real entities skipped, every automation except the two airflow ones off: the pergola cover response waits on timers longer than a move and hung `async_block_till_done`, seen); a **device echo** for the four ComfoConnect stubs (a write sets the entity state, as the integration reports it: without it every follow-up run, e.g. the decision writing state and attributes separately, repeated the write; with it the controller's own follow-ups run as in production, e.g. route-to-auto → `auto_mode_on` → medium); `_runs` counts `automation_triggered` events (on the frozen clock two runs share one `last_triggered`).
+
+Mapping, Docker (65) → in-process:
+| Docker | Now | Notes |
+|---|---|---|
+| controller S1 (6), S2 (3), medium preset (4), away preset (2), consistency (4), `heat_protection_low_wins_over_free_cooling_bump` = 20 | `test_controller`: 20 cases + 4 new | real `decision_changed` edge (automatic control off → on), exact call lists (Docker: trace only for every writing case, no-op cases by unchanged stub state). New: device reports another profile → re-asserted; away ends → low applied; route-to-auto from manual low; schedule drops preset to low → re-bumped. The auto-disabled cases now fire a real trigger and check the controller did not run |
+| boost (5), `drying_boost_away_suppressed`, edge tests (4) = 10 | `test_drying_boost` (8 cases), `test_drying_boost_unavailable_to_boost_does_not_fire` (strict xfail, **config bug**, below) | `starts_when_needed` + `real_edge_into_boost_fires` → one case; exact calls of the boost automation (60 min, ON, notification; adoption without notification; stop; seamless re-arm) |
+| `test_drying_boost_config_edge_only` | moved unchanged (static, no HA) | |
+| drying sensor (3) + drying render (3) | `test_drying_needed` (one forward sequence, 10 checks) | real schedules/workday; new: the 07:00 window edge, hysteresis 0.3. **Dropped:** `drying_low_moisture_guard_prevents_boost`: the guard is no longer in the config (flush gates the guard: `new_low_needed_gated_off_by_flush`) |
+| dew_max (4) | `test_indicator[free_cooling]` 4 cases (1 new) | `dew_max_formula_value_at_baseline` dropped as a duplicate of `test_dew_point_thresholds` (literal 12.08); new: exact gate edge 12.08/12.09, exact delay_on/off |
+| low-needed (5) | `test_indicator[moisture_low]` 6 cases (1 new) | real Schmitt via `this.state`; combined low intent checked |
+| flush (10) | `test_indicator[flush]` 11 cases | hysteresis split in from-off / from-on; season guard with its delay_off; unavailable at once (the Docker test leaned on an earlier test's clock move) |
+| heat (2 of 3) | `test_indicator[heat_low]` 3 cases (1 new) | `heat_ventilation_low_needed_off_…` leaned on an earlier test's clock move; `ventilation_low_needed_derives_from_heat` now with the real heat low |
+| hvac_action (5) | `test_hvac_action` 6 cases (2 new) | real decision, controller off; **dropped** `hvac_action_template_matches_mirror` (a text check of the copy; no copy left) |
+| reload (2) | `test_reload_recovery` | real `template.reload` + the forced-unknown self-trigger |
+
+Drift between the Docker copies and the config (CONFIRMED by the real sensors here):
+- low-needed copy had no indoor-dew gate: `relative_fallback_fires_below_dew_threshold` (outdoor 13, indoor 10, max 65 → copy ON) is OFF in the real sensor. The `outdoor_dew >= indoor_dew` term can never decide alone (outdoor ≥ indoor ≥ edge implies outdoor ≥ edge), so the YAML comment "fallback … kicks in when neither boundary is met" describes a dead branch (comment issue, not a behaviour bug).
+- drying copy read the raw `sensor.wheatherstation_outdoor_temperature` (known), had the removed `low_active` guard and no 0.3 hysteresis; `drying_non_workday_schedule_applies_on_holiday` asserted "off because of delay_on", but the sensor has no delay: it passed only because the template reads the 5-min filter (baseline 21.5), not the seeded raw station. In the real sensor the holiday case is ON from 09:00.
+- flush copy matched the config.
+
+Config findings (record only, not fixed; no issue opened):
+1. **Input flap restarts a running drying boost (bug).** CONFIRMED (state trace): a flush input going unavailable makes `airflow_humidity_flush_needed` unavailable; `airflow_humidity_drying_needed` (no availability, reads flush via `is_state`) drops to off at once; when the input returns, flush is back first, the decision passes `moisture_flush_cooling/medium`, then drying turns on → `medium → boost` is a real `boost_decided` edge: boost time 60 + ON re-sent (a running timer reset; a boost the user stopped would restart). Contradicts the note's rule "decision unavailable → boost is NOT an edge". Strict xfail test pins the intended behaviour.
+2. **climate_template echoes writes.** CONFIRMED in `custom_components/climate_template/climate.py` (`_update_hvac_mode` → `async_set_hvac_mode` → `set_hvac_mode` script): every change of `hvac_mode_template`'s result runs the `set_hvac_mode` action, e.g. switching automatic control off writes the device's current profile back (`select.select_option`) and turns the input_boolean off again; a profile change while automatic control is off is written back too. Redundant ComfoConnect writes; effect on the device UNPROVEN.
+3. **template.reload logs a TemplateError** for `sensor.solar_yield_watts` (packages/victron.yaml): during the reload the η sensor is briefly unavailable and `| float` has no default (VIC-10 assumes η is always numeric). Tolerated by name in `test_reload_recovery` (`allow_log`).
+4. **Reload restores, the comments say it does not.** CONFIRMED: after a real `template.reload` the trigger-based indicators come back with their previous state at once (unavailable → previous value), not `unknown` as the airflow YAML comments state; the `to: "unknown"` self-triggers still work (forced `unknown` → recomputed at once).
+
+Mutation checks (in place, restored with `git checkout`), each fails naming the case(s):
+| Mutation | Failing check(s) |
+|---|---|
+| free cooling delay_on 10 → 5 min | `free_cooling_dew_max_passes_low_outdoor_dew step 1 at 599 s` |
+| moisture low: on-state keeps the max edge | `low_needed_stays_on_above_target_dew step 2` |
+| heat low without Schmitt | `ventilation_low_needed_derives_from_heat step 2`, `step 3 at 599 s` |
+| flush without season guard | `flush_season_guard_heating_branch1_only step 2` |
+| drying without hysteresis | `station 21.6 from on` |
+| controller Away guard removed | both away cases, `new_away_ended_…` |
+| controller low-branch idempotency removed | `moisture_ventilation_low_when_needed` (3× writes), `heat_protection_…`, `controller_low_idempotent_no_write`, `new_away_ended_…` |
+| controller medium without "preset low" | both free-cooling cases, `new_schedule_low_preset_is_rebumped` |
+| boost Away condition removed | `drying_boost_away_suppressed`, `…_away_unknown_to_off_fires` |
+| boost `from:` without `off` | every start case, and `test_drying_boost_config_edge_only` |
+| re-arm without the decision condition | `drying_boost_countdown_during_manual_boost_no_error step 3` |
+| hvac_action drying only for flush-cooling | `hvac_action_drying_survives_boost_blip` |
+| flush `to: unknown` self-trigger removed | `test_reload_recovery` (stays unknown) |
+
+Case independence: controller, boost and the four indicator tables also pass with their case order reversed (temporary module, not committed).
+
+CI: `.github/workflows/ha_check.yaml` "remaining tests" step now collects nothing (exit 5); treated as success until Step 4 replaces the workflow. Docker suite: 18 tests (pergola), collects.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.
@@ -488,6 +538,7 @@ Risk, to close in the spike:
 
 ## Verification
 - Spike exit criterion: 20 consecutive green runs (`pytest --count=20` locally, or a loop).
+- Stability per commit (owner, from item 4 on): 20x on changed tests, full suite 1x (`--count=20 -n 4` only on the changed or new test files / IDs; the whole `tests/ha` once per commit and once at the end of an item).
 - Per migration PR:
   - The in-process test fails when the YAML under test is deliberately broken (mutation check). This proves the test is valid and not reading its own seed.
   - The test passes in isolation and under `-p random_order`.
