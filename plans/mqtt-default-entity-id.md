@@ -6,7 +6,7 @@
 - [ ] Step 2 YAML change, awaiting approval
 - [ ] Step 3 tests and deploy note
 
-Deferred by the owner: fix it another time. Tracked in a GitHub issue.
+Deferred by the owner: fix it another time. Tracked in GitHub issue #146.
 
 ## Problem (CONFIRMED by the in-process spike, HA 2026.10.4)
 - **How HA picks an ID.** HA gives an entity its ID once, at first registration, and stores it in `.storage`. Later YAML changes do not move it. Without `default_entity_id:`, HA builds the ID from area + device + entity name (`.claude/rules/ha-yaml.md`).
