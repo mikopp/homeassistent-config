@@ -1,7 +1,7 @@
 # Home Assistant Config — Claude Instructions
 
 ## Important constraints for this project:
-1. ALWAYS create/maintain a feature specific implementation plan file in the `plans` folder; read `.claude/rules/plans.md` first (format, status, close).
+1. ALWAYS create/maintain a feature specific implementation plan file in the `plans` folder. 
 2. NEVER start implementation without explicit approval
 3. ALWAYS await step-by-step instructions and explicit approval before coding
 4. ALWAYS update the plan file's status section after each step
@@ -86,12 +86,12 @@ Hypotheses go to the feature's `plans/` file, marked as such.
 To record anything learned, invoke the `record-learning` skill: it holds the evidence rules and routing.
 
 ## Where knowledge lives
-Before creating, moving or deleting knowledge (note, rule, skill, design doc, a plan's close step), read `doc/KNOWLEDGE.md`.
+Details, limits and how to extend: `doc/KNOWLEDGE.md`.
 
 | Home | Holds |
 |---|---|
 | `packages/notes/<pkg>.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
-| `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`, `plans.md`, `knowledge.md`); auto-load on matching paths |
+| `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture/derivations of complex packages; read on demand |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant; never cite, and never link from agent knowledge |

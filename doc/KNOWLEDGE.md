@@ -8,14 +8,13 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | Home | What goes there | How it loads | Limit |
 |---|---|---|---|
 | root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start | < 100 lines |
-| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`, `plans.md`, and `knowledge.md`, which points here when knowledge files are touched) | lazily, when a file matching its `paths:` is read | ~4 KB |
+| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`) | lazily, when a file matching its `paths:` is read | ~4 KB |
 | `packages/notes/<pkg>.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
 | `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
-| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. `doc/tests/background.md` for the test framework) | guarded like package background | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
-| `plans/` | open work and hypotheses only; format, status and close in `.claude/rules/plans.md` (also used by `/new-plan`) | when working on that plan | deleted when done |
+| `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
 | git history / PRs | the log: what changed when and why | `git log`, `gh pr view` | n/a |
 
@@ -54,7 +53,7 @@ short why in the note or design doc, with no link to background (K-1).
 
 ## K-3 Note template (`packages/notes/<pkg>.md`)
 
-Frontmatter `paths:` lists the package YAML, its tests (`tests/ha/test_<pkg>.py`, plus any `tests/e2e/` file that tests the package), and `doc/<pkg>/design.md` if one exists.
+Frontmatter `paths:` lists the package YAML, its tests, and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
 
 1. Header: scope, rule paths, design-doc link
@@ -65,7 +64,7 @@ Never list background or sources. Sections, in order:
 6. Known biases / open issues
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
    skill). Above ~2 KB, split into `packages/notes/<pkg>-tests.md` with its own symlink rule and
-   `paths:` only the package's test files (`tests/ha/test_<pkg>.py`, `tests/e2e/…`).
+   `paths:` only `tests/test_<pkg>.py`.
 8. Related
 
 Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and stories to background.
@@ -94,7 +93,7 @@ Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and sto
   `ln -s ../../../packages/notes/<pkg>.md .claude/rules/packages/<pkg>.md` and commit the symlink.
 - **Complex package** (K-4 threshold): add `doc/<pkg>/design.md` and put it in the note's `paths:`.
 - **New cross-package topic:** a skill in `.claude/skills/<topic>/SKILL.md`; the first words of its
-  description carry the trigger. Its history goes to `doc/<topic>/background.md` (K-1), never into the skill.
+  description carry the trigger.
 - **One home per fact.** Every other place points to it; never copy.
 - **Every plan's last step:** distil the result into note / design / skill, move the story to
   background, update pointers, check the note is ≤ 24 KB, then DELETE the plan.
