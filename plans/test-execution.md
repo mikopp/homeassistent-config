@@ -11,7 +11,8 @@
   - [x] Migration item 1: `tests/test_templates.py` → `tests/ha/test_templates.py` (one test, one HA); Docker test and its CI extraction step removed
   - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
   - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
-  - [ ] Migration items 4–5
+  - [ ] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost done (see "Step 2 results, item 4"); Victron, airflow in progress
+  - [ ] Migration item 5 (pergola)
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
@@ -295,6 +296,36 @@ Harness changes (CONFIRMED by measurement in this chunk):
 - Registry facts used: the Shelly Pro 3EM entities get their production ids (`sensor.technikraum_heizung_heizung_power`) on a fresh registry (the surplus test asserts it); utility_meter registers `<unique_id>_single_tariff`; the pool pump sensors get `sensor.pool_pool_pump_pool_pump_*` (#146).
 
 No config bug found by these tests.
+
+### Step 2 results, item 4 (in progress; filled per package)
+Harness changes (`tests/ha/conftest.py`), each CONFIRMED in this chunk:
+- **Freezing fires every boot-time timer.** freezer replaces `time.monotonic`, which is asyncio's `loop.time()`, with the frozen wall-clock timestamp (printed in a test: loop time 1.79e9 s after the freeze vs real monotonic ~2000 s). Every timer scheduled before the freeze (a delay_on/off started at boot, time_pattern ticks, expire_after) is then overdue and fires at whatever loop iteration comes next. The `clock` fixture now fires them itself (`advance(0)`), so a test starts deterministic: e.g. `heating_dhw_active` is already `off`, not its boot `unknown`. Consequence: an "unknown until the delay passes after boot" state cannot be observed in-process (the Docker tests only worked around it).
+- **MQTT keep-alive across clock moves.** paho times its keep-alive on `time.monotonic` too: a move of at least 60 s sends a PINGREQ; a second move before the PINGRESP was read (real socket I/O) counts as a ping timeout and drops the connection (seen: a move to tomorrow 10:00 right after the fixture's `advance(0)` → "Error talking to MQTT: The client is not currently connected", subscriptions lost). `Clock` now waits (real time, bounded) after every move until no ping is open.
+- **history_stats after recorder stop: root cause found and fixed.** Traceback: PHACC's `hass` fixture unloads the config entries after `recorder_mock` (which depends on `hass`, so it is finalised first) stopped the recorder; unloading the MQTT entry writes `unavailable` for every MQTT entity (`entity_registry.write_unavailable_state`), the clamp → `heating_compressor_heating_active` → the history_stats coordinator queries the stopped recorder executor ("RuntimeError: cannot schedule new futures after shutdown"). The `ha` fixture now unloads the config entries itself while the recorder runs. Proof: without that unload, `test_compressor_table` (its item-3 workaround removed) and `test_slab_mode_wanted_delays` both error at teardown; with it both pass. The item-3 workaround is removed.
+- `Clock.hold(seconds, refresh)`: moves in ≤ 60 s steps and republishes the live inputs before each (Victron/Shelly `expire_after` 120 s), as the devices do. `local_at`/`next_day`: forward-only moves to a wall-clock time (schedules, `today_at()`, midnight). `apply_baseline(skip=…)`: leave real entities unseeded.
+
+**heating_pv_boost** (`tests/ha/test_heating_pv_boost.py`, section 5; Docker file deleted):
+| Docker | Now | Notes |
+|---|---|---|
+| `test_return_temp_is_masked_while_making_hot_water` | `test_dhw_mask` (8 checks) | both sources (hcmode `water`, `hwc/Status`), exact 25 min delay_off (on at 24 min, off after 25); the valid return follows. The Docker 26 min startup jump is not needed (see the clock fixture) |
+| `test_decision_stays_off_while_the_master_switch_is_off` | `test_slab_mode_wanted_delays` (8 checks) | same case (switch off, surplus 3000 W → off) plus new: delay_on 15 min, Schmitt hold between 500 and 1500 W, delay_off 20 min; every gate real (season via the 48h mean, PV window schedule at 10:00, ebusd online via ehp/Status, SOC). After the first data the sensor is `unknown` for 20 min (delay_off from no state), as after a restart |
+| `test_last_run_measures_the_on_to_off_transition`, `test_last_run_ignores_hot_water_runs` | `test_last_run` (6 checks) | exact spans (Docker: 6.5…8.0 for 7 min); the DHW run keeps the previous value exactly (Docker: "not ≈ 30", because of leftovers); new: heating rolling into hot water reports the heating part |
+| (item 3 seeded the two history_stats) | new `test_cycling_history_stats` | REAL runs/runtime/duty-cycle history_stats with `recorder_mock` and `async_wait_recording_done`; average run from them; a hot-water run is not counted |
+| — | new `test_daily_meters_reset_at_midnight` | the utility meters' `cycle: daily` at local midnight |
+
+Mutation checks (in place, restored with `git checkout`), each fails naming the step:
+| Mutation | Failing check(s) |
+|---|---|
+| dhw delay_off 25 → 20 min | `hcmode heat: mask still held at 24 min`, `hwc off: … 24 min` |
+| dhw `hwc_active` source dropped | `hwc on masks at once`, `hwc off: … 24 min` |
+| slab delay_on 15 → 10 min | `switch on: 14 min, still within delay_on` |
+| slab delay_off 20 → 15 min | `switch off: 19 min, still within delay_off` |
+| slab master switch ignored | `switch off, 20 min later`, `switch on: 14 min…`, `switch off: charge ends…` |
+| slab Schmitt: on-state uses the start threshold | `surplus between the thresholds holds the charge`, `switch off: 19 min…` |
+| last run `/ 60` → `/ 30` | every last-run check (14.0 for 7 min, …) |
+| heating-only sensor ignores hcmode `water` | history: runs 3, runtime 0.75; last run: hot-water checks |
+| runs_today counts `off` | `no run today` (1), runs 3, average 10.0 |
+| yield meter `cycle: weekly` | `after midnight` (9), `next day` |
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

@@ -1,7 +1,6 @@
 ---
 paths:
   - "packages/heating_pv_boost.yaml"
-  - "tests/test_heating_pv_boost.py"
   - "tests/ha/test_heating_pv_boost.py"
   - "dashboards/heating-dashboard.yaml"
   - "plans/heating-*.md"
@@ -222,12 +221,13 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
 ## Tests
 
 In-process (`tests/ha/test_heating_pv_boost.py`, real broker, ebusd/Shelly/Victron payloads):
-surplus, compressor and cycling formulas, cooling interlock, derived setpoint. Docker
-(`tests/test_heating_pv_boost.py`): the four tests that need the clock (DHW mask, master-switch
-decision, last run).
+surplus, compressor and cycling formulas, cooling interlock, derived setpoint (case tables), and
+on a frozen clock the DHW mask (delay_off), the slab decision (delay_on/off, master switch,
+Schmitt), the last run, the real history_stats (recorder) and the daily meters' midnight reset.
+No Docker tests left for this package.
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
-`unknown` after boot; tests need `fast_forward(26 min)` first. Earlier test files hide this.
+`unknown` after boot until the delay elapses.
 
 ## Related
 

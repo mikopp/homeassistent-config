@@ -11,7 +11,7 @@ Parts, top to bottom:
 - the real broker (`Broker`, `broker`);
 - loading the repo config into HA (`load_repo_config`, `ha`);
 - waiting and lookup helpers (`entity_id`, `wait_state`);
-- the clock (`Clock`, `clock`);
+- the clock (`Clock`, `clock`, `local_at`, `next_day`);
 - the log guard (autouse `log_guard`, marker `allow_log`).
 """
 
@@ -26,8 +26,8 @@ import shutil
 import socket
 import subprocess
 import threading
-from collections.abc import AsyncGenerator, Callable, Generator, Mapping
-from datetime import datetime, timedelta
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ import yaml
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components import mqtt
 from homeassistant.config import async_hass_config_yaml
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CoreState, HomeAssistant, SupportsResponse
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import async_load_custom_templates
@@ -138,7 +139,9 @@ async def seed(hass: HomeAssistant, states: Mapping[str, SeedValue]) -> None:
     await hass.async_block_till_done()
 
 
-async def apply_baseline(hass: HomeAssistant, *, mqtt: bool = True) -> None:
+async def apply_baseline(
+    hass: HomeAssistant, *, mqtt: bool = True, skip: frozenset[str] | set[str] = frozenset()
+) -> None:
     """Apply the whole shared baseline: helper actions, input_number values, then the states.
 
     Same order as the Docker suite's `baseline_inputs` + `baseline_states`. Helpers are set
@@ -158,7 +161,8 @@ async def apply_baseline(hass: HomeAssistant, *, mqtt: bool = True) -> None:
     states = {
         e: v
         for e, v in BASELINE.BASELINE_STATES.items()
-        if mqtt or (entry := registry.async_get(e)) is None or entry.platform != "mqtt"
+        if e not in skip
+        and (mqtt or (entry := registry.async_get(e)) is None or entry.platform != "mqtt")
     }
     await seed(hass, states)
     # Second pass: a later seed can re-render an entity seeded earlier. The delayed trigger-based
@@ -446,9 +450,24 @@ async def ha(
     hass: HomeAssistant,
     enable_custom_integrations: None,
 ) -> AsyncGenerator[HomeAssistant]:
-    """A fresh HA with this repo's package domains set up, MQTT connected to the real broker."""
+    """A fresh HA with this repo's package domains set up, MQTT connected to the real broker.
+
+    Teardown unloads the config entries (MQTT, workday) HERE, while the recorder still runs.
+    PHACC's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
+    on `hass`, so it is finalised first) has stopped the recorder. Unloading the MQTT entry
+    writes `unavailable` for every MQTT entity; a history_stats sensor whose source follows one
+    (heating_compressor_*_today ← heating_compressor_heating_active ← the Shelly clamp) then
+    queried the stopped recorder: "RuntimeError: cannot schedule new futures after shutdown"
+    at teardown. CONFIRMED by the traceback (entity_registry.write_unavailable_state →
+    history_stats coordinator._async_update_from_event → recorder executor) and by this unload
+    removing it.
+    """
     await load_repo_config(hass, mqtt_port=broker.port)
     yield hass
+    loaded = [e for e in hass.config_entries.async_entries() if e.state is ConfigEntryState.LOADED]
+    for entry in loaded:
+        await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 @pytest.fixture
@@ -611,6 +630,26 @@ class Clock:
         self._freezer.move_to(when)
         await self._fire(background)
 
+    async def hold(
+        self,
+        seconds: float,
+        refresh: Callable[[], Awaitable[None]],
+        *,
+        step: float = 60,
+    ) -> None:
+        """Move forward by `seconds` in steps of at most `step`, calling `refresh` before each.
+
+        For waits longer than an input's `expire_after` (Victron/Shelly power: 120 s): a real
+        device keeps publishing, so `refresh` republishes the live inputs (and syncs MQTT, so
+        no message lands after the move and re-arms its expiry on the moved clock).
+        """
+        remaining = float(seconds)
+        while remaining > 0:
+            await refresh()
+            delta = min(step, remaining)
+            await self.advance(delta)
+            remaining -= delta
+
     async def _fire(self, background: bool) -> None:
         # Time listeners first, then wait for the jobs they started.
         # `background=True` also waits for background tasks (interval jobs of coordinators run
@@ -620,12 +659,64 @@ class Clock:
         # keep-alive test when the clock is frozen right after start).
         async_fire_time_changed(self.hass)
         await self.hass.async_block_till_done(wait_background_tasks=background)
+        await self._settle_mqtt_ping()
+
+    async def _settle_mqtt_ping(self) -> None:
+        """Wait (real time, bounded) until HA's MQTT client got the answer to its keep-alive ping.
+
+        paho times its keep-alive on `time.monotonic`, which freezer moves with the clock. A
+        move of at least the keep-alive (60 s) makes paho's misc check send a PINGREQ; if the
+        NEXT move comes before the PINGRESP was read (socket I/O needs the loop to run in real
+        time), paho sees the ping as timed out and drops the connection; HA reconnects and
+        messages in between are lost. CONFIRMED: a jump to tomorrow 10:00 right after the
+        `clock` fixture's own `advance(0)` disconnected HA ("Error talking to MQTT: The client
+        is not currently connected"). Waiting here makes every move start with no ping open.
+        """
+        mqtt_data = self.hass.data.get(mqtt.DATA_MQTT)
+        if mqtt_data is None:
+            return
+        client = mqtt_data.client._mqttc  # paho client; it has no public ping state
+        deadline = _real_monotonic() + 5
+        while client._ping_t != 0:
+            assert _real_monotonic() < deadline, "HA's MQTT client got no PINGRESP in 5 s"
+            await self.hass.async_add_executor_job(threading.Event().wait, 0.002)
+
+
+def local_at(day: date, hour: int, minute: int = 0, second: int = 0) -> datetime:
+    """An aware datetime on `day` at the given wall-clock time in HA's zone (Europe/Vienna).
+
+    For `Clock.move_to` in tests of time-of-day logic (schedules, workday, today_at()).
+    """
+    return datetime(day.year, day.month, day.day, hour, minute, second,
+                    tzinfo=dt_util.get_default_time_zone())
+
+
+def next_day(weekday: int | None = None, *, after: date | None = None) -> date:
+    """The first date after `after` (default: today in HA's zone) on `weekday` (0 = Monday).
+
+    Always strictly in the future, so a `Clock.move_to` to it only ever goes forward.
+    """
+    day = (after or dt_util.now().date()) + timedelta(days=1)
+    while weekday is not None and day.weekday() != weekday:
+        day += timedelta(days=1)
+    return day
 
 
 @pytest.fixture
-def clock(ha: HomeAssistant, freezer: FrozenDateTimeFactory) -> Clock:
-    """A Clock on the repo HA. `freezer` comes after `ha`: HA starts on the real clock."""
-    return Clock(ha, freezer)
+async def clock(ha: HomeAssistant, freezer: FrozenDateTimeFactory) -> Clock:
+    """A Clock on the repo HA. `freezer` comes after `ha`: HA starts on the real clock.
+
+    Freezing makes asyncio's loop time jump: `loop.time()` is `time.monotonic()`, which freezer
+    replaces with the frozen wall-clock timestamp (about 1.8e9 s) instead of the real monotonic
+    clock (seconds since boot). CONFIRMED by printing both in a test: every timer HA scheduled
+    before the freeze (delay_on/delay_off started at boot, time_pattern ticks, expire_after) is
+    then overdue. They would fire at whatever the next loop iteration happens to be, so they
+    are fired HERE (`advance(0)`): a test starts with every boot-time timer done, e.g. a
+    delayed template binary sensor shows its settled value, not its startup `unknown`.
+    """
+    c = Clock(ha, freezer)
+    await c.advance(0)
+    return c
 
 
 # ── Log guard ─────────────────────────────────────────────────────────────────

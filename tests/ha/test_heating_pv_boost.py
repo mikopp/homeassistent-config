@@ -1,28 +1,32 @@
-"""PV slab pre-charging formulas (packages/heating_pv_boost.yaml), in-process.
+"""PV slab pre-charging (packages/heating_pv_boost.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration item 3. Replaces 21 of the 25 Docker tests of
-tests/test_heating_pv_boost.py: the surplus formula, the compressor activity and cycling
-formulas, the cooling interlock and the derived setpoint. Four stay in Docker until item 4,
-because they need the clock for a delay or a `last_changed` span: the hot-water return mask
-(`heating_dhw_active` delay_off 25 min), the master-switch decision (`heating_slab_mode_wanted`
-delay_off 20 min) and the two `heating_compressor_last_run` tests.
+plans/test-execution.md, Step 2, migration items 3 and 4. Replaces all 25 Docker tests of the
+former tests/test_heating_pv_boost.py: item 3 the surplus formula, the compressor activity and
+cycling formulas, the cooling interlock and the derived setpoint (tables 1-4); item 4 the four
+that need the clock (section 5): the hot-water return mask (`heating_dhw_active` delay_off
+25 min), the master-switch decision (`heating_slab_mode_wanted` delay_on 15 / delay_off 20 min)
+and the two `heating_compressor_last_run` tests (a `last_changed` span). Item 4 also adds the
+REAL history_stats sensors (recorder) and the daily utility meters' midnight reset.
 
-Four tests, ONE fresh HA each (tier 1: stateless formulas). Each loops over its cases: publish
+Tables 1-4: ONE fresh HA each (tier 1: stateless formulas). Each loops over its cases: publish
 and check a reset vector, then the case's inputs (optionally followed by further steps without
 a reset), collect every failure, one assert at the end that names each failing case.
+Section 5: ONE fresh HA per test (tier 3: delays, spans, recorder history, meter cycles), the
+steps in order on a frozen clock; every check is collected, one assert at the end.
 
 How the inputs get in (Step 2b: MQTT-fed entities only over the real broker):
 - ebusd registers: plain `;`-separated payloads on `ebusd/<circuit>/<name>` (positional fields,
   names or raw enum numbers, as ebusd sends them), so the real value_templates parse them.
 - Shelly Pro 3EM "Heizung": `em:0` / `emdata:0` JSON; Victron: Venus OS `{"value": x}`.
 - "Unavailable" is a real `expire_after` (Clock), or a sensor that never got a message.
-- Seeded (no real path without the clock, item 4): the η accumulators (trigger-based minute
-  ticks, as in tests/ha/test_victron.py), the two `history_stats` sensors behind the average
-  run, and the 48h outdoor mean (statistics over a filter, registry-dependent id #146) that
-  drives the REAL heating/cooling indicator. The daily meters behind the efficiency are the
-  REAL `utility_meter`s: reset with their own action, fed by the MQTT counters.
-- The clock is frozen (`clock` fixture) in the tables that need an expiry, so nothing ticks
-  between a seed and its check.
+- Seeded (no real source in the test HA): the 48h outdoor mean (statistics over a filter,
+  registry-dependent id #146) that drives the REAL heating/cooling indicator. In tables 1-2
+  also the η accumulators (as in tests/ha/test_victron.py's table) and the two history_stats
+  sensors behind the average run; section 5 has them real. The daily meters are the REAL
+  `utility_meter`s: reset with their own action in table 2, by their midnight cycle in
+  section 5.
+- The clock is frozen (`clock` fixture) in the tests that need an expiry or a delay, so
+  nothing ticks between a step and its check.
 """
 
 from __future__ import annotations
@@ -32,6 +36,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.components.recorder.common import (
+    async_wait_recording_done,
+)
 
 from conftest import (
     Broker,
@@ -41,8 +48,10 @@ from conftest import (
     check_states,
     entity_id,
     is_state,
+    local_at,
     mqtt_sync,
     near,
+    next_day,
     publish,
     seed,
     wait_subscribed,
@@ -415,11 +424,6 @@ async def test_compressor_table(ha: HomeAssistant, broker: Broker, clock: Clock)
     await _publish_all(ha, broker, _COMPRESSOR_TABLE, _counters(dict(_COMPRESSOR_TABLE.reset)))
     await mqtt_sync(ha, broker)
     failures += await _run_table(ha, broker, clock, _COMPRESSOR_TABLE, COMPRESSOR_CASES, ids)
-    # Leave the history_stats source unavailable (reset mode = unmapped enum): HA's shutdown
-    # would otherwise flip it, and the history_stats refresh that follows would query the
-    # recorder after it stopped ("cannot schedule new futures after shutdown" at teardown).
-    await _publish_all(ha, broker, _COMPRESSOR_TABLE, _counters(dict(_COMPRESSOR_TABLE.reset)))
-    await mqtt_sync(ha, broker)
     assert not failures, f"{len(failures)} compressor check(s) failed:\n" + "\n".join(failures)
 
 
@@ -510,3 +514,311 @@ async def test_target_temp(ha: HomeAssistant, broker: Broker) -> None:
     failures = await _run_table(ha, broker, None, _TARGET_TABLE, TARGET_CASES,
                                 _ids(ha, _TARGET_TABLE.outputs))
     assert not failures, f"{len(failures)} setpoint check(s) failed:\n" + "\n".join(failures)
+
+
+# ── 5. Clock-dependent sensors (plans/test-execution.md, Step 2, item 4) ─────────────────
+# Each test is ONE fresh HA (tier 3: delays, `last_changed` spans, recorder history, meters).
+# The clock is frozen right after start (`clock` fixture) and moved explicitly, so every delay
+# and span is exact. Inputs that expire (Shelly/Victron power, 120 s) are republished during
+# long waits, as the devices do (`Clock.hold`).
+_RETURN = Input("ebusd/ehp/HcReturnTemp", None, lambda t: f"{t};ok")  # field 1 = sensor status
+_HWC = Input("ebusd/hwc/Status", None, lambda on: f"50;{on};48;50")  # field 1 = DHW circuit
+_SOC = _venus("system/0/Dc/Battery/Soc")
+
+
+async def _send(hass: HomeAssistant, broker: Broker, *values: tuple[Input, Any]) -> None:
+    """Publish each (input, value) as its device payload, then wait until HA handled them all."""
+    for inp, value in values:
+        await publish(hass, broker, inp.topic, inp.payload(value))
+    await mqtt_sync(hass, broker)
+
+
+def _state(hass: HomeAssistant, eid: str) -> str | None:
+    """Current state string of an entity (None if it does not exist)."""
+    s = hass.states.get(eid)
+    return s.state if s else None
+
+
+async def test_dhw_mask(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
+    """Hot-water charging masks the return temperature, held 25 min after it ends (delay_off).
+
+    Replaces the Docker `test_return_temp_is_masked_while_making_hot_water`, which checked only
+    the mask going on. Here every edge of `binary_sensor.heating_dhw_active` is checked: both
+    sources (hcmode `water`, `hwc/Status` on) and the exact 25 min delay_off (still on at 24 min,
+    off after 25 min). The valid-return sensor follows the mask.
+    """
+    dhw = entity_id(ha, "binary_sensor", "template", "heating_dhw_active")
+    valid = entity_id(ha, "sensor", "template", "heating_circuit_return_temp_valid")
+    await wait_subscribed(ha, broker, _RETURN.topic, _HVAC.topic, _HWC.topic)
+    failures: list[str] = []
+
+    def check(where: str, want_dhw: str, want_valid: Callable[[str], bool]) -> None:
+        """Record a failure unless the mask and the valid return show the wanted states."""
+        failures.extend(check_states(ha, {"dhw": dhw, "valid": valid},
+                                     {"dhw": is_state(want_dhw), "valid": want_valid}, where))
+
+    # Start: no hot water, return 24.9 °C. The mask's boot render (false) went through the
+    # 25 min delay_off from no state; the `clock` fixture fired that boot timer (see its
+    # docstring), so the mask is already off here. (The Docker test needed a 26 min jump first.)
+    await _send(ha, broker, (_RETURN, 24.9), (_HVAC, "heat"), (_HWC, "off"))
+    check("start: no hot water", "off", near(24.9))
+
+    # Source 1, hcmode `water`: the mask goes on at once (no delay_on) …
+    await _send(ha, broker, (_HVAC, "water"))
+    check("hcmode water masks at once", "on", _UNAV)
+    # … and holds through the thermal tail: still on 24 min after the charge, off after 25.
+    await _send(ha, broker, (_HVAC, "heat"))
+    await clock.advance(24 * 60)
+    check("hcmode heat: mask still held at 24 min", "on", _UNAV)
+    await clock.advance(61)
+    check("hcmode heat: mask released after 25 min", "off", near(24.9))
+
+    # Source 2, the DHW circuit (`hwc/Status` field 1) alone, same delay_off.
+    await _send(ha, broker, (_HWC, "on"))
+    check("hwc on masks at once", "on", _UNAV)
+    await _send(ha, broker, (_HWC, "off"), (_RETURN, 26.1))
+    await clock.advance(24 * 60)
+    check("hwc off: mask still held at 24 min", "on", _UNAV)
+    await clock.advance(61)
+    check("hwc off: mask released after 25 min", "off", near(26.1))
+    assert not failures, f"{len(failures)} DHW mask check(s) failed:\n" + "\n".join(failures)
+
+
+# The slab decision's inputs, all live: PV and house load (Victron), the heating clamp, the
+# battery SOC, and ehp/Status (hcmode + the flow temperature that proves ebusd is online).
+_SLAB_HELPERS = {
+    "input_number.heating_pv_surplus_threshold": 1500,
+    "input_number.heating_pv_deficit_threshold": 500,
+    "input_number.heating_pv_min_battery_soc": 70,
+    "input_number.heating_return_temp_max": 30,
+    "input_number.heating_indicator_heating_below": 12,
+    "input_number.heating_indicator_passive_cooling_above": 16,
+    "input_number.heating_indicator_active_cooling_above": 20,
+}
+
+
+async def test_slab_mode_wanted_delays(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
+    """The slab decision: master switch, 15 min delay_on, Schmitt hold, 20 min delay_off.
+
+    Replaces the Docker `test_decision_stays_off_while_the_master_switch_is_off` (abundant
+    surplus, switch off → off). New, through the same real inputs: the switch on starts a
+    charge only after 15 min (delay_on); a surplus between the two thresholds holds it
+    (`this.state` Schmitt); the switch off ends it only after 20 min (delay_off, the
+    compressor's minimum restart interval).
+
+    Every gate of the decision is driven for real: active heating season (the REAL indicator
+    via its seeded 48h mean, as in `test_target_temp`), the PV window (a schedule helper: the
+    clock is moved to 10:00), ebusd online (ehp/Status republished, its flow temperature has
+    `force_update`), SOC 80 % over the 70 % floor, no cooling, no backup heater, no DHW.
+    """
+    slab = entity_id(ha, "binary_sensor", "template", "heating_slab_mode_wanted")
+    surplus = entity_id(ha, "sensor", "template", "heating_pv_surplus")
+    ids = {"slab": slab, "surplus": surplus,
+           "indicator": entity_id(ha, "sensor", "template", "heating_cooling_indicator"),
+           "window": "schedule.heating_pv_window",
+           "online": entity_id(ha, "binary_sensor", "template", "heating_ebusd_online")}
+    for eid, value in _SLAB_HELPERS.items():
+        await ha.services.async_call("input_number", "set_value",
+                                     {"entity_id": eid, "value": value}, blocking=True)
+    # Tomorrow 10:00, inside the 09:00-16:00 PV window (forward only: see `next_day`).
+    await clock.move_to(local_at(next_day(), 10))
+    await seed(ha, _mean(11.0))  # active heating season
+    inputs = list(_VICTRON.values()) + [_HEAT, _SOC, _HVAC]
+    await wait_subscribed(ha, broker, *(inp.topic for inp in inputs))
+    # PV 4000 W DC (η 100 % bootstrap), house load 1000 W, heat pump 0 W → surplus 3000 W.
+    live = {"dc_pv": 4000, "ac_pv": 0, **_load(1000), "heat": 0}
+
+    async def refresh() -> None:
+        """Republish every live input (the devices push continuously), then sync."""
+        await _send(ha, broker, *((_VICTRON[k], v) for k, v in live.items() if k in _VICTRON),
+                    (_HEAT, live["heat"]), (_SOC, 80), (_HVAC, "heat"))
+
+    failures: list[str] = []
+
+    def check(where: str, **want: Callable[[str], bool]) -> None:
+        """Record a failure for every entity (key of `ids`) not matching its predicate."""
+        failures.extend(check_states(ha, ids, want, where))
+
+    await refresh()
+    # Master switch off (default), every other gate open. The sensor was unavailable (no data)
+    # until now; the first data renders false, which goes through delay_off from no state: it
+    # reads `unknown` for 20 min (as after every restart), then off: no charge.
+    check("first data: delay_off from no state", slab=is_state("unknown"), surplus=near(3000),
+          indicator=is_state("active_heating"), window=_ON, online=_ON)
+    await clock.hold(20 * 60 + 1, refresh)
+    check("switch off, 20 min later", slab=_OFF)
+
+    # Switch on: delay_on 15 min.
+    await ha.services.async_call("input_boolean", "turn_on",
+                                 {"entity_id": "input_boolean.heating_pv_boost_enabled"},
+                                 blocking=True)
+    await clock.hold(14 * 60, refresh)
+    check("switch on: 14 min, still within delay_on", slab=_OFF)
+    await clock.hold(61, refresh)
+    check("switch on: charge wanted after 15 min", slab=_ON, online=_ON)
+
+    # Surplus 1000 W: below the start threshold (1500) but above the stop threshold (500).
+    live |= _load(3000)  # 4000 - 3000 = 1000 W
+    await clock.hold(21 * 60, refresh)
+    check("surplus between the thresholds holds the charge (Schmitt)", slab=_ON,
+          surplus=near(1000))
+
+    # Switch off: delay_off 20 min.
+    await ha.services.async_call("input_boolean", "turn_off",
+                                 {"entity_id": "input_boolean.heating_pv_boost_enabled"},
+                                 blocking=True)
+    await clock.hold(19 * 60, refresh)
+    check("switch off: 19 min, still within delay_off", slab=_ON)
+    await clock.hold(61, refresh)
+    check("switch off: charge ends after 20 min", slab=_OFF)
+    assert not failures, f"{len(failures)} slab check(s) failed:\n" + "\n".join(failures)
+
+
+async def _compressor_run(
+    hass: HomeAssistant, broker: Broker, clock: Clock, *, mode: str, watts: float, minutes: float,
+) -> None:
+    """One compressor run: hcmode `mode` at `watts` on the clamp for exactly `minutes`.
+
+    The clamp (`em:0`, expire_after 120 s) is republished every minute during the run, as the
+    Shelly does; the same value does not change the state, so `last_changed` stays at the start.
+    """
+    async def refresh() -> None:
+        """Republish the mode and the clamp (same values: no state change)."""
+        await _send(hass, broker, (_HVAC, mode), (_HEAT, watts))
+
+    await clock.hold(minutes * 60, refresh)
+
+
+async def test_last_run(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
+    """`heating_compressor_last_run` measures a heating run from its own on→off transition.
+
+    Replaces the Docker `test_last_run_measures_the_on_to_off_transition` and
+    `test_last_run_ignores_hot_water_runs` (one HA, no leftover from earlier tests, so the
+    hot-water check is exact: the sensor keeps its previous value, it does not just avoid ≈30).
+    The frozen clock makes each span exact (Docker: 6.5…8.0 min for a 7 min run). New: a
+    heating run that rolls into hot water without the compressor stopping reports only its
+    heating part (the documented edge case of `heating_compressor_heating_active`).
+    """
+    ids = {"active": entity_id(ha, "binary_sensor", "template", "heating_compressor_active"),
+           "heating": entity_id(ha, "binary_sensor", "template",
+                                "heating_compressor_heating_active"),
+           "last_run": entity_id(ha, "sensor", "template", "heating_compressor_last_run")}
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
+    failures: list[str] = []
+
+    def check(where: str, **want: Callable[[str], bool]) -> None:
+        """Record a failure for every entity (key of `ids`) not matching its predicate."""
+        failures.extend(check_states(ha, ids, want, where))
+
+    # Idle circulation (83 W, heating mode): not running; no run has ended yet.
+    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    check("idle", active=_OFF, heating=_OFF, last_run=is_state("unknown"))
+
+    # 1. A 7 min heating run (1.8 kW) is reported as 7.0 min when it ends.
+    await _send(ha, broker, (_HEAT, 1800))
+    check("heating run starts", active=_ON, heating=_ON)
+    await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=7)
+    await _send(ha, broker, (_HEAT, 83))
+    check("7 min heating run ends", active=_OFF, heating=_OFF, last_run=near(7.0))
+
+    # 2. A 30 min hot-water run (3.5 kW, hcmode water) is a compressor run but not a heating
+    #    run: last run keeps the 7.0.
+    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    check("hot-water run starts", active=_ON, heating=_OFF)
+    await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=30)
+    await _send(ha, broker, (_HEAT, 83))
+    check("30 min hot-water run ends", active=_OFF, heating=_OFF, last_run=near(7.0))
+
+    # 3. The next heating run, 12 min, replaces it.
+    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 1800))
+    await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=12)
+    await _send(ha, broker, (_HEAT, 83))
+    check("12 min heating run ends", last_run=near(12.0))
+
+    # 4. New: 5 min of heating, then the mode flips to water with the compressor still on: the
+    #    heating segment ends at the flip (5.0), the hot-water tail does not count.
+    await _send(ha, broker, (_HEAT, 1800))
+    await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=5)
+    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    check("heating rolls into hot water", active=_ON, heating=_OFF, last_run=near(5.0))
+    await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=10)
+    await _send(ha, broker, (_HEAT, 83))
+    check("hot-water tail ends", active=_OFF, last_run=near(5.0))
+    assert not failures, f"{len(failures)} last-run check(s) failed:\n" + "\n".join(failures)
+
+
+async def test_cycling_history_stats(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
+    """Runs, runtime, average run and duty cycle from the REAL history_stats (recorder).
+
+    New (item 3 seeded the two history_stats sensors behind the average run). Two heating runs
+    of 10 and 20 min and one hot-water run today → 2 runs, 0.5 h, average 15 min; the 24 h duty
+    cycle is 0.5 h / 24 h. The recorder is `recorder_mock` (in-memory SQLite); every read
+    follows `async_wait_recording_done`, so the states are committed before history_stats
+    queries them. Starts at 10:00 tomorrow so all runs fall on one day (`today_at()`).
+    """
+    ids = {"runs": entity_id(ha, "sensor", "history_stats", "heating_compressor_runs_today"),
+           "runtime": entity_id(ha, "sensor", "history_stats",
+                                "heating_compressor_runtime_today"),
+           "duty": entity_id(ha, "sensor", "history_stats", "heating_compressor_duty_cycle_24h"),
+           "average": entity_id(ha, "sensor", "template", "heating_compressor_average_run_today")}
+    await clock.move_to(local_at(next_day(), 10))
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
+    failures: list[str] = []
+
+    async def check(where: str, **want: Callable[[str], bool]) -> None:
+        """Commit the recorder's queue, then compare (history_stats reads from it)."""
+        await async_wait_recording_done(ha)
+        failures.extend(check_states(ha, ids, want, where))
+
+    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    await clock.advance(60)
+    await check("no run today", runs=near(0), runtime=near(0), average=near(0))
+    for minutes, pause in ((10, 5), (20, 5)):
+        await _send(ha, broker, (_HEAT, 1800))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=minutes)
+        await _send(ha, broker, (_HEAT, 83))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=83, minutes=pause)
+    # A hot-water run is not counted.
+    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=15)
+    await _send(ha, broker, (_HEAT, 83))
+    await clock.advance(60)
+    await check("two heating runs, one hot-water run", runs=near(2), runtime=near(0.5),
+                average=near(15.0), duty=near(round(0.5 / 24 * 100, 1), 0.05))
+    assert not failures, f"{len(failures)} cycling check(s) failed:\n" + "\n".join(failures)
+
+
+async def test_daily_meters_reset_at_midnight(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """The daily utility meters behind the efficiency reset at local midnight (`cycle: daily`).
+
+    New. The compressor table resets them with `utility_meter.reset`; here the real cycle does
+    it: 9 kWh heat / 3 kWh electricity during the day (efficiency 3.0), the clock crosses
+    midnight → both meters 0, efficiency 0, then the next increments count from 0.
+    """
+    ids = {"yield": entity_id(ha, "sensor", "utility_meter", "heating_yield_daily_single_tariff"),
+           "elec": entity_id(ha, "sensor", "utility_meter",
+                             "heating_electricity_daily_single_tariff"),
+           "efficiency": entity_id(ha, "sensor", "template", "heating_efficiency_today")}
+    yield_in = _COMPRESSOR_TABLE.inputs["yield"]
+    await clock.move_to(local_at(next_day(), 22))
+    await wait_subscribed(ha, broker, yield_in.topic, _HEAT_ENERGY.topic)
+    failures: list[str] = []
+
+    def check(where: str, **want: Callable[[str], bool]) -> None:
+        """Record a failure for every entity (key of `ids`) not matching its predicate."""
+        failures.extend(check_states(ha, ids, want, where))
+
+    # First readings only set the meters' start; then +9 kWh heat, +3 kWh electricity.
+    await _send(ha, broker, (yield_in, 60000), (_HEAT_ENERGY, 1_000_000.0))
+    await _send(ha, broker, (yield_in, 60009), (_HEAT_ENERGY, 1_003_000.0))
+    check("evening", **{"yield": near(9), "elec": near(3), "efficiency": near(3.0)})
+    # Cross local midnight (22:00 → 00:00:30); the Shelly counter expires (120 s), so it is
+    # republished afterwards with an unchanged value.
+    await clock.move_to(local_at(next_day(after=next_day()), 0, 0, 30))
+    await _send(ha, broker, (_HEAT_ENERGY, 1_003_000.0))
+    check("after midnight", **{"yield": near(0), "elec": near(0), "efficiency": near(0)})
+    await _send(ha, broker, (yield_in, 60013), (_HEAT_ENERGY, 1_005_000.0))
+    check("next day", **{"yield": near(4), "elec": near(2), "efficiency": near(2.0)})
+    assert not failures, f"{len(failures)} meter check(s) failed:\n" + "\n".join(failures)
