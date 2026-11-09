@@ -109,7 +109,6 @@ template:
           {% if indoor_hums | count > 0 %}
             {{ (indoor_hums | sum / indoor_hums | count) | round(1) }}
           {% else %}
-            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
             {{ states('sensor.comfoconnect_pro_extract_air_humidity') | float | round(1) }}
           {% endif %}
         availability: >
@@ -148,7 +147,6 @@ template:
           {% if indoor_temps | count > 0 %}
             {{ (indoor_temps | sum / indoor_temps | count) | round(2) }}
           {% else %}
-            {# availability guard above ensures ComfoConnect sensor is live in this fallback branch — no default needed #}
             {{ states('sensor.comfoconnect_pro_extract_air_temperature') | float | round(2) }}
           {% endif %}
         availability: >
@@ -177,8 +175,8 @@ template:
           {% set RH_sa = states('sensor.airflow_supply_air_humidity_5min') | float %}
           {% set T_ra  = states('sensor.airflow_extract_air_temp_5min') | float %}
           {% set RH_ra = states('sensor.airflow_extract_air_humidity_5min') | float %}
-          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float %}  {# input_number: never unavailable, no default needed #}
-          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float %}  {# input_number: never unavailable, no default needed #}
+          {% set eta_max = states('input_number.airflow_bypass_efficiency_max') | float %}
+          {% set eta_min = states('input_number.airflow_bypass_efficiency_min') | float %}
           {# Actual station pressure in kPa; Ecowitt reports hPa so divide by 10. Falls back to standard atmosphere. #}
           {% set P_kpa  = states('sensor.wheatherstation_absolute_pressure') | float(1013.25) / 10 %}
           {# Moist-air enthalpy (kJ/kg) via Magnus saturation pressure + humidity ratio. #}
@@ -338,8 +336,6 @@ template:
              has_value('sensor.airflow_avg_indoor_temp_5min') and
              has_value('sensor.airflow_dew_point_target') }}
         state: >
-          {# Sensors: availability guard above guarantees live values — no defaults needed. #}
-          {# input_numbers: never unavailable — no defaults needed. #}
           {% set outdoor_dew     = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set outdoor_temp    = states('sensor.airflow_outdoor_temp_5min') | float %}
           {% set min_indoor_dew  = states('sensor.airflow_min_indoor_dew_5min') | float %}
@@ -348,12 +344,9 @@ template:
           {% set min_dew_diff    = states('input_number.airflow_min_dew_diff') | float %}
           {% set min_temp_diff   = states('input_number.airflow_min_temp_diff') | float %}
           {% set temp_threshold  = (target_temp - 0.5) if this.state == 'on' else target_temp %}
-          {# Indoor-relative temp gap: outdoor must be min_temp_diff below the CURRENT room temp.
-             Release hysteresis: while ON require a 0.5°C smaller gap (clamped at 0) so the sensor
-             stays on as the room cools toward the outdoor temperature, damping flip-flop. #}
+          {# Indoor-relative gap with a 0.5°C smaller release gap while ON (clamped at 0). #}
           {% set temp_diff = [min_temp_diff - 0.5, 0] | max if this.state == 'on' else min_temp_diff %}
-          {# Maximum outdoor dew: outdoor air warmed to target_temp must not exceed target_hum. #}
-          {# Centralised in sensor.airflow_dew_point_target (Magnus at target_temp, target_hum). #}
+          {# Max outdoor dew = sensor.airflow_dew_point_target. #}
           {% set dew_max = states('sensor.airflow_dew_point_target') | float %}
           {{
             (outdoor_dew + min_dew_diff) < min_indoor_dew and
@@ -411,20 +404,15 @@ template:
         state: >
           {% set outdoor_dew  = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set indoor_dew   = states('sensor.airflow_min_indoor_dew_5min') | float %}
-          {# Humidity-derived dew points at target_temp, centralised in the dew-point sensors. #}
           {% set dew_from_tgt = states('sensor.airflow_dew_point_target') | float %}
           {% set dew_from_max = states('sensor.airflow_dew_point_max') | float %}
-          {# Indoor-moisture Schmitt (was an RH gate): turn ON when measured indoor dew clears the
-             max-derived dew, stay ON until it falls below the target-derived dew. #}
+          {# Indoor-moisture Schmitt: ON when indoor dew clears the max-derived dew, OFF below target-derived. #}
           {% set indoor_gate = indoor_dew >= dew_from_tgt if this.state == 'on'
                                else indoor_dew >= dew_from_max %}
           {# Outdoor Schmitt: turn ON above max-derived dew, stay ON until below target-derived dew. #}
           {% set dew_threshold = dew_from_tgt if this.state == 'on' else dew_from_max %}
-          {# Mutual exclusivity: low (reduce ventilation) and flush/boost (increase air exchange)
-             are opposite actions and must never be ON together. Gate low OFF whenever the cool-profile
-             flush or the scheduled drying boost is active. flush_needed already subsumes drying_needed
-             (drying ⊂ flush); the drying_needed term is kept explicit for clarity. No cycle: neither
-             flush_needed nor drying_needed reads low_needed (the latter's old low_active gate removed). #}
+          {# Low and flush/boost are opposite actions: never ON together. drying ⊂ flush (the drying
+             term is explicit for clarity). No cycle: neither reads low_needed. #}
           {{ indoor_gate and (
                outdoor_dew >= dew_threshold or
                outdoor_dew >= indoor_dew
@@ -566,8 +554,6 @@ template:
              has_value('sensor.airflow_dew_point_max') and
              has_value('sensor.heating_cooling_indicator') }}
         state: >
-          {# Sensors: availability guard above guarantees live values — no defaults needed. #}
-          {# input_numbers: never unavailable — no defaults needed. #}
           {% set outdoor_dew     = states('sensor.airflow_outdoor_dew_5min') | float %}
           {% set indoor_dew      = states('sensor.airflow_min_indoor_dew_5min') | float %}
           {% set outdoor_temp    = states('sensor.airflow_outdoor_temp_5min') | float %}
@@ -620,11 +606,9 @@ template:
         name: "Airflow Humidity Drying Needed"
         device_class: running
         state: >
-          {# flush sensor carries all dew/temp/season logic + its own hysteresis.
-             Defaults fail safe: a missing flush sensor / outdoor temp must not start a boost.
-             NOTE: no longer self-gates on moisture_ventilation_low_needed — low_needed is now gated
-             OFF whenever flush_needed (and thus drying_needed) is ON, so the old `not low_active`
-             guard was redundant AND would have formed a low_needed → drying_needed → low_needed cycle. #}
+          {# flush carries all dew/temp/season logic + hysteresis. Defaults fail safe (a missing flush
+             sensor / outdoor temp must not start a boost). Does not read low_needed: low_needed is
+             OFF whenever flush is ON, and reading it would form a cycle. #}
           {% set flush_needed = is_state('binary_sensor.airflow_humidity_flush_needed', 'on') %}
           {# Use smoothed weatherstation temp to prevent noise spikes from falsely gating the boost. #}
           {% set outdoor_t    = states('sensor.airflow_wheatherstation_outdoor_temp_5min') | float(99) %}

@@ -44,3 +44,10 @@ Rules:
 ## Template `device:` key
 - The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
   entities to a device via the UI instead.
+
+## Comments (style: `doc/KNOWLEDGE.md#K-5`)
+- Every comment, YAML `#` and Jinja `{# #}`: what + at most one line of why + a pointer
+  (`→ doc/<pkg>/design.md#ID`). No history, no dates, no rule copied from design/notes or from this file.
+- In automations, one-line comments per trigger / branch; the rule itself lives once in design/notes.
+- Verify a comment-only edit: `yaml_semantic_equal.py <ref> <file>`; with Jinja comments touched add
+  `--ignore-jinja-comments`.

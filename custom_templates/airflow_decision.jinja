@@ -1,10 +1,6 @@
-{#- Single decision of the airflow (ComfoConnect) automation — see packages/airflow_cooling.yaml.
-
-    sensor.airflow_cooling_state renders this macro for its state AND for its `profile` /
-    `ventilation` attributes, so the reason shown on the dashboard and the outputs the automations
-    apply always come from one evaluation of the same inputs. Inputs are ONLY the decision
-    indicators — never the device outputs (profile, preset, boost switch, climate) — so the
-    decision cannot feed back on itself.
+{#- Single decision of the airflow automation (design: doc/airflow/design.md#AF-6). Rendered for the
+    state AND both attributes of sensor.airflow_cooling_state. Inputs are ONLY the indicators,
+    never device outputs.
 
     prev_profile: the sensor's previous `profile` attribute (hysteresis memory for dry retention).
     Returns "<state>|<profile>|<ventilation>":
@@ -23,8 +19,7 @@
   {%- set drying  = is_state('binary_sensor.airflow_humidity_drying_needed', 'on') -%}
   {%- set moist   = is_state('binary_sensor.airflow_moisture_ventilation_low_needed', 'on') -%}
   {%- set heat    = is_state('binary_sensor.airflow_heat_ventilation_low_needed', 'on') -%}
-  {#- No float default on purpose: both sensors are in the decision sensor's availability: (has_value),
-      so this macro is only rendered when they are numeric; a default would only hide errors. -#}
+  {#- No float default: both sensors are in the decision sensor's availability: guard. -#}
   {%- set dew     = states('sensor.airflow_min_indoor_dew_5min') | float -%}
   {%- set dew_min = states('sensor.airflow_dew_point_min') | float -%}
   {%- set heating_season = season == 'active_heating' -%}
