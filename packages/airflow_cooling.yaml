@@ -246,7 +246,7 @@ template:
 
       # THE single decision of the airflow automation (state-based on purpose: it is derived from
       # slow binary indicators, so it must re-evaluate from current inputs and never restore stale —
-      # see packages/notes/airflow_cooling.md). Indicators feed ONLY this sensor; every automation
+      # see doc/airflow/notes.md). Indicators feed ONLY this sensor; every automation
       # that changes the ComfoConnect (controller profile + preset/auto, drying boost) and the
       # climate hvac_action read ONLY this sensor, never the indicators directly.
       #   state       — reason label shown on the dashboard

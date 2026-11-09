@@ -3,10 +3,12 @@
 **Status:** PLAN ONLY. Follow-up 3 of 5 from PR #141 (knowledge structure, merged).
 Each step needs explicit approval (root CLAUDE rules 2-5).
 **Depends on:** satisfied by PR #141, which created `doc/pergola/{design.md,background.md}`, `doc/sources/pergola/`,
-`packages/notes/pergola.md`, `.claude/rules/packages/pergola.md`, and
+`doc/pergola/notes.md`, `.claude/rules/packages/pergola.md`, and
 `plans/pergola-field-calibration.md`. Also needs `.github/scripts/yaml_semantic_equal.py`
 (added by PR #144). Branch `claude/knowledge-dedup-pergola` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
+
+**Paths:** the note is `doc/pergola/notes.md` (moved from `packages/notes/` by `plans/knowledge-notes-to-doc.md`).
 
 ## Overview
 `packages/pergola.yaml` is 1723 lines, and 55 % of its bytes (≈ 12.2k tokens) are comments. Only

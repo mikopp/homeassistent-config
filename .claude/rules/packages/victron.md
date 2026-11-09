@@ -1,1 +1,1 @@
-../../../packages/notes/victron.md
+../../../doc/victron/notes.md

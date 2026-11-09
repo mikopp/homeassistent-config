@@ -88,7 +88,7 @@ Details, limits and how to extend: `doc/KNOWLEDGE.md`.
 
 | Home | Holds |
 |---|---|
-| `packages/notes/<pkg>.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
+| `doc/<pkg>/notes.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
 | `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture/derivations of complex packages; read on demand |

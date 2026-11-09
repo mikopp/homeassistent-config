@@ -2,7 +2,7 @@
 
 Current design of `packages/pergola.yaml`. Where this doc and the YAML disagree, the YAML wins:
 fix this doc. Section IDs (`PG-1` …) are stable; never renumber, mark retired IDs as gone.
-Package invariants, entity map and open issues: `packages/notes/pergola.md`.
+Package invariants, entity map and open issues: `doc/pergola/notes.md`.
 
 ## PG-1 Overview
 

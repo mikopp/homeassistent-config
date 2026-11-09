@@ -7,6 +7,8 @@ section added, `background.md`, `sources/`). Also needs `.github/scripts/yaml_se
 (added by PR #144). Branch `claude/knowledge-dedup-airflow` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07). Re-check them first.
 
+**Paths:** the note is `doc/airflow/notes.md` (moved from `packages/notes/` by `plans/knowledge-notes-to-doc.md`).
+
 ## Overview
 `packages/airflow_cooling.yaml` is 1494 lines, and 41 % of its bytes (≈ 8.3k tokens) are comments.
 Only about 10 % is history. The rest is cross-cutting rules repeated in many blocks:

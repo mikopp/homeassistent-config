@@ -39,7 +39,7 @@ not CONFIRMED.
 
 | The learning is… | Write it to |
 |---|---|
-| a current fact about one package | `packages/notes/<pkg>.md` (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
+| a current fact about one package | `doc/<pkg>/notes.md` (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | architecture or a derivation result | `doc/<pkg>/design.md` (create at the K-4 threshold) |
 | a story, superseded design or investigation | `doc/<pkg>/background.md` |
 | a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |

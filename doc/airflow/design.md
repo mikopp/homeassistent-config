@@ -3,7 +3,7 @@
 **Scope:** `packages/airflow_cooling.yaml` (+ `packages/heating_cooling_indicator.yaml`)
 **Hardware:** Zehnder ComfoAir Q350 ERV via the ComfoConnect integration
 **Status:** Current design. Heading IDs (`AF-7.2`) are stable: never renumber, mark retired IDs as
-gone. Package facts and rules: `packages/notes/airflow_cooling.md`. Where this doc and the YAML disagree, the YAML wins.
+gone. Package facts and rules: `doc/airflow/notes.md`. Where this doc and the YAML disagree, the YAML wins.
 
 ---
 
@@ -501,7 +501,7 @@ flip it.
 > within ~1 debounce after a restart. `ventilation_low_needed` and `airflow_cooling_state` are
 > **state-based on purpose**: they derive from *slow binary* sensors (`moisture_low`, `heat_low`, the
 > indicators), so trigger-based + restore could leave them stale for hours. Rule: a template binary_sensor whose inputs are only other binary sensors
-> must be state-based. See `packages/notes/airflow_cooling.md`.
+> must be state-based. See `doc/airflow/notes.md`.
 
 ---
 

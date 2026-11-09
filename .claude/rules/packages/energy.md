@@ -1,1 +1,1 @@
-../../../packages/notes/energy.md
+../../../doc/energy/notes.md

@@ -4,7 +4,7 @@ Background only: not design-relevant; current design is design.md.
 
 History and superseded designs for `packages/airflow_cooling.yaml` and
 `packages/heating_cooling_indicator.yaml`. Never cite this file as current behaviour; the current
-design is `doc/airflow/design.md`, current package facts are in `packages/notes/airflow_cooling.md`.
+design is `doc/airflow/design.md`, current package facts are in `doc/airflow/notes.md`.
 IDs `AF-B<n>` are stable. Raw material (never edited, guarded): `doc/sources/airflow/`.
 
 ## AF-B1 Boost debounce: `delay_on` / `delay_off` on `drying_needed`

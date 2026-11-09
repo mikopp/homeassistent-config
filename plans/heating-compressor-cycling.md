@@ -31,7 +31,7 @@ So the cause is the Vaillant's own start/stop behaviour (integral + hysteresis) 
 
 ## Step 0b — record the owner's manual changes in the slab plan (docs only)
 
-None of these are in `plans/ebusd-pv-heating-optimization.md` or `packages/notes/heating_pv_boost.md`
+None of these are in `plans/ebusd-pv-heating-optimization.md` or `doc/heating_pv_boost/notes.md`
 yet. Add them there:
 
 - Status step 9: Loxone no longer writes `mc/OperatingMode` (owner, 2026-10-30). Also record whether
@@ -54,7 +54,7 @@ yet. Add them there:
   - There are no wildcards. Only the topics HA needs are bridged.
 
   Where to record it:
-  - `packages/notes/heating_pv_boost.md`: a new "Transport: the bridge is an allowlist" section.
+  - `doc/heating_pv_boost/notes.md`: a new "Transport: the bridge is an allowlist" section.
     Write down the pattern and the rule, not the topic list. The rule: every new register this
     package reads needs **two** bridge lines (`in` for the state, `out` for `/get`), added on the
     HA broker host after deploy. Without the `in` line the sensor stays `unavailable`. Without the
@@ -148,7 +148,7 @@ Add a "Compressor cycling" card to `dashboards/heating-dashboard.yaml`:
 - `tests/conftest.py`: seed every new MQTT entity in `baseline_states`.
 - `tests/test_heating_pv_boost.py`: cases for average run length, last-run minutes and efficiency
   (including the zero-starts case).
-- `packages/notes/heating_pv_boost.md`: the tuning registers and the reasoning above about start vs
+- `doc/heating_pv_boost/notes.md`: the tuning registers and the reasoning above about start vs
   stop criteria (marked as hypothesis).
 - README package section.
 - Update the Status section of the repo plan file.
@@ -302,7 +302,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
 
 - [x] 0. Plan file (this file)
 - [x] 0b. Owner's manual changes, the bridge allowlist pattern and the Phase 2 mode decision
-      recorded in `plans/ebusd-pv-heating-optimization.md` and `packages/notes/heating_pv_boost.md`
+      recorded in `plans/ebusd-pv-heating-optimization.md` and `doc/heating_pv_boost/notes.md`
 - [x] 1. 9 read-only MQTT sensors (integral, demand, flow setpoint, 3 settings, 3 counters)
 - [x] 2. Poll registration: tier 4 (`?5`) and tier 5 (`?9`)
 - [x] 3. Derived: history_stats (runs today, runtime today, 24 h duty cycle), average run today,
@@ -351,7 +351,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       rules are in `plans/heating-baseline-and-phase2-prerequisites.md` (steps 1 and 4).
       Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
       check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
-      35 °C (`FlowTempMax`). See `packages/notes/heating_pv_boost.md` "Cold weather".
+      35 °C (`FlowTempMax`). See `doc/heating_pv_boost/notes.md` "Cold weather".
 - [x] 7a. `sensor.heating_compressor_stop_temp` (flow setpoint + hysteresis) added to the dashboard
       card and the "Why runs end" graph (owner request, 2026-10-30), with a test. Owner declined
       reading `BackupModeHc` (backup heater stays disabled) and a flow > 34 °C notification.

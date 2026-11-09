@@ -11,7 +11,7 @@ paths:
 Current facts for `packages/heating_pv_boost.yaml` (PV slab charging; Phase 1 = read-only, nothing
 written yet; rollout in `plans/ebusd-pv-heating-optimization.md`). No design doc yet.
 **Register decodes** (field lists, enums, unusable registers, tuning and cooling registers):
-`packages/notes/heating_pv_boost-registers.md`, not auto-loaded; read it before adding or parsing
+`doc/heating_pv_boost/registers.md`, not auto-loaded; read it before adding or parsing
 a register.
 
 Source of truth for ebusd definitions: the **published** catalog
@@ -225,7 +225,7 @@ CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active
 
 ## Related
 
-- `packages/notes/heating_pv_boost-registers.md`: register decodes.
+- `doc/heating_pv_boost/registers.md`: register decodes.
 - `plans/ebusd-pv-heating-optimization.md` (rollout, control law), `plans/heating-compressor-cycling.md`,
   `plans/heating-baseline-and-phase2-prerequisites.md`.
-- Victron surplus inputs: `packages/notes/victron.md`.
+- Victron surplus inputs: `doc/victron/notes.md`.

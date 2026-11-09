@@ -1,6 +1,6 @@
 # Packages
 
-Package knowledge is in `packages/notes/<pkg>.md`. Each loads automatically when that package's files are touched.
+Package knowledge is in `doc/<pkg>/notes.md`. Each loads automatically when that package's files are touched.
 
 A new package gets a note + symlink rule (`doc/KNOWLEDGE.md#K-6`).
 
