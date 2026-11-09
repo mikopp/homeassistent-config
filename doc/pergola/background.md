@@ -4,7 +4,7 @@ Background only: not design-relevant; current design is design.md.
 
 History, derivation work and superseded designs for `packages/pergola.yaml`. Never cite this file
 as current behaviour; the current design is `doc/pergola/design.md`, current package facts are in
-`packages/notes/pergola.md`. IDs `PG-B<n>` are stable. Text below PG-B2 is kept as written at the
+`doc/pergola/notes.md`. IDs `PG-B<n>` are stable. Text below PG-B2 is kept as written at the
 time and contains values that were later corrected (PG-B2 lists them).
 
 ## PG-B1 Sources and references

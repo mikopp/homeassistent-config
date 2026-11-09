@@ -1,1 +1,1 @@
-../../../packages/notes/airflow_cooling.md
+../../../doc/airflow/notes.md

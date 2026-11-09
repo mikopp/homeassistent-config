@@ -1,1 +1,1 @@
-../../../packages/notes/heating_pv_boost.md
+../../../doc/heating_pv_boost/notes.md

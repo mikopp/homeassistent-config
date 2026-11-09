@@ -8,7 +8,7 @@ description: "Gotchas for this repo's pytest + ha_integration_test_harness suite
 Grades: **CONFIRMED** = source read at the pinned version (`.github/ha-versions/ha/Dockerfile` `FROM`),
 stack trace / thread dump, or deterministic repro. **OBSERVED** = real data, alternative explanation open.
 **UNPROVEN** = hypothesis, kept so it is not re-litigated. Never promote a grade without new evidence.
-Package-specific test facts live in the package notes (`packages/notes/<package>.md`).
+Package-specific test facts live in the package notes (`doc/<package>/notes.md`).
 
 ## First rule
 - **When a CI-only test fails, establish whether the harness is at fault before redesigning production YAML.** Why: proven repeatedly here; several confident "HA is broken" root causes were wrong.

@@ -4,7 +4,7 @@ Background only: not design-relevant; current design is design.md.
 
 History, investigations and superseded designs for `packages/victron.yaml`. Never cite this file
 as current behaviour; the current design is `doc/victron/design.md`, current package facts are in
-`packages/notes/victron.md`. IDs `VIC-B<n>` are stable. VIC-B3 and VIC-B4 are the two implemented
+`doc/victron/notes.md`. IDs `VIC-B<n>` are stable. VIC-B3 and VIC-B4 are the two implemented
 plans kept as written at the time (headings demoted); they contain claims that were later
 corrected, listed in VIC-B1.
 
@@ -1497,7 +1497,7 @@ Formerly the plan file for this fix, kept as written (plan references rewritten 
 
 **Status:** IMPLEMENTED on `fix/victron-true-dc-power` (PR open) — phases 1-4 done, `pytest` not run locally (CI only); phase 5 (deploy) and 6 (live verification) are user/follow-up steps.
 **Target files:** `packages/victron.yaml`, `tests/test_victron.py`, `tests/conftest.py`,
-`packages/notes/victron.md` (new), `packages/CLAUDE.md` (index row),
+`doc/victron/notes.md` (new), `packages/CLAUDE.md` (index row),
 VIC-B3 (correct a wrong claim)
 **Branch:** user decision 2026-10-17: implement on the current branch. That branch's PR (#128) was already merged, so the work moved to `fix/victron-true-dc-power` off `origin/master`.
 **Follows from:** VIC-B3, status updates 2026-10-17.
@@ -1623,11 +1623,11 @@ Energy Dashboard wiring. Only the DC reference feeding η and the loss changes.
 ##### Phase 1 — Branch and notes
 4. [DONE] Branch: `fix/victron-restore-slow-sensors` was already merged (#128), so a new branch `fix/victron-true-dc-power` off `origin/master`.
    *Dependency:* approval of this plan.
-5. [DONE] Create `packages/notes/victron.md` and flip the `victron.yaml` row in
+5. [DONE] Create `doc/victron/notes.md` and flip the `victron.yaml` row in
    `packages/CLAUDE.md` from "— (none yet)" to the note. Content (observations only, no
    unproven cause): `Dc/Vebus/Power` ≠ V×I and tracks AC net (numbers above); the true-DC recipe;
    sign convention; the load-dependent-η caveat; the `expire_after` policy pointer. Read
-   `packages/notes/` index rule first (CLAUDE.md of `packages/`).
+   `doc/<pkg>/notes.md` index rule first (CLAUDE.md of `packages/`).
 
 ##### Phase 2 — `packages/victron.yaml`
 6. [DONE] Add the two MQTT sensors (`victron_vebus_dc_current`, `victron_battery_voltage`) in the

@@ -1,7 +1,7 @@
 # heating_pv_boost: ebusd register decodes
 
 Reference for `packages/heating_pv_boost.yaml`; not auto-loaded, read or grep when adding or
-parsing a register. Package facts and rules: `packages/notes/heating_pv_boost.md`.
+parsing a register. Package facts and rules: `doc/heating_pv_boost/notes.md`.
 Source: the live catalog `https://ebus.github.io/de/vaillant/*.csv` (never the `archived/` CSVs),
 checked against a full `ebusctl` dump of this bus.
 

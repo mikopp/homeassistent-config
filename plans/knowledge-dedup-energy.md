@@ -7,6 +7,8 @@ Needs `.github/scripts/yaml_semantic_equal.py` (added by PR #144). Branch
 `claude/knowledge-dedup-energy` off `master`.
 **Line numbers** below are from `master` `da0d742` (2026-11-07); re-check them first.
 
+**Paths:** the note is `doc/energy/notes.md`.
+
 ## Overview
 `packages/energy.yaml` has 355 lines. 40 % of its bytes are comments (≈ 1.5k tokens), and almost
 all of that is current. Energy stays below the design-doc threshold, so it gets a note only and no

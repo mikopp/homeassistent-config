@@ -2,7 +2,7 @@
 # cover.dach_rechts), which always move together: state machine, slat formulas,
 # rain/frost protection, post-rain drain.
 # Design (states, formulas, deadband, verification table): doc/pergola/design.md
-# Invariants and quirks you must not break: packages/notes/pergola.md
+# Invariants and quirks you must not break: doc/pergola/notes.md
 #
 # Tilt scale: 0 = flat (closed, max shade, rain protection), 74 = vertical 90°,
 # 100 = input_number.pergola_max_tilt_angle (122°). → doc/pergola/design.md#PG-1

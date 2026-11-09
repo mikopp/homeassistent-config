@@ -1,10 +1,10 @@
-Background only: not design-relevant; current facts are in packages/notes/heating_pv_boost.md.
+Background only: not design-relevant; current facts are in doc/heating_pv_boost/notes.md.
 
 # heating_pv_boost: background
 
 History, investigations and one-day snapshots for `packages/heating_pv_boost.yaml`. Never cite this
-file as current behaviour; current package facts are in `packages/notes/heating_pv_boost.md`,
-register decodes in `packages/notes/heating_pv_boost-registers.md`. IDs `HPB-B<n>` are stable.
+file as current behaviour; current package facts are in `doc/heating_pv_boost/notes.md`,
+register decodes in `doc/heating_pv_boost/registers.md`. IDs `HPB-B<n>` are stable.
 Text below is kept as written at the time (moved out of the note and the YAML comments).
 
 ## HPB-B1 Live confirmations (dated provenance)

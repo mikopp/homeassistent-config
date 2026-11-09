@@ -15,8 +15,8 @@ Deploy/migration docs come from `git diff origin/master...HEAD`, never the live 
 
 ## Local CI checks
 Run `.github/scripts/ci-local.sh` before pushing. It creates `.venv`, installs the CI Python deps and runs
-the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs
-`brew install yamllint python@3.15`. `check_config` and pytest need Docker and only run in CI.
+the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs only
+python3 (yamllint is installed into `.venv`). `check_config` and pytest need Docker and only run in CI.
 
 ## HA version gate — check before trusting any info
 The pinned HA version lives in the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag
@@ -88,7 +88,7 @@ Details, limits and how to extend: `doc/KNOWLEDGE.md`.
 
 | Home | Holds |
 |---|---|
-| `packages/notes/<pkg>.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
+| `doc/<pkg>/notes.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
 | `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture/derivations of complex packages; read on demand |
