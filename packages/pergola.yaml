@@ -7,10 +7,10 @@
 # Tilt scale: 0 = flat (closed, max shade, rain protection), 74 = vertical 90°,
 # 100 = input_number.pergola_max_tilt_angle (122°). → doc/pergola/design.md#PG-1
 #
-# Every entity is listed in group.pergola_dach (bottom of file) AND
-# dashboards/elements/pergola_card.yaml (card-sync invariant, see the note).
-# Helpers have no initial: values; set them in the UI after deploy
-# (recommended values: the note and doc/pergola/design.md#PG-3.2).
+# Every entity except the two internal input_numbers (see group comment) is listed in
+# group.pergola_dach (bottom of file) AND dashboards/elements/pergola_card.yaml (card-sync
+# invariant, see the note). Helpers have no initial: values; set them in the UI after
+# deploy (recommended value: on each helper below).
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # INPUT BOOLEANS — on/off toggles
@@ -179,7 +179,7 @@ input_number:
     name: Pergola Wall Azimuth
     # Compass bearing the terrasse faces; 204° (SSW, measured on site).
     # Sun window wall_azimuth ± 90 (114°–294°): outside it the sun cannot reach the
-    # terrasse. Also the reference direction of A_eff. Derived, never hardcoded.
+    # terrasse. Also the reference direction of A_eff. Formulas derive from it, never hardcode.
     # → doc/pergola/design.md#PG-1, #PG-4.1
     min: 0
     max: 359
@@ -653,7 +653,6 @@ automation:
   # ── Pergola State Manager ──────────────────────────────────────────────────────────
   # Evaluates rules 1–4 inline (frost → rain → rain_stopped → user_override) and
   # delegates rules 5–9 (sun_down … cooling) to script.pergola_evaluate_state.
-  # (The description text below still says "5–8": stale wording, it is data, not a comment.)
   # First matching choose branch wins; the protected-state guard keeps frost, rain,
   # rain_stopped and user_override until their own exit rule fires.
   # → doc/pergola/design.md#PG-2.2, triggers #PG-2.3
@@ -1125,10 +1124,9 @@ script:
     mode: single
     max_exceeded: silent
 
-  # ── Pergola Evaluate State (Rules 5–8) ───────────────────────────────────────────
+  # ── Pergola Evaluate State (Rules 5–9) ───────────────────────────────────────────
   # Evaluates the sun-based rules 5–9, first match wins: sun_down → no_sun_behind_house →
   # not_enough_sun → sun_automatik_heating → sun_automatik_cooling (default).
-  # (Alias and description still say "5–8": stale wording, they are data, not comments.)
   # Callers: state manager default, exit_to_normal, end of the post-rain drain. Never checks
   # rules 1–4; callers guarantee they do not apply. → doc/pergola/design.md#PG-2.2
   pergola_evaluate_state:
@@ -1423,8 +1421,8 @@ group:
 recorder:
   exclude:
     entities:
-      # Derived constants (geometry + max_tilt), the PV wrapper and the transient drain
-      # step counter: no history needed.
+      # Derived constants (geometry + max_tilt), a duplicate of the Victron PV sensor and
+      # the transient drain step counter: no history needed.
       - sensor.pergola_cooling_lower_bound
       - sensor.pergola_pv_power
       - sensor.pergola_rain_recovery_step

@@ -84,7 +84,8 @@ fallbacks that mirror them go away with #142.
 | `input_number.pergola_min_sun_elevation` | 10° |
 | `input_number.pergola_pv_conversion_factor` | 3.2 |
 
-Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their `id:` (e.g.
+The other helpers' values are on each helper in the YAML (baselines: `doc/pergola/design.md#PG-3.2`,
+`PG-1`). Automation entity IDs come from their `id:` (e.g.
 `automation.pergola_cover_response`); the watchdogs and lock responders have numeric ids.
 
 ## Decisions in force
@@ -110,7 +111,8 @@ Full table: `doc/pergola/design.md#PG-7`. Automation entity IDs come from their 
 - The `alias:`/`description:` of `pergola_state_manager` and `script.pergola_evaluate_state`
   still say "rules 5–8"; the rules are 5–9 (incl. `sun_down`) (`PG-2.2`). UI text only (data, not
   comments), left for a code change.
-- The dashboard's automation grid omits `automation.pergola_sync_heating_from_indicator`.
+- The dashboard's automation grid has no tile for `automation.pergola_sync_heating_from_indicator`
+  (open question: add one? user decides).
 - Flaky test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN).
 
 ## Tests (`tests/test_pergola.py`)
