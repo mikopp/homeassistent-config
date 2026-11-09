@@ -2,8 +2,8 @@
 
 ## Status
 - [x] Research and feasibility check (this file)
-- [x] Step 0 spikes: DONE, exit criterion met (see "Step 0 results"); awaiting approval for Step 1
-- [ ] Step 1 HA version single source
+- [x] Step 0 spikes: DONE, exit criterion met (see "Step 0 results")
+- [x] Step 1 HA version single source: DONE. `requirements_test.txt` (PHACC pin) replaces `tests/ha/requirements.txt`; `tests/ha/test_versions.py` guards Dockerfile year.month = PHACC's HA, holidays/cronsim = HA manifest pins, Python >= HA's; Dependabot pip entry for `/`; CLAUDE.md line
 - [ ] Step 2 in-process layer, Step 2b real MQTT broker
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
@@ -92,7 +92,7 @@ Residual risks, which the spike must close:
   - one Victron `time_pattern` accumulator test, fed through the real broker while `freezer` moves the clock.
 
 ### Step 0 results (spike code: `tests/ha/`, marked SPIKE)
-How to run it: `uv venv -p 3.14 .venv-test && VIRTUAL_ENV=.venv-test uv pip install -r tests/ha/requirements.txt`, plus a `mosquitto` binary and `custom_components/climate_template` (CI downloads it). Then:
+How to run it: `uv venv -p 3.14 .venv-test && VIRTUAL_ENV=.venv-test uv pip install -r requirements_test.txt`, plus a `mosquitto` binary and `custom_components/climate_template` (CI downloads it). Then:
 
 ```
 .venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4
@@ -175,6 +175,20 @@ Migrate per package, one PR each, with the old Docker test deleted in the same P
 5. Pergola: sun is driven by freezer plus the sun integration, and automations are triggered through real state changes.
 
 Rule for every migrated test: assert through real triggers where possible, rather than `automation.trigger` that skips conditions.
+
+### Step 2 additions – how much HA per test
+Why fresh HA per test is the default: a shared instance leaks state that cannot be reset: integration/utility_meter totals, `this.state` accumulators and hysteresis, pending `delay_on`/`time_pattern` timers, running `mode: single` automations and `last_triggered`, recorder history (statistics/history_stats), retained MQTT, a clock that only moves forward. These are today's ordering flakes. Cost ≈2.6 s/test. Three tiers:
+1. **Shared per module** for stateless formula tests (decision table, bypass, wallbox, Victron power-domain math, indicator thresholds): only set inputs and read template results; no clock, accumulators, automations, MQTT.
+   - Spike first whether PHACC supports a module-scoped `hass` (module-scoped event loop; PHACC's per-test `verify_cleanup` may object).
+   - Each test resets the inputs it uses; a guard asserts no trigger-based/accumulator entity changed during the module.
+   - If PHACC can't do it cleanly, stay function-scoped.
+2. **Template validity** (`test_templates.py`): ONE test on one instance: render every extracted template in a loop, collect failures, single assert listing all. No per-template instance, no parametrize. Replaces `/api/template` REST round-trips.
+3. **Fresh HA per test**: everything with time, accumulators, automations or MQTT.
+
+Mosquitto: clear vs restart (measure in Step 2):
+- Alternative: one broker per xdist worker session, cleared between tests (clear all retained messages: subscribe `#`, publish an empty retained payload per retained topic seen; clients disconnect anyway when the per-test HA stops).
+- Valid only if a following test can't see anything from the previous: prove with a retained-publish test plus a test asserting no retained messages on `#`, both orders, 20×.
+- Adopt only if measurably faster than restart (already a few ms + connect poll) and equally isolating; else keep restart.
 
 ### Step 2b – Real MQTT broker instead of faked MQTT entities
 Why:

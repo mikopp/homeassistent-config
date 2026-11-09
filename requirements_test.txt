@@ -1,0 +1,11 @@
+# Dependencies of the in-process test layer (tests/ha, plans/test-execution.md).
+#
+# PHACC pins the exact Home Assistant release (0.13.375 = homeassistant==2026.10.4). Its year.month
+# must match the FROM line of .github/ha-versions/ha/Dockerfile; tests/ha/test_versions.py guards it.
+pytest-homeassistant-custom-component==0.13.375
+# Integration requirements PHACC does not install. They must equal the pins in HA's own manifests
+# for the release above (tests/ha/test_versions.py guards it); bump them together with PHACC.
+holidays==0.106  # workday
+cronsim==2.7  # utility_meter
+# --count=N for the stability gate (each test repeated N times).
+pytest-repeat

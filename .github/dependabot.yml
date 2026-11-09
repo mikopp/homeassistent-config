@@ -13,7 +13,19 @@ updates:
     schedule:
       interval: weekly
 
+  # In-process test layer (requirements_test.txt): PHACC, which pins Home Assistant itself.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # These follow the HA version (tests/ha/test_versions.py); bump them together with PHACC.
+      - dependency-name: holidays
+      - dependency-name: cronsim
+
   # Pinned HA version used by CI (patch and minor bumps arrive as PRs).
+  # Bump PHACC in requirements_test.txt in the same PR: tests/ha/test_versions.py fails until
+  # the image tag and PHACC's Home Assistant have the same year.month.
   - package-ecosystem: docker
     directory: /.github/ha-versions/ha
     schedule:

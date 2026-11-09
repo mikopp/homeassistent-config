@@ -25,6 +25,8 @@ removed in #116 and must not be read. CI config check and the test harness both 
 ANY information from internet search, official HA docs, ha-mcp results, or even this repo's own
 existing code/comments — check it's still accurate for that major version. HA changes fast: config
 keys get renamed/removed, integrations get rewritten, YAML syntax shifts across major versions.
+In-process tests (`tests/ha/`) use the PHACC pin in `requirements_test.txt`, kept at the same
+year.month as the Dockerfile by `tests/ha/test_versions.py`.
 
 - Read the `FROM` line of `.github/ha-versions/ha/Dockerfile` first, at the start of any research into
   HA behavior/config/docs. The live instance may differ from the pin; check it with ha-mcp
