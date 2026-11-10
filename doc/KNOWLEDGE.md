@@ -8,11 +8,12 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | Home | What goes there | How it loads | Limit |
 |---|---|---|---|
 | root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start | < 100 lines |
-| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`) | lazily, when a file matching its `paths:` is read | ~4 KB |
+| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`; `plans.md` for plan format/status/close; `knowledge.md`, which sends to this file when knowledge files are touched) | lazily, when a file matching its `paths:` is read | ~4 KB |
 | `doc/<pkg>/notes.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
 | `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
+| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. the test framework) | guarded like package background | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
@@ -109,7 +110,10 @@ Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and sto
   description carry the trigger.
 - **One home per fact.** Every other place points to it; never copy.
 - **Every plan's last step:** distil the result into note / design / skill, move the story to
-  background, update pointers, check the note is ≤ 24 KB, then DELETE the plan.
+  background (a package's `doc/<pkg>/background.md`, or `doc/<topic>/background.md` for a
+  cross-package topic), update pointers, check the note is ≤ 24 KB, then DELETE the plan.
+  `.claude/rules/plans.md` tells plan authors to include this step; the layout check (K-8)
+  fails a plan without a Close step.
 - Before deleting a fact during a move, confirm the target holds it. Never promote an UNPROVEN
   claim while moving it.
 
@@ -132,7 +136,8 @@ A prompt outside the description must not invoke it.
 ## K-8 Loading mechanics (Claude Code)
 
 What the layout in K-1 relies on. Grades: DOC = Claude Code docs (2026-11-07), CONFIRMED = tested
-headless in this repo 2026-11-07 (K-7 method).
+headless in this repo 2026-11-07 (K-7 method), OBSERVED = real data from a real run with an
+alternative explanation still open (same meaning as in `record-learning`).
 
 - Startup loads only root `CLAUDE.md` plus each skill's name + description; no rule or note bodies.
   A skill body loads only when the skill is invoked. (CONFIRMED)
@@ -149,3 +154,9 @@ headless in this repo 2026-11-07 (K-7 method).
 - Guards: `permissions.ask` blocks Read and `cat`, not Grep (K-1). (CONFIRMED)
 - Rules are context, not enforcement: anything that must never happen (CRLF, YAML errors) needs a
   check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.
+- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow `.github/workflows/knowledge-layout.yml`) enforces the layout: every
+  `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
+  `.claude/rules/packages/<name>.md` symlink to an existing note.
+- A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
+  3 runs); naming "measured value, hardware quirk, user-supplied reason" gave 3/3. Word findings
+  triggers by the concrete case, not the abstract category. (OBSERVED)

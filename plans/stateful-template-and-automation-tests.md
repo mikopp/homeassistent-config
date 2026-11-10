@@ -358,3 +358,6 @@ Reuse the same Docker boot + onboarding token + initial seed steps. Add a step t
 2. **Single defaults file**: `tests/state_defaults.yaml` with `inputs:` and `states:` sections.
 3. **Phase 2 is generic** — the runner discovers automations from `/api/states` and never references specific automation IDs or files. Branch coverage is declarative via `tests/scenarios.yaml`; new automations and refactors require no test-code changes. Scenarios MUST flip `input_boolean.pergola_heating`, `pergola_cooling_optimized`, and `pergola_automatic_enabled` — sensor states alone don't reach those branches.
 4. **Keep** the existing frenck static `check_config` job (the `home-assistant` job in `ha_check_frenk.yaml`) alongside the new live test. The stale `ha-config-check.yml` workflow is out of scope.
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

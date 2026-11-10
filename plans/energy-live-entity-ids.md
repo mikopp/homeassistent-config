@@ -52,3 +52,4 @@ service calls (root `CLAUDE.md` "MCP usage").
    - deploy/migration notes are derived from `git diff origin/master...HEAD`
 
    Delete this plan in the PR's last commit.
+6. [TODO] Close: distil the confirmed ids into `doc/energy/notes.md`, drop any story to background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)
