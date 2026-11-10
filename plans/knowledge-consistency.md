@@ -4,7 +4,7 @@
 - [DONE] Problem found, first drafts tried and verified for loading, then reverted from `claude/happy-cannon-mxtn3f` on the owner's request, redone on `claude/serene-curie-d36oqw`
 - [DONE] Step 0 plan brought to this branch and updated (owner-approved proposal, Steps 0-3)
 - [DONE] Step 1 inventory (table below)
-- [TODO] Step 2 design
+- [DONE] Step 2 design (approved by the owner via the proposal, Steps 0-3)
 - [TODO] Step 3 implement
 - [TODO] Step 4 end-to-end verification
 - [TODO] Step 5 close
@@ -147,7 +147,7 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
   | 6 change a note / rule / skill / design doc | nothing; the `CLAUDE.md` pointer line "Details, limits and how to extend" has no moment attached |
   | 7 change without a plan | `ha-yaml.md` and the package note when a matching file is read; `packages/CLAUDE.md` under `packages/`; nothing for a new package beyond that |
 
-### Step 2 – Design [TODO]
+### Step 2 – Design [DONE]
 - For each moment, choose one trigger that points to exactly one home, with no copied content.
 - Decide:
   - where plan conventions live (rule vs skill vs KNOWLEDGE.md section), and how `/new-plan` uses
@@ -161,6 +161,33 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 - Include the KNOWLEDGE.md change: a home for cross-topic background (`doc/<topic>/background.md`)
   covered by the existing guard `Read(/doc/**/background*.md)`. K-3 stays untouched.
 - Dependencies: Step 1. Output: the design in this plan, approved by the owner before Step 3.
+
+- **Result** (one trigger per moment, each pointing to exactly one home):
+
+  | Moment | Trigger (pointer only) | Home |
+  |---|---|---|
+  | 1 create plan | root `CLAUDE.md` constraint 1 reworded: read `.claude/rules/plans.md` first; `/new-plan` becomes "read that rule and follow it" | new `.claude/rules/plans.md` (`paths: plans/**`) |
+  | 2/3 YAML / code + comments | root `CLAUDE.md` constraint 6 reworded in place: what, one-line why, pointer, `doc/KNOWLEDGE.md#K-5` (removes the conflict; also loaded in subagents) | K-5 |
+  | 4 bug / confirmed fact | `record-learning` description widened to "found or confirmed a bug, root cause, gotcha or non-obvious fact while working, or closing a plan" | `record-learning` §3 |
+  | 5 close plan | `plans.md` "Closing" points to K-6 and `record-learning`; K-6 notes that `plans.md` and the CI check enforce a Close step | K-6 |
+  | 6 edit knowledge | new `.claude/rules/knowledge.md`, paths `doc/**/notes.md`, `doc/**/design.md`, `doc/KNOWLEDGE.md`, `.claude/rules/**`, `.claude/skills/**`; root `CLAUDE.md` pointer line reworded | `doc/KNOWLEDGE.md` |
+  | 7 change without a plan | 2-line pointer section in `ha-yaml.md` (comments → K-5; found a bug or non-obvious fact → `record-learning`); backstop = reworded constraint 6 + widened skill description | K-5 / `record-learning` |
+
+- **Mechanical check (K-8 enforcement):** `.github/scripts/check_knowledge_layout.py`, stdlib only,
+  wired into `ci-local.sh` and `ha_check.yaml` as a cheap early step. It fails if a `plans/*.md` has
+  no `## Status` heading or no step/heading with "Close", or if a `packages/*.yaml` has no
+  `.claude/rules/packages/<name>.md` symlink resolving to an existing file. No comment-length
+  linter: too many false positives for multi-line Jinja.
+- **Root `CLAUDE.md` budget:** reword in place, stay at <= 99 lines. The homes table row for rules
+  names `plans.md` and `knowledge.md`.
+- **`doc/KNOWLEDGE.md`:** K-1 table, K-6 and `record-learning` §3 gain the cross-package topic
+  background home `doc/<topic>/background.md` (already guarded by `Read(/doc/**/background*.md)`).
+  K-1 rules row lists `plans.md` and `knowledge.md`. **K-3 untouched.**
+- **Backfill:** every plan lacking a Status section or a Close step gets one (text unchanged
+  otherwise). New note + symlink for `heating_cooling_indicator` (K-3 template), which the check
+  would otherwise fail.
+- **Verification:** K-7 loading checks for `plans.md`, `knowledge.md`, the changed `ha-yaml.md` and
+  the `record-learning` skill; `ci-local.sh`; the new check proven to fail on a plan without Close.
 
 ### Step 3 – Implement [TODO]
 - Make the approved changes. Every new or changed rule gets the K-7 loading check, and every
