@@ -83,6 +83,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
   schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
   with a long-running script on the frozen clock (hangs HA's shutdown).
+- PHACC's plugin runs `logging.basicConfig(level=INFO)` and sets `sqlalchemy.engine` to INFO at import (`plugins.py` l.157-158): every recorder SQL statement hits stderr (~3300 lines/run). `conftest.py` resets that logger to WARNING; `-p no:logging` does not silence it and is not needed.
 - `log_guard` (autouse): fails setup, call or teardown on WARNING+ from `homeassistant.helpers.frame`, any
   `homeassistant.*` "deprecated" message, or a template error. Opt out per test with
   `@pytest.mark.allow_log(regex, reason=…)`; `_KNOWN_CONFIG_LOGS` lists config defects tolerated everywhere
