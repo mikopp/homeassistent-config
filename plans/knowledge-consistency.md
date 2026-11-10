@@ -7,7 +7,8 @@
 - [DONE] Step 2 design (approved by the owner via the proposal, Steps 0-3)
 - [DONE] Step 3 implement (results below)
 - [DONE] Step 4 end-to-end verification (results below; 21 headless runs, findings OBSERVED)
-- [TODO] Step 5 close (awaiting owner decision on the Step 4 findings)
+- [DONE] Review fixes (change list and T2 re-run under "Review fixes" below)
+- [TODO] Step 5 close (awaiting owner decision on the Step 4 findings and the open decision below)
 
 ## Overview
 **Goal: consistent behaviour.** An agent that writes code or YAML must do more than read the
@@ -52,7 +53,7 @@ The owner rejected putting the K-5 comment rule into `ha-yaml.md` as a duplicate
   - skill descriptions, always listed, with the body loaded when the skill is invoked;
   - commands, only when the user types them;
   - checks (`ci-local.sh`, CI), the only real enforcement.
-- **Moments to cover:**
+- **Moments to cover (seven):**
   1. creating a plan;
   2. working through a step (code, YAML, tests);
   3. writing a YAML or code comment;
@@ -83,9 +84,11 @@ The owner rejected putting the K-5 comment rule into `ha-yaml.md` as a duplicate
 2. **Root `CLAUDE.md` is 99 lines**, not 101: reword in place to stay under 100.
 3. **K-3 test path is correct on `master`** (`tests/test_<pkg>.py`). `tests/ha/` and `tests/e2e/`
    exist only on the test-execution branch. K-3 stays untouched here; that PR updates its paths.
-4. **More evidence for moment 5:** 4 of the 8 plans on `master` have no Close step:
-   `ci-test-speedups`, `heating-baseline-and-phase2-prerequisites`, `knowledge-dedup-energy`,
-   `stateful-template-and-automation-tests`. (Step 3's check script is the final count.)
+4. **More evidence for moment 5:** the check script (Step 3) found 6 of the 8 plans on `master`
+   with no Close step: `ci-test-speedups`, `ebusd-pv-heating-optimization`,
+   `heating-baseline-and-phase2-prerequisites`, `heating-compressor-cycling`,
+   `knowledge-dedup-energy`, `stateful-template-and-automation-tests`. (An early manual count
+   said 4.)
 5. **A trigger the first version missed:** `packages/CLAUDE.md` is a nested `CLAUDE.md` that loads
    on demand when a file under `packages/` is read, also without a plan. It already says "A new
    package gets a note + symlink rule (K-6)". Yet `packages/heating_cooling_indicator.yaml` has no
@@ -116,7 +119,7 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
   - `.claude/settings.json` guards.
 - Mark each statement as a convention (its home) or a pointer, and list duplicates and conflicts,
   e.g. constraint 6 vs K-5, and the homes table in CLAUDE.md vs K-1.
-- Map each of the six moments to what an agent has in context at that moment today.
+- Map each of the seven moments to what an agent has in context at that moment today.
 - Dependencies: none. Output: the tables below.
 
 - **Result** (verified against the files on `master` 204d567):
@@ -143,7 +146,7 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
   | 2 write YAML / code | `ha-yaml.md` (Read before Edit), the package note, `packages/CLAUDE.md`, root `CLAUDE.md` 6 |
   | 3 write a comment | root `CLAUDE.md` 6 ("describe each part"), `ha-yaml.md` Comments section; K-5 itself is not loaded |
   | 4 find a bug / confirmed fact | root `CLAUDE.md` "Learnings" pointer and the `record-learning` description, which says "about to write down a lesson" |
-  | 5 close a plan | only if the plan has a Close step (4 of 8 plans have none) |
+  | 5 close a plan | only if the plan has a Close step (6 of 8 plans have none) |
   | 6 change a note / rule / skill / design doc | nothing; the `CLAUDE.md` pointer line "Details, limits and how to extend" has no moment attached |
   | 7 change without a plan | `ha-yaml.md` and the package note when a matching file is read; `packages/CLAUDE.md` under `packages/`; nothing for a new package beyond that |
 
@@ -199,8 +202,8 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
   `/new-plan` reduced to a pointer, root `CLAUDE.md` constraints 1 and 6, pointer line and rules
   row (99 lines), `ha-yaml.md` pointer section, widened `record-learning` description,
   `doc/KNOWLEDGE.md` K-1/K-6/K-8 (K-3 untouched), `.github/scripts/check_knowledge_layout.py` in
-  `ci-local.sh` and `ha_check.yaml`, 8 plans backfilled with a Close step (3 also with a Status
-  section), new `doc/heating_cooling_indicator/notes.md` + symlink.
+  `ci-local.sh` and `ha_check.yaml`, 6 plans backfilled with a Close step (3 others got a Status
+  placeholder, removed again in the review fixes), new `doc/heating_cooling_indicator/notes.md` + symlink.
 - **Check proven:** removing a plan's Close step, its Status heading, or the
   `heating_cooling_indicator` symlink each made the script exit 1; restored, it exits 0.
 - **K-7 loading checks** (fresh headless `claude -p --model haiku --allowedTools Read --max-turns 4`,
@@ -267,6 +270,53 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 - **Triggers that worked:** `plans.md` via CLAUDE.md constraint 1 (T1 3/3, T4 plan has Status + Close); `record-learning` routing for a user-stated confirmed bug (T5 3/3); K-6 close procedure (T6 3/3); the note template K-3 for a new package (T4). **Not reliable:** the `ha-yaml.md` "Where knowledge goes while you edit" section for a measured fact (T2 1/3, T7 0/3 gradable).
 
 - **Infrastructure notes:** `--allowedTools` without Bash blocked `gh` and `ln -s` (T4, T5: issue drafted but not filed; T6: layout check not run). Headless runs print the workspace-trust warning (`permissions.allow` ignored). Not tested: Bash allowed; sonnet instead of haiku; more than 3 runs; whether a stronger pointer (e.g. in `packages/CLAUDE.md`, loaded on package read) fixes pattern 1. These are options for Step 5, not decisions.
+
+### Review fixes [DONE]
+Applied after review of Steps 3 and 4, on this branch:
+1. `plans.md`: item 7 is "A last step named `Close`, done per `doc/KNOWLEDGE.md#K-6`" (no
+   paraphrase); the bullets restating CLAUDE.md constraints 2-5 and the K-1 GitHub-issue line are
+   gone (the latter now points to `record-learning`); only constraint 1 points to the rule.
+2. `doc/heating_cooling_indicator/notes.md`: entity map marks the derived IDs `_15min` and
+   `_48h_forecast_mean` as unverified; IDs used by working config (grep) stay confirmed; the
+   "(sic) in every entity ID" claim is replaced by the one confirmed source sensor.
+3. `ha-yaml.md`: one short section "Comments and findings while you edit" replaces the two comment
+   sections; it points to K-5, keeps the availability-guard rule, and has the findings trigger
+   reworded for the Step 4 failure (a fact only in a comment, or a pointer to a note not edited).
+4. `knowledge.md`: K-section prose index dropped; paths gain `doc/**/tests.md` and
+   `.claude/commands/**`.
+5. `check_knowledge_layout.py`: Close must be a `Close:` step line or a `Close` heading (outside
+   fenced code, case-sensitive); Status may be `## Status` or a `**Status:**` line;
+   `ha_ci_fixtures` is skipped explicitly.
+6. The 3 placeholder Status sections are removed; `knowledge-dedup-jinja-comments.md` got its
+   Close as its own step 8 so the stricter check passes.
+7. CLAUDE.md constraint 6 now only names the style: "in the style of `doc/KNOWLEDGE.md#K-5`".
+8. The indicator note's Related section lists the consumers (pergola, airflow_cooling,
+   heating_pv_boost, heating dashboard).
+9. This plan's counts corrected (6 Close backfills, 3 Status placeholders removed, seven moments).
+
+**Deliberately skipped review findings:** (12) repeated "record learnings via `record-learning`"
+pointers are intended triggers, one per moment; (13) `record-learning` overtriggering was not seen
+in Step 4; (16) residual gaps are documented in Step 4 under infrastructure notes.
+
+**OPEN owner decision (not changed):** Step 4 pattern 4. CLAUDE.md constraint 1 makes agents write a
+plan file even when told "implement directly" (T4 3/3). Keep that, or allow plan-less work for small
+changes?
+
+**K-7 loading checks for the changed rules** (haiku, `--allowedTools Read --max-turns 4`, repo root,
+HEAD e9acf3c; OBSERVED): `plans.md` absent with no read, present after reading
+`plans/ci-test-speedups.md`, absent after `README.md` (a first README prompt let the agent read the
+rule file itself; rerun with "without reading any other file" was absent). `knowledge.md`: absent,
+present after `doc/energy/notes.md`, present after `.claude/commands/new-plan.md`, absent after
+`README.md`. `ha-yaml.md`: absent, present after `packages/pergola.yaml`, absent after `README.md`.
+
+**T2 re-run after the fixes (OBSERVED, 3 fresh clones of e9acf3c, same command and prompt as
+Step 4):** 3/3 PASS, versus 1/3 before. Every run edited `doc/heating_cooling_indicator/notes.md`
+with the measured 0.5 °C fact (graded OBSERVED, user measurement) and every YAML comment is a short
+what + why; the two comments that point (run 2, run 3) point to the note that was edited.
+r1: Known biases entry + compensation line, comment on the input_number and the template offset.
+r2: transition lines, cold-start band and Known biases updated; comment `→ doc/heating_cooling_indicator/notes.md`.
+r3: Decisions in force + Known biases entries; comment `→ doc/heating_cooling_indicator/notes.md`.
+Caveat: 3 runs of one model on one task; T7 (subagent) was not re-run.
 
 ### Step 5 – Close [TODO, awaiting owner]
 - Close: distil into note/design/skill, story → background, update pointers, delete this plan
