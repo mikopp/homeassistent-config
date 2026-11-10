@@ -30,6 +30,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   failure logs in `tests/e2e/.artifacts/`).
 - CI: `tests.yaml` and `e2e.yaml`; both skip their steps (and pass) on a PR touching none of
   `.github/test-paths`: add a path there when a test starts reading it.
+  `upload-artifact` skips dot-directories: `tests/e2e/.artifacts/` needs `include-hidden-files: true`.
 
 ## Pins and guards (`tests/ha/test_versions.py`)
 - PHACC's HA year.month must equal the Dockerfile `FROM` year.month; `holidays`/`cronsim` equal HA's
@@ -91,7 +92,15 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 - Entity ids: look up by unique_id (`entity_id()`); a fresh registry derives other ids than production for
   MQTT/filter/statistics sensors (#146); `load_repo_config` pre-registers the Victron ones.
 - The template test (`test_templates.py`) renders every extracted state/runtime template in one HA; blueprint
-  templates are not extracted (#148).
+  templates are not extracted (#148). 16 of the 55 MQTT entities are never fed a message by any test, so their
+  `value_template` only gets that syntax check (#159).
+- Pre-start seeding takes an explicit prefix list of the missing integrations' entities, never "whatever does not exist
+  yet": a seed once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it and the
+  config entity became `_2` (`test_packages_load` asserts no `_2` ids).
+- Do not configure `http` explicitly: HA 2026.10's pending-HTTP-config trial reverts and restarts HA once 5 min pass on
+  the mocked clock. The default (0.0.0.0:8123, not listening) is left alone.
+- The YAML `workday` platform is rejected by HA at the pin: workday is a config entry (`MockConfigEntry` in-process,
+  the flow in e2e). `utility_meter` registers `<unique_id>_single_tariff`.
 
 ## `tests/e2e` (real container)
 - ONE session container (`docker run --network host`, image from the Dockerfile `FROM`), a host mosquitto, own client
@@ -100,12 +109,17 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   restart: only the log after it is judged (a fresh HA logs ERROR on `homeassistant: start` MQTT publishes before the
   MQTT entry exists). `test_zz_log_hygiene.py` runs last; its `EXTERNAL_NOISE` (environment) and `KNOWN_CONFIG_BUGS`
   (issue numbers) lists are explicit: add an entry only with its cause.
+- A restore test must make the value final before the restart (e.g. an integral fed absurd power, then 0 W), else the
+  sum keeps moving afterwards and the assertion is weak; `wait_stable` for a value that settles after a burst.
 - `.github/scripts/install_custom_components.py` is the one installer of `climate_template` (CI, `ci-local.sh`, `stage.py`).
 
 ## Quality rules
 - **Mutation check every new or changed test**: break the YAML under test in place, see the named case fail,
   restore with `git checkout` (never commit); a test that reads its own seed passes anyway. Also run a table with its
   case order reversed (temporary module).
+- **Test the real entity, never a copy of its formula.** A test that renders a Jinja copy of a YAML formula tests the
+  copy (the Docker-era copies had drifted from the config). Expected values come from an independent Python port or
+  literal anchors, not from the same template.
 - **Stability: 20× on changed tests** (`--count=20 -n 4` on the changed files), the whole `tests/ha` once.
 - **No retry/rerun plugins.** A flaky test is a bug: find the cause (both flakes found so far were test or fixture
   bugs), or open a GitHub issue; never "passed again" as proof.

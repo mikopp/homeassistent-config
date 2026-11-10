@@ -231,6 +231,9 @@ only over the real broker; "unavailable" is a real `expire_after`. The daily met
 inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
+Ten of its MQTT entities (ebusd `OperatingMode`, `CompIntegral`, `BackupIntegral`, `CompStartsHc`,
+`CompHoursHc`, `global/scan`, `Backup`, `CompDemand`, `global/running`, and `loxone/heating/warm_enough`)
+are never fed a message by any test: #159.
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
 `unknown` after boot until the delay elapses.

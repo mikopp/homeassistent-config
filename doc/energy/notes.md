@@ -98,6 +98,8 @@ is open: `plans/energy-live-entity-ids.md`.
   current, switch).
 - New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
   `state:` template strictly and fails on a sentinel output.
+- The six Loxone washer/tumble-dry/dishwasher power and energy sensors are never fed a message by
+  any test (only the syntax check of `test_templates.py` covers their `value_template`): #159.
 
 ## Related
 - `doc/heating_pv_boost/notes.md` — consumer of the Heizung Pro 3EM power/energy.
