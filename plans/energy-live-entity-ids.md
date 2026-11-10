@@ -16,7 +16,7 @@ service calls (root `CLAUDE.md` "MCP usage").
     `heating_electricity_daily` (`packages/heating_pv_boost.yaml:537`), and the YAML comment there
     says "verify it after deploy".
   - **Unverified:** the pool pump ids `sensor.pool_pump_*` and `binary_sensor.pool_pump_switch`.
-    Tests use them, but the tests seed their own states (#156).
+    The in-process tests no longer use them: they find the sensors by unique_id (#146).
   - **Unknown:** all rain water pump and Loxone (washer, tumble dryer, dishwasher) ids.
   - **To re-check:** the go-e source ids `sensor.go_echarger_homekopp_power_total` and
     `sensor.go_echarger_homekopp_total_energy_charged`. They can change on a re-pair.
