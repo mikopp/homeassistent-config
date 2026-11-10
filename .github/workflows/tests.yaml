@@ -1,7 +1,6 @@
 # In-process tests (tests/ha): the real Home Assistant core in pytest, this repo's real YAML
 # (packages, automations, templates) loaded into it, and a real mosquitto per test for the MQTT
-# inputs. The default home of behaviour tests; the real-HA-in-Docker layer is e2e.yaml
-# (plans/test-execution.md). Replaces the retired Docker-harness job (ha_check.yaml).
+# inputs. The default home of behaviour tests; the real-HA-in-Docker layer is e2e.yaml.
 #
 # Three things are pinned, each in ONE file that tests/ha/test_versions.py guards:
 #   * Home Assistant: requirements_test.txt (PHACC) must match the image in

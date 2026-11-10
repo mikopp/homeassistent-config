@@ -1,11 +1,9 @@
 """Shelly Plus Plug S pool pump MQTT sensors (packages/energy.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration item 3 (Step 2b: MQTT-fed entities over the real
-broker). Replaces the Docker tests/test_shelly_pool_pump.py, which seeded the sensor states and
-read its own seed back, so no value_template ever ran; and the Step 0 spike's Shelly ingest test
-(now the case `ingest_rounds_like_the_firmware_values`).
+The payloads go over the real broker (MQTT-fed entities are never seeded), so the real
+value_templates run; the ingest case is `ingest_rounds_like_the_firmware_values`.
 
-ONE test on one fresh HA (tier 1: stateless value_templates, no clock). Every case publishes a
+ONE test on one fresh HA (stateless value_templates, no clock). Every case publishes a
 complete, real switch-status payload (a real Plug S always sends all fields, `output` included)
 to the device topic, so the five real sensors parse it. Before each case a reset payload is
 published and checked; its values differ from every case's expectation, and the switch is reset

@@ -1,15 +1,11 @@
 """Airflow (packages/airflow_cooling.yaml, custom_templates/airflow_decision.jinja), in-process.
 
-plans/test-execution.md, Step 2, migration items 2 and 4. Together they replace every test of
-the former Docker tests/test_airflow.py (deleted in item 4).
+First part of this file: the formula tables (decision, bypass, dew points). Section "Item 4"
+below: the real indicators with their delays and hysteresis, the controller and drying-boost
+automations on real triggers, the drying schedules, the climate hvac_action and the reload
+recovery, on the clock.
 
-Item 2 (first part of this file): the formula tables. Replaces the 20 `test_decision_*`, the
-6 `test_bypass_*` and the 2 `test_dew_point_*` (one case each, plus a few new cases, marked
-"new"). Item 4 (section "Item 4" below): the real indicators with their delays and
-hysteresis, the controller and drying-boost automations on real triggers, the drying
-schedules, the climate hvac_action and the reload recovery, on the clock.
-
-The item-2 tables: three tests, ONE fresh HA each (tier 1 in the plan: no clock, no accumulators, real triggers
+The tables: three tests, ONE fresh HA each (no clock, no accumulators, real triggers
 only through state changes). Each loops over its cases, resets every input it depends on per
 case, collects failures and fails with one assert that lists every failing case.
 
@@ -454,9 +450,8 @@ async def test_dew_point_thresholds(ha: HomeAssistant) -> None:
 
 
 # ══ Item 4: the real indicators, the automations and the climate entity, on the clock ═════════
-# plans/test-execution.md, Step 2, migration item 4. Replaces every test that was left in the
-# Docker tests/test_airflow.py (controller, drying boost, indicator, reload and template-render
-# tests; the file is deleted). ONE fresh HA per test (tier 3: delayed indicators, automations).
+# Controller, drying boost, indicator, reload and hvac_action tests.
+# ONE fresh HA per test (delayed indicators, automations).
 #
 # Unlike the item-2 tables above, NOTHING of the decision chain is seeded here: the indicators
 # (trigger-based template binary sensors, delay_on/off 10 min, `this.state` hysteresis) are
@@ -972,12 +967,10 @@ BOOSTS = [
 
 # The decision goes unavailable (an input missing) and comes back as boost: by design not an
 # edge, so a running boost's timer is not reset (packages/notes/airflow_cooling.md, boost
-# model). CONFIRMED CONFIG BUG (plans/test-execution.md, "Step 2 results, item 4"): with the
-# REAL indicators it IS an edge. flush_needed goes unavailable, drying_needed (no availability
+# model). CONFIRMED CONFIG BUG (#153): with the REAL indicators it IS an edge. flush_needed goes unavailable, drying_needed (no availability
 # template, reads flush with is_state) drops to off at once; when the input returns, flush is
 # back first, the decision passes moisture_flush_cooling/medium, then drying → boost: a real
-# medium → boost edge, and the boost is restarted. The Docker test seeded the indicators, so it
-# never saw this.
+# medium → boost edge, and the boost is restarted. Seeding the indicators hides it.
 UNAVAILABLE_TO_BOOST = BoostCase(
     "drying_boost_unavailable_to_boost_does_not_fire", BOOST, {},
     [BoostStep(auto=True, calls=_START, expect=_BOOSTED),
@@ -1025,7 +1018,7 @@ async def test_drying_boost(airflow_ha: HomeAssistant, clock: Clock) -> None:
 
 
 @pytest.mark.xfail(strict=True, reason="config bug: an input flap restarts the boost "
-                   "(plans/test-execution.md, Step 2 results, item 4); passes once fixed")
+                   "(#153); passes once fixed")
 async def test_drying_boost_unavailable_to_boost_does_not_fire(
     airflow_ha: HomeAssistant, clock: Clock
 ) -> None:
@@ -1064,8 +1057,7 @@ def test_drying_boost_config_edge_only() -> None:
 # low-needed boundary, flush) and the indicator tests that leaned on an earlier test's clock
 # move (heat protection, flush unavailable). Here the REAL binary sensors are driven through
 # their inputs; hysteresis uses the sensor's real `this.state` (a first step switches it on);
-# the 10 min delays are checked on a timeline where it matters. Recorded drift between the
-# copies and the config: plans/test-execution.md, "Step 2 results, item 4".
+# the 10 min delays are checked on a timeline where it matters.
 @dataclass
 class IStep:
     """One step: scenario overrides (from the reference), then the expected states.
@@ -1371,7 +1363,7 @@ async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
     r"'sensor\.solar_yield_watts'",
     reason="config finding: during template.reload the Victron η sensor is briefly "
     "unavailable and solar_yield_watts' `| float` without default logs a TemplateError "
-    "(plans/test-execution.md, Step 2 results, item 4)",
+    "(#155)",
 )
 async def test_reload_recovery(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """The trigger-based indicators after a YAML reload, and their `to: unknown` self-trigger.

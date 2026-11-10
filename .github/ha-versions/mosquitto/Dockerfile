@@ -1,4 +1,4 @@
-# The MQTT broker the tests run against (plans/test-execution.md, Step 4), pinned like Home
+# The MQTT broker the tests run against, pinned like Home
 # Assistant itself (.github/ha-versions/ha/Dockerfile).
 #
 # What this pins: the latest release of the official Home Assistant "Mosquitto broker" app (add-on,

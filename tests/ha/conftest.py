@@ -1,4 +1,4 @@
-"""Fixtures of the in-process test layer (plans/test-execution.md, Step 2).
+"""Fixtures of the in-process test layer.
 
 The real Home Assistant core runs inside pytest (pytest-homeassistant-custom-component, PHACC).
 It loads THIS repo's packages through HA's own YAML loader, and the real MQTT integration talks
@@ -127,9 +127,8 @@ SeedValue = str | tuple[str, Mapping[str, Any]]
 async def seed(hass: HomeAssistant, states: Mapping[str, SeedValue]) -> None:
     """Set entity states directly, in order, then let HA process the changes.
 
-    Replaces the Docker suite's REST `set_state`. Meant for entities with no real source in the
-    test HA (Somfy, ComfoConnect, weather station, ...). For MQTT-fed entities prefer the broker
-    (plans/test-execution.md, Step 2b); the full baseline seeds them too, for tests that only
+    Meant for entities with no real source in the
+    test HA (Somfy, ComfoConnect, weather station, ...). For MQTT-fed entities prefer the broker; the full baseline seeds them too, for tests that only
     need a value (template rendering).
     """
     for eid, value in states.items():
@@ -344,8 +343,8 @@ def broker(tmp_path: Path, socket_enabled: None) -> Generator[Broker]:
     """A fresh broker per test, so retained messages cannot leak between tests.
 
     Kept over one broker per worker that is cleared between tests: clearing measured no faster
-    (about 24 ms per test either way) and needs workarounds (plans/test-execution.md, Step 2
-    results). tests/ha/test_broker_isolation.py proves the isolation.
+    (about 24 ms per test either way) and needs workarounds (PHACC's thread check fails the
+    first test; the subscription log is shared). tests/ha/test_broker_isolation.py proves the isolation.
     """
     b = Broker(tmp_path)
     yield b
@@ -525,7 +524,7 @@ async def wait_state(
         await hass.async_add_executor_job(threading.Event().wait, 0.01)
 
 
-# ── MQTT helpers for case tables (plans/test-execution.md, Step 2b) ──────────────
+# ── MQTT helpers for case tables ─────────────────────────────────────────────────
 async def publish(hass: HomeAssistant, broker: Broker, topic: str, payload: Any) -> None:
     """Publish like a device would, pipelined (`Broker.send`); `mqtt_sync` waits for delivery.
 
@@ -629,10 +628,10 @@ def check_states(
 class Clock:
     """Move HA's clock: freezer + async_fire_time_changed + async_block_till_done.
 
-    Replaces the Docker suite's libfaketime jumps: any number of moves per test, and
+    Any number of moves per test, and
     `move_to` may also go back (only meaningful for code that reads now(), since timers that
     already fired do not fire again). Every expectation must come from HA's own timestamps or
-    from a state read after freezing (plans/test-execution.md, Step 0 results).
+    from a state read after freezing.
     """
 
     def __init__(self, hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
@@ -783,8 +782,7 @@ _KNOWN_CONFIG_LOGS = (
     # packages/victron.yaml counter-delta baselines render the string 'unknown' (src unknown and
     # this.state unknown) into a numeric energy sensor on a time_pattern tick before the Venus
     # counters arrived. Any test that crosses a real minute boundary before publishing them
-    # logs it, so it cannot be avoided per test. Fix: render none instead (plans/
-    # test-execution.md, Step 2 results).
+    # logs it, so it cannot be avoided per test. Fix: render none instead (#147).
     re.compile(
         r"Received invalid sensor state: unknown for entity "
         r"sensor\.victron_(?:solar_yield_dc|ac_pv_energy)_baseline_kwh, expected a number"

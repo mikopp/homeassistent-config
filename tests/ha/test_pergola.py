@@ -1,8 +1,5 @@
 """Pergola roof (packages/pergola.yaml, the Loxone blueprint uses in automations.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration item 5. Replaces all 18 tests of the former Docker
-tests/test_pergola.py (mapping in the plan, "Step 2 results, item 5").
-
 How the tests drive the package (everything through real triggers, never `automation.trigger`):
 - The sun is the REAL `sun` integration at the production location (tests/ha/conftest.py sets
   Europe/Vienna and the Linz coordinates and loads `sun`); the frozen clock is moved to real
@@ -22,9 +19,9 @@ How the tests drive the package (everything through real triggers, never `automa
 
 The cover response waits 500 ms (template-cascade settle delay) before every sun-tracking
 move. On the frozen clock that timer never comes due by itself, and HA's
-`async_block_till_done` waits for the run forever (seen in item 4: the airflow tests had to turn
+`async_block_till_done` waits for the run forever (the airflow tests therefore turn
 the pergola automations off). `_settle` therefore runs HA until idle and moves the frozen clock
-to a pending timer when it is at most 1 s away; every wait in this module goes through it
+to a pending timer when it is at most 0.6 s away; every wait in this module goes through it
 (`_PergolaClock`, `_Env.seed`, `_Env.act`, `_Env.sync`).
 
 Expected cover angles come from `_Ref`, an independent Python port of the formulas in

@@ -1,20 +1,18 @@
 """PV slab pre-charging (packages/heating_pv_boost.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration items 3 and 4. Replaces all 25 Docker tests of the
-former tests/test_heating_pv_boost.py: item 3 the surplus formula, the compressor activity and
-cycling formulas, the cooling interlock and the derived setpoint (tables 1-4); item 4 the four
-that need the clock (section 5): the hot-water return mask (`heating_dhw_active` delay_off
-25 min), the master-switch decision (`heating_slab_mode_wanted` delay_on 15 / delay_off 20 min)
-and the two `heating_compressor_last_run` tests (a `last_changed` span). Item 4 also adds the
+Tables 1-4: the surplus formula, the compressor activity and cycling formulas, the cooling
+interlock and the derived setpoint. Section 5 needs the clock: the hot-water return mask
+(`heating_dhw_active` delay_off 25 min), the master-switch decision (`heating_slab_mode_wanted`
+delay_on 15 / delay_off 20 min), `heating_compressor_last_run` (a `last_changed` span), the
 REAL history_stats sensors (recorder) and the daily utility meters' midnight reset.
 
-Tables 1-4: ONE fresh HA each (tier 1: stateless formulas). Each loops over its cases: publish
+Tables 1-4: ONE fresh HA each (stateless formulas). Each loops over its cases: publish
 and check a reset vector, then the case's inputs (optionally followed by further steps without
 a reset), collect every failure, one assert at the end that names each failing case.
-Section 5: ONE fresh HA per test (tier 3: delays, spans, recorder history, meter cycles), the
+Section 5: ONE fresh HA per test (delays, spans, recorder history, meter cycles), the
 steps in order on a frozen clock; every check is collected, one assert at the end.
 
-How the inputs get in (Step 2b: MQTT-fed entities only over the real broker):
+How the inputs get in (MQTT-fed entities only over the real broker):
 - ebusd registers: plain `;`-separated payloads on `ebusd/<circuit>/<name>` (positional fields,
   names or raw enum numbers, as ebusd sends them), so the real value_templates parse them.
 - Shelly Pro 3EM "Heizung": `em:0` / `emdata:0` JSON; Victron: Venus OS `{"value": x}`.
@@ -516,8 +514,8 @@ async def test_target_temp(ha: HomeAssistant, broker: Broker) -> None:
     assert not failures, f"{len(failures)} setpoint check(s) failed:\n" + "\n".join(failures)
 
 
-# ── 5. Clock-dependent sensors (plans/test-execution.md, Step 2, item 4) ─────────────────
-# Each test is ONE fresh HA (tier 3: delays, `last_changed` spans, recorder history, meters).
+# ── 5. Clock-dependent sensors ───────────────────────────────────────────────────────────
+# Each test is ONE fresh HA (delays, `last_changed` spans, recorder history, meters).
 # The clock is frozen right after start (`clock` fixture) and moved explicitly, so every delay
 # and span is exact. Inputs that expire (Shelly/Victron power, 120 s) are republished during
 # long waits, as the devices do (`Clock.hold`).

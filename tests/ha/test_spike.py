@@ -1,10 +1,4 @@
-"""Step 0 spike test (plans/test-execution.md) that has no package home: the package load.
-
-The other spike tests moved into their package files as the packages migrated (Step 2):
-the two airflow decision ports into tests/ha/test_airflow.py (item 2); the Shelly ingest into
-tests/ha/test_shelly_pool_pump.py and the Victron accumulator and keep-alive tests into
-tests/ha/test_victron.py (item 3).
-"""
+"""Package load: every package loads together in the in-process HA, with no `_2` entity ids."""
 
 from __future__ import annotations
 

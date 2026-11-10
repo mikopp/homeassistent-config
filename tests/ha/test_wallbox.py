@@ -1,14 +1,14 @@
-"""Wallbox wrapper sensors (packages/energy.yaml), in-process (plans/test-execution.md, Step 2).
+"""Wallbox wrapper sensors (packages/energy.yaml), in-process.
 
 sensor.wallbox_power / sensor.wallbox_energy are source-independent wrappers: the Energy
 Dashboard references them, never the go-e MQTT entities. The go-e firmware's discovery payload
 may declare either W/Wh or kW/kWh, so the wrappers normalise the unit.
 
-Replaces the Docker tests/test_wallbox.py (7 tests → 7 cases here). The go-e entities come from
+The go-e entities come from
 MQTT discovery in production (not from this repo's YAML), so there is no real path for them in
 the test HA: they are seeded, and the test reads the REAL wrapper templates' results.
 
-ONE test on ONE fresh HA (tier 1 in the plan: stateless formulas, no clock, no automations):
+ONE test on ONE fresh HA (stateless formulas, no clock, no automations):
 it loops over the cases, collects every failure and fails with one assert that lists them all.
 """
 

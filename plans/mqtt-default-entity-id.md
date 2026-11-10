@@ -1,7 +1,7 @@
 # Plan: pin MQTT sensor entity IDs with `default_entity_id`
 
 ## Status
-- [x] Problem found (in-process test spike, `plans/test-execution.md` Step 0 results, finding 1)
+- [x] Problem found (in-process test spike: a fresh registry derives other ids than production, see #146)
 - [ ] Step 1 research: real IDs via ha-mcp and source check, awaiting approval
 - [ ] Step 2 YAML change, awaiting approval
 - [ ] Step 3 tests and deploy note
@@ -9,7 +9,7 @@
 
 Deferred by the owner: fix it another time. Tracked in GitHub issue #146.
 
-#146 also covers the registry-dependent IDs of the airflow and weather-station filter and statistics sensors (not MQTT, same cause; `plans/test-execution.md`, Step 2 results, finding 3). Step 1 research must include them:
+#146 also covers the registry-dependent IDs of the airflow and weather-station filter and statistics sensors (not MQTT, same cause; confirmed on a fresh registry by the in-process tests). Step 1 research must include them:
 
 | unique_id (platform) | Fresh registry gives | Config reads |
 |---|---|---|

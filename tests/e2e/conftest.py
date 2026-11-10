@@ -1,7 +1,7 @@
 """Real Home Assistant in Docker, fed by a real mosquitto on the host.
 
 This layer is deliberately small: it only holds tests that need a real Home Assistant (see the
-module docstrings, plans/test-execution.md). Everything a Home Assistant inside pytest can show
+module docstrings). Everything a Home Assistant inside pytest can show
 runs in `tests/ha`. Every test here says why with `@pytest.mark.needs_real_ha("<reason>")`;
 collection fails without it.
 
@@ -100,7 +100,7 @@ class Broker:
     """A mosquitto process plus a paho client that publishes like the devices do.
 
     The HA container runs with `--network host`, so it reaches the broker on 127.0.0.1 and the
-    config flow of the MQTT integration uses `port` (plans/test-execution.md, Step 2b).
+    config flow of the MQTT integration uses `port`.
     """
 
     def __init__(self, workdir: Path) -> None:

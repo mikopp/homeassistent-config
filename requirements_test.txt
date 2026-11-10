@@ -1,4 +1,4 @@
-# Dependencies of the in-process test layer (tests/ha, plans/test-execution.md).
+# Dependencies of the in-process test layer (tests/ha).
 #
 # PHACC pins the exact Home Assistant release (0.13.375 = homeassistant==2026.10.4). Its year.month
 # must match the FROM line of .github/ha-versions/ha/Dockerfile; tests/ha/test_versions.py guards it.

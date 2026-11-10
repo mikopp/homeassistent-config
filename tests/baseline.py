@@ -3,7 +3,7 @@ exist in a test HA (MQTT devices, Somfy, ComfoConnect, weather station, ...).
 
 Pure data, no imports. The in-process layer (tests/ha/conftest.py: `seed`, `apply_baseline`)
 applies it with `hass.states.async_set` and real helper actions. (The Docker-harness suite that
-used to apply it over REST is gone, plans/test-execution.md Step 4.)
+used to apply it over REST is gone.)
 
 Order matters (dicts and lists keep it): helpers first, then the states, in the order below.
 """

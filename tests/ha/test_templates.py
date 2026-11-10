@@ -1,7 +1,6 @@
-"""Every Jinja template in the config renders on the in-process HA (plans/test-execution.md, Step 2).
+"""Every Jinja template in the config renders on the in-process HA.
 
-Replaces the Docker suite's tests/test_templates.py, which rendered each template over REST
-(/api/template). Same extraction (.github/scripts/extract_templates.py), same two modes:
+Templates are extracted by .github/scripts/extract_templates.py and rendered in two modes:
 - state templates (no runtime variables): strict. The shared baseline is applied first, so an
   error, an undefined variable or a sentinel output (unknown, unavailable, None, empty) is a
   real failure.

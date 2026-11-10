@@ -1,4 +1,4 @@
-"""Broker isolation proof (plans/test-execution.md, "Step 2 additions"): no retained message
+"""Broker isolation proof: no retained message
 survives into the next test.
 
 Two tests that only make sense together: the first leaves retained messages on the broker, the

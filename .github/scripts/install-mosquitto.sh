@@ -4,8 +4,7 @@
 # Why not `apt-get install mosquitto`: the distribution's version drifts (the sandbox has 2.0.18,
 # the Home Assistant Mosquitto app ships 2.1.2). The tests pin the broker like Home Assistant, to
 # the one the official app ships, so the binary is taken out of that very image.
-# Why not `docker run` per test: measured about 150 ms per start against about 6 ms for a binary
-# (plans/test-execution.md, Step 4 results).
+# Why not `docker run` per test: measured about 150 ms per start against about 6 ms for a binary.
 #
 # Usage:  .github/scripts/install-mosquitto.sh [dest]     (default .cache/mosquitto, git-ignored)
 # Result: <dest>/bin/mosquitto, a wrapper that runs the extracted binary. Put <dest>/bin first on

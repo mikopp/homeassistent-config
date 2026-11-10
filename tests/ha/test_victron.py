@@ -1,25 +1,23 @@
 """Victron power-domain formulas and accumulators (packages/victron.yaml), in-process.
 
-plans/test-execution.md, Step 2, migration items 3 and 4. Replaces every test of the former
-Docker tests/test_victron.py: item 3 the 31 instant-power tests (one case each; the one
-two-step test is split into two cases) and the battery/grid accumulator spike ports; item 4
-the 11 accumulator tests left (η gate, export, night, conversion loss, solar-yield counter
-delta incl. the skipped first-tick test, battery residual), now on real minute ticks.
+Covers the instant-power templates (one case each), the battery/grid accumulators, and on real
+minute ticks the η gate, export, night, conversion loss, solar-yield counter delta and battery
+residual.
 
-`test_instant_power_table`: ONE test on one fresh HA loops over the cases (tier 1 in the plan:
-stateless formulas). Every case first publishes a reset vector and checks that the derived
+`test_instant_power_table`: ONE test on one fresh HA loops over the cases (stateless
+formulas). Every case first publishes a reset vector and checks that the derived
 sensors show it, then publishes the case's inputs and checks its expectations; all failures are
 collected into one assert that names each failing case.
 
 The accumulator tests (section "Accumulators driven by real minute ticks"): ONE fresh HA each
-(tier 3), real ticks on the frozen clock, nothing seeded.
+real ticks on the frozen clock, nothing seeded.
 
 How the inputs get in:
 - Every Victron MQTT sensor is driven over the real broker with Venus OS payloads
   (`{"value": x}`), so the real value_templates, rounding and `expire_after` run.
 - "Unavailable" is what production sees: the MQTT sensor's `expire_after` elapsed (Clock), or
   the sensor never received a message (expire_after sensors start unavailable, see
-  `test_instant_power_table`'s startup phase). The Docker suite wrote "unavailable" over REST.
+  `test_instant_power_table`'s startup phase).
 - In the instant-power table the two η accumulators (`victron_multiplus_ac_out_energy` /
   `_dc_in_energy`) are seeded to set η per case; their self-reference (`this.state`) makes the
   seed what the next tick builds on. The clock is frozen for the whole table (`clock`
@@ -290,10 +288,8 @@ async def test_instant_power_table(ha: HomeAssistant, broker: Broker, clock: Clo
     assert not failures, f"{len(failures)} Victron check(s) failed:\n" + "\n".join(failures)
 
 
-# ── Accumulators: real broker + moved clock (moved unchanged from the Step 0 spike) ────────
-# These are item-4-type tests (time_pattern, platform: integration), already proven in Step 0
-# (plans/test-execution.md, "Step 0 results"). They replace the Docker
-# `test_battery_discharge_energy_accumulates` and `test_grid_import_energy_accumulates`.
+# ── Accumulators: real broker + moved clock ───────────────────────────────────────────────
+# Battery discharge (time_pattern) and grid import (platform: integration) energy.
 _TOPICS = {
     "grid_l1": "system/0/Ac/Grid/L1/Power",
     "grid_l2": "system/0/Ac/Grid/L2/Power",
@@ -370,9 +366,9 @@ async def test_victron_keepalive_published(
     )
 
 
-# ── Accumulators driven by real minute ticks (plans/test-execution.md, Step 2, item 4) ──────
-# Replace the Docker η, export, night, conversion-loss, solar-yield counter-delta and battery
-# residual tests. ONE fresh HA per test (tier 3: the accumulators' `this.state` and the
+# ── Accumulators driven by real minute ticks ─────────────────────────────────────────────
+# η, export, night, conversion-loss, solar-yield counter-delta and battery residual.
+# ONE fresh HA per test (the accumulators' `this.state` and the
 # `integration` totals cannot be reset), no seeded accumulator or baseline: every value is what
 # the real trigger block (`time_pattern: minutes: "/1"`) built from the published inputs.
 #
