@@ -3,7 +3,7 @@
 ## Status
 - [DONE] Problem found, first drafts tried and verified for loading, then reverted from `claude/happy-cannon-mxtn3f` on the owner's request, redone on `claude/serene-curie-d36oqw`
 - [DONE] Step 0 plan brought to this branch and updated (owner-approved proposal, Steps 0-3)
-- [TODO] Step 1 inventory
+- [DONE] Step 1 inventory (table below)
 - [TODO] Step 2 design
 - [TODO] Step 3 implement
 - [TODO] Step 4 end-to-end verification
@@ -105,7 +105,7 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 
 ## Steps
 
-### Step 1 – Inventory (read-only) [TODO]
+### Step 1 – Inventory (read-only) [DONE]
 - List every place that states a knowledge convention or a trigger:
   - root `CLAUDE.md` (constraints 1–6, Learnings, Where knowledge lives);
   - `doc/KNOWLEDGE.md`;
@@ -117,7 +117,35 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 - Mark each statement as a convention (its home) or a pointer, and list duplicates and conflicts,
   e.g. constraint 6 vs K-5, and the homes table in CLAUDE.md vs K-1.
 - Map each of the six moments to what an agent has in context at that moment today.
-- Dependencies: none. Output: a table in this plan.
+- Dependencies: none. Output: the tables below.
+
+- **Result** (verified against the files on `master` 204d567):
+
+  | Statement | Lives in | Kind | Conflict / duplicate |
+  |---|---|---|---|
+  | plan format (overview, steps, status markers, homes, Close step) | `.claude/commands/new-plan.md` only | convention | unreachable without `/new-plan` |
+  | status update / summarize / wait for approval | root `CLAUDE.md` 1-5 | convention | partly repeated in `new-plan.md` ("wait for my approval", status markers) |
+  | "ALWAYS write comments that describe each part" | root `CLAUDE.md` 6 | convention | conflicts with K-5 (what + one-line why + pointer); K-5 is in view only via `ha-yaml.md`'s Comments section |
+  | homes table | root `CLAUDE.md` + K-1 + `record-learning` §3 | 3 copies | `CLAUDE.md` is a summary, `record-learning` is routing (adds the issue/hypothesis/contradicted rows); K-1 is the home |
+  | close procedure | K-6 "Every plan's last step" + `new-plan.md` item 7 | 2 copies | item 7 paraphrases K-6 |
+  | background guard | `.claude/settings.json` `permissions.ask` + K-1 | convention + enforcement | consistent (prompt, not a wall; Grep not blocked) |
+  | new package = note + symlink | `packages/CLAUDE.md`, K-6, `record-learning` §3 | convention | no mechanical check; `heating_cooling_indicator` has neither note nor symlink |
+  | YAML comment style | K-5 | convention | `ha-yaml.md` "Comments" section restates it (exists on `master` since #152) |
+  | learnings need evidence | root `CLAUDE.md` "Learnings", `record-learning` §1-2 | convention + pointer | the `CLAUDE.md` copy is a pointer |
+  | loading check method | K-7, K-8 | convention | none |
+  | notes' Tests / Related sections | `doc/<pkg>/notes.md` | package facts | none; K-3 names `tests/test_<pkg>.py`, correct on `master` |
+
+- **Moments → what is in context today:**
+
+  | Moment | In context today |
+  |---|---|
+  | 1 create a plan | nothing, unless the owner types `/new-plan`; root `CLAUDE.md` 1-5 only |
+  | 2 write YAML / code | `ha-yaml.md` (Read before Edit), the package note, `packages/CLAUDE.md`, root `CLAUDE.md` 6 |
+  | 3 write a comment | root `CLAUDE.md` 6 ("describe each part"), `ha-yaml.md` Comments section; K-5 itself is not loaded |
+  | 4 find a bug / confirmed fact | root `CLAUDE.md` "Learnings" pointer and the `record-learning` description, which says "about to write down a lesson" |
+  | 5 close a plan | only if the plan has a Close step (4 of 8 plans have none) |
+  | 6 change a note / rule / skill / design doc | nothing; the `CLAUDE.md` pointer line "Details, limits and how to extend" has no moment attached |
+  | 7 change without a plan | `ha-yaml.md` and the package note when a matching file is read; `packages/CLAUDE.md` under `packages/`; nothing for a new package beyond that |
 
 ### Step 2 – Design [TODO]
 - For each moment, choose one trigger that points to exactly one home, with no copied content.
