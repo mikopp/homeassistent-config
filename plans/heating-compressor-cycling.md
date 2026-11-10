@@ -367,3 +367,6 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
   `test_return_temp_is_masked_while_making_hot_water` passed in CI only because earlier test files
   had moved the mocked clock past their sensors' `delay_off` windows; run alone they failed (also on
   `master`). Each now advances the clock 26 min itself; `test_heating_pv_boost.py` alone: 20/20 pass.
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

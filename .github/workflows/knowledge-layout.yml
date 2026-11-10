@@ -1,0 +1,25 @@
+---
+# Knowledge layout (doc/KNOWLEDGE.md K-6, K-8): every plans/*.md has a Status section and a
+# Close step, every packages/*.yaml has a note symlink in .claude/rules/packages/.
+# Its own workflow so it needs no Docker and no pip install (the script is stdlib only).
+name: Knowledge Layout
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-knowledge-layout:
+    name: Check knowledge layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Runner's preinstalled python3 is enough; the script exits 1 and prints each violation.
+      - name: Check plans and package notes
+        run: python3 .github/scripts/check_knowledge_layout.py

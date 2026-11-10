@@ -348,3 +348,6 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
   test patterns but has not been executed — CI is its first run
 - Anything touching the real MQTT broker or the ebus, so every topic name and payload shape is
   taken from the captured dump rather than observed live
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

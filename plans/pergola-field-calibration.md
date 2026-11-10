@@ -42,3 +42,4 @@ changes; if a formula turns out wrong, open a separate plan.
 ## Knowledge homes updated
 `doc/pergola/notes.md` (calibrated values, decisions), `doc/pergola/design.md` (drain angles
 or thresholds if they change), `doc/pergola/background.md` (calibration story).
+
