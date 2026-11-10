@@ -798,8 +798,8 @@ automation:
 
           # ── RULE 2 → USER OVERRIDE: User overrides while in rain state ──────────────
           # User operated a cover during rain (originator = user): respect it, go to
-          # user_override. When that lock clears, the user-override exit runs and rain
-          # entry re-engages on the next trigger if it is still raining.
+          # user_override. When that lock clears, rain entry (listed first) wins in the same
+          # run if it is still raining; otherwise the user-override exit runs.
           - conditions:
               - condition: template
                 value_template: >

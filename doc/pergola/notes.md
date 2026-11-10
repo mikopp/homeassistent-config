@@ -129,10 +129,9 @@ The other helpers' values are on each helper in the YAML (baselines: `doc/pergol
   covers (the 12:05/12:10 ticks race the state change), and a move at 12:10:30 makes the 12:15:30
   watchdog tick see a fresh update. The test reports the covers at 12:11:30 and counts the window
   from there.
-- Config comment stale (not fixed): rule 2 → user_override (`packages/pergola.yaml` ~985-997) says
-  the exit runs first and rain re-engages on the next trigger; CONFIRMED by state trace that with
-  `rain_rate > 0` and both locks `unknown` the state goes user_override → rain in the same run
-  (rain entry comes before the exit rule). The test asserts the code.
+- Rule 2 → user_override: with `rain_rate > 0` and both locks `unknown` the state goes
+  user_override → rain in the same run (rain entry comes before the exit rule); CONFIRMED by state
+  trace, the test asserts it, and the YAML comment now says so.
 
 ## Related
 - `doc/pergola/design.md`: current design.
