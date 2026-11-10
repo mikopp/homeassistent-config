@@ -222,7 +222,8 @@ _STUBBED_ACTIONS = (
 
 
 # Entity id prefixes of integrations the test HA does not run: Somfy covers and their lock
-# sensors, ComfoConnect, the weather station (UDP), go-e, sun. `sensor.wheatherstation_` also
+# sensors, ComfoConnect, the weather station (UDP), go-e. NOT sun: the real `sun` integration
+# runs (see `load_repo_config`), so sun.sun follows the frozen clock. `sensor.wheatherstation_` also
 # matches the production ids of two config sensors (statistics 48h mean, filter 15min) that a
 # fresh registry derives as `sensor.weatherstation_...` (registry-dependent ids, as in #146), so
 # seeding them cannot collide with the config entities.
@@ -235,7 +236,6 @@ _EXTERNAL_PREFIXES = (
     "switch.comfoconnect_pro_",
     "sensor.wheatherstation_",
     "sensor.go_echarger_",
-    "sun.sun",
 )
 
 
@@ -418,6 +418,15 @@ async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> Non
     results = await asyncio.gather(*(async_setup_component(hass, d, conf) for d in conf))
     failed = [d for d, ok in zip(conf, results, strict=True) if not ok]
     assert not failed, f"setup failed: {failed}"
+    # Real sun integration (production loads it through default_config, which this layer does
+    # not load). A config entry like the one onboarding creates; sun.sun's elevation, azimuth
+    # and next_* attributes are computed by astral at the production location above, and
+    # follow the frozen clock (its position timer fires on every clock move past it).
+    # AFTER the package domains: sun forwards its entry to the `sensor`/`binary_sensor`
+    # platforms, which sets those domains up without the YAML platforms if it runs first
+    # (seen: the `integration`/`filter` sensors were missing).
+    MockConfigEntry(domain="sun", title="Sun").add_to_hass(hass)
+    assert await async_setup_component(hass, "sun", {})
     # Actions of integrations the test HA does not run (Somfy covers, ComfoConnect, phone,
     # Loxone). Stubbed only where no real action exists; each records its calls, so a test can
     # assert what an automation did: hass.data["service_calls"]["select.select_option"].

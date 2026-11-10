@@ -68,10 +68,8 @@ BASELINE_NUMBERS: dict[str, float] = {
 _ATTRS_W = {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
 _ATTRS_KWH = {"unit_of_measurement": "kWh", "device_class": "energy", "state_class": "total_increasing"}
 BASELINE_STATES: dict[str, tuple[str, dict]] = {
-    # Sun — seeded to midday above_horizon; may be overwritten by the sun integration
-    # within seconds if the fake time is set to night. Tests that need a specific sun
-    # position use the midday_sun fixture which uses the time machine.
-    "sun.sun": ("above_horizon", {"elevation": 45, "azimuth": 180}),
+    # sun.sun is NOT seeded: the in-process HA runs the real sun integration
+    # (tests/ha/conftest.py `load_repo_config`); tests move the clock to get a sun position.
     # Victron solar charger (MQTT — broker absent in CI). Raw DC input — the repointed
     # sensor.solar_yield_watts (AC-referenced, packages/victron.yaml) is computed from
     # sensor.victron_dc_pv_total_power instead, not from this one.

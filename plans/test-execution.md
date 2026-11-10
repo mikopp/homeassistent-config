@@ -12,7 +12,7 @@
   - [x] Migration item 2: wallbox, heating_cooling_indicator, airflow decision/bypass/dew-point thresholds → `tests/ha/test_{wallbox,heating_cooling_indicator,airflow}.py` (one looping test per table); Docker tests removed (see "Step 2 results, item 2")
   - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
   - [x] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron, airflow → in-process; their Docker files deleted; only `tests/test_pergola.py` (18 tests, item 5) is left in Docker (see "Step 2 results, item 4")
-  - [ ] Migration item 5 (pergola)
+  - [x] Migration item 5 (pergola): the 18 Docker tests → `tests/ha/test_pergola.py` (14 tests on the real `sun` integration, real triggers); `tests/test_pergola.py` and the pergola CI step removed (see "Step 2 results, item 5")
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
 - [ ] Step 3 real-HA layer
 - [ ] Step 4 CI/local runs
@@ -398,6 +398,51 @@ Case independence: controller, boost and the four indicator tables also pass wit
 Stability and time (owner rule: 20x on changed tests, full suite 1x). `--count=20 -n 4` on the three changed files after the last harness change: `test_heating_pv_boost.py` 180/180, `test_victron.py` 220/220, `test_airflow.py` 260/260 + 20 strict xfails (the boost bug), 11m00s wall. Full `tests/ha` 1x: 43 passed + 1 xfailed, 39.5 s (`-n 4`). Slowest calls: slab decision 3.9 s, controller 3.9 s, history_stats 3.5 s, last run 3.0 s, decision table 2.4 s; setup 2.3-3.5 s per test (HA boot).
 
 CI: `.github/workflows/ha_check.yaml` "remaining tests" step now collects nothing (exit 5); treated as success until Step 4 replaces the workflow. Docker suite: 18 tests (pergola), collects.
+
+### Step 2 results, item 5 (pergola)
+`tests/ha/test_pergola.py` (14 tests incl. 6 parametrized scenarios); Docker `tests/test_pergola.py` deleted. Real `sun` integration at the configured location on the moved clock (`load_repo_config` now loads it as a config entry AFTER the package domains, else its sensor/binary_sensor forwarding hides the YAML platforms; `sun.sun` is no longer seeded, not in `tests/baseline.py` either). All automations run through real triggers and conditions; no `automation.trigger`. Effects are the recorded cover/Loxone calls, attributed to the automation by the context of its `automation_triggered` event. Weather station, Somfy covers and lock sensors are seeded (no integration); Victron PV/load go over the real broker; the season is the real indicator driven through its 48h mean.
+
+Harness findings (each CONFIRMED by a failing then passing test):
+- **500 ms settle delay vs frozen clock.** The cover response's `delay: 500 ms` never comes due on the frozen clock and `async_block_till_done` waits forever (the item-4 airflow hang). `_settle` runs HA until idle and moves the clock to a pending script delay only when it is at most 0.6 s away. The first value 1.0 s was wrong: a drain delay with 1 s left (`hold(29)` of the 30 s) was reached early, one step of the drain came a second too soon.
+- **A scenario that fails while the post-rain drain waits** left the drain running on the frozen clock and hung HA's shutdown for minutes (mutation run: no result in 280 s). The `pergola_env` fixture now stops `script.pergola_post_rain_recovery` at teardown.
+- A test must not end with a running drain either (same hang): the last scenario step is never one that starts it.
+
+Mapping, Docker (18) → in-process:
+| Docker | Now | Notes |
+|---|---|---|
+| `test_baseline_cooling_optimized`, `test_cooling_unoptimized`, `test_heating_mode` | `test_cover_formulas` | real sun positions chosen per branch of the PG-4 formulas (floor_90, max_tilt, moe_plus_db, flip, cap, lower bound, heating floor/follow), expected angles from the independent port `_Ref` (checked against the PG-4.8 table in `test_reference_model`); HA's sensors AND the sent tilt are compared. Docker seeded A_eff 67.9 and `sun.sun` |
+| (new) | `test_deadbands` | tilt deadband per mode against the echoed cover position |
+| `test_automation_disabled` | scenario `master_switch` | master off: no move, sensors keep computing, last angle kept; on again: next transition moves |
+| `test_not_enough_sun`, `test_no_sun_behind_house`, `test_sun_down_state`, state part of `test_pv_power_zero_at_night_when_mppt_stale` | `test_sun_rules` (9 cases) | rules 5-9 on real days (March, June, December); shading threshold 512 × sin(el) × 0.9 checked ±30 W/m² against the real elevation; UV ≥ 3 and PV alone; azimuth window edge and min elevation edge on real mornings; steady `/5` tick calls |
+| `test_frost_entry`, `test_frost_recovery` | scenario `frost` | entry tested at 2.0 °C (below the 2.5 threshold but above a lowered one), hysteresis 2.8, exit 3.5 |
+| `test_post_rain_recovery` | scenario `frost_exit_with_hourly_rain_drains` | exact drain timing: 30 s, 8° (tilt 12) 5 min, 15° (tilt 18) 5 min, 30 min drying, then evaluate; Docker checked only the step sensor |
+| `test_rain_starts` | scenario `rain_rate` | rain, hold, rain_stopped, short drain without the 8° step and the drying wait |
+| `test_rain_lock_from_cover`, `test_rain_with_user_originator` | scenario `cover_rain_lock_then_user` | lock responders force a report (`stop_cover_tilt`) per originator change |
+| `test_user_override_left` | scenario `user_override` | see finding 1 |
+| wrapper part of `test_pv_power_zero_at_night_when_mppt_stale` | `test_pv_power_wrapper` | real `expire_after: 120`, GX/MPPT quiet combinations |
+| `test_indicator_heating_season_…_on`, `…_cooling_season_…_off`, `…_unavailable_keeps_…` | `test_season_sync` | 7 real indicator transitions via the 48h mean, unavailable leaves it; Docker used `automation.trigger` |
+| (new) | `test_watchdogs_responders_loxone`, `test_automation_set_is_complete`, `test_reference_model` | watchdogs, lock responders, Loxone mirror; guard that every automation is covered; reference model anchors |
+
+Runtime: `tests/ha/test_pergola.py` 14 tests, ~27-34 s with `-n 4` (94 s serial, reversed order). Full `tests/ha`: 57 passed + 1 strict xfail, 59 s.
+
+Stability: `--count=20 -n 4` on the file: 280/280, 6m43s. Reversed test order (serial, `-p no:randomly`): 14 passed.
+
+Mutation checks (in place on `packages/pergola.yaml`, restored with `git checkout`, `git diff packages/` empty), each fails:
+| Mutation | Failing test |
+|---|---|
+| frost entry `below: 2.5` → 1.5 | `test_protected_states[frost]` (first version passed with a -1.5 °C seed; entry now tested at 2.0) |
+| shining threshold `* sensitivity` → `* sensitivity * 1.5` | `test_sun_rules` |
+| rain entry without the links `!= 'user'` guard | `test_protected_states[cover_rain_lock_then_user]` |
+| rain → user_override transition writes `rain` | `test_protected_states[cover_rain_lock_then_user]` |
+| drain first delay 30 → 45 s | `[frost_exit_with_hourly_rain_drains]`, `[rain_rate]` |
+| shining `delay_on` 1 → 3 min | `test_cover_formulas` |
+| 8° drain angle → 10° | `[frost_exit_with_hourly_rain_drains]` |
+
+Config findings (record only, not fixed; no issue opened):
+1. **User-lock clear while it rains goes straight to `rain`.** CONFIRMED (state trace): the state manager's rain entry (rule 2) comes before the user_override exit rule and only excludes `frost`/`rain`, so with `rain_rate > 0` and both locks `unknown` the state goes user_override → rain in the same run, `exit_to_normal` never runs. The comments at rule 2 → user_override (`packages/pergola.yaml` ~985-997) say the exit runs first and rain re-engages on the next trigger. Behaviour is sensible; the comment is stale. The test asserts the code.
+2. The `tests/conftest.py` Docker fixtures `midday_sun`/`low_elevation_sun` and the "year-jump" explanation in `ha_check.yaml` are gone with the Docker pergola tests; `packages/notes/pergola.md` "Tests" section still describes `tests/test_pergola.py` (stale; notes are under `.claude/`-governed knowledge work, not touched here).
+
+Leftover harness bits: removed `midday_sun`/`low_elevation_sun` (unused). Still present, unused now: the Docker `tests/conftest.py` (baseline fixtures, `wait_for_state` helpers if any), `tests/baseline.py` REST seeding (shared with `tests/ha`), `requirements.txt` Docker harness deps, the `ha_check.yaml` "remaining tests" step (exit 5 accepted) and `check_config` step: all for Step 4.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

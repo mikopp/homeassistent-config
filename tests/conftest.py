@@ -9,7 +9,7 @@ import pytest
 import requests
 from datetime import timedelta
 
-from ha_integration_test_harness import HomeAssistant, TimeMachine
+from ha_integration_test_harness import HomeAssistant
 
 from baseline import BASELINE_ACTIONS, BASELINE_NUMBERS, BASELINE_STATES
 
@@ -111,39 +111,3 @@ def baseline_states(home_assistant: HomeAssistant, baseline_inputs: None) -> Non
     """
     for entity_id, (state, attributes) in BASELINE_STATES.items():
         home_assistant.set_state(entity_id, state, attributes)
-
-
-# ── Shared time-machine fixtures ─────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def low_elevation_sun(home_assistant: HomeAssistant, time_machine: TimeMachine) -> None:
-    """Jump to June 21 at 04:00 UTC — sun just above horizon, elevation ~3° (below min_sun_elevation=10°).
-
-    Linz (48.3°N): June 21 sunrise ≈ 03:47 UTC; at 04:00 UTC elevation ≈ 3°, azimuth ≈ 55°.
-    Mirrors midday_sun: pin clock so the sun integration computes a stable low elevation,
-    then assert the integration settled before the test proceeds.
-    """
-    time_machine.jump_to_next(month="Jun", day_of_month=21, hour=4, minute=0, second=0)
-    home_assistant.set_state("sun.sun", "above_horizon", {"elevation": 3, "azimuth": 55})
-    home_assistant.assert_entity_state(
-        "sun.sun",
-        expected_state="above_horizon",
-        expected_attributes={"elevation": lambda e: float(e) < 10},
-        timeout=10,
-    )
-
-
-@pytest.fixture
-def midday_sun(home_assistant: HomeAssistant, time_machine: TimeMachine) -> None:
-    """Jump to June 21 at 10:00 UTC — sun above_horizon, elevation ~45°, azimuth ~150°.
-
-    Linz (48.3°N): June 21 solar noon ≈ 11:50 UTC; at 10:00 UTC elevation ≈ 45°.
-    Uses jump_to_next so subsequent tests jump to the same time next year — sun
-    position at June 21 10:00 UTC is identical across years.
-    """
-    time_machine.jump_to_next(month="Jun", day_of_month=21, hour=10, minute=0, second=0)
-    # Seed immediately to prevent a race between the sun integration recomputing and
-    # automations reading sun.sun during the first moments after the time jump.
-    home_assistant.set_state("sun.sun", "above_horizon", {"elevation": 45, "azimuth": 150})
-    home_assistant.assert_entity_state("sun.sun", "above_horizon", timeout=10)
