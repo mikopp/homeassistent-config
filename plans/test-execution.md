@@ -552,9 +552,9 @@ Risk, to close in the spike:
 - Point `.claude/rules/tests.md` to it.
 - Delete `plans/ci-test-speedups.md` and the stale `plans/stateful-template-and-automation-tests.md` once their content is superseded.
 - Record only confirmed learnings through `record-learning`.
-- `doc/KNOWLEDGE.md` K-3 still names `tests/test_<pkg>.py`; that fix belongs to `plans/knowledge-consistency.md`. Here: check that every package note's `paths:` frontmatter, and any `-tests.md` split, covers the new test files; the in-process files are already listed, so drop any pointer to a deleted Docker file and add `tests/e2e/` files from Step 3 where they belong.
+- `doc/KNOWLEDGE.md` K-3 still names `tests/test_<pkg>.py`; update it here when the tests move (owner decision: this plan owns the K-3 path fix). Also: check that every package note's `paths:` frontmatter, and any `-tests.md` split, covers the new test files; the in-process files are already listed, so drop any pointer to a deleted Docker file and add `tests/e2e/` files from Step 3 where they belong.
 - If `.claude/rules/tests.md` changes its `paths:` or its body, verify the loading per K-7 in a fresh headless session: the rule loads on a `tests/ha/` or `tests/e2e/` read, and not on `README.md`.
-- History out of the plan (K-6 last step): the story of Steps 0–2 (spikes, measurements, rejected options, flakes found and fixed) goes to the cross-topic background home that `plans/knowledge-consistency.md` defines (proposed: `doc/tests/background.md`); if that plan is not done yet, keep the story in this plan until it is. Only CONFIRMED current facts move into the skill or rule, via `record-learning`. Then delete this plan.
+- History out of the plan (K-6 last step): the story of Steps 0–2 (spikes, measurements, rejected options, flakes found and fixed) goes to the cross-topic background home `doc/<topic>/background.md` (K-1, added by the knowledge-consistency work on `claude/serene-curie-d36oqw`): here `doc/tests/background.md`; if that branch is not merged yet, keep the story in this plan until it is. Only CONFIRMED current facts move into the skill or rule, via `record-learning`. Then delete this plan.
 
 ## Critical files
 - New:
