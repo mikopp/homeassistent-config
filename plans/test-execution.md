@@ -164,7 +164,7 @@ Stability: 140/140 for 7 tests × 20 rounds, and before the last test was added,
    - Rule for Step 2: every expectation is computed from HA's own timestamps or from a state read after freezing.
 
 ### Step 2 results (first chunk: spikes, shared fixtures, migration item 1)
-Run: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4 -q -p no:logging`.
+Run: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4 -q`.
 13 tests (7 spike, 2 broker isolation, 1 templates, 3 version guards). Stability `--count=20 -n 4`: 260/260, 2m19s wall (Step 0: 140 runs in 1m53s).
 
 **Module-scoped `hass` (tier 1): feasible, NOT clean; function scope kept.** Verified against PHACC 0.13.375 source (`plugins.py`, `common.py`) and a throw-away proof (one module fixture, 20 decision tests, then 100 with `--count=5`):
@@ -556,10 +556,10 @@ The binary needs glibc <= 2.34 and `libcjson.so.1`; libssl/libz come from the ho
 **First GitHub runs (PR #149).** The PR first conflicted with master, so no `pull_request` workflow ran; after merging master (`a160277`) both started. In-process: green, 3m20s. e2e: red on the log test, twice `habluetooth.manager` ERROR "Missing required permissions for Bluetooth management" (the runner has a Bluetooth stack, the container has no NET_ADMIN/NET_RAW): added to `EXTERNAL_NOISE`. The failure upload found nothing because `upload-artifact` skips dot-directories: `include-hidden-files: true`. On `0b44150` both green: e2e 1m45s, in-process 3m12s. So the runner path works: app-image pull and binary copy for mosquitto, `python-version-file`, the climate_template download (no `custom_components/` in the checkout; the boot test found `climate.airflow_climate`), and the e2e boot on a runner with internet. Still unverified: the nightly beta run.
 
 **Findings, not fixed:**
-1. PHACC prints about 3000 lines of `sqlalchemy.engine` INFO per full run (also with `-p no:logging`): CI log noise, cause not investigated.
-2. `.github/scripts/validate_templates.py` is dead since the template test moved in-process (only user of `requests`).
+1. FIXED after Step 5: ~3300 `sqlalchemy.engine` INFO lines per run. Root cause: PHACC's `plugins.py` (lines 157-158, import time) calls `logging.basicConfig(level=INFO)` (stderr root handler) and sets `sqlalchemy.engine` to INFO; `-p no:logging` never helped. `tests/ha/conftest.py` sets that one logger back to WARNING; the count is now 0.
+2. FIXED after Step 5: `.github/scripts/validate_templates.py` (dead since the template test moved in-process) deleted, with its only dependency `requests` in the YAML tooling.
 3. Knowledge files still describe the Docker harness: `.claude/skills/ha-test-harness/SKILL.md` (lines 40, 41, 45), `packages/notes/energy.md:38`, `.claude/rules/tests.md` (`pyproject.toml` in its `paths:`): Step 5.
-4. README's yaml-lint section (auto-commit of fixes) does not match `yaml-lint.yml`.
+4. FIXED after Step 5: README's yaml-lint section rewritten to match `yaml-lint.yml` (it checks, it does not auto-commit).
 
 **CLAUDE.md changes for the owner to approve (not edited):**
 - "Local CI checks": `ci-local.sh` also runs the in-process suite `tests/ha`; prerequisites become `brew install yamllint python@3.15 python@3.14 mosquitto`; `--e2e` adds the Docker layer; "`check_config` and pytest need Docker and only run in CI" is no longer true (pytest `tests/ha` runs locally; `check_config` runs in `tests/e2e`).

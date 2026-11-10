@@ -770,6 +770,13 @@ _TEMPLATE_MESSAGE = re.compile(
 )
 
 
+# PHACC's plugin (plugins.py, import time) runs logging.basicConfig(level=INFO) and sets the
+# "sqlalchemy.engine" logger to INFO, so every recorder SQL statement is echoed to stderr (about
+# 3000 lines per run, in the CI log too). Only the SQL echo is silenced: WARNING and above from
+# sqlalchemy, and everything from homeassistant.*, still reach log_guard.
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+
 # Known config issues the guard tolerates in EVERY test, each with its reason. Keep this list
 # short: an entry is a defect to fix in the YAML (needs approval), not a permanent exception.
 _KNOWN_CONFIG_LOGS = (
