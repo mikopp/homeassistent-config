@@ -129,12 +129,15 @@ Same triggers and change detection, plus a nightly run against the Home Assistan
 
 **Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer.
 
-### `yaml-lint.yml` — YAML Style + Lint
-Runs on every push as a separate job chain.
+### `yaml-lint.yml` — YAML style and lint
+Runs on every push and on manual dispatch; checks only, it never commits.
 
-1. **fix-yaml-style**: auto-fixes trailing whitespace, CRLF line endings, and missing trailing newlines; commits the fixes back if any changes are detected
-2. **lint-yaml**: runs `yamllint` with the rules in `.yamllint.yaml`
-3. **lint-resolved**: resolves all `!include` directives in `configuration.yaml` and dashboards (expanding to a flat file), then lints the resolved output — catches issues that only appear after include expansion
+1. **check-yaml-style**: runs `.github/scripts/fix_yaml_style.py` and fails when it changed anything (trailing whitespace, CRLF, missing final newline); run the script locally and commit the result
+2. **lint-yaml**: `yamllint` with the rules in `.yamllint.yaml`
+3. **lint-resolved**: resolves the `!include` directives of `configuration.yaml` and `dashboards/*.yaml` (`.github/scripts/resolve_ha_yaml.py`) and lints the flat output, which catches issues that only appear after expansion
+
+### `knowledge-layout.yml` — knowledge layout
+Runs `.github/scripts/check_knowledge_layout.py` (stdlib only): every plan has a Status section and a Close step, every package has its note symlink; see `doc/KNOWLEDGE.md`.
 
 ---
 
