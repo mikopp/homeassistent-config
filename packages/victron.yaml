@@ -5,7 +5,7 @@
 # Solar and battery are AC-referenced for the Energy Dashboard; power and energy domains each
 # close exactly. Grid always uses the signed L1+L2+L3 sum (Austrian billing sums the phases).
 # Sign table, formulas, identities: → doc/victron/design.md (VIC-1..VIC-13).
-# Hardware quirks, expire_after policy, entity map: → packages/notes/victron.md
+# Hardware quirks, expire_after policy, entity map: → doc/victron/notes.md
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -14,7 +14,7 @@ mqtt:
     # expire_after: fluctuating power 120 s, Multi DC current 600 s, SOC/voltage 24 h, lifetime
     # counters 7 d. The GX publishes on change only; expire_after is also what restores a value
     # after a restart, so never omit it. value_template guards `value_json is defined` (empty
-    # payload when a service disappears). → packages/notes/victron.md "expire_after policy"
+    # payload when a service disappears). → doc/victron/notes.md "expire_after policy"
 
     # ── MPPT Solar DC (solarcharger 279) ─────────────────────────────────────
     # Raw DC readings of the MPPT (panel output before conversion). The Energy Dashboard's
@@ -90,7 +90,7 @@ mqtt:
     # ── VEBus / MultiPlus 2 — DC current of the conversion stage (system/0 aggregate) ──
     # The Multi's own DC current: negative = inverting, positive = charging. Real DC, unlike
     # system/0/Dc/Vebus/Power, which follows the AC side and is not used.
-    # → packages/notes/victron.md "Dc/Vebus/Power is NOT the Multi's DC power"
+    # → doc/victron/notes.md "Dc/Vebus/Power is NOT the Multi's DC power"
     - name: "Victron VEBus DC Current"
       unique_id: "victron_vebus_dc_current"
       # default_entity_id pins the ID the template sensor below reads (else HA derives one).
@@ -101,7 +101,7 @@ mqtt:
       state_class: measurement
       # 600 s, not 120: an expired current reads as 0 A downstream and would book the AC load as
       # loss while charging; a flowing current refreshes about every second. Expiry after
-      # > 10 min of real 0 A is harmless. → packages/notes/victron.md "expire_after policy"
+      # > 10 min of real 0 A is harmless. → doc/victron/notes.md "expire_after policy"
       expire_after: 600
       icon: mdi:current-dc
       device: *victron_device
@@ -503,7 +503,7 @@ template:
       # ── Solar yield in AC kWh: state += max(counter - baseline, 0) × η ───────
       # Energy Dashboard solar energy source. Accumulates the MPPT counter delta (no sampling
       # drift, no loss over downtime). Entity_id reused for dashboard continuity; its state is
-      # an accumulator, NOT the MPPT counter. → packages/notes/victron.md
+      # an accumulator, NOT the MPPT counter. → doc/victron/notes.md
       # Guards: no baseline yet ('unknown' | float(-1)) adds nothing this tick; a counter reset
       # adds nothing; source unavailable holds and the next tick takes the whole gap.
       # → doc/victron/design.md#VIC-9
@@ -623,7 +623,7 @@ template:
 # ── Automations ───────────────────────────────────────────────────────────────
 # Venus OS keep-alive (dbus-flashmq): the GX publishes only while it gets a keep-alive at
 # least every 60 s; any keep-alive without "suppress-republish" (or with a topic list) dumps
-# ALL topics. → packages/notes/victron.md "Keep-alive"
+# ALL topics. → doc/victron/notes.md "Keep-alive"
 automation:
 
   # Periodic keep-alive — feeds the 60 s timeout WITHOUT re-publishing all topics.

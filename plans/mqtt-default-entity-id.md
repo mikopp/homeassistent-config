@@ -5,6 +5,7 @@
 - [ ] Step 1 research: real IDs via ha-mcp and source check, awaiting approval
 - [ ] Step 2 YAML change, awaiting approval
 - [ ] Step 3 tests and deploy note
+- [ ] Step 4 Close
 
 Deferred by the owner: fix it another time. Tracked in GitHub issue #146.
 
@@ -50,4 +51,7 @@ Filter and statistics sensors may not support `default_entity_id`; Step 1 must c
 - Remove the pre-registration stand-in from `tests/ha/conftest.py`. The in-process tests must still pass with a fresh registry, which proves the fix.
 - Look the Shelly IDs in the tests up by `unique_id`, or use the now-pinned IDs.
 - Deploy note, from `git diff origin/master...HEAD`: `git pull` and a YAML reload or restart. No ID or history change is expected on the live system, as confirmed in Step 1.2.
-- Record the learning via `record-learning` once it is CONFIRMED. Delete this plan when done.
+- Record the learning via `record-learning` once it is CONFIRMED.
+
+## Step 4 – Close [TODO]
+- Close: per `doc/KNOWLEDGE.md#K-6`. The confirmed ID facts go to the package notes and the `ha-mqtt` skill (via `record-learning`), pointers updated, then delete this plan.

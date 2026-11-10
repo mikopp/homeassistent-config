@@ -2,8 +2,8 @@
 # Phase 1: read-only decision layer. Everything here observes and decides; NOTHING writes to the
 # heat pump yet, so the thresholds can be calibrated on live data first. Rollout (Phases 2/3):
 # plans/ebusd-pv-heating-optimization.md.
-# → packages/notes/heating_pv_boost.md (facts, invariants); register decodes in
-#   packages/notes/heating_pv_boost-registers.md.
+# → doc/heating_pv_boost/notes.md (facts, invariants); register decodes in
+#   doc/heating_pv_boost/registers.md.
 #
 # ebusd payloads are plain ';'-separated values (--mqttjson must stay off: Loxone reads the same
 # topics), so multi-field messages are parsed positionally; field lists are inline at each sensor.
@@ -20,7 +20,7 @@ mqtt:
     #
     # ehp/Status fields: 0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
     # hcmode enum: 0=off 1=cooling 3=heat 4=water; name and number both accepted.
-    # → packages/notes/heating_pv_boost-registers.md
+    # → doc/heating_pv_boost/registers.md
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
       default_entity_id: sensor.geotherm_heating_hvac_action
@@ -111,7 +111,7 @@ mqtt:
     # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
     # generator's real-time activity (HVAC action). Phase 2 control law writes "auto" normally,
     # "on" for "not warm enough" or a boost, "off" only in cooling season, never "low"
-    # (→ packages/notes/heating_pv_boost.md "Decisions in force"). Read-only in Phase 1.
+    # (→ doc/heating_pv_boost/notes.md "Decisions in force"). Read-only in Phase 1.
     #
     # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
     # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.
@@ -139,7 +139,7 @@ mqtt:
     # in the payload shapes parsed below; MQTT delivery depends on the bridge lines.
     #
     # Each of these needs two Mosquitto bridge lines (state `in`, `/get` `out`) — the bridge is
-    # an explicit allowlist, see packages/notes/heating_pv_boost.md "Invariants".
+    # an explicit allowlist, see doc/heating_pv_boost/notes.md "Invariants".
     #
     # Single-value payloads use the empty-render guard: an unparsable payload renders '' and HA
     # keeps the last value instead of raising (see .claude/skills/ha-mqtt/SKILL.md).
@@ -258,7 +258,7 @@ mqtt:
     # priority registered while this reads "running" targets a message catalog that may still be
     # incomplete (ebusd is mid-discovery of what's on the bus) and is unreliable.
     # automation.heating_ebusd_poll_registration gates on this being anything other than
-    # "running" before it (re-)registers polling — see that automation and packages/notes/heating_pv_boost.md.
+    # "running" before it (re-)registers polling — see that automation and doc/heating_pv_boost/notes.md.
     - name: "Heating ebusd Scan Status"
       unique_id: heating_ebusd_scan_status
       default_entity_id: sensor.ebusd_heating_ebusd_scan_status
@@ -682,7 +682,7 @@ template:
       # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
       # cut the run short. In cold weather it also shows how close the stop point comes to
       # mc/FlowTempMax (35 °C): the cue to step the hysteresis back
-      # (→ packages/notes/heating_pv_boost.md "Cold weather").
+      # (→ doc/heating_pv_boost/notes.md "Cold weather").
       - name: "Heating Compressor Stop Temp"
         unique_id: heating_compressor_stop_temp
         unit_of_measurement: "°C"
@@ -884,7 +884,7 @@ automation:
   # Publishes "?N" to every read register's ".../get" topic: a read now plus ongoing polling at
   # relative priority N. ebusd forgets these on restart, so they are re-asserted on HA start,
   # ebusd running, bus data back and scan finished/OK; never while the scan reads "running".
-  # → packages/notes/heating_pv_boost.md "Polling"
+  # → doc/heating_pv_boost/notes.md "Polling"
   - alias: "Heating: ebusd poll registration"
     id: heating_ebusd_poll_registration
     description: "Register/refresh ebusd polling priorities once its bus scan is not in progress"

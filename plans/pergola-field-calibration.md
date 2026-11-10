@@ -35,10 +35,11 @@ changes; if a formula turns out wrong, open a separate plan.
 
 ### Phase 3: close
 6. [TODO] Close: write the calibrated values and any observed hardware quirk into
-   `packages/notes/pergola.md` (current facts) and `doc/pergola/design.md` if a design value
+   `doc/pergola/notes.md` (current facts) and `doc/pergola/design.md` if a design value
    changed; story → `doc/pergola/background.md`; update pointers; check the note is ≤ 24 KB;
    delete this plan (`doc/KNOWLEDGE.md#K-6`).
 
 ## Knowledge homes updated
-`packages/notes/pergola.md` (calibrated values, decisions), `doc/pergola/design.md` (drain angles
+`doc/pergola/notes.md` (calibrated values, decisions), `doc/pergola/design.md` (drain angles
 or thresholds if they change), `doc/pergola/background.md` (calibration story).
+

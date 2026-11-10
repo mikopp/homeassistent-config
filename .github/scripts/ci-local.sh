@@ -3,7 +3,8 @@
 # extractor, and the in-process test suite tests/ha (mirrors tests.yaml, no Docker needed to run
 # it). The real-HA layer tests/e2e (e2e.yaml) needs Docker and runs only with --e2e.
 #
-# Prerequisites (macOS): brew install yamllint python@3.15 python@3.14 mosquitto
+# Prerequisites (macOS): brew install python@3.15 python@3.14 mosquitto (yamllint is installed
+# into .venv)
 #   - python@3.14: the in-process suite runs on the Python Home Assistant requires
 #     (.github/ha-versions/ha-python.txt); without it that step is SKIPPED, loudly.
 #   - mosquitto: must be the version pinned in .github/ha-versions/mosquitto/Dockerfile (the Home
@@ -25,13 +26,20 @@ FAILED=()
 # back to plain python3 if that exact minor version is not installed.
 PYVER=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)
 PY=$(command -v "python$PYVER" || command -v python3) || { echo "No python3 found"; exit 1; }
-command -v yamllint >/dev/null || { echo "yamllint missing: brew install yamllint"; exit 1; }
 
 # Create the venv once and (re)install CI Python deps from the same manifest CI uses.
 if [ ! -x "$VENV/bin/python" ]; then
   "$PY" -m venv "$VENV" || exit 1
 fi
-"$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt || exit 1
+if ! "$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt; then
+  # The test harness needs the pinned (newer) Python and is only used by pytest, which runs in CI.
+  # The Docker-free checks below need just pyyaml + requests, so fall back to those.
+  echo "WARN: full CI manifest not installable on $("$VENV/bin/python" --version); installing Docker-free deps only"
+  "$VENV/bin/pip" install --quiet pyyaml requests || exit 1
+fi
+# yamllint comes from the venv, so no system install (brew/apt) is needed locally or in cloud sessions.
+"$VENV/bin/pip" install --quiet yamllint || exit 1
+YAMLLINT="$VENV/bin/yamllint"
 echo "Using $("$VENV/bin/python" --version) (CI pin: $PYVER)"
 
 # step <name> <command...>: run a check, record failures, keep going.
@@ -57,7 +65,7 @@ lint_resolved() {
   for f in configuration.yaml dashboards/*.yaml; do
     out="$TMP/resolved_$(basename "$f")"
     "$VENV/bin/python" .github/scripts/resolve_ha_yaml.py "$f" . > "$out" || { rc=1; continue; }
-    yamllint -c .yamllint.yaml "$out" || rc=1
+    "$YAMLLINT" -c .yamllint.yaml "$out" || rc=1
   done
   return $rc
 }
@@ -68,9 +76,11 @@ extract_templates() {
 }
 
 step "YAML style (fix_yaml_style.py)" style_check
-step "yamllint" yamllint -c .yamllint.yaml .
+step "yamllint" "$YAMLLINT" -c .yamllint.yaml .
 step "yamllint on resolved config + dashboards" lint_resolved
 step "Jinja template extraction" extract_templates
+# Plans need Status + Close, packages need a note symlink (doc/KNOWLEDGE.md K-6, K-8).
+step "knowledge layout" "$VENV/bin/python" .github/scripts/check_knowledge_layout.py
 
 # ── In-process suite (tests/ha), as in tests.yaml ────────────────────────────────────────────────
 SKIPPED=()

@@ -1,40 +1,8 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Energy Dashboard — metered devices
-#
-# Shelly Plus Plug S devices:
-#   Pool Pump       — shellyplusplugs-pool-pump
-#   Rain Water Pump — shellyplusplugs-rainwaterpump
-#   MQTT topic: shelly/<device>/status/switch:0 (JSON payload)
-#   sensor.<device>_power   → instantaneous draw in W (individual device power)
-#   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
-#   aenergy.total from Shelly firmware is in Wh — divided by 1000 to yield kWh.
-#
-# go-e Charger (Wallbox) — added to HA via the charger firmware's own MQTT
-# auto-discovery (discovery: homeassistant/<domain>/go-e_291401/*,
-# data topics: go-eCharger/<key>). Replaces the previous evcc loadpoint
-# sensors, which republished far too slowly to track a live charge session.
-#   Source entities — owned by the MQTT integration, ids can change if the
-#   device is ever re-paired:
-#     sensor.go_echarger_homekopp_power_total          ← go-eCharger/nrg (nrg[11])
-#     sensor.go_echarger_homekopp_total_energy_charged ← go-eCharger/eto (lifetime)
-#   The Energy Dashboard NEVER references those directly — it uses the
-#   sensor.wallbox_* wrappers defined in the template: section at the bottom.
-#
-# Shelly Pro 3EM (Heizung) — bridged from separate mosquitto broker under
-# shelly/ prefix. Gen2/3 EM component payload schema differs from Plug S:
-#   em:0     → total_act_power is already in W (no scaling)
-#   emdata:0 → total_act is cumulative Wh, divided by 1000 for kWh
-#
-# Loxone appliances (Washer, Tumble Dryer, Dishwasher):
-#   MQTT topics: loxone/<device>/power and loxone/<device>/energy
-#     <device> ∈ washer | tumble-dry | dishwasher   (note: hyphen in topic)
-#   Payloads are plain numeric values (not JSON), 3-digit precision.
-#   sensor.<device>_power   → instantaneous draw in kW (native, no scaling)
-#   sensor.<device>_energy  → cumulative kWh (total_increasing, for dashboard)
-#   Loxone publishes ONLY on change, has NO heartbeat (idle → silent for hours),
-#   but publishes a 0 when a draw ends and retains its last value for new
-#   subscribers. Hence: NO expire_after (would go unavailable during idle and
-#   break the Energy Dashboard); the retained/last value is held instead.
+# Energy Dashboard — metered devices (MQTT): Shelly Plus Plug S (pool pump, rain
+# water pump), Shelly Pro 3EM (Heizung), Loxone appliances (washer, tumble dryer,
+# dishwasher), and the function-named wallbox wrappers (go-e Charger).
+# Device map, topics, units and invariants → doc/energy/notes.md
 # ──────────────────────────────────────────────────────────────────────────────
 
 mqtt:
@@ -57,9 +25,7 @@ mqtt:
         suggested_area: "Pool"
       value_template: "{{ value_json.apower | round(1) }}"
 
-    # Cumulative lifetime energy from Shelly firmware (Wh → kWh).
-    # Never resets unless the device is factory-reset; total_increasing tells
-    # HA to handle any dip (reboot reset) gracefully.
+    # Lifetime energy from Shelly firmware (Wh → kWh); total_increasing absorbs a reset.
     - name: "Pool Pump Energy"
       unique_id: "shelly_pool_pump_energy"
       state_topic: "shelly/shellyplusplugs-pool-pump/status/switch:0"
@@ -110,9 +76,7 @@ mqtt:
         suggested_area: "Garden"
       value_template: "{{ value_json.apower | round(1) }}"
 
-    # Cumulative lifetime energy from Shelly firmware (Wh → kWh).
-    # Never resets unless the device is factory-reset; total_increasing tells
-    # HA to handle any dip (reboot reset) gracefully.
+    # Lifetime energy from Shelly firmware (Wh → kWh); total_increasing absorbs a reset.
     - name: "Rain Water Pump Energy"
       unique_id: "shelly_rainwater_pump_energy"
       state_topic: "shelly/shellyplusplugs-rainwaterpump/status/switch:0"
@@ -176,10 +140,8 @@ mqtt:
       value_template: "{% if value_json.total_act is not none %}{{ (value_json.total_act / 1000) | round(3) }}{% endif %}"
 
     # ── Loxone Washer ──────────────────────────────────────────────────────────
-    # Loxone publishes only on change (and a 0 when a draw ends), so holding the
-    # last value reads the true draw while running and 0 while idle. No
-    # expire_after: with no heartbeat, an idle appliance is silent for hours/days
-    # and must not go unavailable; the retained last value is kept instead.
+    # Loxone sensors: no expire_after (no heartbeat; idle must not go unavailable).
+    # → doc/energy/notes.md
     - name: "Washer Power"
       unique_id: "loxone_washer_power"
       state_topic: "loxone/washer/power"
@@ -193,15 +155,11 @@ mqtt:
         name: "Washer"
         manufacturer: "Loxone"
         suggested_area: "Technikraum"
-      # All Loxone value_templates below: Loxone sometimes publishes an EMPTY payload. A bare
-      # `| float` raises on '' (WARNING per message), so pass an empty payload through as ''.
-      # The MQTT sensor ignores an empty state for numeric sensors (debug log only) and keeps the
-      # last value — the same end state as before, minus the warning. Real numbers are unchanged.
+      # All Loxone value_templates: empty payload → '' keeps the last value without a warning.
+      # → .claude/skills/ha-mqtt/SKILL.md
       value_template: "{{ '' if value | trim == '' else value | float | round(3) }}"
 
-    # Cumulative lifetime energy (kWh). Loxone updates it at least every 5 min
-    # while it is changing (i.e. while drawing); no heartbeat during idle.
-    # total_increasing + no expire_after → the Energy Dashboard's source of truth.
+    # Lifetime energy (kWh), total_increasing: the Energy Dashboard's source for the washer.
     - name: "Washer Energy"
       unique_id: "loxone_washer_energy"
       state_topic: "loxone/washer/energy"
@@ -289,33 +247,17 @@ mqtt:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Wallbox abstraction layer — STABLE ENTITY IDS
-#
-# sensor.wallbox_power / sensor.wallbox_energy are what the Energy Dashboard,
-# long-term statistics and any dashboard card reference. They are named after
-# the *function* (wallbox), never after the device or its integration, so that
-# swapping the charger or how it reaches HA is a one-line change to `state:` and
-# `availability:` below — no entity rename, no loss of history, no Energy
-# Dashboard edit.
-#
-#   Today's source:  go-e Charger, via its firmware's MQTT auto-discovery.
-#   Previous source: evcc loadpoint 1 (removed — republished too slowly).
-#
-# Two further reasons this indirection is not optional:
-#   1. The go-e discovery entity for total_energy_charged ships WITHOUT
-#      state_class, so it cannot be selected in the Energy Dashboard at all.
-#      The wrapper supplies state_class: total_increasing.
-#   2. Units are normalised from the source's own unit_of_measurement rather
-#      than assumed — go-e's API v2 is natively W / Wh, but the firmware's
-#      discovery payload is free to declare kW / kWh instead, and a future
-#      source may differ again.
+# The Energy Dashboard references only these function-named wrappers; a source
+# swap edits `state:`/`availability:` only. They also supply state_class and
+# normalise units from the source's unit_of_measurement.
+# Source: go-e Charger (firmware MQTT discovery). Previous source: evcc (removed).
+# → doc/energy/notes.md
 # ──────────────────────────────────────────────────────────────────────────────
 template:
   - sensor:
 
       # ── Wallbox Power ─────────────────────────────────────────────────────────
-      # Instantaneous charge power across all phases (go-e nrg[11]), normalised
-      # to W. Display-only: when the charger drops off MQTT this goes
-      # unavailable rather than reporting a misleading 0.
+      # All-phase charge power (go-e nrg[11]) in W; unavailable, not 0, when the charger is offline.
       - name: "Wallbox Power"
         unique_id: wallbox_power
         state: >
@@ -332,12 +274,8 @@ template:
         icon: mdi:ev-station
 
       # ── Wallbox Energy ────────────────────────────────────────────────────────
-      # Lifetime cumulative charged energy (go-e eto) — the Energy Dashboard's
-      # source of truth for the wallbox. eto is a lifetime counter, not a
-      # per-session one, and is natively Wh. total_increasing lets HA absorb a
-      # counter reset (charger factory reset) without booking a phantom spike,
-      # and baselines on the first observed value so the pre-existing lifetime
-      # total does not land as day-one consumption.
+      # Lifetime charged energy (go-e eto, not per session) in kWh; total_increasing absorbs a
+      # reset and baselines on the first value. → doc/energy/notes.md
       - name: "Wallbox Energy"
         unique_id: wallbox_energy
         state: >

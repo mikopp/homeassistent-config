@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assert that a YAML file's data is unchanged against a git ref.
 
-Usage:  .github/scripts/yaml_semantic_equal.py <before-ref> <file> [<file> ...]
+Usage:  .github/scripts/yaml_semantic_equal.py [--ignore-jinja-comments] <before-ref> <file> [<file> ...]
 
 Used for comment-only edits (knowledge dedup, doc/KNOWLEDGE.md#K-5): it parses
 `git show <ref>:<file>` and the working copy and compares the two data trees.
@@ -9,9 +9,19 @@ YAML comments are not part of the data, so moving or rewording `#` comments
 passes. Any change to keys, values, list order or template strings fails,
 including Jinja `{# #}` comments, which are template text.
 
+--ignore-jinja-comments: render-equivalence mode for dedup of comments inside templates.
+Every string (and every *.jinja file as a whole) is compared after removing `{# ... #}`
+comments and collapsing whitespace runs to one space. Comments never render, so templates that
+differ only in comment text (and the whitespace around it) still compare equal. Any change to
+code, quoted literals, or the order of statements still fails. Whitespace-control markers
+(`{#-` / `-#}`) are covered by the whitespace collapse. Not proof for text whose exact
+whitespace is output (none of the comment-bearing airflow templates are such); CI tests remain
+the behavioural check.
+
 Exit status: 0 if every file is equal, 1 if any differs, 2 on usage/git errors.
 """
 
+import re
 import subprocess
 import sys
 
@@ -50,13 +60,34 @@ def load_at_ref(ref, path):
         capture_output=True,
         text=True,
     ).stdout
+    if path.endswith(".jinja"):
+        return text  # a macro file is one template string, not YAML
     return yaml.load(text, Loader=HALoader)
 
 
 def load_working(path):
     """Parse the working-copy version of `path`."""
     with open(path, encoding="utf-8") as fh:
+        if path.endswith(".jinja"):
+            return fh.read()
         return yaml.load(fh, Loader=HALoader)
+
+
+# ── Optional normalisation: ignore Jinja comments and whitespace in strings ─
+_JINJA_COMMENT = re.compile(r"\{#.*?#\}", re.DOTALL)
+
+
+def normalise(value):
+    """Return `value` with Jinja comments removed and whitespace collapsed in every string."""
+    if isinstance(value, str):
+        return " ".join(_JINJA_COMMENT.sub("", value).split())
+    if isinstance(value, dict):
+        return {k: normalise(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [normalise(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(normalise(v) for v in value)
+    return value
 
 
 # ── Diff: report the first differing path so a failure is easy to find ──────
@@ -85,10 +116,13 @@ def first_difference(a, b, where="$"):
 
 # ── Main: compare each file, print OK/DIFF, exit non-zero on any difference ─
 def main(argv):
-    if len(argv) < 3:
+    args = argv[1:]
+    ignore_comments = "--ignore-jinja-comments" in args
+    args = [a for a in args if a != "--ignore-jinja-comments"]
+    if len(args) < 2:
         print(__doc__, file=sys.stderr)
         return 2
-    ref, paths = argv[1], argv[2:]
+    ref, paths = args[0], args[1:]
     failed = False
     for path in paths:
         try:
@@ -96,7 +130,10 @@ def main(argv):
         except subprocess.CalledProcessError as err:
             print(f"ERROR {path}: git show {ref}:{path} failed: {err.stderr.strip()}", file=sys.stderr)
             return 2
-        diff = first_difference(before, load_working(path))
+        after = load_working(path)
+        if ignore_comments:
+            before, after = normalise(before), normalise(after)
+        diff = first_difference(before, after)
         if diff:
             failed = True
             print(f"DIFF  {path}: {diff}")

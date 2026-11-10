@@ -1,1 +1,1 @@
-../../../packages/notes/pergola.md
+../../../doc/pergola/notes.md

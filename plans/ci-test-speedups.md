@@ -125,3 +125,6 @@ ones that exposed the hangs; without the shim and timeouts it can stall CI inste
 - [x] Image prefetch, barrier, retag; Dockerfile pin consumed
 - [x] Dangling plan references repointed to this file
 - [ ] First CI run on `master` base, read honestly
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

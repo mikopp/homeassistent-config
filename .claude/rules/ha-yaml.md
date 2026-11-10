@@ -44,3 +44,10 @@ Rules:
 ## Template `device:` key
 - The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
   entities to a device via the UI instead.
+
+## Comments and findings while you edit
+- Comment style: `doc/KNOWLEDGE.md#K-5`. Jinja comments follow it too; do not repeat the
+  availability-guard / no-`float`-default rule above in a comment.
+- If a comment's why rests on a fact not visible in the YAML (measured value, hardware quirk,
+  user-supplied reason) or you found a bug: invoke `record-learning` before you finish. The fact
+  goes to its home; the comment only points there. Never point to a note you did not update.

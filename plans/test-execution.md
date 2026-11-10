@@ -17,6 +17,7 @@
 - [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI wired in Step 4
 - [x] Step 4 CI/local runs: DONE locally, workflows NOT yet run on GitHub (see "Step 4 results")
 - [ ] Step 5 knowledge update
+- [ ] Step 6 Close
 
 
 ## Context
@@ -673,7 +674,9 @@ Risk, to close in the spike:
 - Record only confirmed learnings through `record-learning`.
 - `doc/KNOWLEDGE.md` K-3 still names `tests/test_<pkg>.py`; update it here when the tests move (owner decision: this plan owns the K-3 path fix). Also: check that every package note's `paths:` frontmatter, and any `-tests.md` split, covers the new test files; the in-process files are already listed, so drop any pointer to a deleted Docker file and add `tests/e2e/` files from Step 3 where they belong.
 - If `.claude/rules/tests.md` changes its `paths:` or its body, verify the loading per K-7 in a fresh headless session: the rule loads on a `tests/ha/` or `tests/e2e/` read, and not on `README.md`.
-- History out of the plan (K-6 last step): the story of Steps 0–2 (spikes, measurements, rejected options, flakes found and fixed) goes to the cross-topic background home `doc/<topic>/background.md` (K-1, added by the knowledge-consistency work on `claude/serene-curie-d36oqw`): here `doc/tests/background.md`; if that branch is not merged yet, keep the story in this plan until it is. Only CONFIRMED current facts move into the skill or rule, via `record-learning`. Then delete this plan.
+
+### Step 6 – Close [TODO]
+- Close: per `doc/KNOWLEDGE.md#K-6`. Distil the CONFIRMED current facts into the skill, rule and notes (via `record-learning`); the story of Steps 0–4 (spikes, measurements, rejected options, flakes found and fixed) goes to the cross-topic background home `doc/<topic>/background.md` (K-1, merged with #158): here `doc/tests/background.md`. Update pointers, then delete this plan.
 
 ## Critical files
 - New:

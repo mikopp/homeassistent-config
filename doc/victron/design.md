@@ -2,7 +2,7 @@
 
 Current design of `packages/victron.yaml`. Where this doc and the YAML disagree, the YAML wins:
 fix this doc. Section IDs (`VIC-1` …) are stable; never renumber, mark retired IDs as gone.
-Hardware quirks, entity map, biases and open issues: `packages/notes/victron.md`.
+Hardware quirks, entity map, biases and open issues: `doc/victron/notes.md`.
 
 ## VIC-1 Topology and goal
 

@@ -8,11 +8,12 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 | Home | What goes there | How it loads | Limit |
 |---|---|---|---|
 | root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start | < 100 lines |
-| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`) | lazily, when a file matching its `paths:` is read | ~4 KB |
-| `packages/notes/<pkg>.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
+| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`; `plans.md` for plan format/status/close; `knowledge.md`, which sends to this file when knowledge files are touched) | lazily, when a file matching its `paths:` is read | ~4 KB |
+| `doc/<pkg>/notes.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
 | `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
+| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. the test framework) | guarded like package background | none |
 | YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
@@ -51,7 +52,7 @@ Test: *"If background were deleted tomorrow, could an agent still change the pac
 If no, the fact is current and must not live only in background. A decision in force keeps its
 short why in the note or design doc, with no link to background (K-1).
 
-## K-3 Note template (`packages/notes/<pkg>.md`)
+## K-3 Note template (`doc/<pkg>/notes.md`)
 
 Frontmatter `paths:` lists the package YAML, its tests, and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
@@ -63,7 +64,7 @@ Never list background or sources. Sections, in order:
 5. Decisions in force (one-line why; no background link)
 6. Known biases / open issues
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
-   skill). Above ~2 KB, split into `packages/notes/<pkg>-tests.md` with its own symlink rule and
+   skill). Above ~2 KB, split into `doc/<pkg>/tests.md` with its own symlink rule and
    `paths:` only `tests/test_<pkg>.py`.
 8. Related
 
@@ -82,21 +83,37 @@ Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and sto
 ## K-5 YAML comment style
 
 - Each comment says **what** the block does, at most **one line of why**, and a pointer for more:
-  `# → doc/<pkg>/design.md#PG-4` or `# → packages/notes/<pkg>.md`.
+  `# → doc/<pkg>/design.md#PG-4` or `# → doc/<pkg>/notes.md`.
 - No dates, no stories, no "was changed because": that is git history or background.
 - The automation `description:` is the human summary shown in the HA UI; keep it current.
-- Jinja `{# #}` comments are template text: treat changes to them as code changes.
+- **Jinja `{# #}` comments** (inside `state:` / `availability:` / `value_template:` strings and in
+  `custom_templates/*.jinja`) follow the same style: what + at most one line of why, no history
+  ("was …", "no longer …", "removed …"), no rule that is written elsewhere. In particular do not
+  repeat the "availability guard ⇒ no `float` default" rule (it lives in `.claude/rules/ha-yaml.md`),
+  and do not restate a decision table or invariant that a design ID holds: point to it.
+- **Automations:** put cross-cutting rules (edge rules, single-decision, guard invariants, hardware
+  facts) once in design/notes and give each trigger / branch a one-line comment with `→ #ID`.
+  Never paste the same rule into several blocks.
+- Jinja comments are template text, so editing them changes the YAML data tree. Check a
+  comment-only template edit with `.github/scripts/yaml_semantic_equal.py --ignore-jinja-comments
+  <ref> <files>` (render-equivalence: comments and whitespace ignored, code must be identical).
+  Plain `yaml_semantic_equal.py` (no flag) is for YAML `#` comments only and fails on any Jinja
+  comment change. Behaviour changes are never "comment-only": they need tests.
 
 ## K-6 How to extend
 
-- **New package:** create `packages/notes/<pkg>.md` with `paths:` frontmatter (K-3), then
-  `ln -s ../../../packages/notes/<pkg>.md .claude/rules/packages/<pkg>.md` and commit the symlink.
+- **New package:** create `doc/<pkg>/notes.md` with `paths:` frontmatter (K-3), then
+  `ln -s ../../../doc/<pkg>/notes.md .claude/rules/packages/<pkg>.md` and commit the symlink.
+  `<pkg>` in the symlink name is the package YAML name; the folder is `doc/<topic>/` (airflow: `airflow_cooling.md` -> `doc/airflow/notes.md`).
 - **Complex package** (K-4 threshold): add `doc/<pkg>/design.md` and put it in the note's `paths:`.
 - **New cross-package topic:** a skill in `.claude/skills/<topic>/SKILL.md`; the first words of its
   description carry the trigger.
 - **One home per fact.** Every other place points to it; never copy.
 - **Every plan's last step:** distil the result into note / design / skill, move the story to
-  background, update pointers, check the note is ≤ 24 KB, then DELETE the plan.
+  background (a package's `doc/<pkg>/background.md`, or `doc/<topic>/background.md` for a
+  cross-package topic), update pointers, check the note is ≤ 24 KB, then DELETE the plan.
+  `.claude/rules/plans.md` tells plan authors to include this step; the layout check (K-8)
+  fails a plan without a Close step.
 - Before deleting a fact during a move, confirm the target holds it. Never promote an UNPROVEN
   claim while moving it.
 
@@ -119,7 +136,8 @@ A prompt outside the description must not invoke it.
 ## K-8 Loading mechanics (Claude Code)
 
 What the layout in K-1 relies on. Grades: DOC = Claude Code docs (2026-11-07), CONFIRMED = tested
-headless in this repo 2026-11-07 (K-7 method).
+headless in this repo 2026-11-07 (K-7 method), OBSERVED = real data from a real run with an
+alternative explanation still open (same meaning as in `record-learning`).
 
 - Startup loads only root `CLAUDE.md` plus each skill's name + description; no rule or note bodies.
   A skill body loads only when the skill is invoked. (CONFIRMED)
@@ -136,3 +154,9 @@ headless in this repo 2026-11-07 (K-7 method).
 - Guards: `permissions.ask` blocks Read and `cat`, not Grep (K-1). (CONFIRMED)
 - Rules are context, not enforcement: anything that must never happen (CRLF, YAML errors) needs a
   check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.
+- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow `.github/workflows/knowledge-layout.yml`) enforces the layout: every
+  `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
+  `.claude/rules/packages/<name>.md` symlink to an existing note.
+- A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
+  3 runs); naming "measured value, hardware quirk, user-supplied reason" gave 3/3. Word findings
+  triggers by the concrete case, not the abstract category. (OBSERVED)

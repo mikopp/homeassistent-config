@@ -1,12 +1,12 @@
 # Home Assistant Config — Claude Instructions
 
 ## Important constraints for this project:
-1. ALWAYS create/maintain a feature specific implementation plan file in the `plans` folder. 
+1. Feature work: ALWAYS create/maintain a plan file in `plans/`; read `.claude/rules/plans.md` first. Small ad-hoc changes the owner asks for directly need no plan.
 2. NEVER start implementation without explicit approval
 3. ALWAYS await step-by-step instructions and explicit approval before coding
 4. ALWAYS update the plan file's status section after each step
 5. ALWAYS summarize what was done before asking for next steps
-6. ALWAYS write comments that describe each part of the implementation in the source code file.
+6. ALWAYS comment each part of the code in the style of `doc/KNOWLEDGE.md#K-5`.
 7. User will deploy via `git pull` on the HA host, NEVER do that yourself
 8. ALL files use LF (Linux) line endings — never CRLF. Before committing run `git ls-files --eol`
    (nothing may show `w/crlf` or `i/crlf`). Enforced by `.gitattributes` (`eol=lf`) and `.editorconfig`.
@@ -15,8 +15,8 @@ Deploy/migration docs come from `git diff origin/master...HEAD`, never the live 
 
 ## Local CI checks
 Run `.github/scripts/ci-local.sh` before pushing. It creates `.venv`, installs the CI Python deps and runs
-the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs
-`brew install yamllint python@3.15`. `check_config` and pytest need Docker and only run in CI.
+the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs only
+python3 (yamllint is installed into `.venv`). `check_config` and pytest need Docker and only run in CI.
 
 ## HA version gate — check before trusting any info
 The pinned HA version lives in the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag
@@ -86,12 +86,12 @@ Hypotheses go to the feature's `plans/` file, marked as such.
 To record anything learned, invoke the `record-learning` skill: it holds the evidence rules and routing.
 
 ## Where knowledge lives
-Details, limits and how to extend: `doc/KNOWLEDGE.md`.
+Before creating, moving or deleting knowledge (note, rule, skill, design doc, a plan's close step), read `doc/KNOWLEDGE.md`.
 
 | Home | Holds |
 |---|---|
-| `packages/notes/<pkg>.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
-| `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`); auto-load on matching paths |
+| `doc/<pkg>/notes.md` | current facts of one package; auto-loads when its files are touched (symlinked rule) |
+| `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`, `plans.md`, `knowledge.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture/derivations of complex packages; read on demand |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant; never cite, and never link from agent knowledge |
