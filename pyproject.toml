@@ -6,7 +6,9 @@ addopts = "-v"
 testpaths = ["tests"]
 # tests/ha is the in-process layer (own pytest.ini, own deps, needs Python 3.14 + PHACC); the
 # Docker-harness run must not collect it. Run it with: pytest -c tests/ha/pytest.ini tests/ha
-norecursedirs = [".*", "*.egg", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "ha"]
+# tests/e2e is the real-HA layer (own pytest.ini and requirements, starts its own container):
+#   pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant
+norecursedirs = [".*", "*.egg", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "ha", "e2e"]
 
 # pytest-timeout: measure ONLY the test function body, not fixture setup/teardown.
 # Default (false) charges session-fixture setup to whichever test triggers it — here that is

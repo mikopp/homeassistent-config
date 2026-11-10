@@ -4,7 +4,7 @@
 - [x] Research and feasibility check (this file)
 - [x] Step 0 spikes: DONE, exit criterion met (see "Step 0 results")
 - [x] Step 1 HA version single source: DONE. `requirements_test.txt` (PHACC pin) replaces `tests/ha/requirements.txt`; `tests/ha/test_versions.py` guards Dockerfile year.month = PHACC's HA, holidays/cronsim = HA manifest pins, Python >= HA's; Dependabot pip entry for `/`; CLAUDE.md line
-- [ ] Step 2 in-process layer, Step 2b real MQTT broker (see "Step 2 results")
+- [x] Step 2 in-process layer, Step 2b real MQTT broker: DONE (see "Step 2 results")
   - [x] Spike module-scoped `hass` (tier 1): works, but not clean; function scope kept, tier-1 tables become one looping test (decision below)
   - [x] Mosquitto clear vs restart: measured, restart kept; isolation proof `tests/ha/test_broker_isolation.py`
   - [x] Shared fixtures in `tests/ha/conftest.py`: `seed`, `apply_baseline` (data moved to `tests/baseline.py`, shared with the Docker suite), `Clock`/`clock`, autouse `log_guard` + `allow_log` marker, action stubs
@@ -14,7 +14,7 @@
   - [x] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron, airflow → in-process; their Docker files deleted; only `tests/test_pergola.py` (18 tests, item 5) is left in Docker (see "Step 2 results, item 4")
   - [x] Migration item 5 (pergola): the 18 Docker tests → `tests/ha/test_pergola.py` (14 tests on the real `sun` integration, real triggers); `tests/test_pergola.py` and the pergola CI step removed (see "Step 2 results, item 5")
   - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
-- [ ] Step 3 real-HA layer
+- [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI is NOT wired yet (Step 4)
 - [ ] Step 4 CI/local runs
 - [ ] Step 5 knowledge update
 
@@ -443,6 +443,66 @@ Config findings (record only, not fixed; no issue opened):
 2. The `tests/conftest.py` Docker fixtures `midday_sun`/`low_elevation_sun` and the "year-jump" explanation in `ha_check.yaml` are gone with the Docker pergola tests; `packages/notes/pergola.md` "Tests" section still describes `tests/test_pergola.py` (stale; notes are under `.claude/`-governed knowledge work, not touched here).
 
 Leftover harness bits: removed `midday_sun`/`low_elevation_sun` (unused). Still present, unused now: the Docker `tests/conftest.py` (baseline fixtures, `wait_for_state` helpers if any), `tests/baseline.py` REST seeding (shared with `tests/ha`), `requirements.txt` Docker harness deps, the `ha_check.yaml` "remaining tests" step (exit 5 accepted) and `check_config` step: all for Step 4.
+
+### Step 3 results (`tests/e2e/`)
+Run: `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant` (needs Docker, `mosquitto` on the host, `tests/e2e/requirements.txt`). `--confcutdir` keeps the old Docker-harness `tests/conftest.py` out until Step 4 deletes it. `pyproject.toml` `norecursedirs` gained `e2e`, else the old `pytest tests/` CI step would collect (and try to run) the new layer.
+
+**Files.** `tests/e2e/{__init__.py, conftest.py, ha_client.py, stage.py, pytest.ini, requirements.txt, test_boot.py, test_check_config.py, test_restart.py, test_zz_log_hygiene.py}`; `.gitignore` (`tests/e2e/.artifacts/`); `pyproject.toml` (norecursedirs).
+- `conftest.py`: marker `needs_real_ha("<reason>")`, closed `REAL_HA_REASONS`, enforced in `pytest_collection_modifyitems`; a session mosquitto (free port, 127.0.0.1) plus a paho publisher; ONE session container (`docker run --network host` of the image from the Dockerfile `FROM` line, read from the file; `E2E_IMAGE` overrides).
+- `ha_client.py`: own client (`wait_ready`, `wait_running`, `onboard`, flows, websocket, `wait_for`, `wait_stable`, `assert_entity_state`); a timeout on every call; deadline polling; no fixed sleeps.
+- `stage.py`: `stage(dir)` and `check_config(dir)`; CLI `python -m tests.e2e.stage <dir> [--check-config]`. Shared by the fixture, the check-config test and the future CI step.
+
+**Reasons used.** `full-boot`, `check-config`, `restart-persistence`, `runtime-logs`. **Dropped: `http-surface`** (nothing needs it: `/api/template` is covered in-process by `tests/ha/test_templates.py`; REST and websocket are only the driver here, not the subject).
+
+**Tests (5).** Each module docstring starts with "Needs a real HA because: …".
+| Test | Reason | Checks |
+|---|---|---|
+| `test_boot.py::test_every_package_registers_its_entities` | full-boot | every `unique_id` any `packages/*.yaml` declares is in the real entity registry (utility meters as `<id>_single_tariff`); derived from the YAML, so a new entity is covered without editing the test |
+| `test_boot.py::test_integrations_the_config_needs_are_alive` | full-boot | state RUNNING; `climate.airflow_climate` (HACS `climate_template`) exists; MQTT and workday entries `loaded`; the package integration domains are in `components`; `binary_sensor.workday` exists |
+| `test_check_config.py::test_staged_config_passes_check_config` | check-config | HA's `check_config` script on `stage()` output in a throw-away container |
+| `test_restart.py::test_totals_survive_a_real_restart` | restart-persistence | `utility_meter` `heating_electricity_daily` (Shelly Wh over real MQTT: 1000 kWh then +1.5 → `1.5`) and Riemann `integration` `victron_grid_energy_import` (three phases over MQTT) keep their exact value over `docker stop` + `start` |
+| `test_zz_log_hygiene.py::test_no_errors_or_deprecations_in_the_session_log` | runtime-logs | every ERROR/CRITICAL, any deprecation, any traceback in the log from the clean boot on fails, except two commented lists (`EXTERNAL_NOISE`, `KNOWN_CONFIG_BUGS`); also asserts the log spans at least two boots |
+
+**Design decisions (each verified by running).**
+- **Bootstrap boot, then a clean boot.** A fresh HA has no MQTT entry, so its first boot logs ERROR on every `homeassistant: start` publish (`ebusd poll registration`, `Victron Bridge Initial Full Publish`: "make sure MQTT is set up"). The `session` fixture therefore boots, onboards, creates the MQTT entry (real flow, host mosquitto) and the workday entry (real flow, AT), renames entity ids, then restarts the container; the log offset taken at that stop marks the end of the bootstrap, and only the log after it is judged. In the clean boot those publishes succeed, so MQTT errors are NOT ignored, they do not occur. Cost: one extra boot (about 25 s).
+- **MQTT is configured through the config flow**, not a pre-seeded `.storage` file (format-bound). Flow data (HA 2026.10.1): `broker`, `port`, `protocol`, `other_settings: {set_client_cert: false, set_ca_cert: "off"}`.
+- **Workday is a config entry (flow), not the YAML fixture** `tests/custom_components.yaml` `ha_yaml_config`: HA at the pin rejects the YAML platform (see the comment in `tests/ha/conftest.py` `stage_config`; check_config of the staged config also passes without it); that fixture is dead and CI's `packages/ha_ci_fixtures.yaml` is no longer written by `stage.py`.
+- **Production-like entity ids** (`PRODUCTION_IDS` in conftest, through the real registry API, as a user renames in the UI): `weather.forecast_home`→`weather.home`, `binary_sensor.workday_sensor_at`→`binary_sensor.workday`, the three Victron grid phases and the Shelly heating energy sensor (fresh registry ids differ, #146 class). Without them the config's templates have no source.
+- **Custom component**: `stage.py` copies `custom_components/<domain>` from the repo if present (CI's download step, a developer checkout), else downloads the tarball of `tests/custom_components.yaml` itself. The download path could not run here (the sandbox proxy answers 403 for github.com archives); its extraction logic was run against a local tarball.
+- **Riemann restore test uses absurd power (100 MW per phase), then 0 W.** The integral grows by whole kWh in the sub-second between publishes (no waiting for real time); the closing 0 W makes the sum final, so after the restart (restored source 0 W) any difference is a restore failure. First version kept the power on: the sum kept integrating after the restart (412 → 720) and the assertion was both wrong and weak.
+- **`wait_stable`** exists for exactly that value that settles after a burst.
+- The container logs at WARNING and above (HA default), so INFO lines are not in the log; the "right log" proof counts the per-boot `climate_template` custom-integration warning.
+
+**Runtime (this sandbox, container already pulled).** Whole `tests/e2e`: 83 s, 79 s, 91 s (3 runs, 5/5 green each). Parts: bootstrap fixture about 50 s (two HA boots, onboarding), `test_boot` +2 s, check_config about 10 s, restart test about 30 s. Not 20×; per the task 3×.
+
+**What ran for real vs. what did not.**
+- Ran for real: Docker daemon (started by hand with `dockerd`, it was not running), the pinned image `ghcr.io/home-assistant/home-assistant:2026.10.1` pulled through the proxy, host mosquitto 2.0.18, all five tests, 3× green.
+- Not verified: the GitHub Actions runner (apt `mosquitto`, internet access); stage.py's tarball download from GitHub (403 in the sandbox; extraction run offline); behaviour with a reachable Met.no (here it is not: TLS interception, so `weather.home` never exists and the `EXTERNAL_NOISE` entries for Met.no and its follow-ups were used; online they are simply unused); the beta channel; Python 3.14 for the e2e venv (the sandbox run used Python 3.13 with the pinned requirements).
+
+**Marker enforcement.** A test without the marker, and one with `needs_real_ha("nonsense")`, each fail at collection with a `UsageError` naming the test and the allowed reasons (exit code 4); the five real tests collect. (Throw-away file, deleted.)
+
+**Mutation checks** (each restored, `git diff packages/ automations.yaml` empty):
+| Mutation | Result |
+|---|---|
+| `packages/victron.yaml`: `platform: integration` → `integratio` | `test_check_config` fails (check_config output); `test_boot` fails: `declared in packages but not registered by the real boot: {'victron.yaml': ['victron_grid_energy_import']}`; the other tests unaffected |
+| `automations.yaml`: a `homeassistant start` automation calling `notify.does_not_exist` | only `test_zz_log_hygiene` fails, naming the ERROR twice (clean boot and restart) |
+| harness: delete `.storage/core.restore_state` between stop and start (no restore) | `test_totals_survive_a_real_restart` fails: the meter is `unknown` |
+
+**In-process suite after the change:** 57 passed, 1 xfailed (66 s). `ci-local.sh`: all local checks passed. `git ls-files --eol`: no CRLF.
+
+**Step 4 must wire** (nothing in CI is changed yet):
+1. `e2e.yaml`: `apt-get install -y mosquitto`; `pip install -r tests/e2e/requirements.txt`; pull the image in the background (the pattern in `ha_check.yaml`); run the command above with `--timeout=300 --timeout-method=thread`; upload `tests/e2e/.artifacts/` (HA docker log, mosquitto log) on failure. Python 3.12+ is enough (`tarfile` filter).
+2. The `check_config` CI step can be dropped (the test runs it) or kept as `python -m tests.e2e.stage "$RUNNER_TEMP/cfg" --check-config` for a fast separate signal.
+3. Delete from `ha_check.yaml`: the "Install custom component dependencies" step (stage.py does it; keep it only if the download should be cached), the `sed` location edit, the `secrets.yaml` copy, the `:stable` retag, the AppDaemon prefetch, the "remaining tests" step and the PR-comment steps; delete `tests/conftest.py`, the harness pin in `.github/workflows/requirements.txt`, the `e2e` entry in `pyproject.toml` `norecursedirs` (with the Docker run gone), `tests/baseline.py` only if `tests/ha` stops using it (it does not: keep).
+4. `tests/custom_components.yaml`: drop `ha_yaml_config` (workday YAML platform is rejected by HA at the pin) and fix its header comment (it names `ha_check_frenk.yaml`); `stage.py` still reads `dependencies`.
+5. Change detection, concurrency group, a nightly `beta` channel (`E2E_IMAGE=ghcr.io/home-assistant/home-assistant:beta`, `continue-on-error`) as in the plan above; the `EXTERNAL_NOISE` list may need entries once CI shows real external noise (it is explicit on purpose).
+
+**Config findings (record only, nothing fixed, no issue opened):**
+1. #147 confirmed in a real boot: `Received invalid sensor state: unknown for entity sensor.victron_solar_yield_dc_baseline_kwh` (and `victron_ac_pv_energy_baseline_kwh`) logged as ERROR; carried in `KNOWN_CONFIG_BUGS` of the hygiene test, delete the entry with the fix.
+2. The config reads two ids that exist only after a manual rename on a fresh install (#146 class): `binary_sensor.workday` (the workday flow creates `binary_sensor.workday_sensor_at`) and `weather.home` (Met.no creates `weather.forecast_home`); likewise the MQTT sensors listed in `PRODUCTION_IDS`.
+3. A fresh install's first boot logs ERROR for the `homeassistant: start` publishes (ebusd poll registration, Victron initial full publish) until the MQTT entry exists; harmless in production, which is why the e2e log is judged from the clean boot on.
+4. With the external integrations absent (ComfoConnect, weather station, Somfy) the clean boot logs WARNINGs only: `numeric_state` triggers for `number.comfoconnect_pro_boost_time` and `sensor.wheatherstation_outdoor_temperature` ("unknown entity"), and the "Inactivity Watchdog" conditions. Not judged (WARNING, not deprecation).
+5. Stale: the `workday` YAML fixture in `tests/custom_components.yaml` / `ha_check.yaml` (see Step 4 item 4).
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

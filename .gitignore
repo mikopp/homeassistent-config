@@ -23,3 +23,5 @@ custom_components/
 .venv/
 # Local virtualenv for the in-process test layer (tests/ha, Python 3.14)
 .venv-test/
+# Logs of the real-HA layer (tests/e2e)
+tests/e2e/.artifacts/
