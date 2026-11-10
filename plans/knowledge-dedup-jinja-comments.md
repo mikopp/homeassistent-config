@@ -82,3 +82,6 @@ locally.
 - `{#-` / `-#}` markers strip surrounding whitespace in the rendered template. Deleting such a
   comment keeps neighbours' own markers, but keep the marker style of the line when shortening.
 - A `DIFF` is always a stop sign: the only edits allowed are inside `{# #}`.
+
+## Status
+- [TODO] Plan only; steps are tracked in the sections above (see the **Status:** line at the top)

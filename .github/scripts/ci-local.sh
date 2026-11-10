@@ -72,6 +72,8 @@ step "YAML style (fix_yaml_style.py)" style_check
 step "yamllint" "$YAMLLINT" -c .yamllint.yaml .
 step "yamllint on resolved config + dashboards" lint_resolved
 step "Jinja template extraction" extract_templates
+# Plans need Status + Close, packages need a note symlink (doc/KNOWLEDGE.md K-6, K-8).
+step "knowledge layout" "$VENV/bin/python" .github/scripts/check_knowledge_layout.py
 
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo; echo "Failed: ${FAILED[*]}"; exit 1

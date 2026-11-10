@@ -246,3 +246,6 @@ These are not implemented by Claude. Tick them in the Status section when done.
       (step 7 retention + baseline method link); 8c stays open (owner)
 - [ ] 7. Follow-up: revert retention to 5 once the tuning is finished
 - [ ] Owner: SOC to 50 (slab 8c); `heating_pv_boost_enabled` is the owner's switch
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

@@ -32,3 +32,9 @@ background file. This plan is small; it could be folded into another dedup PR if
    which MUST print `OK` (it proves only comment text changed and no template code was touched;
    a `DIFF` means revert that hunk). Also `ci-local.sh`, `git ls-files --eol`, CI green
    (`tests/test_wallbox.py`). Delete this plan in the PR's last commit.
+
+## Status
+- [TODO] Plan only; steps are tracked in the sections above (see the **Status:** line at the top)
+
+## Close
+- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)

@@ -51,3 +51,7 @@ Rules:
 - In automations, one-line comments per trigger / branch; the rule itself lives once in design/notes.
 - Verify a comment-only edit: `yaml_semantic_equal.py <ref> <file>`; with Jinja comments touched add
   `--ignore-jinja-comments`.
+
+## Where knowledge goes while you edit
+- Comments you write: what + one-line why + pointer, `doc/KNOWLEDGE.md#K-5`.
+- Found a bug or a non-obvious fact: invoke the `record-learning` skill; do not write it into a comment.

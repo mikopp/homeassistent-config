@@ -5,8 +5,8 @@
 - [DONE] Step 0 plan brought to this branch and updated (owner-approved proposal, Steps 0-3)
 - [DONE] Step 1 inventory (table below)
 - [DONE] Step 2 design (approved by the owner via the proposal, Steps 0-3)
-- [TODO] Step 3 implement
-- [TODO] Step 4 end-to-end verification
+- [DONE] Step 3 implement (results below)
+- [TODO] Step 4 end-to-end verification (awaiting approval)
 - [TODO] Step 5 close
 
 ## Overview
@@ -189,11 +189,32 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 - **Verification:** K-7 loading checks for `plans.md`, `knowledge.md`, the changed `ha-yaml.md` and
   the `record-learning` skill; `ci-local.sh`; the new check proven to fail on a plan without Close.
 
-### Step 3 – Implement [TODO]
+### Step 3 – Implement [DONE]
 - Make the approved changes. Every new or changed rule gets the K-7 loading check, and every
   changed skill the K-7 skill check.
 - Run `.github/scripts/ci-local.sh` and `git ls-files --eol`.
 - Dependencies: Step 2 approved.
+
+- **Result:** implemented as designed in Step 2: `.claude/rules/plans.md`, `.claude/rules/knowledge.md`,
+  `/new-plan` reduced to a pointer, root `CLAUDE.md` constraints 1 and 6, pointer line and rules
+  row (99 lines), `ha-yaml.md` pointer section, widened `record-learning` description,
+  `doc/KNOWLEDGE.md` K-1/K-6/K-8 (K-3 untouched), `.github/scripts/check_knowledge_layout.py` in
+  `ci-local.sh` and `ha_check.yaml`, 8 plans backfilled with a Close step (3 also with a Status
+  section), new `doc/heating_cooling_indicator/notes.md` + symlink.
+- **Check proven:** removing a plan's Close step, its Status heading, or the
+  `heating_cooling_indicator` symlink each made the script exit 1; restored, it exits 0.
+- **K-7 loading checks** (fresh headless `claude -p --model haiku --allowedTools Read --max-turns 4`,
+  repo root; the workspace-trust warning only ignores `permissions.allow`, rules still load):
+
+  | Rule | No file touched | After reading a matching file | After reading `README.md` |
+  |---|---|---|---|
+  | `plans.md` | NOT IN CONTEXT | names `check_knowledge_layout.py`, source `.claude/rules/plans.md` (read `plans/ci-test-speedups.md`) | NOT IN CONTEXT |
+  | `knowledge.md` | NOT IN CONTEXT | YES, source `.claude/rules/knowledge.md` (read `doc/energy/notes.md`) | NOT IN CONTEXT |
+  | `ha-yaml.md` pointer section | NOT IN CONTEXT | YES, source `.claude/rules/ha-yaml.md` (read `packages/pergola.yaml`) | NOT IN CONTEXT |
+
+  Skill (`--allowedTools Read,Skill,Grep,Glob`): the prompt "While editing packages/energy.yaml I
+  found that a utility_meter reset silently drops the first sample ... make sure this gets written
+  down" invoked `record-learning` without naming it; the unrelated prompt (capital of Austria) did not.
 
 ### Step 4 – End-to-end verification [TODO]
 - In fresh headless sessions on a scratch copy of the repo, with no hints in the prompt, check

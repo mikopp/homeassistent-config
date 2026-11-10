@@ -1,6 +1,6 @@
 ---
 name: record-learning
-description: Record a proven learning/gotcha after a bug or feature. Use when about to write down a lesson, pattern, anti-pattern or root cause.
+description: Record a proven learning/gotcha after a bug or feature. Use when you find or confirm a bug, root cause, gotcha or non-obvious fact while working, when about to write down a lesson, pattern or anti-pattern, or when closing a plan.
 ---
 
 # Record a learning
@@ -42,6 +42,7 @@ not CONFIRMED.
 | a current fact about one package | `doc/<pkg>/notes.md` (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | architecture or a derivation result | `doc/<pkg>/design.md` (create at the K-4 threshold) |
 | a story, superseded design or investigation | `doc/<pkg>/background.md` |
+| a story about a cross-package topic (e.g. the test framework) | `doc/<topic>/background.md` |
 | a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |
 | a cross-package topic fact (templates, MQTT, energy, tests …) | the matching skill in `.claude/skills/`, or a new skill |
 | needed in every session | root `CLAUDE.md` (keep it < 100 lines) |
