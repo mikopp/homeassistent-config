@@ -43,6 +43,13 @@ class Allowed(NamedTuple):
 
 # Noise from outside this config. Nothing here may hide an error of our own YAML.
 EXTERNAL_NOISE = [
+    # default_config loads bluetooth; on a host with a Bluetooth stack (the GitHub runner) HA
+    # finds the adapter but the CI container has no NET_ADMIN/NET_RAW. A container-setup message,
+    # not a config error (an HA OS install has the capabilities).
+    Allowed(
+        re.compile(r"^habluetooth\.manager Missing required permissions for Bluetooth management"),
+        "the e2e container runs without NET_ADMIN/NET_RAW; Bluetooth recovery is not under test",
+    ),
     Allowed(
         re.compile(r"^metno "),
         "Met.no (the default weather entity onboarding creates) cannot be reached: a runner or "

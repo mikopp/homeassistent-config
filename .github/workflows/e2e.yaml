@@ -129,3 +129,5 @@ jobs:
           name: e2e-logs-${{ matrix.channel }}
           path: tests/e2e/.artifacts/
           if-no-files-found: ignore
+          # .artifacts is a dot-directory; without this the action skips it and uploads nothing.
+          include-hidden-files: true
