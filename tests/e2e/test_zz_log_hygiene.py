@@ -52,6 +52,14 @@ EXTERNAL_NOISE = [
         re.compile(r"^homeassistant\.components\.homeassistant_alerts"),
         "alerts.home-assistant.io is fetched by default_config; unreachable without internet",
     ),
+    # Radio Browser is another entry onboarding creates; it needs the internet. While its setup
+    # retries, a stop (every restart) cancels it and HA logs that as ERROR. Timing decides whether
+    # a run sees it, so it is allowed only together with the unreachable API that causes it.
+    Allowed(
+        re.compile(r"^homeassistant\.components\.radio_browser Setup of config entry .* cancelled"),
+        "Radio Browser (created by onboarding) cannot reach its API; a restart cancels its retry",
+        only_if_log_has=re.compile(r"Cannot connect to host [\w.]*radio-browser\.info"),
+    ),
     # Follow-ups of an unreachable Met.no: weather.home is then missing, so the forecast call of
     # packages/heating_cooling_indicator.yaml finds no entity. Allowed only together with that cause.
     Allowed(

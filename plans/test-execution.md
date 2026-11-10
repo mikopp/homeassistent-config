@@ -427,6 +427,8 @@ Runtime: `tests/ha/test_pergola.py` 14 tests, ~27-34 s with `-n 4` (94 s serial,
 
 Stability: `--count=20 -n 4` on the file: 280/280, 6m43s. Reversed test order (serial, `-p no:randomly`): 14 passed.
 
+Fix after review: `test_watchdogs_responders_loxone` then failed 20/20 in a later session (and passed in others). Cause: before `not_enough_sun` is reached, the cover response may or may not move the covers (the 12:05/12:10 ticks race the state change; the order differs between HA boots). When it moved them at 12:10:30, the 12:15:30 tick saw an update 4 min 59.5 s old and the watchdog rightly stayed silent. The test now reports the covers (tilt 73) at 12:11:30, after the state is reached, and counts the watchdog window from there (12:15 silent, 12:20 both stop). After the fix: 20/20 on the test, 280/280 on the file, passes with the boot time faked to three dates (libfaketime), and both mutations (window 5 → 10 min, `sun_automatik_cooling` dropped from the suppression list) fail it.
+
 Mutation checks (in place on `packages/pergola.yaml`, restored with `git checkout`, `git diff packages/` empty), each fails:
 | Mutation | Failing test |
 |---|---|
@@ -474,6 +476,8 @@ Run: `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2
 - The container logs at WARNING and above (HA default), so INFO lines are not in the log; the "right log" proof counts the per-boot `climate_template` custom-integration warning.
 
 **Runtime (this sandbox, container already pulled).** Whole `tests/e2e`: 83 s, 79 s, 91 s (3 runs, 5/5 green each). Parts: bootstrap fixture about 50 s (two HA boots, onboarding), `test_boot` +2 s, check_config about 10 s, restart test about 30 s. Not 20×; per the task 3×.
+
+Review re-run (Python 3.14 venv from `tests/e2e/requirements.txt`): the first run failed the log test on `radio_browser ... Setup of config entry 'Radio Browser' ... cancelled`. Onboarding creates that entry, its API is unreachable here, and a restart that lands during its setup retry logs the cancel as ERROR; timing decides whether a run sees it. Added to `EXTERNAL_NOISE`, allowed only together with the "Cannot connect to host ...radio-browser.info" cause. Then 3/3 green (88-89 s), one of them with the cancel present. Marker enforcement re-checked: unmarked and unknown reason both fail collection.
 
 **What ran for real vs. what did not.**
 - Ran for real: Docker daemon (started by hand with `dockerd`, it was not running), the pinned image `ghcr.io/home-assistant/home-assistant:2026.10.1` pulled through the proxy, host mosquitto 2.0.18, all five tests, 3× green.

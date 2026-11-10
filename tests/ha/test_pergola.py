@@ -1169,40 +1169,50 @@ async def test_watchdogs_responders_loxone(pergola_env: _Env) -> None:
             failures.append(f"{where}: {got}, want {sorted(want)}")
 
     day = _next_date(3, 10, after=dt_util.now().date())
-    # not_enough_sun (no moving state), covers at its 90° target (tilt 74): no move at all.
+    # not_enough_sun (no moving state).
     await env.move_to(_at(day, 12, 2))
     await env.seed({_RADIATION: ("5", {"unit_of_measurement": "W/m²"}), _UV: "0",
                     _LINKS: 74, _RECHTS: 74})
-    await env.hold_until(_at(day, 12, 10))  # ticks 12:05 (updated 2.5 min ago), 12:10 (7.5)
+    await env.hold_until(_at(day, 12, 10))
     if env.state(_STATE) != "not_enough_sun":
         failures.append(f"setup: state {env.state(_STATE)}, want not_enough_sun")
+    # The covers report a tilt near the 90° target (74; not_enough_sun moves only when more than
+    # 30° off, so nothing moves) at a known time. Before not_enough_sun is reached, the cover
+    # response may or may not have moved them (the 12:05/12:10 ticks race the state change), so
+    # their last update is only known from here on. 73, not 74: an unchanged state and
+    # attributes would not refresh `last_updated`.
+    await env.hold_until(_at(day, 12, 11))
+    await env.seed({_LINKS: 73, _RECHTS: 73})
     env.clear()
     await env.hold_until(_at(day, 12, 15))
-    expect("12:15 tick, nothing updated for 5 min", ("stop", "tilt"),
-           ["watchdog_links: stop dach_links", "watchdog_rechts: stop dach_rechts"])
-    env.clear()
-    await env.hold_until(_at(day, 12, 17))
-    await env.seed({_LINKS: 73})  # a cover report (tilt changed): links fresh, mirrored
-    expect("links reports tilt 73", ("loxone", "stop", "tilt"),
-           ["loxone_tilt: loxone dach_links.current_tilt_position=73"])
+    expect("12:15 tick, covers updated 3.5 min ago", ("stop", "tilt"), [])
     env.clear()
     await env.hold_until(_at(day, 12, 20))
-    expect("12:20 tick, links updated 2.5 min ago", ("stop", "tilt"),
+    expect("12:20 tick, nothing updated for 8.5 min", ("stop", "tilt"),
+           ["watchdog_links: stop dach_links", "watchdog_rechts: stop dach_rechts"])
+    env.clear()
+    await env.hold_until(_at(day, 12, 22))
+    await env.seed({_LINKS: 72})  # a cover report (tilt changed): links fresh, mirrored
+    expect("links reports tilt 72", ("loxone", "stop", "tilt"),
+           ["loxone_tilt: loxone dach_links.current_tilt_position=72"])
+    env.clear()
+    await env.hold_until(_at(day, 12, 25))
+    expect("12:25 tick, links updated 2.5 min ago", ("stop", "tilt"),
            ["watchdog_rechts: stop dach_rechts"])
     # Sun tracking with a deadband no sun move exceeds: covers still for > 5 min, yet the
     # watchdogs stay silent (moving-state suppression).
     await env.number(_DEADBAND, 20)
     await env.seed({_RADIATION: ("800", {"unit_of_measurement": "W/m²"})})
-    await env.hold_until(_at(day, 12, 30))
+    await env.hold_until(_at(day, 12, 35))
     if env.state(_STATE) != "sun_automatik_cooling":
         failures.append(f"sun tracking: state {env.state(_STATE)}")
     env.clear()
-    await env.hold_until(_at(day, 12, 35))
+    await env.hold_until(_at(day, 12, 40))
     covers_idle = all(dt_util.utcnow() - env.hass.states.get(c).last_updated
                       > timedelta(minutes=5) for c in (_LINKS, _RECHTS))
     if not covers_idle:
         failures.append("sun tracking: a cover updated within 5 min (watchdog check void)")
-    expect("12:35 tick in sun tracking", ("stop", "tilt"), [])
+    expect("12:40 tick in sun tracking", ("stop", "tilt"), [])
     # Lock responders and the Loxone mirror of the lock sensors.
     env.clear()
     await env.seed({_ORIGIN["links"]: "user"})
