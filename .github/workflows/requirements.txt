@@ -3,6 +3,3 @@
 # The test layers have their own manifests: requirements_test.txt (tests/ha, in-process) and
 # tests/e2e/requirements.txt (real-HA layer); the retired Docker test harness is gone.
 pyyaml
-# validate_templates.py (REST template check of the retired Docker suite) is the only user;
-# drop both when that script is deleted.
-requests

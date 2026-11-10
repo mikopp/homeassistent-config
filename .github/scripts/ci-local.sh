@@ -33,7 +33,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 if ! "$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt; then
   # The test harness needs the pinned (newer) Python and is only used by pytest, which runs in CI.
-  # The Docker-free checks below need just pyyaml + requests, so fall back to those.
+  # The Docker-free checks below need just pyyaml, so fall back to those.
   echo "WARN: full CI manifest not installable on $("$VENV/bin/python" --version); installing Docker-free deps only"
   "$VENV/bin/pip" install --quiet pyyaml requests || exit 1
 fi
