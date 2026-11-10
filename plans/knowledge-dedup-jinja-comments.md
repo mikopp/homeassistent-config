@@ -71,8 +71,9 @@ locally.
 5. [TODO] Run the negative test of the gate (see above), `ci-local.sh`, `git ls-files --eol`.
 6. [TODO] Review: one sonnet agent checks that no current fact was lost; a second sonnet agent
    challenges its findings; apply corrections.
-7. [TODO] Push; CI green. Close: every removed fact has a home. Delete this plan in the PR's last
-   commit.
+7. [TODO] Push; CI green.
+8. [TODO] Close: every removed fact has a home. Delete this plan in the PR's last commit
+   (`doc/KNOWLEDGE.md#K-6`).
 
 ## Risks
 - Whitespace: the check collapses whitespace, so it cannot prove that the exact output whitespace
@@ -83,5 +84,3 @@ locally.
   comment keeps neighbours' own markers, but keep the marker style of the line when shortening.
 - A `DIFF` is always a stop sign: the only edits allowed are inside `{# #}`.
 
-## Status
-- [TODO] Plan only; steps are tracked in the sections above (see the **Status:** line at the top)

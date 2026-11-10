@@ -5,33 +5,26 @@ paths:
 
 # Plan files (`plans/<feature>.md`)
 
-The single source for how a plan looks, is kept and is closed. The `/new-plan` command and root
-`CLAUDE.md` (constraints 1-5) point here; do not copy this list elsewhere. Read this file before
-creating a plan: it loads by itself only once a file under `plans/` is touched.
+The single source for how a plan looks and is closed. The `/new-plan` command and root `CLAUDE.md`
+constraint 1 point here; do not copy this list elsewhere. Read this file before creating a plan:
+it loads by itself only once a file under `plans/` is touched.
 
 ## Creating a plan
-Writing a plan is planning only: do NOT implement anything. After creating it, stop and wait for
-the owner's approval.
-
 A plan file has:
 1. A clear overview of the project.
 2. The architecture/design approach.
 3. Numbered steps in logical phases.
 4. Dependencies and notes for each step.
 5. Steps marked `[TODO]`, `[IN_PROGRESS]` or `[DONE]`, and a `## Status` section.
-6. Which knowledge homes it will update (note, design doc, skill, rule, root `CLAUDE.md`;
-   `doc/KNOWLEDGE.md#K-1`).
-7. A last step: "Close: distil into note/design/skill, story → background, update pointers,
-   delete this plan" (`doc/KNOWLEDGE.md#K-6`).
+6. Which knowledge homes it will update (`doc/KNOWLEDGE.md#K-1`).
+7. A last step named `Close`, done per `doc/KNOWLEDGE.md#K-6`.
 
 The plan follows the conventions in `doc/KNOWLEDGE.md`: open work and hypotheses only, hypotheses
 marked as such, no learnings until CONFIRMED. `.github/scripts/check_knowledge_layout.py` fails
-CI for a plan without a `## Status` heading or a Close step.
+CI for a plan without a Status section or a `Close:` step.
 
 ## Working on a plan
-- Update the Status section after each step, and summarize before asking for the next one.
-- Confirmed bugs not fixed now become GitHub issues; link the issue number from the plan.
+Confirmed bugs and learnings: invoke the `record-learning` skill; it routes them to their home.
 
 ## Closing a plan
-At the last step, read `doc/KNOWLEDGE.md` (K-1, K-2, K-6) and follow K-6's last-step procedure. It
-is the one home of that procedure. Record learnings only through the `record-learning` skill.
+At the last step, read `doc/KNOWLEDGE.md` (K-1, K-2, K-6) and follow K-6's last-step procedure.

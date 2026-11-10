@@ -29,7 +29,8 @@ into four modes for ventilation automations. No design doc.
   passive - 0.5, active - 0.5).
 
 ## Hardware / integration quirks
-- Source entity name is spelled `wheatherstation` (sic) in every entity ID.
+- The source sensor is `sensor.wheatherstation_outdoor_temperature` (spelled so; referenced by
+  `pergola`, `airflow_cooling`, `heating_pv_boost` and the heating dashboard).
 - The statistics sensor needs `max_age: 48:00:00` to pre-load history from the recorder on restart;
   `sampling_size` alone does not load history. `sampling_size: 192` (4/h x 48 h) is only a cap.
 - The 15 min sensor is a `filter` (`time_simple_moving_average` then `time_throttle`, 15 min) so the
@@ -38,13 +39,21 @@ into four modes for ventilation automations. No design doc.
   an attribute, so it is a trigger-based template (every hour and on HA start).
 
 ## Entity map
-- `sensor.wheatherstation_outdoor_temperature_15min`, `sensor.wheatherstation_outdoor_temperature_48h_mean`
-- `sensor.wheatherstation_outdoor_temperature_48h_forecast_mean` (mean of forecast hours from now - 1 h
-  to now + 48 h; `unknown` with fewer than 48 usable hours)
-- `sensor.heating_cooling_indicator`, `sensor.heating_indicator_passive_cooling_effective`,
-  `sensor.heating_indicator_active_cooling_effective`
+The package sets no `default_entity_id`, so IDs of named sensors are derived by HA from the name.
+CONFIRMED = referenced by working config outside this package (grep over `packages/`, `dashboards/`).
+- Source `sensor.wheatherstation_outdoor_temperature` (confirmed; defined elsewhere)
+- `sensor.wheatherstation_outdoor_temperature_48h_mean` (confirmed: heating dashboard)
+- `sensor.wheatherstation_outdoor_temperature_15min`: unverified (derived from name; confirm via
+  ha-mcp lookup)
+- `sensor.wheatherstation_outdoor_temperature_48h_forecast_mean`: unverified (derived from name;
+  confirm via ha-mcp lookup); mean of forecast hours from now - 1 h to now + 48 h, `unknown` with
+  fewer than 48 usable hours
+- `sensor.heating_cooling_indicator` (confirmed: pergola, airflow_cooling, heating_pv_boost,
+  dashboards), `sensor.heating_indicator_passive_cooling_effective`,
+  `sensor.heating_indicator_active_cooling_effective` (confirmed: heating dashboard)
 - `input_number.heating_indicator_heating_below`, `input_number.heating_indicator_passive_cooling_above`,
-  `input_number.heating_indicator_active_cooling_above` (5-25 °C, step 0.5, box mode)
+  `input_number.heating_indicator_active_cooling_above` (confirmed: heating dashboard; 5-25 °C,
+  step 0.5, box mode)
 - Group `group.heating_cooling_indicator` lists all of the above.
 
 ## Decisions in force
@@ -65,3 +74,6 @@ into four modes for ventilation automations. No design doc.
 
 ## Related
 - `doc/KNOWLEDGE.md` (K-3 template); skills `ha-templates`, `ha-test-harness`.
+- Consumers of `sensor.heating_cooling_indicator`: `packages/pergola.yaml` (heating season sync),
+  `packages/airflow_cooling.yaml` (season input), `packages/heating_pv_boost.yaml` (heating-season
+  gate), `dashboards/heating-dashboard.yaml`.

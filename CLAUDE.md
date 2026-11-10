@@ -6,7 +6,7 @@
 3. ALWAYS await step-by-step instructions and explicit approval before coding
 4. ALWAYS update the plan file's status section after each step
 5. ALWAYS summarize what was done before asking for next steps
-6. ALWAYS comment each part of the code: what it does, at most one line of why, a pointer (`doc/KNOWLEDGE.md#K-5`).
+6. ALWAYS comment each part of the code in the style of `doc/KNOWLEDGE.md#K-5`.
 7. User will deploy via `git pull` on the HA host, NEVER do that yourself
 8. ALL files use LF (Linux) line endings — never CRLF. Before committing run `git ls-files --eol`
    (nothing may show `w/crlf` or `i/crlf`). Enforced by `.gitattributes` (`eol=lf`) and `.editorconfig`.

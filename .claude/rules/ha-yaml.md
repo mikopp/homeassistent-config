@@ -45,13 +45,9 @@ Rules:
 - The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
   entities to a device via the UI instead.
 
-## Comments (style: `doc/KNOWLEDGE.md#K-5`)
-- Every comment, YAML `#` and Jinja `{# #}`: what + at most one line of why + a pointer
-  (`→ doc/<pkg>/design.md#ID`). No history, no dates, no rule copied from design/notes or from this file.
-- In automations, one-line comments per trigger / branch; the rule itself lives once in design/notes.
-- Verify a comment-only edit: `yaml_semantic_equal.py <ref> <file>`; with Jinja comments touched add
-  `--ignore-jinja-comments`.
-
-## Where knowledge goes while you edit
-- Comments you write: what + one-line why + pointer, `doc/KNOWLEDGE.md#K-5`.
-- Found a bug or a non-obvious fact: invoke the `record-learning` skill; do not write it into a comment.
+## Comments and findings while you edit
+- Comment style: `doc/KNOWLEDGE.md#K-5`. Jinja comments follow it too; do not repeat the
+  availability-guard / no-`float`-default rule above in a comment.
+- If a comment's why rests on a fact not visible in the YAML (measured value, hardware quirk,
+  user-supplied reason) or you found a bug: invoke `record-learning` before you finish. The fact
+  goes to its home; the comment only points there. Never point to a note you did not update.
