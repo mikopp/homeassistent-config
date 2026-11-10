@@ -1,7 +1,7 @@
 # Home Assistant Config — Claude Instructions
 
 ## Important constraints for this project:
-1. ALWAYS create/maintain a feature specific implementation plan file in the `plans` folder; read `.claude/rules/plans.md` first (format, status, close).
+1. Feature work: ALWAYS create/maintain a plan file in `plans/`; read `.claude/rules/plans.md` first. Small ad-hoc changes the owner asks for directly need no plan.
 2. NEVER start implementation without explicit approval
 3. ALWAYS await step-by-step instructions and explicit approval before coding
 4. ALWAYS update the plan file's status section after each step

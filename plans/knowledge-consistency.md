@@ -8,7 +8,8 @@
 - [DONE] Step 3 implement (results below)
 - [DONE] Step 4 end-to-end verification (results below; 21 headless runs, findings OBSERVED)
 - [DONE] Review fixes (change list and T2 re-run under "Review fixes" below)
-- [TODO] Step 5 close (awaiting owner decision on the Step 4 findings and the open decision below)
+- [DONE] Owner decisions: plan-less small ad-hoc work (constraint 1 reworded); commit trailers left (squash merge); happy-cannon branch dropped its copy of this plan
+- [TODO] Step 5 close (awaiting owner)
 
 ## Overview
 **Goal: consistent behaviour.** An agent that writes code or YAML must do more than read the
@@ -298,9 +299,10 @@ Applied after review of Steps 3 and 4, on this branch:
 pointers are intended triggers, one per moment; (13) `record-learning` overtriggering was not seen
 in Step 4; (16) residual gaps are documented in Step 4 under infrastructure notes.
 
-**OPEN owner decision (not changed):** Step 4 pattern 4. CLAUDE.md constraint 1 makes agents write a
-plan file even when told "implement directly" (T4 3/3). Keep that, or allow plan-less work for small
-changes?
+**Owner decision (Step 4 pattern 4):** small ad-hoc work goes without a plan file. CLAUDE.md
+constraint 1 now limits plans to feature work: "Small ad-hoc changes the owner asks for directly need
+no plan." Knowledge from plan-less work still reaches its home via moment 7 (`ha-yaml.md` pointer,
+`record-learning`, the note-symlink check). Not re-tested headless.
 
 **K-7 loading checks for the changed rules** (haiku, `--allowedTools Read --max-turns 4`, repo root,
 HEAD e9acf3c; OBSERVED): `plans.md` absent with no read, present after reading
