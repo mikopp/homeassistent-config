@@ -15,7 +15,7 @@
   - [x] Migration item 5 (pergola): the 18 Docker tests → `tests/ha/test_pergola.py` (14 tests on the real `sun` integration, real triggers); `tests/test_pergola.py` and the pergola CI step removed (see "Step 2 results, item 5")
   - [x] **Gap until Step 4:** closed: `tests.yaml` runs `tests/ha` in CI and `ci-local.sh` runs it locally
 - [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI wired in Step 4
-- [x] Step 4 CI/local runs: DONE locally, workflows NOT yet run on GitHub (see "Step 4 results")
+- [x] Step 4 CI/local runs: DONE, both workflows green on GitHub (see "Step 4 results")
 - [ ] Step 5 knowledge update
 - [ ] Step 6 Close
 
@@ -552,6 +552,8 @@ The binary needs glibc <= 2.34 and `libcjson.so.1`; libssl/libz come from the ho
 - `ci-local.sh`: all local checks passed. `actionlint` 1.7.7 on both workflows: clean. `git ls-files --eol`: no CRLF.
 
 **Not verified (cannot run GitHub Actions here):** the workflows themselves; the runner's Docker pull of the app image and `install-mosquitto.sh` on a host without `libcjson` (here the system had it; `LD_DEBUG` shows the copied one is found first); `setup-python` reading `python-version-file` from a plain `3.14` file and the `exclude:` matrix expression for the beta channel (both copied from documented behaviour / hrds); the climate_template download in CI (`--force` path; 403 from the sandbox proxy); the nightly beta run; required-check names; wall times on the runner.
+
+**First GitHub runs (PR #149).** The PR first conflicted with master, so no `pull_request` workflow ran; after merging master (`a160277`) both started. In-process: green, 3m20s. e2e: red on the log test, twice `habluetooth.manager` ERROR "Missing required permissions for Bluetooth management" (the runner has a Bluetooth stack, the container has no NET_ADMIN/NET_RAW): added to `EXTERNAL_NOISE`. The failure upload found nothing because `upload-artifact` skips dot-directories: `include-hidden-files: true`. On `0b44150` both green: e2e 1m45s, in-process 3m12s. So the runner path works: app-image pull and binary copy for mosquitto, `python-version-file`, the climate_template download (no `custom_components/` in the checkout; the boot test found `climate.airflow_climate`), and the e2e boot on a runner with internet. Still unverified: the nightly beta run.
 
 **Findings, not fixed:**
 1. PHACC prints about 3000 lines of `sqlalchemy.engine` INFO per full run (also with `-p no:logging`): CI log noise, cause not investigated.
