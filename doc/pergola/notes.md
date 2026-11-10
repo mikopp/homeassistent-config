@@ -108,17 +108,31 @@ The other helpers' values are on each helper in the YAML (baselines: `doc/pergol
   reads. This is code, not a comment: fixing it needs a test run. → GitHub issue #142
 - Field calibration (PV factor, shading sensitivity, wall azimuth, drain angles, rain lock):
   `plans/pergola-field-calibration.md`.
-- Flaky test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN).
+- Flaky Docker-era test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN); the Docker test is gone, `test_sun_rules` covers the rule in-process.
 
-## Tests (`tests/test_pergola.py`)
-- Formula tests seed `sensor.pergola_effective_sun_angle` directly (the sun integration can
-  overwrite seeded `sun.sun` attributes), then trigger `automation.pergola_cover_response` with
-  `skip_condition` and assert `sensor.pergola_effective_slat_angle`. Anchor A_eff = 67.9°:
-  optimized 13.0°, standard 15.0°, heating 67.9°.
-- `conftest.py` baseline: automatic on, heating off, optimized **on**, state
-  `sun_automatik_cooling`, sync automation turned **off** (its own tests enable it).
-- `test_sun_down_state` must first leave a protected state (the previous test can leave
-  `user_override`) and wait for `sensor.pergola_pv_power == 0` before triggering.
+## Tests (`tests/ha/test_pergola.py`, in-process; 14 tests)
+- Real `sun` integration at the configured location on the moved clock (`sun.sun` is not seeded);
+  all automations run through real triggers and conditions, never `automation.trigger`. Weather
+  station, Somfy covers and lock sensors are seeded; Victron PV/load go over the real broker; the
+  season is the real indicator driven through its 48h mean. Effects are the recorded cover/Loxone
+  calls, attributed to the automation by its `automation_triggered` context.
+- Formula tests pick real sun positions per branch of the slat formulas and compare HA's sensors
+  AND the sent tilt with an independent port (`_Ref`, anchored to the PG-4.8 table by
+  `test_reference_model`); `test_automation_set_is_complete` fails when an automation has no test.
+- The cover response's `delay: 500 ms` never comes due on a frozen clock; `_settle` moves the
+  clock to a pending script delay only when it is at most 0.6 s away (1.0 s was wrong: a drain
+  delay with 1 s left was reached one step too early).
+- The post-rain drain script must not be running at the end of a test, else HA's shutdown hangs
+  on the frozen clock (`pergola_env` stops it at teardown; a scenario never ends with a step that
+  starts it).
+- Watchdog test race, fixed: before `not_enough_sun` the cover response may or may not move the
+  covers (the 12:05/12:10 ticks race the state change), and a move at 12:10:30 makes the 12:15:30
+  watchdog tick see a fresh update. The test reports the covers at 12:11:30 and counts the window
+  from there.
+- Config comment stale (not fixed): rule 2 → user_override (`packages/pergola.yaml` ~985-997) says
+  the exit runs first and rain re-engages on the next trigger; CONFIRMED by state trace that with
+  `rain_rate > 0` and both locks `unknown` the state goes user_override → rain in the same run
+  (rain entry comes before the exit rule). The test asserts the code.
 
 ## Related
 - `doc/pergola/design.md`: current design.

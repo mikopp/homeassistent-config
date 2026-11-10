@@ -2,6 +2,7 @@
 paths:
   - "packages/victron.yaml"
   - "tests/ha/test_victron.py"
+  - "tests/e2e/test_restart.py"
   - "doc/victron/design.md"
 ---
 # Victron package notes (`packages/victron.yaml`)
@@ -149,14 +150,25 @@ change: both sensors share a long template with counter-delta branches, and the 
 sensors advance on their own, so a held tick would drop that tick's delta. Needs its own tests
 (none cover an unavailable grid today).
 
+- The MQTT sensors have no `default_entity_id`: on a fresh registry they get other ids than the
+  templates read (`sensor.victron_grid_l1_power` …) and the whole chain breaks (#146).
+- `victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh` render the string
+  `unknown` into a numeric energy sensor on each `time_pattern` tick before the Venus counters
+  arrive: ERROR in the log (#147; production impact UNPROVEN).
+- `template.reload` logs a TemplateError for `sensor.solar_yield_watts`: during the reload the η
+  sensor is briefly unavailable and `| float` has no default; VIC-10 assumes η is always numeric (#155).
+
 ## Tests
 In-process (`tests/ha/test_victron.py`, real broker): `test_instant_power_table` covers every
 instant-power template, fed with Venus OS payloads; "unavailable" is a real `expire_after` (Clock)
 or a sensor that never got a message. The η accumulators are seeded in that table only. The
 accumulator tests run real minute ticks on a frozen clock (one fresh HA each, nothing seeded):
 battery, η gate, conversion loss, solar-yield counter delta and battery residual chains, grid
-`integration` import/export (exact 60 s steps), and the keep-alive publish. No Docker tests left
-for this package.
+`integration` import/export (exact 60 s steps), and the keep-alive publish. Each tick publishes every
+input, syncs MQTT and advances 60 s from half past the minute (`Clock.align`); expectations are
+computed with the template's own arithmetic from the state read just before the tick.
+`tests/e2e/test_restart.py` checks that the `victron_grid_energy_import` total survives a real
+restart.
 
 ## Related
 - `doc/victron/design.md` (current design).

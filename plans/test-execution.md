@@ -16,7 +16,7 @@
   - [x] **Gap until Step 4:** closed: `tests.yaml` runs `tests/ha` in CI and `ci-local.sh` runs it locally
 - [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI wired in Step 4
 - [x] Step 4 CI/local runs: DONE, both workflows green on GitHub (see "Step 4 results")
-- [ ] Step 5 knowledge update
+- [x] Step 5 knowledge update: DONE (see "Step 5 results")
 - [ ] Step 6 Close
 
 
@@ -565,6 +565,32 @@ The binary needs glibc <= 2.34 and `libcjson.so.1`; libssl/libz come from the ho
 - "Local CI checks": `ci-local.sh` also runs the in-process suite `tests/ha`; prerequisites become `brew install yamllint python@3.15 python@3.14 mosquitto`; `--e2e` adds the Docker layer; "`check_config` and pytest need Docker and only run in CI" is no longer true (pytest `tests/ha` runs locally; `check_config` runs in `tests/e2e`).
 - Mosquitto prerequisite: "the mosquitto must be the version of the Home Assistant Mosquitto app pinned in `.github/ha-versions/mosquitto/Dockerfile` (Linux: `.github/scripts/install-mosquitto.sh`)".
 - Pins paragraph: add `.github/ha-versions/ha-python.txt` (Python HA requires) and the mosquitto pin next to the HA gate; `tests/ha/test_versions.py` guards both.
+
+### Step 5 results (knowledge for the two test layers)
+CLAUDE.md "Local CI checks" and the version gate were rewritten first (own commit; 97 lines).
+
+Moved, one home per fact:
+- `.claude/skills/ha-test-harness/SKILL.md` rewritten for `tests/ha` and `tests/e2e` (where a test goes, running, pins and guards, fixtures and gotchas, e2e design, quality rules: mutation check, 20x on changed tests, no retry plugins). The Docker-harness entries (libfaketime, `jump_to_next`, REST seeding, harness HTTP hangs, `pyproject.toml` timeouts, test ordering, per-file CI steps) are gone with the harness; the generic `set_state` entries of `ha-templates` and `ha-energy-metering` stay (they describe HA, and `hass.states.async_set` behaves the same).
+- `.claude/rules/tests.md`: `paths:` now `tests/**`, both test workflows, `ci-local.sh`, the two installers, `.github/test-paths`, `requirements_test.txt` (no `pyproject.toml`, no `ha_check.yaml`); body points to the skill.
+- `doc/KNOWLEDGE.md` K-3: `tests/ha/test_<pkg>.py` (plus `tests/e2e/` files that target the package). IDs unchanged.
+- Package notes: Tests sections rewritten for energy, heating_cooling_indicator, airflow, pergola (watchdog race fix, 500 ms settle, drain at teardown, stale rule-2 comment), victron, heating_pv_boost; `tests/e2e/test_restart.py` added to the `paths:` of victron and heating_pv_boost (it checks their totals). Issues linked where they were missing: #146 (energy, victron, airflow, heating_pv_boost), #147 and #155 (victron), #153, #154, #155 (airflow). The #156 bullet of energy (Docker test read back its own seed) is removed: the in-process test replaced that file. #143 stays linked, reworded (Docker test gone).
+- `plans/ci-test-speedups.md` and `plans/stateful-template-and-automation-tests.md` deleted. Their content is the Docker harness (timeout shim, image prefetch, REST seeding, `state_defaults.yaml`/`scenarios.yaml` runner, files that no longer exist); everything that was a confirmed fact is superseded by the skill or the in-process/e2e tests. The one open item in them, removing the `| float(default)` fallbacks in `packages/pergola.yaml`, is already tracked as #142 and in the pergola and airflow notes.
+
+K-7 (fresh headless sessions from the repo root, `claude -p … --model haiku --allowedTools Read --max-turns 4`):
+| Check | Result |
+|---|---|
+| `tests.md` rule, no tool use | absent (the model says it is not in context) |
+| after reading `tests/ha/test_wallbox.py` | present, source `.claude/rules/tests.md` quoted |
+| after reading `tests/e2e/test_boot.py` | present |
+| after reading `README.md` | absent |
+| skill, task prompt not naming it (`--tools Read,Skill,Grep,Glob`) | `Skill(ha-test-harness)` invoked in 3 of 3 further runs (the very first run, with Bash available, read the skill file by `cat` instead) |
+| skill, unrelated prompt | no tool use |
+
+Open / for the owner (nothing fixed here, knowledge only):
+1. `tests/e2e/ha_client.py` line 5 still cites `plans/ci-test-speedups.md` (deleted); reword at the Close step or in the next test edit. `doc/victron/background.md` also names it (history, left).
+2. #156 (`test_shelly_pool_pump.py` never exercised the value_templates) and #143 (Docker-era flaky `test_sun_down_state`) look superseded by the in-process tests; the plan does not prove either resolved, so both stay linked or open. Closing them is the owner's call.
+3. README "yaml-lint" section still does not match `yaml-lint.yml` (Step 4 finding 4); `validate_templates.py` is dead (finding 2); both untouched.
+4. The Step 3 "config findings" without an issue (rain-entry comment in `packages/pergola.yaml`; the fresh-install first-boot MQTT ERRORs) are in the pergola note and the skill only.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

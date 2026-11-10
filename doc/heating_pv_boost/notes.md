@@ -2,6 +2,7 @@
 paths:
   - "packages/heating_pv_boost.yaml"
   - "tests/ha/test_heating_pv_boost.py"
+  - "tests/e2e/test_restart.py"
   - "dashboards/heating-dashboard.yaml"
   - "plans/heating-*.md"
   - "plans/ebusd-*.md"
@@ -224,7 +225,12 @@ In-process (`tests/ha/test_heating_pv_boost.py`, real broker, ebusd/Shelly/Victr
 surplus, compressor and cycling formulas, cooling interlock, derived setpoint (case tables), and
 on a frozen clock the DHW mask (delay_off), the slab decision (delay_on/off, master switch,
 Schmitt), the last run, the real history_stats (recorder) and the daily meters' midnight reset.
-No Docker tests left for this package.
+MQTT-fed inputs (ebusd strings by name and raw enum number, Shelly Pro 3EM JSON, Venus values) go
+only over the real broker; "unavailable" is a real `expire_after`. The daily meters are the real
+`utility_meter`s; the 48h mean (which drives the real season indicator) and the η accumulators'
+inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
+`heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
+production ids on a fresh registry; other MQTT ids may not (#146).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
 `unknown` after boot until the delay elapses.
