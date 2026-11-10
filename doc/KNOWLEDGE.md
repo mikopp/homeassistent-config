@@ -136,7 +136,8 @@ A prompt outside the description must not invoke it.
 ## K-8 Loading mechanics (Claude Code)
 
 What the layout in K-1 relies on. Grades: DOC = Claude Code docs (2026-11-07), CONFIRMED = tested
-headless in this repo 2026-11-07 (K-7 method).
+headless in this repo 2026-11-07 (K-7 method), OBSERVED = real data from a real run with an
+alternative explanation still open (same meaning as in `record-learning`).
 
 - Startup loads only root `CLAUDE.md` plus each skill's name + description; no rule or note bodies.
   A skill body loads only when the skill is invoked. (CONFIRMED)
@@ -156,3 +157,6 @@ headless in this repo 2026-11-07 (K-7 method).
 - `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and CI) enforces the layout: every
   `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
   `.claude/rules/packages/<name>.md` symlink to an existing note.
+- A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
+  3 runs); naming "measured value, hardware quirk, user-supplied reason" gave 3/3. Word findings
+  triggers by the concrete case, not the abstract category. (OBSERVED)
