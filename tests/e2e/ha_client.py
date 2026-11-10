@@ -2,7 +2,7 @@
 
 Own and small on purpose (modelled on the sibling repo ha_innova_hrds): the old
 `ha_integration_test_harness` called `requests` without a timeout, so a wedged container hung the
-whole run (plans/ci-test-speedups.md), and it needed docker-compose and a `:stable` image tag.
+whole run, and it needed docker-compose and a `:stable` image tag.
 
 Rules the client keeps:
 - every HTTP and websocket call has a timeout;
