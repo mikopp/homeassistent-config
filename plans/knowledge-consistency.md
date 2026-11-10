@@ -6,8 +6,8 @@
 - [DONE] Step 1 inventory (table below)
 - [DONE] Step 2 design (approved by the owner via the proposal, Steps 0-3)
 - [DONE] Step 3 implement (results below)
-- [TODO] Step 4 end-to-end verification (awaiting approval)
-- [TODO] Step 5 close
+- [DONE] Step 4 end-to-end verification (results below; 21 headless runs, findings OBSERVED)
+- [TODO] Step 5 close (awaiting owner decision on the Step 4 findings)
 
 ## Overview
 **Goal: consistent behaviour.** An agent that writes code or YAML must do more than read the
@@ -216,7 +216,7 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
   found that a utility_meter reset silently drops the first sample ... make sure this gets written
   down" invoked `record-learning` without naming it; the unrelated prompt (capital of Austria) did not.
 
-### Step 4 – End-to-end verification [TODO]
+### Step 4 – End-to-end verification [DONE]
 - In fresh headless sessions on a scratch copy of the repo, with no hints in the prompt, check
   behaviour, not just loading. For each task, check where knowledge landed against KNOWLEDGE.md.
   - Plain prompt "plan feature X", without `/new-plan`: the plan has its knowledge homes and a
@@ -230,7 +230,45 @@ Step 4 gets an extra behaviour test: "small YAML edit, no plan, no `/new-plan`".
 - Each task runs at least 3 times; consistent means the same homes each time.
 - Dependencies: Step 3.
 
-### Step 5 – Close [TODO]
+- **Result** (HEAD 73d8543, fresh scratch clone per run, `claude -p ... --model haiku --allowedTools
+  Read,Write,Edit,Glob,Grep,Skill,Task --max-turns 25 --permission-mode acceptEdits`, no hints in
+  the prompts; symlinks survived the clone). Haiku was strong enough for every task. All findings
+  are **OBSERVED** (3 runs, non-deterministic model), not CONFIRMED.
+
+  | Task | r1 | r2 | r3 | Consistent? |
+  |---|---|---|---|---|
+  | T1 plan, no `/new-plan` | PASS: `plans/pool-pump-frost-protection.md`, `## Status`, "Knowledge homes updated", Close step; no implementation | PASS (same, `check_knowledge_layout.py` ok) | PASS (same) | yes 3/3 |
+  | T2 YAML change with non-obvious why | PASS: K-5 comment + sensor fact in `doc/heating_cooling_indicator/notes.md` (Hardware quirk + Decision) + tests adapted | FAIL: 2-line comment only, note untouched | FAIL: comment with a dangling `→ notes.md` pointer, note untouched | no (1/3) |
+  | T3 rename a friendly name | PASS: one-line diff, no comment, no plan | PASS | PASS | yes 3/3 |
+  | T4 new package, "implement directly" | PARTIAL: package + `doc/garage_door/notes.md` (K-3 shape) but NO symlink; a plan was created despite "directly"; layout check exit 1 | same (plan `garage-door-open-alert.md`) | same | yes 3/3 (same shortfalls) |
+  | T5 confirmed bug, not fixed | PASS: issue drafted, nothing in YAML; asked approval for `gh issue create`, note edit held until the number exists | PASS but differs: issue drafted AND a "Confirmed bug" section already written into `doc/victron/notes.md` with "NOT YET FILED" | PASS: issue drafted, note link held | routing yes 3/3; note timing differs |
+  | T6 close a small plan | PASS: fact to `doc/energy/notes.md`, story to new `doc/energy/background.md`, plan deleted; also edited `packages/energy.yaml` history comments (unrequested) | PASS; 3 % drift figure placed in the note as OBSERVED (story-ish) | PASS (cleanest) | yes 3/3 on homes; extras differ |
+  | T7 T2 via subagent | NO CHANGE: subagent stopped and asked the owner how to apply the offset | NO CHANGE: same | FAIL: Jinja comment pointing to `doc/KNOWLEDGE.md#K-5` as if it were a content pointer, note untouched | no |
+
+  T2 and T7 adapt the task: the file has no "passive heating" threshold, so the test used the
+  real passive-cooling threshold (effective sensor, offset -0.5 °C) with the reason "sensor reads 0.5 °C low".
+
+- **Evidence excerpts:**
+  - T2 r1 note diff: `+- The weatherstation outdoor sensor reads about 0.5 °C low in summer (user measurement; ...)` under "Hardware / integration quirks".
+  - T2 r2 only diff: `+        # Subtracts 0.5 °C: the weatherstation reads 0.5 °C low in summer (measured), so the passive threshold is lowered ...` and no other file.
+  - T2 r3: `# Typed value minus 0.5 °C: the outdoor sensor reads low in summer (measured). → doc/heating_cooling_indicator/notes.md`, note not edited.
+  - T7 r3: `{# Sensor reads 0.5 °C low in summer: ... (doc/KNOWLEDGE.md#K-5). #}`.
+  - T4: the Write tool cannot create symlinks; the runs had no Bash (a harness limit, see below). All three said so and told the owner the `ln -s` command.
+
+- **Observed failure patterns:**
+  1. **Moment 2/3 trigger is weak (T2 2/3, T7 3/3).** When the why is a hardware fact, the agent writes it only as a comment, or adds a pointer to a note it did not edit. The `ha-yaml.md` pointer ("non-obvious fact: invoke `record-learning`") was in context (the file is read before editing) but `record-learning` was not applied in 2 of 3 T2 runs; a measured hardware quirk is apparently not seen as "a bug or non-obvious fact".
+  2. **K-5 pointer misuse (T7 r3):** the agent points to `doc/KNOWLEDGE.md#K-5` (the style rule) instead of to a content home.
+  3. **Subagents may stop and ask (T7 r1, r2)** instead of making the change; the offset has to touch two sensors and a clamp, so this is a task trait, not necessarily a knowledge failure, but the knowledge behaviour could not be graded for those runs.
+  4. **"No plan" is overridden by CLAUDE.md constraint 1 (T4 3/3):** "Implement it directly" still produced a plan file each time. A new package without a plan therefore always carries a plan too. Owner decision needed: is that desired?
+  5. **New package symlink (T4 3/3):** note content was right, the symlink was never created in these runs (Write cannot; no Bash allowed). Only `check_knowledge_layout.py` catches it, as designed; whether an agent with Bash creates it was NOT tested.
+  6. **Scope creep at close (T6 r1):** edited package comments not asked for. **Story leakage (T6 r2):** a story figure kept in the note. Homes were right in all 3.
+  7. **Works consistently:** T1 (plan structure without `/new-plan`), T3 (no comment or plan pollution), T5 routing (issue, not a comment), T6 homes (note / background / delete).
+
+- **Triggers that worked:** `plans.md` via CLAUDE.md constraint 1 (T1 3/3, T4 plan has Status + Close); `record-learning` routing for a user-stated confirmed bug (T5 3/3); K-6 close procedure (T6 3/3); the note template K-3 for a new package (T4). **Not reliable:** the `ha-yaml.md` "Where knowledge goes while you edit" section for a measured fact (T2 1/3, T7 0/3 gradable).
+
+- **Infrastructure notes:** `--allowedTools` without Bash blocked `gh` and `ln -s` (T4, T5: issue drafted but not filed; T6: layout check not run). Headless runs print the workspace-trust warning (`permissions.allow` ignored). Not tested: Bash allowed; sonnet instead of haiku; more than 3 runs; whether a stronger pointer (e.g. in `packages/CLAUDE.md`, loaded on package read) fixes pattern 1. These are options for Step 5, not decisions.
+
+### Step 5 – Close [TODO, awaiting owner]
 - Close: distil into note/design/skill, story → background, update pointers, delete this plan
   (`doc/KNOWLEDGE.md#K-6`).
 
