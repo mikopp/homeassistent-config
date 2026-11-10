@@ -108,13 +108,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r .github/workflows/requirements.txt
 
-      # Knowledge layout (doc/KNOWLEDGE.md K-6, K-8): every plan has a Status section and a Close
-      # step, every package has a note symlink. Stdlib only, no Docker. It must run BEFORE
-      # "Install custom component dependencies" below, which generates packages/ha_ci_fixtures.yaml
-      # (a package with no note by design).
-      - name: Check knowledge layout
-        run: python3 .github/scripts/check_knowledge_layout.py
-
       # ── 4. Prepare config dir ────────────────────────────────────────────────
       - name: Prepare HA config dir
         run: |

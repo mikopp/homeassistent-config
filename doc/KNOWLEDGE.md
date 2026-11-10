@@ -154,7 +154,7 @@ alternative explanation still open (same meaning as in `record-learning`).
 - Guards: `permissions.ask` blocks Read and `cat`, not Grep (K-1). (CONFIRMED)
 - Rules are context, not enforcement: anything that must never happen (CRLF, YAML errors) needs a
   check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.
-- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and CI) enforces the layout: every
+- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow `.github/workflows/knowledge-layout.yml`) enforces the layout: every
   `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
   `.claude/rules/packages/<name>.md` symlink to an existing note.
 - A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
