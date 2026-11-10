@@ -4,8 +4,8 @@
     python -m tests.e2e.stage <dir> --check-config  # stage, then run HA's check_config on it
 
 One staging, two users: the pytest fixtures (tests/e2e/conftest.py) boot a container on the
-result, and the CI check_config step (Step 4 of plans/test-execution.md) runs the same
-`--check-config`, so both look at exactly the same configuration.
+result, and test_check_config.py runs `--check-config` on it (the CI e2e job runs both), so both
+look at exactly the same configuration.
 
 What the staged copy is:
 - the repo's real `configuration.yaml` (default_config, frontend, lovelace dashboards, recorder,
@@ -16,8 +16,8 @@ What the staged copy is:
   `dashboards/`, `blueprints/`, `custom_templates/`) and an empty `themes/` (the frontend
   includes that directory);
 - the custom components from `tests/custom_components.yaml` (the HACS `climate_template`),
-  taken from the repo's `custom_components/` if present (CI's download step or a developer
-  checkout), else downloaded from GitHub like that step did.
+  installed by `.github/scripts/install_custom_components.py` (the repo's `custom_components/` if
+  present, else downloaded from GitHub; CI runs the same script once before the tests).
 
 Not staged on purpose: `tests/custom_components.yaml` `ha_yaml_config` (the `workday` YAML
 platform). Home Assistant at the pinned version rejects it ("does not support platform setup");
@@ -27,19 +27,28 @@ how production has it.
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
-
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / ".github" / "ha-versions" / "ha" / "Dockerfile"
-CUSTOM_COMPONENTS = ROOT / "tests" / "custom_components.yaml"
+
+
+def _load_installer():
+    """Import .github/scripts/install_custom_components.py (not a package) by path.
+
+    The one implementation of the custom-component install: CI steps, ci-local.sh and this
+    staging all use it, none has a copy.
+    """
+    path = ROOT / ".github" / "scripts" / "install_custom_components.py"
+    spec = importlib.util.spec_from_file_location("install_custom_components", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 # Production location (CI used the same coordinates via sed). Inserted into the staged
 # configuration.yaml; without a location HA starts with the default "Home" at 0/0.
@@ -70,27 +79,6 @@ def image_from_dockerfile() -> str:
     raise RuntimeError(f"no FROM line in {DOCKERFILE}")
 
 
-def _install_custom_components(target: Path) -> None:
-    """Put the custom components listed in tests/custom_components.yaml into `target`."""
-    listed = yaml.safe_load(CUSTOM_COMPONENTS.read_text())
-    for dep in listed.get("dependencies", []):
-        domain = dep["domain"]
-        destination = target / "custom_components" / domain
-        local = ROOT / "custom_components" / domain
-        if local.is_dir():
-            shutil.copytree(local, destination, ignore=shutil.ignore_patterns("__pycache__"))
-            continue
-        owner_repo = dep["repository"].rstrip("/").removeprefix("https://github.com/")
-        url = f"https://github.com/{owner_repo}/archive/refs/heads/{dep.get('ref', 'main')}.tar.gz"
-        with tempfile.TemporaryDirectory() as tmp:
-            archive = Path(tmp) / "component.tar.gz"
-            urllib.request.urlretrieve(url, archive)
-            with tarfile.open(archive) as tar:
-                tar.extractall(tmp, filter="data")
-            (source,) = [p for p in Path(tmp).glob(f"*/custom_components/{domain}") if p.is_dir()]
-            shutil.copytree(source, destination)
-
-
 def stage(target: Path) -> Path:
     """Build the staged config in `target` (emptied first) and return it."""
     if target.exists():
@@ -109,7 +97,8 @@ def stage(target: Path) -> Path:
     lines.insert(index + 1, LOCATION)
     (target / "configuration.yaml").write_text("".join(lines))
 
-    _install_custom_components(target)
+    # Local checkout copy if there is one, else the download (ref honoured): one implementation.
+    _load_installer().install(target, ROOT)
     return target
 
 

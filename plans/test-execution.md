@@ -13,9 +13,9 @@
   - [x] Migration item 3: heating_pv_boost formulas, Victron instant power, Shelly pool pump → `tests/ha/test_{heating_pv_boost,victron,shelly_pool_pump}.py`, all MQTT inputs over the real broker; spike Shelly/Victron tests moved into them; Docker tests removed (see "Step 2 results, item 3")
   - [x] Migration item 4 (clock: delays, accumulators, automations, recorder): heating_pv_boost, Victron, airflow → in-process; their Docker files deleted; only `tests/test_pergola.py` (18 tests, item 5) is left in Docker (see "Step 2 results, item 4")
   - [x] Migration item 5 (pergola): the 18 Docker tests → `tests/ha/test_pergola.py` (14 tests on the real `sun` integration, real triggers); `tests/test_pergola.py` and the pergola CI step removed (see "Step 2 results, item 5")
-  - [ ] **Gap until Step 4:** CI does not run `tests/ha` yet, so template rendering is checked only locally (`ci-local.sh` only smoke-runs the extractor)
-- [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI is NOT wired yet (Step 4)
-- [ ] Step 4 CI/local runs
+  - [x] **Gap until Step 4:** closed: `tests.yaml` runs `tests/ha` in CI and `ci-local.sh` runs it locally
+- [x] Step 3 real-HA layer `tests/e2e/`: DONE, ran for real in Docker, 3 of 3 green (see "Step 3 results"); CI wired in Step 4
+- [x] Step 4 CI/local runs: DONE locally, workflows NOT yet run on GitHub (see "Step 4 results")
 - [ ] Step 5 knowledge update
 
 
@@ -507,6 +507,61 @@ Review re-run (Python 3.14 venv from `tests/e2e/requirements.txt`): the first ru
 3. A fresh install's first boot logs ERROR for the `homeassistant: start` publishes (ebusd poll registration, Victron initial full publish) until the MQTT entry exists; harmless in production, which is why the e2e log is judged from the clean boot on.
 4. With the external integrations absent (ComfoConnect, weather station, Somfy) the clean boot logs WARNINGs only: `numeric_state` triggers for `number.comfoconnect_pro_boost_time` and `sensor.wheatherstation_outdoor_temperature` ("unknown entity"), and the "Inactivity Watchdog" conditions. Not judged (WARNING, not deprecation).
 5. Stale: the `workday` YAML fixture in `tests/custom_components.yaml` / `ha_check.yaml` (see Step 4 item 4).
+
+### Step 4 results (CI and local runs)
+
+**Mosquitto is a pinned dependency like HA (owner requirement).** Researched from source and the real image:
+- Latest release of the official Home Assistant Mosquitto app (add-on, `home-assistant/addons`, `mosquitto/`): **7.1.3** (`config.yaml`, CHANGELOG top). It ships **mosquitto 2.1.2** (since 7.0.0; 6.x shipped 2.0.x). CONFIRMED by running the image: `mosquitto version 2.1.2`.
+- Install method: NOT apk or a distribution package. The app's Dockerfile `git clone -b v${MOSQUITTO_VERSION}` (ARG, 2.1.2) of eclipse/mosquitto plus one websocket patch, `make`, `make install` into `/usr/local/sbin`, on `debian:trixie-slim` (base `trixie-2026.10.1`). The image is `ghcr.io/home-assistant/app-mosquitto:<version>` (multi-arch, also `amd64-app-mosquitto`); the old `{arch}-addon-mosquitto` name is denied by the registry.
+- The sandbox's `apt` mosquitto is 2.0.18, so before this step the tests ran on a different broker than HA's. The whole in-process suite and the e2e suite pass on 2.1.2 (no test change needed).
+
+**Options measured** (start to first accepted TCP connection, 15 starts, median):
+| Option | Per-test start | Exact version | Verdict |
+|---|---|---|---|
+| distro `apt` mosquitto | 6 ms | no (2.0.18 here, runner differs) | rejected |
+| binary extracted from the app image (`docker cp`) + wrapper | 6 ms | yes, the very binary | **chosen** |
+| `docker run` of the app image per test (`--network host`) | 154 ms start, plus kill/rm | yes | rejected: 25x the cost, 57 tests x 0.15 s+ |
+| job inside a container of the app image / compile the tag on the runner | n/a | yes | rejected: no Node in the image for the actions / 30+ s build and a cache to maintain |
+The binary needs glibc <= 2.34 and `libcjson.so.1`; libssl/libz come from the host (Ubuntu 24.04 has them). `libcjson` is copied out of the image next to the binary and found through `LD_LIBRARY_PATH` (checked with `LD_DEBUG=libs`).
+
+**Design (single source, guard, bump).**
+- `.github/ha-versions/mosquitto/Dockerfile`: `FROM ghcr.io/home-assistant/app-mosquitto:7.1.3` (Dependabot `docker` entry, weekly) and, next to it, the recorded mapping line `# mosquitto-in-app: 7.1.3 = 2.1.2`. Dependabot only bumps the FROM line, so the guard fails with the exact line to add until the map is updated in the same PR.
+- `.github/scripts/install-mosquitto.sh [dest]`: reads the FROM line, pulls, copies `/usr/local/sbin/mosquitto` and libcjson to `.cache/mosquitto` (git-ignored), writes a `bin/mosquitto` wrapper (`exec`, so `Popen.kill()` hits the broker). Linux only; macOS developers `brew install` that version.
+- `tests/ha/test_versions.py::test_mosquitto_is_the_version_of_the_pinned_ha_app`: the first `mosquitto` on PATH (what `Broker` starts) must report the version the map gives for the pinned app. FAILS (no skip) when missing, wrong, or unmapped; the message names the fix.
+- Mutation checks (all restored): FROM bumped to 7.1.4 -> "records no mosquitto version for it: add the line ..."; map changed to 2.0.22 -> "the tests start mosquitto 2.1.2 ..., but the pinned app 7.1.3 ships 2.0.22"; PATH without the extracted copy (system 2.0.18) -> mismatch message.
+- Both workflows run the script and append `.cache/mosquitto/bin` to `$GITHUB_PATH`. e2e itself has no version assertion (only the in-process job runs the guard); both jobs use the same script, so they get the same binary.
+
+**Python single source.** New `.github/ha-versions/ha-python.txt` (`3.14`), read by `setup-python` (`python-version-file`), `ci-local.sh`. Not Dependabot-bumped on purpose (`.github/ha-versions/python` is 3.15 for the YAML tooling and Dependabot would push this past HA). New guard `test_ci_python_is_the_python_home_assistant_requires` fails when the file differs from HA's `REQUIRED_PYTHON_VER` major.minor (mutation-checked with 3.15).
+
+**Custom components: one implementation.** `.github/scripts/install_custom_components.py` (CLI `[config-dir] [--force]`, function `install(target, repo)`): `ref`/`repository`/`domain` honoured as before; copies the repo's `custom_components/<domain>` if present, else downloads the branch tarball (60 s timeout). Used by `tests.yaml` (once, into the checkout, because `tests/ha/conftest.py` copies `custom_components/` from the repo), `ci-local.sh`, and `tests/e2e/stage.py` (imports it by path). The duplicate `_install_custom_components` in `stage.py` and the inline Python of `ha_check.yaml` are deleted. `ha_yaml_config` dropped from `tests/custom_components.yaml`, header fixed.
+
+**Workflows.**
+- `tests.yaml` (job "In-process tests (tests/ha)"): checkout (depth 2), change detection (`.github/test-paths`), setup-python from `ha-python.txt` with pip cache on `requirements_test.txt`, install, pinned mosquitto, custom components, `pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n auto --timeout=60`. `pytest-timeout`, xdist and the annotate-failures plugin come with PHACC (no requirements change); the ini already sets `timeout_func_only`.
+- `e2e.yaml` (job "e2e (pinned)", nightly also "e2e (beta)" with `E2E_IMAGE=...:beta`, `continue-on-error`): background image pull (FROM line), setup-python from `ha-python.txt` (3.14, not 3.15: wheels of the pinned requirements; also what the sandbox run used), `tests/e2e/requirements.txt`, pinned mosquitto, barrier, `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant --timeout=300 --timeout-method=thread`, upload `tests/e2e/.artifacts/` on failure. No separate check_config step: `test_check_config.py` runs HA's check_config on the same staging (a separate step would repeat ~10 s). The nightly beta channel was trivial (copied from hrds), so it is in.
+- Both: triggers `pull_request` + `push: [master]` + `workflow_dispatch`, concurrency group with cancel-in-progress on PRs, `permissions: contents: read`, actions pinned by major tag like `yaml-lint.yml` (`checkout@v7`, `setup-python@v7`, `upload-artifact@v7`). `.github/test-paths` lists what triggers tests (config files and dirs, `tests/`, `requirements_test.txt`, `.github/ha-versions/`, the installers, the workflow files).
+- **Branch protection:** the old required check "Config Check · Template Validation · Automation Tests" no longer exists. Required checks must be changed to "In-process tests (tests/ha)" and "e2e (pinned)" (owner action in the repo settings).
+
+**Removed.** `.github/workflows/ha_check.yaml` (image prefetch, `:stable` retag, AppDaemon prefetch, sed location edit, secrets copy, custom-component step, remaining-tests step, PR-comment and summary steps; nothing in it was left that another workflow lacks: yaml lint is in `yaml-lint.yml`, check_config in e2e). `tests/conftest.py` (Docker-harness fixtures, nothing used it). `pyproject.toml` (only the harness pytest config: `norecursedirs`, `timeout_func_only`; each layer has its own ini). Harness pin, `pytest-timeout` and annotate plugin from `.github/workflows/requirements.txt` (now `pyyaml`, plus `requests` for the dead `validate_templates.py`). Dependabot comment for that file.
+
+**Local.** `ci-local.sh` now builds `.venv-test` (Python from `ha-python.txt`; `uv pip` if the venv has no pip), installs `requirements_test.txt`, runs the shared custom-component installer, puts `.cache/mosquitto/bin` on PATH, runs `install-mosquitto.sh` when the version is wrong (Linux + Docker), then the `tests/ha` suite. Missing Python 3.14 -> that step is SKIPPED and listed under "Skipped (NOT checked)"; wrong mosquitto -> the guard test FAILS. `--e2e` (opt-in, Docker) creates `.venv-e2e` and runs the real-HA layer. `.yamllint.yaml` now ignores `.venv*`/`.cache` (yamllint was scanning HA's own YAML in `.venv-test`).
+
+**Ran locally (this sandbox, Python 3.14, mosquitto 2.1.2 from the app image, Docker started by hand):**
+- `tests/ha`: 59 passed, 1 xfailed (57 + 2 new guards) three times: direct 67 s, via `ci-local.sh` 62 s and 64 s (`-n auto`, 4 cores).
+- `tests/e2e`: 5 passed, 121 s (one run through `ci-local.sh --e2e`, image already pulled; earlier Step 3 runs took 80-90 s).
+- `ci-local.sh`: all local checks passed. `actionlint` 1.7.7 on both workflows: clean. `git ls-files --eol`: no CRLF.
+
+**Not verified (cannot run GitHub Actions here):** the workflows themselves; the runner's Docker pull of the app image and `install-mosquitto.sh` on a host without `libcjson` (here the system had it; `LD_DEBUG` shows the copied one is found first); `setup-python` reading `python-version-file` from a plain `3.14` file and the `exclude:` matrix expression for the beta channel (both copied from documented behaviour / hrds); the climate_template download in CI (`--force` path; 403 from the sandbox proxy); the nightly beta run; required-check names; wall times on the runner.
+
+**Findings, not fixed:**
+1. PHACC prints about 3000 lines of `sqlalchemy.engine` INFO per full run (also with `-p no:logging`): CI log noise, cause not investigated.
+2. `.github/scripts/validate_templates.py` is dead since the template test moved in-process (only user of `requests`).
+3. Knowledge files still describe the Docker harness: `.claude/skills/ha-test-harness/SKILL.md` (lines 40, 41, 45), `packages/notes/energy.md:38`, `.claude/rules/tests.md` (`pyproject.toml` in its `paths:`): Step 5.
+4. README's yaml-lint section (auto-commit of fixes) does not match `yaml-lint.yml`.
+
+**CLAUDE.md changes for the owner to approve (not edited):**
+- "Local CI checks": `ci-local.sh` also runs the in-process suite `tests/ha`; prerequisites become `brew install yamllint python@3.15 python@3.14 mosquitto`; `--e2e` adds the Docker layer; "`check_config` and pytest need Docker and only run in CI" is no longer true (pytest `tests/ha` runs locally; `check_config` runs in `tests/e2e`).
+- Mosquitto prerequisite: "the mosquitto must be the version of the Home Assistant Mosquitto app pinned in `.github/ha-versions/mosquitto/Dockerfile` (Linux: `.github/scripts/install-mosquitto.sh`)".
+- Pins paragraph: add `.github/ha-versions/ha-python.txt` (Python HA requires) and the mosquitto pin next to the HA gate; `tests/ha/test_versions.py` guards both.
 
 ### Step 1 – Single source of the HA version (copy the hrds pattern)
 - Add `requirements_test.txt` pinning PHACC, which pins HA.

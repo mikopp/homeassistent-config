@@ -1,0 +1,131 @@
+# End-to-end tests (tests/e2e): this repo's real configuration.yaml in a real Home Assistant
+# container (the image in .github/ha-versions/ha/Dockerfile), fed by a real mosquitto on the
+# runner. Deliberately small: only what the in-process layer (tests.yaml) cannot show, each test
+# naming why (@pytest.mark.needs_real_ha). It covers: full boot of every package, HA's own
+# check_config on the staged config (test_check_config.py, so no separate step), totals surviving
+# a real restart, and a log free of errors/deprecations. Replaces the retired ha_check.yaml.
+#
+# Same three pins as tests.yaml (HA image, Python, mosquitto). Nightly it also runs against the
+# HA beta image, where a failure is informational (continue-on-error) and an early warning.
+name: E2E (Home Assistant in Docker)
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    # Two HA boots plus the tests take about 2 minutes once the image is local.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [pinned, beta]
+        # The beta channel runs only on the nightly schedule (the exclude leaves a never-matching
+        # value otherwise).
+        exclude:
+          - channel: ${{ github.event_name != 'schedule' && 'beta' || 'none' }}
+    continue-on-error: ${{ matrix.channel == 'beta' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # the PR merge commit and its base, for the change check below
+
+      # Same change detection as tests.yaml (.github/test-paths): a pull request without a
+      # relevant change skips the steps below and the required check still passes.
+      - name: Changed config, tests or dependencies?
+        id: changes
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD | tee /tmp/changed.txt
+          if grep -qEf .github/test-paths /tmp/changed.txt; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No config, test or dependency change: tests skipped"
+          fi
+
+      # Start the ~650 MB image pull now and collect it after pip: a registry pull is parallel
+      # and backgroundable (a cache + `docker load` was slower). `nohup ... &` survives the step;
+      # output goes to files because the step's pipes close; the .rc sentinel is written only
+      # after the pull finished (polling `docker image inspect` would race the commit).
+      # The pinned channel reads the FROM line; the tests read it too unless E2E_IMAGE is set,
+      # which only the beta channel does.
+      - name: Pull the Home Assistant image (background)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          if [ "${{ matrix.channel }}" = "beta" ]; then
+            image=ghcr.io/home-assistant/home-assistant:beta
+            echo "E2E_IMAGE=$image" >> "$GITHUB_ENV"
+          else
+            image=$(awk '/^FROM /{print $2}' .github/ha-versions/ha/Dockerfile)
+          fi
+          echo "PULLED_IMAGE=$image" >> "$GITHUB_ENV"
+          nohup sh -c "docker pull $image > /tmp/pull.log 2>&1; echo \$? > /tmp/pull.rc" > /dev/null 2>&1 &
+
+      - name: Set up Python
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .github/ha-versions/ha-python.txt
+          cache: pip
+          cache-dependency-path: tests/e2e/requirements.txt
+
+      # No Home Assistant and no PHACC here: HA runs in the container, the tests drive it over
+      # REST/websocket.
+      - name: Install e2e requirements
+        if: steps.changes.outputs.run == 'true'
+        run: pip install -r tests/e2e/requirements.txt
+
+      # The host broker the container connects to (--network host): the same pinned binary as
+      # tests.yaml, whose version tests/ha/test_versions.py guards.
+      - name: Install the pinned mosquitto
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          .github/scripts/install-mosquitto.sh
+          echo "$PWD/.cache/mosquitto/bin" >> "$GITHUB_PATH"
+
+      # Barrier: the first consumer of the image is the next step. A failed background pull is
+      # retried once in the foreground so the error is a clear pull error, not a docker-run one.
+      - name: Wait for the image
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          for _ in $(seq 1 900); do [ -f /tmp/pull.rc ] && break; sleep 2; done
+          tail -3 /tmp/pull.log || true
+          if [ "$(cat /tmp/pull.rc 2>/dev/null || echo timeout)" != "0" ]; then
+            echo "::warning::Background pull did not succeed: pulling again"
+            docker pull "$PULLED_IMAGE"
+          fi
+
+      # --timeout-method=thread: a stuck docker/websocket call dumps every thread's stack and
+      # fails the test instead of stalling the job. stage.py downloads climate_template itself
+      # (.github/scripts/install_custom_components.py). check_config runs inside this suite.
+      - name: Run e2e tests
+        if: steps.changes.outputs.run == 'true'
+        run: >-
+          pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e
+          -p no:homeassistant --timeout=300 --timeout-method=thread
+
+      # The HA container log and the mosquitto log of the session, only worth keeping on failure.
+      - name: Upload logs
+        if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs-${{ matrix.channel }}
+          path: tests/e2e/.artifacts/
+          if-no-files-found: ignore

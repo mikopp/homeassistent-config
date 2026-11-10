@@ -108,9 +108,8 @@ def hass_config_dir(tmp_path: Path) -> str:
 
 
 # ── Shared baseline (tests/baseline.py) ───────────────────────────────────────
-# The same data the Docker-harness suite seeds over REST. Loaded by path: tests/ is not on
-# sys.path in this layer (own rootdir conftest, `--confcutdir tests/ha`), and a path import
-# cannot pick up tests/conftest.py by accident.
+# Known-good helper values and states of entities a test HA lacks. Loaded by path: tests/ is not on
+# sys.path in this layer (`--confcutdir tests/ha`).
 def _load_baseline() -> Any:
     spec = importlib.util.spec_from_file_location("baseline", REPO / "tests" / "baseline.py")
     assert spec and spec.loader

@@ -1,16 +1,8 @@
-# CI-only Python dependencies for the Home Assistant config check workflow.
-# Kept in a manifest (rather than inline `pip install`) so Dependabot can
-# track and propose updates — see .github/dependabot.yml.
+# Python dependencies of the repo's YAML tooling (.github/scripts/*, run by ci-local.sh and the
+# lint jobs). Kept in a manifest so Dependabot can track it, see .github/dependabot.yml.
+# The test layers have their own manifests: requirements_test.txt (tests/ha, in-process) and
+# tests/e2e/requirements.txt (real-HA layer); the retired Docker test harness is gone.
 pyyaml
+# validate_templates.py (REST template check of the retired Docker suite) is the only user;
+# drop both when that script is deleted.
 requests
-pytest-github-actions-annotate-failures
-
-# Converts CI hangs into failures: enforces a per-test wall-clock timeout and,
-# with --timeout-method=thread (set in ha_check.yaml), dumps every thread's
-# stack on expiry so the exact blocking line is visible in the CI log instead
-# of the job silently stalling. See plans/ci-test-speedups.md.
-pytest-timeout
-
-# Home Assistant integration test harness, pinned to the v0.11.0 release commit.
-# Dependabot bumps the pinned ref when a newer release is published.
-ha_integration_test_harness @ git+https://github.com/HeadlessTarry/HomeAssistant-Test-Harness.git@ee8abdd635af3d773676ed537ba1e7cb51133910

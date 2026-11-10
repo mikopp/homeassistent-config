@@ -1,11 +1,9 @@
 """Baseline of the test suites: known-good helper values and the states of entities that do not
 exist in a test HA (MQTT devices, Somfy, ComfoConnect, weather station, ...).
 
-Pure data, no imports, so BOTH layers use the same baseline (plans/test-execution.md, Step 2):
-- the Docker-harness suite (tests/conftest.py: `baseline_inputs`, `baseline_states`) applies it
-  over REST before every test;
-- the in-process layer (tests/ha/conftest.py: `seed`, `apply_baseline`) applies it with
-  `hass.states.async_set` and real helper actions.
+Pure data, no imports. The in-process layer (tests/ha/conftest.py: `seed`, `apply_baseline`)
+applies it with `hass.states.async_set` and real helper actions. (The Docker-harness suite that
+used to apply it over REST is gone, plans/test-execution.md Step 4.)
 
 Order matters (dicts and lists keep it): helpers first, then the states, in the order below.
 """

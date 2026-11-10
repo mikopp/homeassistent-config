@@ -25,3 +25,5 @@ custom_components/
 .venv-test/
 # Logs of the real-HA layer (tests/e2e)
 tests/e2e/.artifacts/
+# Local virtualenv for the real-HA test layer (tests/e2e, ci-local.sh --e2e)
+.venv-e2e/

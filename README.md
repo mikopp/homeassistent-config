@@ -115,19 +115,19 @@ Dashboard element fragments live in `dashboards/elements/` and are included via 
 
 ## CI / GitHub Actions
 
-### `ha_check.yaml` — HA Config Validation + Integration Tests
-Runs on every push. Validates the full configuration and executes the test suite against a live HA Docker instance.
+### `tests.yaml` — in-process tests (`tests/ha`)
+Runs on pull requests and on pushes to `master`. Home Assistant core runs inside pytest (pytest-homeassistant-custom-component) with this repo's real packages loaded, and a real mosquitto per test for the MQTT inputs.
 
-1. Pulls the pinned HA Docker image (`.github/ha-versions/ha/Dockerfile`, bumped by Dependabot) and caches it; the same image is used for `check_config` and the test harness via `HA_IMAGE`
-2. Sets up Python from `.github/ha-versions/python/Dockerfile` (`FROM python:<minor>`, bumped by Dependabot; `yaml-lint.yml` reads the same file)
-3. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
-4. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
-5. Runs `homeassistant --script check_config` to catch invalid configuration
-6. Runs `pytest tests/` against a session-scoped live HA container — covers automation scenario tests
-7. Posts a PR comment with truncated pytest output on failure
-8. Writes full results to the Actions Job Summary
+1. Skips the test steps on a pull request that touches none of the paths in `.github/test-paths` (the job still reports green)
+2. Sets up the Python Home Assistant requires (`.github/ha-versions/ha-python.txt`) and installs `requirements_test.txt` (pip cache keyed on that file)
+3. Installs the pinned mosquitto (`.github/scripts/install-mosquitto.sh`): the broker of the official Home Assistant Mosquitto app, version pinned in `.github/ha-versions/mosquitto/Dockerfile` (bumped by Dependabot)
+4. Installs the custom components of `tests/custom_components.yaml` (`.github/scripts/install_custom_components.py`)
+5. Runs `pytest tests/ha`; `tests/ha/test_versions.py` fails when the Home Assistant, Python or mosquitto versions drift apart
 
-**Run the Docker-free checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15`; builds `.venv` itself). `check_config` and pytest require Docker and run only in CI.
+### `e2e.yaml` — real Home Assistant in Docker (`tests/e2e`)
+Same triggers and change detection, plus a nightly run against the Home Assistant beta image (informational). Boots this repo's real `configuration.yaml` in the pinned image (`.github/ha-versions/ha/Dockerfile`) against the host mosquitto: full boot of every package, `check_config`, totals surviving a real restart, and a log free of errors and deprecations. Logs of a failed run are uploaded as an artifact.
+
+**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer.
 
 ### `yaml-lint.yml` — YAML Style + Lint
 Runs on every push as a separate job chain.
@@ -153,7 +153,7 @@ The `tests/` directory contains a `pytest` suite:
 | File | Coverage |
 |------|----------|
 | `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
-| `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
+| `ha/test_pergola.py` | In-process: automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
 | `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table); on a frozen clock the real indicators (delays, hysteresis), controller and drying-boost automations on real triggers, drying schedules, climate hvac_action, reload recovery |
 | `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
 | `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |

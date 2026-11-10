@@ -18,7 +18,7 @@ Environment: `E2E_IMAGE` (default: the `FROM` line of .github/ha-versions/ha/Doc
 
 Run: pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant
 (`-p no:homeassistant` only matters when PHACC is installed in the same venv; `--confcutdir`
-keeps the old Docker-harness `tests/conftest.py` out until Step 4 deletes it).
+keeps this run from collecting conftest files above tests/e2e).
 """
 
 from __future__ import annotations

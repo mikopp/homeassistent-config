@@ -1,6 +1,13 @@
 ---
 extends: default
 
+# Local virtualenvs and caches of the test layers (ci-local.sh) hold third-party YAML.
+ignore: |
+  .venv/
+  .venv-test/
+  .venv-e2e/
+  .cache/
+
 rules:
   line-length:
     max: 200
