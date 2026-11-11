@@ -9,6 +9,9 @@ Outputs a JSON object with two keys to stdout:
                       strict validation after state is seeded.
   runtime_templates — templates that reference runtime-only variables (trigger, wait,
                       value, repeat, this, context); validated leniently (syntax only).
+
+A file that does not parse fails the extraction (ValueError naming the file): a skipped file's
+templates would go unchecked, and yamllint never constructs tags, so it misses an unknown one.
 """
 
 import json
@@ -85,7 +88,12 @@ def _has_free_variables(template: str) -> bool:
 
 
 def _make_loader():
-    """Build a YAML loader that no-ops all HA custom tags."""
+    """Build a YAML loader that no-ops all HA custom tags.
+
+    Each tag yields its scalar as a plain string (include path, secret name, blueprint input
+    name); none holds `{{`, so none is collected. Blueprint templates read inputs through
+    variables, so they are classified runtime.
+    """
     class HALoader(yaml.SafeLoader):
         pass
 
@@ -99,6 +107,7 @@ def _make_loader():
         "!include_dir_merge_named",
         "!include_dir_list",
         "!include_dir_merge_list",
+        "!input",
     ):
         HALoader.add_constructor(tag, _noop)
 
@@ -146,14 +155,14 @@ def extract_templates(repo_root):
     raw = []
 
     for path in _yaml_files(root):
+        rel = str(path.relative_to(root))
         try:
             with open(path, encoding="utf-8") as fh:
                 data = yaml.load(fh, Loader=_LOADER)
-            rel = str(path.relative_to(root))
-            _collect(data, raw, rel)
-        except yaml.YAMLError:
-            # YAML errors are caught by the yaml-lint job; skip here
-            pass
+        except yaml.YAMLError as err:
+            # Fail, never skip: a skipped file's templates go unchecked (an unknown tag passes yamllint).
+            raise ValueError(f"{rel}: cannot parse YAML: {err}") from err
+        _collect(data, raw, rel)
 
     # Deduplicate by template string, keeping first-seen file
     seen = set()
