@@ -350,6 +350,10 @@ async def test_grid_import_energy_accumulates(
     expected = ((0 + 3000) / 2 * first_s + (3000 + 1000) / 2 * 60) / 3_600_000
     total = float(ha.states.get("sensor.victron_grid_energy_import").state)
     assert abs(total - expected) < 0.0006, (total, expected, first_s)
+    # No export flow: the export source stays at 0, so the integration never gets a changed
+    # source state and its total stays `unknown` (measured; the Docker test had a number only
+    # because earlier tests had already moved it). Any positive total or `unavailable` still
+    # fails here; that the export sensor itself integrates is test_grid_export_energy_accumulates.
     assert ha.states.get("sensor.victron_grid_energy_export").state in ("0.0", "0.000", "unknown")
 
 
