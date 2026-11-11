@@ -29,7 +29,7 @@ causes go away; the hypothesis does not need to be settled first.
 |---|---|---|
 | Heating starts | `ehp/CompStartsHc` | already read |
 | Hot-water starts | `ehp/CompStartsHwc` | new; the owner's `ebusctl` read 9419 |
-| Runtime per mode | `ehp/CompHoursHc` / `ehp/CompHoursHwc` | whole hours only, so used only as a daily cross-check |
+| Runtime per mode | `ehp/CompHoursHc` / `ehp/CompHoursHwc` | whole hours only; `CompHoursHwc` not added (owner) |
 | Compressor on/off now | `ehp/Comp` | new; replaces the Shelly for run edges |
 | Heat output | `ehp/YieldTotal` | the only yield register: no per-mode yield exists |
 | Electricity | Shelly Pro 3EM "Heizung" energy | the only electrical meter |
@@ -42,17 +42,26 @@ Five modes, defined by the owner. A template sensor `sensor.heating_energy_mode`
 |---|---|---|
 | `ehp/Comp` on and `hvac_action` = `water` | `water_heating` | hot water |
 | `ehp/Comp` on (not water) | `active_heating` | heating |
-| cooling indicator on (`binary_sensor.heating_cooling_active`) and `ehp/Hc1Pump` on | `cooling` | cooling |
+| `hvac_action` = `cooling` and `ehp/Hc1Pump` on | `cooling` | cooling |
 | `ehp/Hc1Pump` on, no cooling | `passive_heating` | heating |
 | none of the above (standby) | `off` | off |
 
-- Pump state comes from `ehp/Hc1Pump` ("Status Heizkreispumpe: AN/AUS", in the published
-  catalog), so every mode is read from the ehp. Alternative: Shelly > ~40 W (idle circulation
-  ~83 W, standby ~9 W). Owner to choose; the ehp register needs two more bridge lines.
-- UNKNOWN: whether `hvac_action` = `water` already covers the hot-water pump lag after the
-  compressor stops (`HwcLaggingTime` 3 min). If not, that lag books to `passive_heating`.
-- UNKNOWN: cooling with the compressor running (active cooling) books to `active_heating` under
-  this order. If active cooling is used, put the cooling row first.
+- Pump state comes from `ehp/Hc1Pump` ("Status Heizkreispumpe: AN/AUS"), as in the owner's
+  Loxone logic, so every mode is read from the ehp.
+- Cooling = `hvac_action` `cooling` (`ehp/Status` hcmode `1`): what the generator does now. Not
+  `binary_sensor.heating_cooling_active`: that OR also includes the cooling NEED
+  (`uih/CoolingDemand`) and REQUEST (`mc/CoolingRequestHc2`), which can be on while nothing runs.
+  The interlock keeps using the OR (safer). UNPROVEN: `hcmode` has never been seen reading
+  `cooling` on this unit (heating season since the package exists); confirm in the first cooling
+  period, with `uih/CoolingActive` as the fallback signal.
+- The geoTHERM has passive cooling only (owner): the compressor never runs for cooling, so the row
+  order (compressor before cooling) is safe.
+- UNKNOWN: where the hot-water run-on goes (`HwcLaggingTime` 3 min, catalog "WP Nachlaufzeit WW";
+  the pump keeps running after the compressor stops). Expected: into the tank while the
+  heating/hot-water valve (`HwcHcValve`) still points to hot water. The mode books it by
+  `hvac_action`: `water` → hot water, else `passive_heating`. Its electricity is small
+  (~83 W × 3 min ≈ 4 Wh per run). Settle after deploy: watch `hvac_action`, `HwcHcValve` and the
+  tank temperature for the minutes after a hot-water run ends.
 
 ### Booking energy to a mode
 
@@ -89,7 +98,8 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
    poll-registration automation. Depends on: nothing.
    PR post-deploy steps: for each of the three, `topic ebusd/ehp/<name> in 0` and
    `topic ebusd/ehp/<name>/get out 0`, then restart Mosquitto.
-2. [TODO] Optional: `ehp/CompHoursHwc` (+ its two bridge lines) for the daily cross-check.
+2. [TODO] Remove the backup-heater indicators (owner: the backup heater is never used here).
+   Scope to be confirmed by the owner, see Status.
 
 ### Phase 2 — mode and run source
 3. [TODO] `sensor.heating_energy_mode` per the table above. Tests: every row, the row order
@@ -99,7 +109,7 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 
 ### Phase 3 — energy split
 5. [TODO] Tariff `utility_meter`s for electricity and yield, the tariff automation, and the two
-   efficiency sensors. Replace or keep the combined `heating_efficiency_today` (owner decides).
+   efficiency sensors. The combined `heating_efficiency_today` stays (owner).
    Tests on the frozen clock: each of the five modes books to its own tariff, heating efficiency
    uses active + passive, no cooling/off efficiency, midnight reset.
 6. [TODO] Daily starts meter for hot water.
@@ -128,5 +138,7 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 
 - Plan drafted; waiting for owner approval. Nothing implemented.
 - Five modes defined by the owner (active/passive heating, water heating, cooling, off).
-- Open questions: pump state from `ehp/Hc1Pump` or the Shelly?; is active cooling (compressor)
-  used?; keep the combined efficiency sensor?; include `CompHoursHwc`?
+- Owner answers: pump from `ehp/Hc1Pump`; passive cooling only; keep the combined efficiency;
+  no `CompHoursHwc`; remove the backup-heater indicators.
+- Open: scope of the backup removal (dashboard rows only, or also the sensors, the alert
+  automation, the slab-decision gate and the notes invariant).
