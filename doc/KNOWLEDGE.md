@@ -54,7 +54,7 @@ short why in the note or design doc, with no link to background (K-1).
 
 ## K-3 Note template (`doc/<pkg>/notes.md`)
 
-Frontmatter `paths:` lists the package YAML, its tests, and `doc/<pkg>/design.md` if one exists.
+Frontmatter `paths:` lists the package YAML, its tests (`tests/ha/test_<pkg>.py`; `tests/e2e/` only when a real-HA test targets the package), and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
 
 1. Header: scope, rule paths, design-doc link
@@ -65,7 +65,7 @@ Never list background or sources. Sections, in order:
 6. Known biases / open issues
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
    skill). Above ~2 KB, split into `doc/<pkg>/tests.md` with its own symlink rule and
-   `paths:` only `tests/test_<pkg>.py`.
+   `paths:` only `tests/ha/test_<pkg>.py` (plus the `tests/e2e/` files that cover the package, if any).
 8. Related
 
 Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and stories to background.

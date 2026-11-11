@@ -1,0 +1,15 @@
+# Paths whose change makes the test workflows (tests.yaml, e2e.yaml) run their tests. On a pull
+# request that touches none of them (docs, plans, .claude, README) the steps are skipped and the
+# job still reports green, so the required checks pass. One extended regex per line, matched with
+# `grep -E` against `git diff --name-only`. Pushes to master and manual runs always test.
+# What a test reads belongs here: the config under test, the tests, their dependencies and pins.
+^configuration\.yaml$
+^(automations|scripts|scenes)\.yaml$
+^fakesecrets\.yaml$
+^(packages|blueprints|custom_templates|dashboards|custom_components)/
+^tests/
+^requirements_test\.txt$
+^\.github/scripts/(extract_templates|install_custom_components|install-mosquitto)
+^\.github/ha-versions/
+^\.github/test-paths$
+^\.github/workflows/(tests|e2e)\.yaml$

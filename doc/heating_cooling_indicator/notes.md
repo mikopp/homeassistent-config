@@ -1,7 +1,7 @@
 ---
 paths:
   - "packages/heating_cooling_indicator.yaml"
-  - "tests/test_heating_cooling_indicator.py"
+  - "tests/ha/test_heating_cooling_indicator.py"
 ---
 # heating_cooling_indicator.yaml — outdoor-temperature mode indicator
 
@@ -63,11 +63,12 @@ CONFIRMED = referenced by working config outside this package (grep over `packag
 ## Known biases / open issues
 - None recorded.
 
-## Tests (`tests/test_heating_cooling_indicator.py`)
-- The template re-renders on any dependency change and reads its own state, so each test sets the
-  helpers, waits for the `*_effective` sensors, sets the mean, pins the indicator with `set_state`,
-  then moves the mean across the boundary under test. Pin AFTER setting the mean, otherwise a late
-  re-render changes the pinned state.
+## Tests (`tests/ha/test_heating_cooling_indicator.py`, in-process)
+- One looping test over a case table: every case resets the helpers and the mean (and checks the
+  reset), then sets the mean across the boundary under test and checks both `*_effective` sensors.
+- The template re-renders on any dependency change and reads its own state: the indicator's
+  previous state is pinned only AFTER the mean is set to a value that holds it, and the test checks
+  the pin held (pinning a state the mean does not support logs "Template loop detected").
 - Covered: each threshold taken from its helper, the +1 °C heating hysteresis, the order clamp
   (passive typed below heating; passive/active typed low). The forecast sensor and the
   passive/active hysteresis exits are not tested.

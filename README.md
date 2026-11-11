@@ -115,27 +115,29 @@ Dashboard element fragments live in `dashboards/elements/` and are included via 
 
 ## CI / GitHub Actions
 
-### `ha_check.yaml` — HA Config Validation + Integration Tests
-Runs on every push. Validates the full configuration and executes the test suite against a live HA Docker instance.
+### `tests.yaml` — in-process tests (`tests/ha`)
+Runs on pull requests and on pushes to `master`. Home Assistant core runs inside pytest (pytest-homeassistant-custom-component) with this repo's real packages loaded, and a real mosquitto per test for the MQTT inputs.
 
-1. Pulls the pinned HA Docker image (`.github/ha-versions/ha/Dockerfile`, bumped by Dependabot) and caches it; the same image is used for `check_config` and the test harness via `HA_IMAGE`
-2. Sets up Python from `.github/ha-versions/python/Dockerfile` (`FROM python:<minor>`, bumped by Dependabot; `yaml-lint.yml` reads the same file)
-3. Installs custom component dependencies listed in `tests/custom_components.yaml` from GitHub
-4. Copies `fakesecrets.yaml` → `secrets.yaml` so the config loads without real credentials
-5. Runs `homeassistant --script check_config` to catch invalid configuration
-6. Extracts all Jinja2 templates from YAML files into `/tmp/templates.json`
-7. Runs `pytest tests/` against a session-scoped live HA container — covers template rendering correctness and automation scenario tests
-8. Posts a PR comment with truncated pytest output on failure
-9. Writes full results to the Actions Job Summary
+1. Skips the test steps on a pull request that touches none of the paths in `.github/test-paths` (the job still reports green)
+2. Sets up the Python Home Assistant requires (`.github/ha-versions/ha-python.txt`) and installs `requirements_test.txt` (pip cache keyed on that file)
+3. Installs the pinned mosquitto (`.github/scripts/install-mosquitto.sh`): the broker of the official Home Assistant Mosquitto app, version pinned in `.github/ha-versions/mosquitto/Dockerfile` (bumped by Dependabot)
+4. Installs the custom components of `tests/custom_components.yaml` (`.github/scripts/install_custom_components.py`)
+5. Runs `pytest tests/ha`; `tests/ha/test_versions.py` fails when the Home Assistant, Python or mosquitto versions drift apart
 
-**Run the Docker-free checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15`; builds `.venv` itself). `check_config` and pytest require Docker and run only in CI.
+### `e2e.yaml` — real Home Assistant in Docker (`tests/e2e`)
+Same triggers and change detection, plus a nightly run against the Home Assistant beta image (informational). Boots this repo's real `configuration.yaml` in the pinned image (`.github/ha-versions/ha/Dockerfile`) against the host mosquitto: full boot of every package, `check_config`, totals surviving a real restart, and a log free of errors and deprecations. Logs of a failed run are uploaded as an artifact.
 
-### `yaml-lint.yml` — YAML Style + Lint
-Runs on every push as a separate job chain.
+**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer.
 
-1. **fix-yaml-style**: auto-fixes trailing whitespace, CRLF line endings, and missing trailing newlines; commits the fixes back if any changes are detected
-2. **lint-yaml**: runs `yamllint` with the rules in `.yamllint.yaml`
-3. **lint-resolved**: resolves all `!include` directives in `configuration.yaml` and dashboards (expanding to a flat file), then lints the resolved output — catches issues that only appear after include expansion
+### `yaml-lint.yml` — YAML style and lint
+Runs on every push and on manual dispatch; checks only, it never commits.
+
+1. **check-yaml-style**: runs `.github/scripts/fix_yaml_style.py` and fails when it changed anything (trailing whitespace, CRLF, missing final newline); run the script locally and commit the result
+2. **lint-yaml**: `yamllint` with the rules in `.yamllint.yaml`
+3. **lint-resolved**: resolves the `!include` directives of `configuration.yaml` and `dashboards/*.yaml` (`.github/scripts/resolve_ha_yaml.py`) and lints the flat output, which catches issues that only appear after expansion
+
+### `knowledge-layout.yml` — knowledge layout
+Runs `.github/scripts/check_knowledge_layout.py` (stdlib only): every plan has a Status section and a Close step, every package has its note symlink; see `doc/KNOWLEDGE.md`.
 
 ---
 
@@ -153,8 +155,11 @@ The `tests/` directory contains a `pytest` suite:
 
 | File | Coverage |
 |------|----------|
-| `test_templates.py` | Renders every state template and runtime template extracted from YAML; asserts no rendering errors |
-| `test_pergola.py` | Automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
-| `test_airflow.py` | Automation scenarios for ventilation profile switching and humidity boost logic |
-| `test_victron.py` | Template sensor correctness for energy accumulation and mode detection |
-| `test_wallbox.py` | Wallbox wrapper sensors: unit normalisation (W/kW, Wh/kWh) and availability propagation |
+| `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
+| `ha/test_pergola.py` | In-process: automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
+| `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table); on a frozen clock the real indicators (delays, hysteresis), controller and drying-boost automations on real triggers, drying schedules, climate hvac_action, reload recovery |
+| `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
+| `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
+| `ha/test_victron.py` | In-process, real MQTT broker: Victron instant-power formulas (Venus OS payloads, expiry); on real minute ticks the energy accumulators (η, conversion loss, counter-delta baselines, battery residual) and the grid import/export integration; keep-alive publish |
+| `ha/test_heating_pv_boost.py` | In-process, real MQTT broker: PV surplus, compressor and cycling formulas, cooling interlock, derived setpoint (ebusd, Shelly and Victron payloads); on a frozen clock the hot-water return mask, slab decision delays, last compressor run, history_stats and daily meter reset |
+| `ha/test_shelly_pool_pump.py` | In-process, real MQTT broker: pool pump Shelly payloads through the real value_templates |

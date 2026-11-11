@@ -1,52 +1,127 @@
 ---
 name: ha-test-harness
-description: "Gotchas for this repo's pytest + ha_integration_test_harness suite (Docker HA, mocked clock, REST set_state seeding). Use when writing, debugging or reviewing tests/*.py, conftest.py, CI test steps, flaky/hanging CI, fast_forward/jump_to_next, pytest-timeout."
+description: "Writing, running, debugging or reviewing tests in tests/ha (in-process HA, PHACC, real mosquitto, Clock) or tests/e2e (real HA container), their CI workflows, flaky or hanging tests, frozen-clock moves, log_guard, mutation checks, PHACC/Python/mosquitto pins. Use before touching tests/**, tests.yaml, e2e.yaml or ci-local.sh."
 ---
 
-# pytest + ha_integration_test_harness gotchas
+# Tests: in-process layer (`tests/ha`) and real-HA layer (`tests/e2e`)
 
-Grades: **CONFIRMED** = source read at the pinned version (`.github/ha-versions/ha/Dockerfile` `FROM`),
-stack trace / thread dump, or deterministic repro. **OBSERVED** = real data, alternative explanation open.
-**UNPROVEN** = hypothesis, kept so it is not re-litigated. Never promote a grade without new evidence.
-Package-specific test facts live in the package notes (`doc/<package>/notes.md`).
+Grades as in `record-learning`: everything below is CONFIRMED (source read at the pinned version,
+stack trace, or deterministic repro) unless marked. Package-specific test facts live in the package
+notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-versions/ha/Dockerfile`.
 
-## First rule
-- **When a CI-only test fails, establish whether the harness is at fault before redesigning production YAML.** Why: proven repeatedly here; several confident "HA is broken" root causes were wrong.
+## Where does a new test go?
+1. Behaviour of the config given inputs (templates, automations, helpers, MQTT ingest, clock)? →
+   `tests/ha/test_<pkg>.py`. This is the default.
+2. Only a real container can show it? → `tests/e2e/`, marked `@pytest.mark.needs_real_ha("<reason>")`
+   with a reason from `REAL_HA_REASONS` in `tests/e2e/conftest.py` (`full-boot`, `check-config`,
+   `restart-persistence`, `runtime-logs`); collection fails without it. Module docstring starts
+   "Needs a real HA because: …". A new reason is a deliberate decision, not a way around the rule.
+3. Never repeat an in-process scenario in e2e.
+4. Package-specific facts a test establishes → the package note's "Tests" section.
 
-## Mocked clock
-- **Step with `fast_forward(timedelta(...))`, never `jump_to_next(hour=...)`, unless the code is genuinely time-of-day dependent** (CONFIRMED, `time_machine.py`).
-  - Why: `jump_to_next` is forward-only (`if target_dt <= current_time: target_dt += timedelta(days=1)`); re-requesting a passed hour silently advances a full day (and every `platform: integration` step integrates 86400 s).
-  - Check the package first (grep `sun.`, `now()`, `today_at`, `hour`). `test_pergola.py` needs them (sun elevation); `test_victron.py` did not.
-  - Same for `jump_to_next(month=...)`: advances a full year once the month has passed.
-  - DISPROVED: month/year jumps (pergola fixtures reach ~2032) are NOT the CI hang cause; a docs-only commit hung with identical test code.
-- **Delayed trigger-based sensors are `unknown` after boot until the mocked clock crosses their delay** (CONFIRMED, airflow and heating tests).
-  - Why it matters: tests silently piggyback on an earlier test's clock move; a green full-suite run hides this. Run a touched test file on its own before trusting it.
-- **Chaining several `jump_to_next()` calls in one test** — OBSERVED, mechanism DUBIOUS: `last_updated` stayed pinned to the reset timestamp on 2nd/3rd jumps.
-  - Rule: one clock advance per test; seed "already progressed" state via `set_state()`. Why: a wedged container (below) produces the same symptom, so the "harness won't re-fire" cause is not established.
+## Run
+- Everything: `.github/scripts/ci-local.sh` (`--e2e` adds Docker). Needs python3.14
+  (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of `.github/ha-versions/mosquitto/Dockerfile`.
+- `tests/ha` alone: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4`
+  (`.venv-test`: `requirements_test.txt`, which pins PHACC and with it HA). Each layer has its own
+  ini; there is no root pytest config; `--confcutdir` keeps conftests above the layer out.
+- `tests/e2e` alone: `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant --timeout=300 --timeout-method=thread`
+  (`tests/e2e/requirements.txt`, Docker, mosquitto on the host; `E2E_IMAGE` overrides the image;
+  failure logs in `tests/e2e/.artifacts/`).
+- CI: `tests.yaml` and `e2e.yaml`; both skip their steps (and pass) on a PR touching none of
+  `.github/test-paths`: add a path there when a test starts reading it.
+  `upload-artifact` skips dot-directories: `tests/e2e/.artifacts/` needs `include-hidden-files: true`.
 
-## REST `set_state()` seeding
-- **Seed trigger inputs FIRST, then delayed (`delay_on/off`) trigger-based binary sensors** (CONFIRMED, deterministic repro, airflow, 2026.10.1).
-  - Why: the delay has never elapsed in CI, so the sensor has no internal state; any trigger re-renders it and writes `unknown` over the seed (cascading to dependents).
-- **Don't pin a self-referencing template (reads `this.state`) with `set_state()`** (CONFIRMED 2026.10.1, `template_entity.py::_handle_results`).
-  - Why: it re-renders on its own state change (up to `len(_template_attrs)` times, e.g. state + availability = 2) and walks a hysteresis ladder back toward its real inputs. Drive the real input (e.g. the 48h mean) and assert the reached state; one input change moves it at most 1 + 2 steps.
-- **`sensor: platform: integration` totals can't be reset via `set_state()`.** Why: the total is in entity memory. Assert a before/after delta (details: `ha-energy-metering`).
-- **Same-value `set_state()` doesn't propagate through `template:` chains.** Why: listens to state *changes* only. Nudge by 1 unit (details: `ha-templates`).
-- **`automation.trigger` skips conditions by default** (CONFIRMED 2026.10.1). Why: `skip_condition` defaults to `True`; a test of a condition guard must pass `skip_condition: False`.
+## Pins and guards (`tests/ha/test_versions.py`)
+- PHACC's HA year.month must equal the Dockerfile `FROM` year.month; `holidays`/`cronsim` equal HA's
+  manifest pins (PHACC does not install them).
+- `ha-python.txt` must equal the minor HA requires (not the 3.15 of the YAML tooling; Dependabot must not bump it).
+- The first `mosquitto` on PATH must be the version the pinned HA Mosquitto app ships (FAILS, never skips; the
+  message names the fix). Bump: Dependabot raises the `FROM` line, you add the `# mosquitto-in-app:` mapping line.
+  Install: `.github/scripts/install-mosquitto.sh` (copies the binary out of the app image).
+- Bump PHACC and the Dockerfile together, in one PR.
 
-## Hangs and timeouts
-- **Harness HTTP calls can block forever** (CONFIRMED, pytest-timeout thread dump). Why: `ha_integration_test_harness` v0.11.0 calls `requests.get/post/delete` without `timeout=`; a container that accepts TCP but never answers parks in `socket.recv_into`.
-  - `assert_entity_state(timeout=5)` does NOT protect: the timeout is checked between polls, each calling the unbounded `get_state()`.
-  - `jump_to_next()`/`fast_forward()` are unbounded `docker exec` writes to `/shared_data/.faketime`; they never poll, so a hang "in a jump" is a hung `docker exec`, not clock arithmetic.
-  - Fix in place: `tests/conftest.py` wraps `requests` helpers to `setdefault` a 30 s timeout; CI uses `pytest-timeout --timeout=90 --timeout-method=thread` and job-level `timeout-minutes: 20`. Keep them.
-- **`pytest-timeout` charges session-fixture setup to whichever test triggers it unless `timeout_func_only = true`** (CONFIRMED, thread dump in `docker_manager.py → subprocess.run` / `docker compose up`, 60-90 s). Why: keep `timeout_func_only = true` in `pyproject.toml`; bound setup with job `timeout-minutes`.
-- **`--timeout-method=thread` aborts the whole invocation** after dumping all stacks. Why: right while a hang is undiagnosed; switch to `signal` (raises in the test, run continues) once understood.
+## `tests/ha` fixtures and their gotchas (`tests/ha/conftest.py`)
+- **Fresh HA per test (function scope).** Why: totals, `this.state` hysteresis, pending timers,
+  `last_triggered`, recorder history and retained MQTT cannot be reset. A module-scoped `hass` was built and
+  rejected (PHACC's fixtures are function-scoped, the per-test leak checks no longer see the shared HA).
+- **Tables are one looping test**, not parametrize: one fresh HA, a case list, inputs reset (and the
+  reset CHECKED) before each case, failures collected, one assert naming every failing case.
+- `ha`: the repo's package domains on PHACC's `hass`, real sun integration, real `workday` entry
+  (AT), `weather.get_forecasts` stubbed, MQTT on the real broker; HA is set up `not_running` and then started
+  (else templates render before `input_*` exist and `homeassistant: start` never fires). Config entries load
+  AFTER the package domains (else `sun` hides the YAML `sensor` platforms).
+- `seed(hass, states)` / `apply_baseline(hass, mqtt=…, skip=…)`: for entities with no real source
+  (Somfy, ComfoConnect, weather station, go-e). Data in `tests/baseline.py`. MQTT-fed inputs go over
+  the broker only: `mqtt=False` skips registry-`mqtt` states (a seed over an MQTT entity hides the next same-value message).
+- Seed trigger inputs BEFORE delayed (`delay_on/off`) trigger-based sensors: a later seed re-renders them to
+  `unknown` (they have no internal state; `apply_baseline` does a second restoring pass).
+- Stubbed actions (`hass.data["service_calls"][action]`) record calls; attribute a call to an automation by the
+  context of its `automation_triggered` event. A device echo (write sets the entity state) is needed for follow-up
+  runs to behave as in production. Assert through real triggers, not `automation.trigger` (skips conditions by default).
+- **Never pin a self-referencing template (`this.state`) with a seed** unless the inputs hold that state: it
+  re-renders on its own change and logs "Template loop detected" (caught by `log_guard`). Drive the real input
+  (e.g. the 48h mean), then assert.
+- `Clock` (`clock` fixture; request it AFTER `ha`): `advance`, `move_to`, `hold(seconds, refresh)` (steps ≤ 60 s,
+  republishing live inputs before each: Victron/Shelly `expire_after` 120 s), `align()`, `local_at`/`next_day`.
+  - Freezing makes `loop.time()` the frozen wall clock, so every boot-time timer is overdue; the fixture fires them
+    (`advance(0)`). "unknown until the delay passes after boot" cannot be observed in-process.
+  - `align()` before counting `time_pattern` minute ticks: it moves to half past the minute. A tick scheduled in
+    the first second of a move is skipped (`_TrackUTCTimeChange` reschedules from now + 1 s): 1 in about 60 ticks.
+  - Background tasks are not awaited by default (`background=True` opts in): MQTT's re-subscribe task waits on a
+    monotonic cooldown that freezer stops → hang until the timeout.
+  - A move of ≥ 60 s sends a PINGREQ and a second move before the PINGRESP drops the connection: `Clock` waits for it;
+    the test client connects with `keepalive=0`. A script `delay` that never comes due on a frozen clock hangs
+    `async_block_till_done` (pergola's 500 ms settle: see the package note).
+  - freezegun also freezes `time.monotonic`: real-I/O waits use `freezegun.api.real_monotonic` looked up at call time
+    (an alias gets frozen too) and executor sleeps.
+  - Expectations come from HA's own timestamps or a state read after freezing, never from the wall clock.
+- Real MQTT: a mosquitto per test (restart, SIGKILL, `persistence false`, `set_tcp_nodelay true`), on a free port;
+  broker fixture first so it is torn down after HA. `publish` is pipelined; `mqtt_sync` proves every earlier message
+  was handled (needed before a clock move and before a seed); `wait_subscribed` before a non-retained publish.
+  Isolation proof: `test_broker_isolation.py`.
+- Teardown order in `ha`: automations off, then the config entries are unloaded WHILE the recorder runs (else
+  unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
+  schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
+  with a long-running script on the frozen clock (hangs HA's shutdown).
+- PHACC's plugin runs `logging.basicConfig(level=INFO)` and sets `sqlalchemy.engine` to INFO at import (`plugins.py` l.157-158): every recorder SQL statement hits stderr (~3300 lines/run). `conftest.py` resets that logger to WARNING; `-p no:logging` does not silence it and is not needed.
+- `log_guard` (autouse): fails setup, call or teardown on WARNING+ from `homeassistant.helpers.frame`, any
+  `homeassistant.*` "deprecated" message, or a template error. Opt out per test with
+  `@pytest.mark.allow_log(regex, reason=…)`; `_KNOWN_CONFIG_LOGS` lists config defects tolerated everywhere
+  (an entry is an open defect, issue number in its comment). `expected_lingering_timers` is True on purpose.
+- Entity ids: look up by unique_id (`entity_id()`); a fresh registry derives other ids than production for
+  MQTT/filter/statistics sensors (#146); `load_repo_config` pre-registers the Victron ones.
+- The template test (`test_templates.py`) renders every extracted state/runtime template in one HA; blueprint
+  templates are not extracted (#148). 16 of the 55 MQTT entities are never fed a message by any test, so their
+  `value_template` only gets that syntax check (#159).
+- Pre-start seeding takes an explicit prefix list of the missing integrations' entities, never "whatever does not exist
+  yet": a seed once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it and the
+  config entity became `_2` (`test_packages_load` asserts no `_2` ids).
+- Do not configure `http` explicitly: HA 2026.10's pending-HTTP-config trial reverts and restarts HA once 5 min pass on
+  the mocked clock. The default (0.0.0.0:8123, not listening) is left alone.
+- The YAML `workday` platform is rejected by HA at the pin: workday is a config entry (`MockConfigEntry` in-process,
+  the flow in e2e). `utility_meter` registers `<unique_id>_single_tariff`.
 
-## Ordering and isolation
-- **Test order is NOT file-definition order.** Why: `tests/conftest.py::pytest_collection_modifyitems` sorts by `(0 if "test_pergola" else 1, item.nodeid)`. Don't reason about neighbouring tests from source position.
-- **Per-file isolation = separate `pytest tests/<file>.py -v` CI step, with `--ignore=tests/<file>.py` on the shared step** (used for `test_pergola.py` in `.github/workflows/ha_check.yaml`).
-  - Why: each step is its own process, so session-scoped `docker`/`home_assistant`/`time_machine` fixtures start fresh → deterministic clock and container.
-  - Does NOT prevent hangs (claimed once, disproved). Copy the Job Summary / PR-comment / fail-check handling of multiple step outcomes too.
-- **One skipped test, never root-caused** (UNPROVEN): failed deterministically (2/2, unaffected by 5s→20s timeout) apparently only due to its nodeid-sorted position; skipped with documented `@pytest.mark.skip(reason=...)`. Why kept: worth re-testing now that HTTP calls are bounded; the wedged-container explanation may cover it.
+## `tests/e2e` (real container)
+- ONE session container (`docker run --network host`, image from the Dockerfile `FROM`), a host mosquitto, own client
+  `ha_client.py` with a timeout on every call and deadline polling, no fixed sleeps.
+- Bootstrap boot (onboarding, MQTT and workday through the real config flows, production-like entity ids), then a clean
+  restart: only the log after it is judged (a fresh HA logs ERROR on `homeassistant: start` MQTT publishes before the
+  MQTT entry exists). `test_zz_log_hygiene.py` runs last; its `EXTERNAL_NOISE` (environment) and `KNOWN_CONFIG_BUGS`
+  (issue numbers) lists are explicit: add an entry only with its cause.
+- A restore test must make the value final before the restart (e.g. an integral fed absurd power, then 0 W), else the
+  sum keeps moving afterwards and the assertion is weak; `wait_stable` for a value that settles after a burst.
+- `.github/scripts/install_custom_components.py` is the one installer of `climate_template` (CI, `ci-local.sh`, `stage.py`).
 
-## Docker in the cloud sandbox
-- Docker works in the cloud sandbox (`dockerd`), but the harness image needs the proxy CA + libfaketime baked in. Why: `apk add` at container start fails TLS through the proxy.
+## Quality rules
+- **Mutation check every new or changed test**: break the YAML under test in place, see the named case fail,
+  restore with `git checkout` (never commit); a test that reads its own seed passes anyway. Also run a table with its
+  case order reversed (temporary module).
+- **Test the real entity, never a copy of its formula.** A test that renders a Jinja copy of a YAML formula tests the
+  copy (the Docker-era copies had drifted from the config). Expected values come from an independent Python port or
+  literal anchors, not from the same template.
+- **Stability: 20× on changed tests** (`--count=20 -n 4` on the changed files), the whole `tests/ha` once.
+- **No retry/rerun plugins.** A flaky test is a bug: find the cause (both flakes found so far were test or fixture
+  bugs), or open a GitHub issue; never "passed again" as proof.
+- A confirmed config bug is pinned by a `strict` xfail test (it fails the run when the bug is fixed), with its issue number.
+- When a CI-only test fails, establish whether the test environment is at fault before redesigning production YAML.

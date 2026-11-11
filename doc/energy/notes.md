@@ -1,8 +1,8 @@
 ---
 paths:
   - "packages/energy.yaml"
-  - "tests/test_wallbox.py"
-  - "tests/test_shelly_pool_pump.py"
+  - "tests/ha/test_wallbox.py"
+  - "tests/ha/test_shelly_pool_pump.py"
   - "plans/energy-live-entity-ids.md"
 ---
 # energy package notes (`packages/energy.yaml`)
@@ -62,11 +62,11 @@ the `ha-mqtt` skill.
 - Shelly lifetime counters reset only on a factory reset; `total_increasing` absorbs a reboot dip.
 - All Shelly entities use `expire_after: 120`; the Loxone ones have none (invariant above).
 - The go-e source entities are owned by the MQTT integration; their ids can change if the device is
-  re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the test
-  seeds in `tests/test_wallbox.py` and `tests/conftest.py` must change with them.
+  re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the seeds
+  in `tests/baseline.py` and `tests/ha/test_wallbox.py` must change with them.
 
 ## Entity map
-MQTT entities here have no `default_entity_id`, so their ids are not derivable (rule in
+MQTT entities here have no `default_entity_id` (#146), so their ids are not derivable (rule in
 `.claude/rules/ha-yaml.md`); look them up via ha-mcp `ha_get_entity(unique_id=...)`. Live lookup
 is open: `plans/energy-live-entity-ids.md`.
 
@@ -76,7 +76,7 @@ is open: `plans/energy-live-entity-ids.md`.
 | `sensor.go_echarger_homekopp_power_total`, `sensor.go_echarger_homekopp_total_energy_charged` | (discovery) | wallbox wrapper sources |
 | `sensor.technikraum_heizung_heizung_power` | `shelly_pro3em_heizung_power` | used by `heating_pv_boost` and the heating dashboard |
 | `sensor.technikraum_heizung_heizung_energy` (unverified, derived like the power id) | `shelly_pro3em_heizung_energy` | source of `heating_pv_boost`'s `heating_electricity_daily` |
-| pool pump: power, energy, voltage, current, `switch` (binary) | `shelly_pool_pump_*` | tests use `sensor.pool_pump_*` / `binary_sensor.pool_pump_switch` (not live-verified) |
+| pool pump: power, energy, voltage, current, `switch` (binary) | `shelly_pool_pump_*` | on a fresh registry (tests) `sensor.pool_pool_pump_pool_pump_*` (#146); live ids not verified |
 | rain water pump: same set | `shelly_rainwater_pump_*` | |
 | washer / tumble dryer / dishwasher: power (kW), energy (kWh) | `loxone_washer_*`, `loxone_tumble_dry_*`, `loxone_dishwasher_*` | |
 
@@ -87,15 +87,19 @@ is open: `plans/energy-live-entity-ids.md`.
   reporting a misleading 0.
 
 ## Known biases / open issues
-- #156: `tests/test_shelly_pool_pump.py` seeds the same entity it asserts (`set_state` →
-  `assert_entity_state`), so it never renders the YAML `value_template` (Wh→kWh etc.); it also
-  checks `sensor.pool_pump_temperature`, which `packages/energy.yaml` does not define.
+- MQTT sensors without `default_entity_id`: ids depend on the old registry (#146).
 
 ## Tests
-- `tests/test_wallbox.py` seeds the go-e SOURCE entities (with explicit units, energy without
-  `state_class`) and asserts on the WRAPPER, so it exercises the template incl. unit normalisation.
-- New source entities need a seed in `tests/conftest.py::baseline_states` — `test_templates.py`
-  renders every `state:` template strictly and fails on a sentinel output.
+- `tests/ha/test_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
+  without `state_class`), asserting on the WRAPPER, so the template incl. unit normalisation (W/kW,
+  Wh/kWh) and availability run. Source entities have no real path in CI and are seeded.
+- `tests/ha/test_shelly_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
+  the real `value_template`s; every case checks all five entities (power, energy, voltage,
+  current, switch).
+- New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
+  `state:` template strictly and fails on a sentinel output.
+- The six Loxone washer/tumble-dry/dishwasher power and energy sensors are never fed a message by
+  any test (only the syntax check of `test_templates.py` covers their `value_template`): #159.
 
 ## Related
 - `doc/heating_pv_boost/notes.md` — consumer of the Heizung Pro 3EM power/energy.

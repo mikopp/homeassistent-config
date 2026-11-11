@@ -1,0 +1,11 @@
+# Real-HA layer (tests/e2e). Home Assistant itself runs in the container (the FROM line of
+# .github/ha-versions/ha/Dockerfile), so no Home Assistant and no PHACC is installed here; the
+# tests drive it over REST/websocket and publish to a host mosquitto (apt-get install mosquitto).
+# If PHACC happens to be installed anyway, run with `-p no:homeassistant`.
+pytest==9.2.0
+pytest-timeout==2.4.0
+pytest-github-actions-annotate-failures==0.4.2
+requests==2.34.2
+websocket-client==1.9.2
+paho-mqtt==2.1.0
+pyyaml==6.0.3

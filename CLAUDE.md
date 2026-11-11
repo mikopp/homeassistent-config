@@ -14,31 +14,29 @@
 Deploy/migration docs come from `git diff origin/master...HEAD`, never the live system.
 
 ## Local CI checks
-Run `.github/scripts/ci-local.sh` before pushing. It creates `.venv`, installs the CI Python deps and runs
-the Docker-free checks (YAML style fixer, yamllint, resolved-config lint, template extraction). Needs only
-python3 (yamllint is installed into `.venv`). `check_config` and pytest need Docker and only run in CI.
+Run `.github/scripts/ci-local.sh` before pushing: YAML checks, knowledge-layout check and the in-process
+suite `tests/ha` (no Docker); `--e2e` adds the real-HA layer `tests/e2e` (Docker). CI runs both
+(`tests.yaml`, `e2e.yaml`). Prerequisites: python3.15 (tooling; yamllint goes into `.venv`), python3.14
+(what HA requires, pinned in `.github/ha-versions/ha-python.txt`) and mosquitto at the version pinned in
+`.github/ha-versions/mosquitto/Dockerfile` (the HA Mosquitto app's broker; Linux:
+`.github/scripts/install-mosquitto.sh`).
 
 ## HA version gate — check before trusting any info
-The pinned HA version lives in the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag
-like `ghcr.io/home-assistant/home-assistant:2026.10.1`; Dependabot bumps it). `.HA_VERSION` was
-removed in #116 and must not be read. CI config check and the test harness both use this image. Before applying
-ANY information from internet search, official HA docs, ha-mcp results, or even this repo's own
-existing code/comments — check it's still accurate for that major version. HA changes fast: config
-keys get renamed/removed, integrations get rewritten, YAML syntax shifts across major versions.
+The pinned HA version is the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag like
+`ghcr.io/home-assistant/home-assistant:2026.10.1`; Dependabot bumps it; the e2e layer runs this image).
+`.HA_VERSION` was removed in #116 and must not be read. Before applying ANY information from internet
+search, official HA docs, ha-mcp results, or even this repo's own existing code/comments — check it's
+still accurate for that major version: HA renames/removes config keys and shifts YAML syntax. The PHACC
+pin in `requirements_test.txt` (in-process tests), the Python and the mosquitto pins are guarded by
+`tests/ha/test_versions.py`.
 
-- Read the `FROM` line of `.github/ha-versions/ha/Dockerfile` first, at the start of any research into
-  HA behavior/config/docs. The live instance may differ from the pin; check it with ha-mcp
-  (`ha_get_system_health`, `homeassistant.info.version`) when that matters.
-- Verify behaviour against source at the pinned tag: `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`.
-  Docs were ambiguous or silent every time it mattered; reading the source is what turns a guess
-  into a CONFIRMED fact.
-- When citing docs or web results, prefer version-pinned docs (e.g. `www.home-assistant.io/docs`
-  reflects latest — verify against changelog/release notes if the feature is old or obscure) over
-  version-less blog posts/forum answers, which may predate or postdate this install by years.
-- If a found answer's version isn't stated, say so explicitly and flag it as unverified for this
-  major version rather than presenting it as fact.
-- Existing YAML in this repo reflects the version it was written under — don't assume patterns here
-  are still current best practice without checking; note conflicts instead of silently "fixing" them.
+- Read the `FROM` line first, at the start of any research into HA behavior/config/docs. The live
+  instance may differ from the pin; check it with ha-mcp (`ha_get_system_health`) when that matters.
+- Verify behaviour against source at the pinned tag: `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`
+  (docs were ambiguous or silent every time it mattered).
+- When citing docs or web results, prefer version-pinned docs over version-less blog/forum answers; flag
+  an answer whose version isn't stated as unverified for this major version.
+- Existing YAML reflects the version it was written under: note conflicts instead of silently "fixing" them.
 
 ## MCP usage (read-only)
 The ha-mcp connection is available for DISCOVERY ONLY:

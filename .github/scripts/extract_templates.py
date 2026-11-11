@@ -12,6 +12,7 @@ Outputs a JSON object with two keys to stdout:
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -125,15 +126,26 @@ def _is_runtime(template):
     return bool(_RUNTIME_VARS.search(template)) or _has_free_variables(template)
 
 
+def _yaml_files(root):
+    """Sorted *.yaml / *.yml files under root, skipping hidden directories.
+
+    Hidden directories are never HA config: .github (CI/tooling), .git, .claude, and local
+    virtualenvs such as .venv / .venv-test, whose site-packages hold HA's own YAML. They are
+    pruned during the walk, so a local venv neither adds templates nor slows the scan.
+    """
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        found += [Path(dirpath) / f for f in filenames if f.endswith((".yaml", ".yml"))]
+    return sorted(found)
+
+
 def extract_templates(repo_root):
     """Return {"state_templates": [...], "runtime_templates": [...]}."""
     root = Path(repo_root).resolve()
     raw = []
 
-    for path in sorted(root.rglob("*.yaml")) + sorted(root.rglob("*.yml")):
-        # Skip CI/tooling files — they are not HA config
-        if ".github" in path.parts:
-            continue
+    for path in _yaml_files(root):
         try:
             with open(path, encoding="utf-8") as fh:
                 data = yaml.load(fh, Loader=_LOADER)

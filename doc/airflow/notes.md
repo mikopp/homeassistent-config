@@ -2,7 +2,7 @@
 paths:
   - "packages/airflow_cooling.yaml"
   - "custom_templates/airflow_decision.jinja"
-  - "tests/test_airflow.py"
+  - "tests/ha/test_airflow.py"
   - "dashboards/airflow-dashboard.yaml"
   - "doc/airflow/design.md"
 ---
@@ -16,7 +16,7 @@ you must not break.
 
 ## Invariants
 ### Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
-CONFIRMED by `test_decision_*` in `tests/test_airflow.py` at 2026.10.1.
+CONFIRMED by `tests/ha/test_airflow.py::test_decision_table` at 2026.10.1.
 - **Indicators feed only the decision; consumers read only the decision.** The indicators
   (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
   `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
@@ -90,17 +90,32 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 - `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
   default on a helper that the repo rule forbids (code, not fixed in a docs step). → GitHub issue #142
 
-## Tests (`tests/test_airflow.py`)
-- Seed season/dew first, then the delayed indicators (`_seed_indicators`) — CONFIRMED; otherwise a
-  season/dew change re-renders the REST-seeded indicators to `unknown` (harness pattern:
-  ha-test-harness skill).
-- Clock-order dependency, CONFIRMED by breaking it: the delayed indicators (`delay_on`/`delay_off`
-  = 10 min, no `homeassistant:start` trigger) are `unknown` after boot until the mocked clock crosses
-  the delay. Any test asserting a definite on/off from them needs its own `fast_forward` first —
-  removing the one in `_assert_recomputes_after_reload` broke two unrelated tests later in nodeid order.
-- Latent fragility: the file pins `sensor.heating_cooling_indicator` via `set_state()` ~30×; that
-  only holds because the seeded 48h mean happens to keep those states (the indicator re-renders from
-  its inputs). If a pin stops sticking, drive the mean instead.
+## Tests (`tests/ha/test_airflow.py`, in-process)
+- Tables (decision, bypass, dew points; one looping test each) seed the delayed indicators: seed
+  season/dew first, then the indicators (CONFIRMED: otherwise a season/dew change re-renders the
+  seeded indicators to `unknown`, they have no internal state without the delay). The season is
+  the REAL `sensor.heating_cooling_indicator`, driven through its seeded 48h mean.
+- Clock tests drive the REAL indicators (10 min delays, `this.state` hysteresis) through the seeded
+  5-min filter outputs, the real workday/schedules (clock moved to a known weekday or the next
+  public holiday) and the automations on real triggers. Effects are the recorded ComfoConnect and
+  phone calls; the four ComfoConnect stubs echo a write into the entity state (a device echo), else
+  follow-up runs repeat their write. Only the two airflow automations are on (`airflow_ha`): the
+  pergola cover response waits on timers longer than a clock move and hangs the test.
+- After a real `template.reload` the trigger-based indicators come back with their previous state
+  at once (not `unknown`, as some YAML comments say; #155); the `to: "unknown"` self-triggers
+  still recompute. `template.reload` logs a TemplateError for `sensor.solar_yield_watts` (allowed
+  by name in `test_reload_recovery`, #155).
+- The 5-min filter sensors and the 48h statistics sensor get other ids on a fresh registry than
+  the templates read (#146).
+- CONFIRMED config bug, `test_drying_boost_unavailable_to_boost_does_not_fire` (strict xfail,
+  #153): a flush input going briefly unavailable restarts a running boost (decision unavailable →
+  medium → boost is a real edge, boost time and ON re-sent). Contradicts the rule "decision
+  unavailable → boost is NOT an edge".
+- `climate_template` echoes every `hvac_mode_template` change into the `set_hvac_mode` action
+  (e.g. automatic control off writes the device's current profile back, #154); effect on the
+  device UNPROVEN.
+- The `outdoor_dew >= indoor_dew` term of the low-needed fallback can never decide alone (a dead
+  branch, comment issue, #155).
 
 ## Related
 - `doc/airflow/design.md` — current design (`AF-*` IDs).

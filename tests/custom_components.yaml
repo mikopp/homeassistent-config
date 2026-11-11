@@ -1,15 +1,13 @@
 # Custom components required by this Home Assistant configuration.
 # Install via HACS (preferred) or manually from the repository links below.
 #
-# This file is read by the CI workflow (.github/workflows/ha_check_frenk.yaml)
-# to install dependencies before running the config check.
+# This file is read by .github/scripts/install_custom_components.py, the one implementation of the
+# install. The test workflows (tests.yaml, e2e.yaml), .github/scripts/ci-local.sh and
+# tests/e2e/stage.py use it to put the components into custom_components/, where the in-process
+# tests and the staged config of the real-HA tests load them.
 #
-# Two sections:
-#   dependencies   — HACS/GitHub custom components (downloaded and placed in custom_components/).
-#   ha_yaml_config — Built-in HA integrations that need explicit YAML configuration.
-#                    CI writes these snippets to packages/ha_ci_fixtures.yaml so both
-#                    check_config (step 6) and the test harness (step 8) can load them.
-#                    In production, configure these integrations via the HA UI.
+# `dependencies` - HACS/GitHub custom components. Fields used by the script: `domain`,
+# `repository`, optional `ref`. `name`, `hacs` and `description` are for people.
 
 dependencies:
   - name: Template Climate
@@ -24,15 +22,3 @@ dependencies:
     description: >
       Provides the climate_template platform used in packages/climate_airflow.yaml
       to create a virtual climate entity driven by Jinja2 templates.
-
-ha_yaml_config:
-  - name: Workday
-    description: >
-      Built-in Home Assistant workday integration. Provides binary_sensor.workday,
-      used by the airflow humidity drying boost schedule check in
-      packages/airflow_cooling.yaml. Configure via the HA UI in production;
-      this snippet is used by CI to create the entity in the test harness.
-    yaml: |
-      binary_sensor:
-        - platform: workday
-          country: AT

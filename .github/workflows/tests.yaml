@@ -1,0 +1,93 @@
+# In-process tests (tests/ha): the real Home Assistant core in pytest, this repo's real YAML
+# (packages, automations, templates) loaded into it, and a real mosquitto per test for the MQTT
+# inputs. The default home of behaviour tests; the real-HA-in-Docker layer is e2e.yaml.
+#
+# Three things are pinned, each in ONE file that tests/ha/test_versions.py guards:
+#   * Home Assistant: requirements_test.txt (PHACC) must match the image in
+#     .github/ha-versions/ha/Dockerfile (year.month);
+#   * Python: .github/ha-versions/ha-python.txt = the minor Home Assistant requires. NOT the
+#     Python of .github/ha-versions/python (that one runs the YAML tooling and may be newer);
+#   * mosquitto: .github/ha-versions/mosquitto/Dockerfile, the broker of the official Home
+#     Assistant Mosquitto app, copied out of its image by .github/scripts/install-mosquitto.sh.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR cancels the superseded run; master runs always finish.
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pytest:
+    name: In-process tests (tests/ha)
+    runs-on: ubuntu-latest
+    # Bounds a hang anywhere (a stuck broker, a pip mirror); a green run takes a few minutes.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2 # the PR merge commit and its base, for the change check below
+
+      # A pull request that touches none of the paths in .github/test-paths (docs, plans, notes)
+      # skips every step below, but the job still reports green, so the required check passes.
+      # Pushes to master and manual runs always test.
+      - name: Changed config, tests or dependencies?
+        id: changes
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # On a pull_request event the checkout is the merge commit; its first parent is the base.
+          git diff --name-only HEAD^1 HEAD | tee /tmp/changed.txt
+          if grep -qEf .github/test-paths /tmp/changed.txt; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No config, test or dependency change: tests skipped"
+          fi
+
+      # Python minor from the single source (see the header); the pip cache is keyed on the file
+      # the install reads, so a PHACC bump rebuilds it and nothing else does.
+      - name: Set up Python
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .github/ha-versions/ha-python.txt
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install test requirements
+        if: steps.changes.outputs.run == 'true'
+        run: pip install -r requirements_test.txt
+
+      # The pinned broker. The script prints its version; test_versions.py fails the run if the
+      # mosquitto on PATH is not the one the pin file maps to. GITHUB_PATH makes the wrapper the
+      # first `mosquitto` for all later steps (tests/ha/conftest.py starts it per test).
+      - name: Install the pinned mosquitto
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          .github/scripts/install-mosquitto.sh
+          echo "$PWD/.cache/mosquitto/bin" >> "$GITHUB_PATH"
+
+      # climate_template (HACS) is loaded from custom_components/ by the tests; the one
+      # implementation of this install is shared with tests/e2e/stage.py and ci-local.sh.
+      - name: Install custom components
+        if: steps.changes.outputs.run == 'true'
+        run: python .github/scripts/install_custom_components.py
+
+      # -n auto: one HA per test, spread over the runner's cores. --timeout=60 turns a hang into a
+      # failure with a stack dump (fixture setup is not counted: timeout_func_only in the ini).
+      # No rerun plugin: a flaky test is a bug to fix, not to retry.
+      - name: Run tests
+        if: steps.changes.outputs.run == 'true'
+        run: >-
+          pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha
+          -n auto --timeout=60

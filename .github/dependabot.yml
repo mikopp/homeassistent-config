@@ -6,22 +6,45 @@ updates:
     schedule:
       interval: weekly
 
-  # Keep CI Python dependencies up to date, including the git-pinned
-  # Home Assistant test harness in .github/workflows/requirements.txt.
+  # Keep the YAML tooling's Python dependencies (.github/workflows/requirements.txt) up to date.
   - package-ecosystem: pip
     directory: /.github/workflows
     schedule:
       interval: weekly
 
+  # In-process test layer (requirements_test.txt): PHACC, which pins Home Assistant itself.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # These follow the HA version (tests/ha/test_versions.py); bump them together with PHACC.
+      - dependency-name: holidays
+      - dependency-name: cronsim
+
   # Pinned HA version used by CI (patch and minor bumps arrive as PRs).
+  # Bump PHACC in requirements_test.txt in the same PR: tests/ha/test_versions.py fails until
+  # the image tag and PHACC's Home Assistant have the same year.month.
   - package-ecosystem: docker
     directory: /.github/ha-versions/ha
     schedule:
       interval: weekly
 
-  # Python version used by CI (setup-python reads it from this Dockerfile,
-  # since Dependabot cannot bump `python-version:` in workflow files).
+  # Python version of the YAML tooling/lint jobs (setup-python reads it from this Dockerfile,
+  # since Dependabot cannot bump `python-version:` in workflow files). NOT the Python of the test
+  # layers: that is .github/ha-versions/ha-python.txt, which follows Home Assistant by hand
+  # (tests/ha/test_versions.py fails when it differs from the Python HA requires).
   - package-ecosystem: docker
     directory: /.github/ha-versions/python
+    schedule:
+      interval: weekly
+
+  # Pinned mosquitto: the official Home Assistant Mosquitto app (add-on) release whose broker the
+  # tests start (.github/scripts/install-mosquitto.sh copies it out of this image). Dependabot
+  # bumps the FROM line only: add the matching `# mosquitto-in-app: <app> = <mosquitto>` line in
+  # the same PR (tests/ha/test_versions.py fails and names the line until you do). Independent of
+  # the Home Assistant bump above; when Home Assistant is bumped, take the latest app release.
+  - package-ecosystem: docker
+    directory: /.github/ha-versions/mosquitto
     schedule:
       interval: weekly

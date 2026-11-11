@@ -21,3 +21,9 @@ custom_components/
 
 # Local virtualenv for .github/scripts/ci-local.sh
 .venv/
+# Local virtualenv for the in-process test layer (tests/ha, Python 3.14)
+.venv-test/
+# Logs of the real-HA layer (tests/e2e)
+tests/e2e/.artifacts/
+# Local virtualenv for the real-HA test layer (tests/e2e, ci-local.sh --e2e)
+.venv-e2e/
