@@ -1,0 +1,125 @@
+# Heating — run statistics from the ehp, energy and efficiency split by mode
+
+## Overview
+
+The "Compressor Cycling" dashboard counts runs from the Shelly clamp (> 500 W) together with
+`hvac_action`. On 2026-11-11 it showed 8 heating runs against the machine's 6 heating starts
+(`CompStartsHc`). The flow-temperature graph shows 6 heating runs and 2 hot-water runs. Rows and
+their popups also use different words ("starts" vs "runs").
+
+Owner direction:
+1. Count starts from the ehp's own counters (`CompStartsHc`, `CompStartsHwc`), not from the Shelly.
+2. Report energy and efficiency separately for **heating** and **hot water**.
+3. Book the circulation pump's energy while the compressor is off (no hot water, no cooling) to
+   **heating**.
+4. Book energy while **cooling** is active to a separate cooling bucket. Cooling has no yield and
+   no efficiency.
+
+HYPOTHESIS (not checked against history): the 2 extra Shelly "runs" are short false heating
+segments at the end of each hot-water run, where `hvac_action` flips back to heat while the clamp
+still reads > 500 W. A short `unavailable` dropout of the Shelly or `hvac_action` in the middle of
+a run would also split one run into two. This plan replaces the Shelly as the run source, so both
+causes go away; the hypothesis does not need to be settled first.
+
+## Design
+
+### Registers (published catalog `08.ehp.csv`)
+
+| Need | Register | Note |
+|---|---|---|
+| Heating starts | `ehp/CompStartsHc` | already read |
+| Hot-water starts | `ehp/CompStartsHwc` | new; the owner's `ebusctl` read 9419 |
+| Runtime per mode | `ehp/CompHoursHc` / `ehp/CompHoursHwc` | whole hours only, so used only as a daily cross-check |
+| Compressor on/off now | `ehp/Comp` | new; replaces the Shelly for run edges |
+| Heat output | `ehp/YieldTotal` | the only yield register: no per-mode yield exists |
+| Electricity | Shelly Pro 3EM "Heizung" energy | the only electrical meter |
+
+### Energy mode (one decision, `ha-templates` "one decision sensor")
+
+A template sensor `sensor.heating_energy_mode` with the states `hot_water`, `cooling` or `heating`:
+
+| Condition (first match wins) | Mode |
+|---|---|
+| `hvac_action` = `water` | `hot_water` |
+| `binary_sensor.heating_cooling_active` on | `cooling` |
+| anything else (compressor heating, pump only, standby) | `heating` |
+
+Open question for the owner: should standby outside the heating season (no heating, no cooling,
+~9 W) also count as heating? It does under this table.
+
+### Booking energy to a mode
+
+Use HA's `utility_meter` with `tariffs:` (daily cycle). An automation sets each meter's tariff
+`select` to the energy mode whenever the mode changes.
+
+- Electricity: one meter on the Shelly energy, tariffs `heating`, `hot_water`, `cooling`.
+- Yield: one meter on `YieldTotal`, tariffs `heating`, `hot_water`, `cooling`. The cooling tariff
+  should stay at 0. A non-zero value means yield is counted while cooling (a check, not a figure).
+- Efficiency today: heating = heating yield ÷ heating electricity; hot water = hot-water yield ÷
+  hot-water electricity. No cooling efficiency. Keep the "under 1 kWh → 0" rule from the existing
+  efficiency sensor.
+
+HYPOTHESIS: `YieldTotal` arrives in whole kWh at the poll rate, so an increment that lands just
+after a mode switch is booked to the wrong mode. Over a day with ~1 h hot-water runs this should
+roughly balance. Check against the totals for a few days before relying on the split.
+
+### Run statistics
+
+- Starts per day: daily `utility_meter`s on `CompStartsHc` (exists) and `CompStartsHwc` (new).
+- Runs, runtime, average run, last run, duty cycle: driven by a new
+  `binary_sensor.heating_compressor_heating_active` input, `ehp/Comp` on and mode `heating`
+  (instead of Shelly > 500 W). Keeps the entity ids, so history continues.
+- `binary_sensor.heating_compressor_active` (Shelly) stays for the slab-boost surplus logic.
+  Not changed here.
+
+UNKNOWN: how quickly `ehp/Comp` reports a change at a given poll priority. If the lag is long,
+runtimes shift by that lag. Measure it against the Shelly after deploy.
+
+## Steps
+
+### Phase 1 — inputs
+1. [TODO] MQTT sensors for `ehp/CompStartsHwc` and `ehp/Comp`; add both to the poll-registration
+   automation. Depends on: nothing.
+   PR post-deploy steps: bridge lines `topic ebusd/ehp/CompStartsHwc in 0`,
+   `topic ebusd/ehp/CompStartsHwc/get out 0`, `topic ebusd/ehp/Comp in 0`,
+   `topic ebusd/ehp/Comp/get out 0`, then restart Mosquitto.
+2. [TODO] Optional: `ehp/CompHoursHwc` (+ its two bridge lines) for the daily cross-check.
+
+### Phase 2 — mode and run source
+3. [TODO] `sensor.heating_energy_mode` per the table above. Tests: every row, raw enum numbers,
+   unavailable inputs.
+4. [TODO] Change `binary_sensor.heating_compressor_heating_active` to `ehp/Comp` + mode `heating`.
+   Update tests `test_compressor_table`, `test_last_run` and `test_cycling_history_stats`.
+
+### Phase 3 — energy split
+5. [TODO] Tariff `utility_meter`s for electricity and yield, the tariff automation, and the two
+   efficiency sensors. Replace or keep the combined `heating_efficiency_today` (owner decides).
+   Tests on the frozen clock: pump-only energy goes to heating, hot-water energy to hot water,
+   cooling energy to cooling, no cooling efficiency, midnight reset.
+6. [TODO] Daily starts meter for hot water.
+
+### Phase 4 — dashboard
+7. [TODO] Rename the cycling rows and the entity names so each row and its popup say the same
+   thing. Show heating and hot water side by side: starts, energy, yield, efficiency; cooling
+   energy on its own row.
+
+### Phase 5 — verification
+8. [TODO] `ci-local.sh` green. After deploy, compare for 3 days: starts vs the graph, run edges
+   vs the Shelly, `heating + hot_water + cooling` electricity vs the total, and the yield split.
+
+### Close
+9. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
+   plan (`doc/KNOWLEDGE.md#K-6`).
+
+## Knowledge homes this plan will update
+
+- `doc/heating_pv_boost/notes.md`: entity map (new entities), the energy-mode decision, the
+  baseline method's "Starts per day" and efficiency lines, the "Tests" section.
+- `doc/heating_pv_boost/registers.md`: `CompStartsHwc`, `Comp`, `CompHoursHwc`.
+- YAML comments in `packages/heating_pv_boost.yaml` (K-5).
+
+## Status
+
+- Plan drafted; waiting for owner approval. Nothing implemented.
+- Open questions: standby outside the heating season → heating?; keep the combined efficiency
+  sensor?; include `CompHoursHwc`?
