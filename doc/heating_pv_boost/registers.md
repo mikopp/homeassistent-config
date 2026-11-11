@@ -50,14 +50,19 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/Integral` | running energy integral, Σ(flow actual − flow desired) per minute, °min (`SIN`) |
 | `ehp/CompIntegral` | "Komp. Start in": integral at which the compressor starts (installer setting) |
 | `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (hydraulic plans 1/3 = no buffer) |
-| `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660) |
+| `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
 | `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
+| `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
+| `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |
+| `ehp/Hc1Pump` | heating-circuit pump on/off now ("Status Heizkreispumpe: AN/AUS"), the signal the owner's Loxone logic uses |
 
+`ehp/YieldTotal` is the only yield register: there is no per-mode (heating / hot water) yield.
 Also in the catalog, not read: `NumberCompStarts` (max starts/h, sets
 `TimeBetweenTwoCompStartsMin`), `mc/HeatingCurve` (conditional on `cfgheatsinktype`),
-`ehp/CompStartsHwc` / `ehp/CompHoursHwc` (DHW-only counters; `CompStartsHc` excludes DHW).
+`ehp/CompHoursHwc` (DHW hours, whole hours only), `ehp/Backup*` (backup heater, never used
+here), `HwcLaggingTime` ("WP Nachlaufzeit WW", owner read 3 min: pump run-on after a hot-water charge).
 
 Heating-circuit pump registers live in **`50.ehp.mc.csv` (circuit `mc`), not `08.ehp.csv`**, and
 need unit software ≥ 407: `HcPumpStatus` (0 = speed-controlled HEP ok, ≥ 2 = no HEP), `HcPumpPWM`

@@ -94,33 +94,36 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 ## Steps
 
 ### Phase 1 — inputs
-1. [TODO] MQTT sensors for `ehp/CompStartsHwc`, `ehp/Comp` and `ehp/Hc1Pump`; add them to the
+1. [DONE] MQTT sensors for `ehp/CompStartsHwc`, `ehp/Comp` and `ehp/Hc1Pump`; add them to the
    poll-registration automation. Depends on: nothing.
    PR post-deploy steps: for each of the three, `topic ebusd/ehp/<name> in 0` and
    `topic ebusd/ehp/<name>/get out 0`, then restart Mosquitto.
-2. [TODO] Remove the backup-heater indicators (owner: the backup heater is never used here).
-   Scope to be confirmed by the owner, see Status.
+2. [DONE] Remove the backup-heater indicators (owner: the backup heater is never used here).
+   Scope (b): both MQTT sensors, the alert automation, the controller-state branch, the
+   slab-decision gate, the poll registrations, dashboard rows and the notes invariant.
+   PR post-deploy steps: the bridge lines for `ebusd/ehp/Backup` and `ebusd/ehp/BackupIntegral`
+   can be removed; the two orphaned entities can be deleted in the UI.
 
 ### Phase 2 — mode and run source
-3. [TODO] `sensor.heating_energy_mode` per the table above. Tests: every row, the row order
+3. [DONE] `sensor.heating_energy_mode` per the table above. Tests: every row, the row order
    (compressor before cooling before pump), raw enum numbers, unavailable inputs.
-4. [TODO] Change `binary_sensor.heating_compressor_heating_active` to mode `active_heating`.
+4. [DONE] Change `binary_sensor.heating_compressor_heating_active` to mode `active_heating`.
    Update tests `test_compressor_table`, `test_last_run` and `test_cycling_history_stats`.
 
 ### Phase 3 — energy split
-5. [TODO] Tariff `utility_meter`s for electricity and yield, the tariff automation, and the two
+5. [DONE] Tariff `utility_meter`s for electricity and yield, the tariff automation, and the two
    efficiency sensors. The combined `heating_efficiency_today` stays (owner).
    Tests on the frozen clock: each of the five modes books to its own tariff, heating efficiency
    uses active + passive, no cooling/off efficiency, midnight reset.
-6. [TODO] Daily starts meter for hot water.
+6. [DONE] Daily starts meter for hot water.
 
 ### Phase 4 — dashboard
-7. [TODO] Rename the cycling rows and the entity names so each row and its popup say the same
-   thing. Show the current energy mode; heating and hot water side by side (starts, energy,
+7. [DONE] Drop the name overrides on the starts/runs rows so each row and its popup say the
+   same thing (entity names kept: renaming would change the ids on a fresh registry). Show the current energy mode; heating and hot water side by side (starts, energy,
    yield, efficiency); heating energy also split active / passive; cooling and off energy rows.
 
 ### Phase 5 — verification
-8. [TODO] `ci-local.sh` green. After deploy, compare for 3 days: starts vs the graph, run edges
+8. [IN_PROGRESS] `ci-local.sh` green (incl. e2e: see Status). After deploy, compare for 3 days: starts vs the graph, run edges
    vs the Shelly, `heating + hot_water + cooling` electricity vs the total, and the yield split.
 
 ### Close
@@ -131,14 +134,17 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 
 - `doc/heating_pv_boost/notes.md`: entity map (new entities), the energy-mode decision, the
   baseline method's "Starts per day" and efficiency lines, the "Tests" section.
-- `doc/heating_pv_boost/registers.md`: `CompStartsHwc`, `Comp`, `CompHoursHwc`.
+- `doc/heating_pv_boost/registers.md`: `CompStartsHwc`, `Comp`, `Hc1Pump`.
+- `.claude/skills/ha-test-harness/SKILL.md`: the stubbed-action gotcha (real `select` domain).
 - YAML comments in `packages/heating_pv_boost.yaml` (K-5).
 
 ## Status
 
-- Plan drafted; waiting for owner approval. Nothing implemented.
+- Approved by the owner; steps 1-7 implemented, tests and notes updated.
 - Five modes defined by the owner (active/passive heating, water heating, cooling, off).
 - Owner answers: pump from `ehp/Hc1Pump`; passive cooling only; keep the combined efficiency;
   no `CompHoursHwc`; remove the backup-heater indicators.
-- Open: scope of the backup removal (dashboard rows only, or also the sensors, the alert
-  automation, the slab-decision gate and the notes invariant).
+- Backup removal: scope (b), everything.
+- Next: deploy, add the bridge lines, then the 3-day comparison (step 8). Still to settle with
+  live data: `hvac_action` reading `cooling` (first cooling period), where the hot-water run-on
+  goes, `YieldTotal` misbooking at mode switches, and the `ehp/Comp` reporting lag vs the Shelly.

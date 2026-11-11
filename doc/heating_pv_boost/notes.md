@@ -44,7 +44,6 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
 - **`mc/TempDesiredLow` is the only human knob.** Every setpoint HA writes is derived from it,
   so `mc/TempDesired` set at the wall will be overwritten. The target is always absolute, never
   "current + offset".
-- **Never spend PV surplus while `ehp/Backup` is on** (resistive heat ≈ ¼ the heat per kWh).
 - **No hysteresis or toggle faster than 20 min** (`ehp/TimeBetweenTwoCompStartsMin` = 1200 s).
 
 ## Hardware and integration quirks
@@ -87,18 +86,21 @@ bridged: keep it that way rather than widening to `ebusd/#`.
 
 ### Compressor and measurements
 
-- **Compressor activity comes from the Shelly clamp, not ebus.** `hcmode` stays `heat` while the
-  circulation pump idles between runs. `sensor.technikraum_heizung_heizung_power` (Shelly Pro 3EM):
-  idle circulation ~83 W, standby ~9 W, heating ~1.8 kW, hot water ~3.5 kW (owner-confirmed /
-  measured); threshold 500 W. Loxone's own status logic additionally uses
-  `ehp/ActualEnvironmentPower` (> 1 → active) and `ehp/Hc1Pump`; HA deliberately polls neither.
+- **Two views of a compressor run.** `hcmode` stays `heat` while the circulation pump idles
+  between runs, so it never says whether the compressor runs. The run statistics and the energy
+  mode read `ehp/Comp` (on/off, no `expire_after`, so a dropout cannot split a run). The Shelly
+  clamp `sensor.technikraum_heizung_heizung_power` (Pro 3EM) stays the electrical view for the PV
+  surplus: idle circulation ~83 W, standby ~9 W, heating ~1.8 kW, hot water ~3.5 kW
+  (owner-confirmed / measured); threshold 500 W. Pump state is `ehp/Hc1Pump`, as in the owner's
+  Loxone logic (which also uses `ehp/ActualEnvironmentPower` > 1; HA does not).
 - **No electrical-power or modulation register.** `ehp/Comp` is on/off and
   `ActualEnvironmentPower` is thermal display data, so the Shelly is the only electrical
   measurement.
 - **No buffer tank.** `uih/EhpHeatBufferAvailable` is `off`, both storage sensors read `cutoff`.
   The slab is the only thermal store, which is why `ehp/HcReturnTemp` reads its charge state.
-- **Resistive backup exists:** `ehp/BackupType` = `internalheatandwater`, currently `no_backup`
-  on both circuits.
+- **Resistive backup exists:** `ehp/BackupType` = `internalheatandwater`, `no_backup` on both
+  circuits. Never used in this house (owner), so HA reads no backup register and has no
+  backup gate.
 - Compressor timing: `TimeBetweenTwoCompStartsMin` 1200 s, `TimeCompOffMin` 300 s,
   `TimeCompOnMin` 240 s.
 - Thermal ceilings are hardware protections, not tuning targets: `mc/FlowTempMax` 35 °C,
@@ -155,9 +157,16 @@ on the machine.
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_temp_desired_low` | `mc/TempDesiredLow` |
-| `binary_sensor.heating_compressor_active` | Shelly > 500 W (any run) |
-| `binary_sensor.heating_compressor_heating_active` | Shelly > 500 W and `hvac_action` ≠ `water` |
+| `binary_sensor.heating_compressor_active` | Shelly > 500 W (any run; PV surplus logic) |
+| `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
+| `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
+| `sensor.heating_energy_mode` | the energy mode (see "Energy modes") |
+| `binary_sensor.heating_compressor_heating_active` | energy mode = `active_heating`; drives the run statistics |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
+| `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
+| `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (tariff meter) |
+| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (tariff meter) |
+| `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.ebusd_heating_ebusd_scan_status`, `binary_sensor.ebusd_heating_ebusd_running` | `ebusd/global/scan`, `/running` |
 
@@ -187,6 +196,33 @@ on the machine.
     overshoots within minutes and the hysteresis ends the run: deepening `CompIntegral` lengthens
     the pause, not the run. Confirm with the integral and flow-vs-setpoint at run end.
 
+## Energy modes
+
+`sensor.heating_energy_mode` (owner-defined, first match wins):
+
+| Condition | Mode | Counts as |
+|---|---|---|
+| `ehp/Comp` on, `hvac_action` = `water` | `water_heating` | hot water |
+| `ehp/Comp` on | `active_heating` | heating |
+| `ehp/Hc1Pump` on, `hvac_action` = `water` | `water_heating` (hot-water run-on) | hot water |
+| `ehp/Hc1Pump` on, `hvac_action` = `cooling` | `cooling` | cooling: no yield, no efficiency |
+| `ehp/Hc1Pump` on | `passive_heating` | heating |
+| otherwise | `off` | standby |
+
+- Cooling is `hvac_action` (what the machine does now), not `binary_sensor.heating_cooling_active`,
+  which also fires on a cooling need or request. The interlock keeps the wider OR.
+- The geoTHERM cools passively only (owner): the compressor never runs for cooling, so checking
+  the compressor first is safe.
+- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two `utility_meter`s
+  with one tariff per mode; `automation.heating_energy_tariff_follows_mode` sets their selects on
+  every mode change and on HA start. Each increment is booked to the mode active when it arrives
+  (`utility_meter` source at 2026.10). An unavailable mode leaves the tariff unchanged.
+- Space heating efficiency = (active + passive yield) ÷ (active + passive electricity); hot water
+  = water yield ÷ water electricity; 0 below 1 kWh electricity. The combined
+  `sensor.heating_efficiency_today` stays (owner).
+- Run statistics count `active_heating` segments: a heating run that rolls into hot water ends at
+  the flip, one that turns from hot water into heating starts a new segment there.
+
 ## Baseline method (compressor-cycling comparison)
 
 Counting rules so two baselines are comparable (plans/heating-baseline-and-phase2-prerequisites.md):
@@ -194,17 +230,17 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
 - **First full baseline day is 2026-10-31**; 2026-10-30 is partial (meters began ~16:06), exclude it.
   A baseline is 3 consecutive full days with comparable weather; note the daily mean outdoor
   temperature next to each day.
-- **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only).
-  `sensor.heating_compressor_runs_today` counts Shelly runs EXCLUDING hot water
-  (`binary_sensor.heating_compressor_heating_active`): should roughly agree with the machine
-  counter. A heating run that rolls into hot water is cut at the mode flip. Runs/runtime/duty
-  cycle/last run exclude hot water; `sensor.heating_efficiency_today` still includes it (no
-  DHW-free yield register). Baselines logged before 2026-11-06 counted hot-water runs too.
+- **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only);
+  hot water: `sensor.hot_water_compressor_starts_daily`. `sensor.heating_compressor_runs_today`
+  counts `active_heating` segments (see "Energy modes"). Runs/runtime/duty cycle/last run exclude
+  hot water; `sensor.heating_efficiency_today` includes it, the per-mode efficiencies split it.
+  Baselines logged before 2026-11-06 counted hot-water runs too; runs logged before the switch
+  to `ehp/Comp` came from the Shelly clamp (could split one run in two).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
   in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
   MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
-- **Settings:** log `CompHysteresis`, `CompIntegral`, `BackupIntegral` at the start of each baseline
-  day and every change (date, time, old, new). They have no long-term statistics.
+- **Settings:** log `CompHysteresis` and `CompIntegral` at the start of each baseline day and every
+  change (date, time, old, new). They have no long-term statistics.
 - **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
   the cycling plan's Observations.
 - **Compressor vs circulation:** `binary_sensor.heating_compressor_active` is the Shelly clamp
@@ -231,9 +267,12 @@ only over the real broker; "unavailable" is a real `expire_after`. The daily met
 inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
-Ten of its MQTT entities (ebusd `OperatingMode`, `CompIntegral`, `BackupIntegral`, `CompStartsHc`,
-`CompHoursHc`, `global/scan`, `Backup`, `CompDemand`, `global/running`, and `loxone/heating/warm_enough`)
-are never fed a message by any test: #159.
+Nine of its MQTT entities (ebusd `OperatingMode`, `CompIntegral`, `CompStartsHc`, `CompStartsHwc`,
+`CompHoursHc`, `global/scan`, `CompDemand`, `global/running`, and `loxone/heating/warm_enough`)
+are never fed a message by any test: #159. The energy mode is a case table; the per-mode meters,
+the tariff automation and both efficiencies are tested end to end (`test_energy_split_by_mode`).
+The tariff selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
+`select.select_option` and records only calls to external entities (ComfoConnect).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
 `unknown` after boot until the delay elapses.

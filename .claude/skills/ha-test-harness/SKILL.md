@@ -56,6 +56,10 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   the broker only: `mqtt=False` skips registry-`mqtt` states (a seed over an MQTT entity hides the next same-value message).
 - Seed trigger inputs BEFORE delayed (`delay_on/off`) trigger-based sensors: a later seed re-renders them to
   `unknown` (they have no internal state; `apply_baseline` does a second restoring pass).
+- An action in `_STUBBED_ACTIONS` is stubbed only if its domain is not loaded. A config entity of that domain
+  loads the real one (utility_meter tariffs create `select` entities, so `select.select_option` is real): then
+  `_record_external_calls` wraps it and records only calls to `_EXTERNAL_PREFIXES` entities (deterministic repro:
+  without it every airflow test failed with `KeyError: 'select.select_option'`).
 - Stubbed actions (`hass.data["service_calls"][action]`) record calls; attribute a call to an automation by the
   context of its `automation_triggered` event. A device echo (write sets the entity state) is needed for follow-up
   runs to behave as in production. Assert through real triggers, not `automation.trigger` (skips conditions by default).
@@ -92,7 +96,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 - Entity ids: look up by unique_id (`entity_id()`); a fresh registry derives other ids than production for
   MQTT/filter/statistics sensors (#146); `load_repo_config` pre-registers the Victron ones.
 - The template test (`test_templates.py`) renders every extracted state/runtime template in one HA; blueprint
-  templates are not extracted (#148). 16 of the 55 MQTT entities are never fed a message by any test, so their
+  templates are not extracted (#148). 15 of the 56 MQTT entities are never fed a message by any test, so their
   `value_template` only gets that syntax check (#159).
 - Pre-start seeding takes an explicit prefix list of the missing integrations' entities, never "whatever does not exist
   yet": a seed once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it and the

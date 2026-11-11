@@ -39,7 +39,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components import mqtt
 from homeassistant.config import async_hass_config_yaml
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import CoreState, HomeAssistant, SupportsResponse
+from homeassistant.core import CoreState, HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import async_load_custom_templates
 from homeassistant.setup import async_setup_component
@@ -217,6 +217,28 @@ _STUBBED_ACTIONS = (
     "switch.turn_off",
     "switch.turn_on",
 )
+
+
+def _record_external_calls(hass: HomeAssistant, domain: str, name: str) -> list[ServiceCall]:
+    """Wrap a real action: calls to `_EXTERNAL_PREFIXES` entities are only recorded (as by
+    `async_mock_service`), every other call runs the real action. Returns the record list.
+
+    The real handler runs through `ServiceRegistry._execute_service` (private, 2026.10), the
+    same dispatch `async_call` uses, so entity services keep their job type.
+    """
+    real = hass.services.async_services_internal()[domain][name]
+    recorded: list[ServiceCall] = []
+
+    async def handler(call: ServiceCall) -> None:
+        eids = call.data.get("entity_id")
+        eids = [eids] if isinstance(eids, str) else list(eids or [])
+        if eids and all(e.startswith(_EXTERNAL_PREFIXES) for e in eids):
+            recorded.append(call)
+            return
+        await hass.services._execute_service(real, call)  # noqa: SLF001
+
+    hass.services.async_register(domain, name, handler, schema=real.schema)
+    return recorded
 
 
 # Entity id prefixes of integrations the test HA does not run: Somfy covers and their lock
@@ -433,6 +455,11 @@ async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> Non
         domain, name = action.split(".")
         if not hass.services.has_service(domain, name):
             calls[action] = async_mock_service(hass, domain, name)
+        else:
+            # The real action exists because a config entity of that domain does (the
+            # heating_pv_boost tariff selects make `select` real): keep it for those, record
+            # only the calls to the external entities, as the stub would.
+            calls[action] = _record_external_calls(hass, domain, name)
     # Entities of integrations the test HA does not run exist in production from the start
     # (restored from the registry). Create them with their baseline state BEFORE start, so
     # `homeassistant: start` automations see them as in production (e.g. the pergola watchdogs'
