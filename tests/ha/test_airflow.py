@@ -879,6 +879,13 @@ async def test_controller(airflow_ha: HomeAssistant, clock: Clock) -> None:
                 failures.append(f"{case.name}: the controller did not run")
             if (got := _calls(ha)) != sorted(case.calls):
                 failures.append(f"{case.name}: calls {got}, want {sorted(case.calls)}")
+        else:
+            # Automatic control off: with THIS case's season/indicator inputs the decision is
+            # still 'off' (the Docker tests asserted it; without this the case would only
+            # prove "no run, no calls", which an always-on decision with a blocked controller
+            # also shows).
+            if (got := _decision(ha, ids["decision"])) != ("off", "off", "off"):
+                failures.append(f"{case.name}: decision {got!r}, want off with auto disabled")
         for n, step in enumerate(case.then, start=2):
             _clear(ha)
             before = _runs(ha, _CONTROLLER)
@@ -1017,8 +1024,21 @@ async def test_drying_boost(airflow_ha: HomeAssistant, clock: Clock) -> None:
     assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
 
 
-@pytest.mark.xfail(strict=True, reason="config bug: an input flap restarts the boost "
-                   "(#153); passes once fixed")
+async def test_drying_boost_input_flap_before_the_bug(
+    airflow_ha: HomeAssistant, clock: Clock
+) -> None:
+    """Steps 1-2 of UNAVAILABLE_TO_BOOST (boost starts, an input goes unavailable → the
+    decision is unavailable, the boost automation stays quiet). They pass today; run apart from
+    the strict xfail below so that a regression in them is not swallowed as the expected
+    failure of #153 (which is step 3 only)."""
+    case = BoostCase("drying_boost_input_flap_before_the_bug", BOOST, {},
+                     UNAVAILABLE_TO_BOOST.steps[:2])
+    failures = await _run_boost_cases(airflow_ha, clock, [case])
+    assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError,
+                   reason="config bug: an input flap restarts the boost (#153); passes once fixed")
 async def test_drying_boost_unavailable_to_boost_does_not_fire(
     airflow_ha: HomeAssistant, clock: Clock
 ) -> None:

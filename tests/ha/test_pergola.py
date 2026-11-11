@@ -1017,7 +1017,15 @@ async def _user_override(env: _Env, check: Check) -> None:
     ahead of the user_override exit rule) goes straight to rain, without a sun state in
     between. (The YAML comment at rule 2 → user_override says the exit path runs first and rain
     follows on the next trigger; the code does not do that: reported as a finding.)
-    Docker: test_user_override_left (user_override left)."""
+    Docker: test_user_override_left (user_override left, driven through dach_links: the first
+    two steps restore that side; the new scenario below uses dach_rechts)."""
+    env.clear()
+    # Rule 4 has one `or` over the two covers; each half needs its own entry check (a mutant
+    # that drops the links half survived the rechts-only scenario).
+    await env.seed({_ORIGIN["links"]: "user", _TIMER["links"]: "300"})
+    check("links user lock", state="user_override", tilt_calls=[])
+    await env.seed({_ORIGIN["links"]: "unknown", _TIMER["links"]: "unknown"})
+    check("links lock clears (dry) → exit_to_normal", state="sun_automatik_cooling")
     env.clear()
     await env.seed({_ORIGIN["rechts"]: "user", _TIMER["rechts"]: "300"})
     check("rechts user lock", state="user_override", tilt_calls=[],
