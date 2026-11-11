@@ -123,7 +123,7 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
    yield, efficiency); heating energy also split active / passive; cooling and off energy rows.
 
 ### Phase 5 — verification
-8. [IN_PROGRESS] `ci-local.sh` green (incl. e2e: see Status). After deploy, compare for 3 days: starts vs the graph, run edges
+8. [IN_PROGRESS] `ci-local.sh --e2e` green (done). After deploy, compare for 3 days: starts vs the graph, run edges
    vs the Shelly, `heating + hot_water + cooling` electricity vs the total, and the yield split.
 
 ### Close
