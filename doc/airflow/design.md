@@ -510,7 +510,7 @@ flip it.
 The full input → output mapping is the decision table in AF-6 (source:
 `custom_templates/airflow_decision.jinja`), plus the controller guards in AF-7.1: Away skips the
 preset/auto_mode half, a running boost is never cancelled, and every write is idempotent. The
-decision-table test `tests/ha/test_airflow.py::test_decision_table` pins each row (one case per row). The decision is
+decision-table test `tests/ha/test_airflow_cooling.py::test_decision_table` pins each row (one case per row). The decision is
 stateless apart from P3's dry-retention hysteresis, so there is no `keep` row.
 
 ---

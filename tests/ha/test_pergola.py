@@ -94,7 +94,7 @@ _TEMPLATE_UIDS = {
 }
 
 # The season through the REAL indicator: one 48h mean per season (thresholds 12 / 16 / 20 from
-# the baseline helpers, hysteresis 1 °C; as `_SEASON_MEAN` in test_airflow.py).
+# the baseline helpers, hysteresis 1 °C; as `_SEASON_MEAN` in test_airflow_cooling.py).
 _COOLING_MEAN, _HEATING_MEAN = "17.0", "11.0"  # passive_cooling (heating off) / active_heating
 
 # Venus OS topics of the two Victron inputs the pergola reads (packages/victron.yaml).
@@ -516,7 +516,7 @@ async def pergola_ha(ha: HomeAssistant) -> HomeAssistant:
       shows it (`unknown`, PG-2.4; the shared baseline says `none`);
     - the sync automation back on (the shared baseline turns it off for other packages);
     - every automation outside `_AUTOMATIONS` off: the other packages' runs wait on timers
-      longer than any clock move here (as in test_airflow.py, the other way round);
+      longer than any clock move here (as in test_airflow_cooling.py, the other way round);
     - the cover echo and the call-owner listener.
     """
     await apply_baseline(ha, mqtt=False, skip={entity_id(ha, d, "template", u)

@@ -4,7 +4,7 @@
 - [x] Plan and owner decisions (Step 3 wanted, package-load test runs with every package, test
       files renamed after their package, cross-package tests run under each package they cover)
 - [x] Step 1 `ci-local.sh` selection flags [DONE]
-- [ ] Step 2 rename test files, awaiting approval
+- [x] Step 2 rename test files [DONE]
 - [ ] Step 3 package selection (`--package`), awaiting approval
 - [ ] Step 4 skip unchanged dependency installs, awaiting approval
 - [ ] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README)
@@ -92,7 +92,7 @@ reinstalls. Timing before/after recorded here.
    used by both modes. Header comment (usage block) updated in the K-5 style. Depends on: nothing.
    Verify: full run unchanged (same test count); `-- tests/ha/test_pergola.py::test_deadbands`
    runs 1 test; a failing selection exits 1; `--package nosuch` fails with the list.
-2. **[TODO] Rename test files.** `git mv` per the table, references updated. Depends on: nothing
+2. **[DONE] Rename test files.** `git mv` per the table, references updated. Depends on: nothing
    (independent of step 1). Verify: full `tests/ha` same count; grep finds no old name outside
    `background.md`.
 3. **[TODO] Package selection.** Option, filter, marker, guard, template filter, cross-package
