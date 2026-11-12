@@ -11,8 +11,8 @@ One looping test on ONE fresh HA (stateless templates): per topic the payloads a
 order WITHOUT a reset, so "ignored payload keeps the last value" is checked against the value the
 previous step produced. Failures are collected; one assert names every failing step.
 
-Not here: `ehp/Integral` (the `mqtt_sync` channel of the harness, tests/ha/conftest.py) and the
-`loxone/...` topics (no live payloads supplied yet).
+`ehp/Integral` is the `mqtt_sync` channel of the harness (tests/ha/conftest.py), so it has its own
+test below. The `loxone/...` topics are not here (no live payloads supplied yet).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from homeassistant.core import HomeAssistant
 
 from conftest import (
     Broker,
+    wait_state,
     check_states,
     entity_id,
     is_state,
@@ -153,11 +154,12 @@ TOPICS = [
         Msg(_status("-", "off"), {_ACTION: is_state("off"), _FLOW: near(35.0)},
             "ebusd '-' for no value"),
         Msg(_status("n/a", "water"), {_ACTION: is_state("water"), _FLOW: near(35.0)}),
-        # A short payload has no field 3. hvac_action has no device_class/unit, so its '' render
-        # is NOT ignored: the state becomes '' (observed, pinned as is; the numeric flow temp
-        # keeps being read). A guard like the single-value sensors would keep the last value.
-        Msg("36.5;1.5", {_FLOW: near(36.5), _ACTION: is_state("")},
-            "too few fields for the mode: state becomes ''"),
+        # A payload without field 3 (short or empty) is not a mode: hvac_action is unknown, the
+        # flow temp (field 0) is still read, and an empty payload leaves it as it was.
+        Msg("36.5;1.5", {_FLOW: near(36.5), _ACTION: is_state("unknown")},
+            "too few fields for the mode"),
+        Msg(_status("37.0", "heat"), {_ACTION: is_state("heat"), _FLOW: near(37.0)}),
+        Msg("", {_FLOW: near(37.0), _ACTION: is_state("unknown")}, "empty payload"),
     ]),
     # ── ehp/HcReturnTemp: temp;sensor-status, only "ok" readings are used ─────────────────────
     Topic("ebusd/ehp/HcReturnTemp", [
@@ -309,3 +311,26 @@ async def test_ebusd_registers(ha: HomeAssistant, broker: Broker) -> None:
         logging.getLogger("homeassistant.components.mqtt").removeHandler(warnings)
     failures += [f"mqtt warning at {hit}" for hit in warnings.hits]
     assert not failures, f"{len(failures)} ebusd register check(s) failed:\n" + "\n".join(failures)
+
+
+async def test_ebusd_integral(ha: HomeAssistant, broker: Broker) -> None:
+    """ehp/Integral (live: 66): the sensor behind `mqtt_sync`, so it is checked without it.
+
+    Order is the sync: an ignored payload is followed by a `TempDesired` message that DOES change
+    its sensor, and once that shows, the earlier Integral message was handled too.
+    """
+    integral = entity_id(ha, "sensor", "mqtt", "heating_energy_integral")
+    marker = entity_id(ha, "sensor", "mqtt", "heating_temp_desired")
+    await wait_subscribed(ha, broker, "ebusd/ehp/Integral", "ebusd/mc/TempDesired")
+    failures: list[str] = []
+    # (payload, state of the Integral sensor afterwards): live value, negative, rounding, ignored.
+    steps = [("66", 66), ("-600", -600), ("-12.6", -13), ("n/a", -13), ("", -13), ("0", 0)]
+    for n, (payload, want) in enumerate(steps, start=1):
+        await publish(ha, broker, "ebusd/ehp/Integral", payload)
+        await publish(ha, broker, "ebusd/mc/TempDesired", f"{20 + n}.0")
+        await wait_state(ha, marker, near(20.0 + n))
+        state = ha.states.get(integral)
+        got = state.state if state else None
+        if got is None or not near(want)(got):
+            failures.append(f"Integral #{n} {payload!r}: {integral} = {got!r}, want {want}")
+    assert not failures, "\n".join(failures)
