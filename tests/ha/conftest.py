@@ -10,6 +10,8 @@ Parts, top to bottom:
 - config staging (`stage_config`, `hass_config_dir`);
 - the shared baseline (`seed`, `apply_baseline`, data in tests/baseline.py);
 - the real broker (`Broker`, `broker`);
+- the test recorder's filter (`recorder_config`, derived from the config, guarded by
+  test_recorder_filter.py);
 - loading the repo config into HA (`load_repo_config`, `ha`);
 - waiting and lookup helpers (`entity_id`, `wait_state`);
 - the clock (`Clock`, `clock`, `local_at`, `next_day`);
@@ -62,7 +64,7 @@ REPO = Path(__file__).resolve().parents[2]
 # → plans/targeted-local-tests.md
 # Harness modules that belong to no package; each is kept or dropped as a whole.
 # Runs under EVERY --package: a package edit can break loading or template rendering of any package.
-HARNESS_EVERY_PACKAGE = ("test_packages_load", "test_templates")
+HARNESS_EVERY_PACKAGE = ("test_packages_load", "test_templates", "test_recorder_filter")
 # Runs only without --package (pins and broker isolation do not depend on a package's YAML).
 HARNESS_FULL_RUN_ONLY = ("test_versions", "test_broker_isolation")
 
@@ -468,6 +470,84 @@ def _victron_mqtt_unique_ids() -> list[str]:
     text = (REPO / "packages/victron.yaml").read_text()
     data = yaml.load(text, Loader=_AnyTagLoader)
     return [e["unique_id"] for e in data["mqtt"]["sensor"] if "default_entity_id" not in e]
+
+
+# ── Test recorder: record only what the config reads back ─────────────────────
+# PHACC's `recorder_mock` commits to SQLite after every event (`commit_interval: 0`); recording the
+# whole boot cost ~1.1 s of CPU per test (the recorder thread competes with the loop for the GIL).
+# The recorder is only READ by the entity platforms below, so it records only their sources and
+# drops event types no test reads. Both parts are derived or guarded, never a hand-kept list:
+# → .claude/skills/ha-test-harness/SKILL.md (fixtures), test_recorder_filter.py (the guards).
+# Entity platform → config key holding the entity whose state history it reads (source read at the
+# pinned HA: filter/statistics/history_stats import `recorder.history` and query the source's states).
+HISTORY_PLATFORMS = {"filter": "entity_id", "statistics": "entity_id", "history_stats": "entity_id"}
+# Every other entity platform the config uses, with the reason it needs no history (no recorder
+# import in its component source at the pinned HA). A new platform must be classified in one of
+# the two dicts, else test_recorder_filter.py fails.
+NO_HISTORY_PLATFORMS = {
+    "integration": "Riemann sum over live state changes, restores through RestoreEntity",
+    "climate_template": "custom component (custom_components/), live template state only",
+}
+# Top-level domains that import the recorder although the config never reads history from them.
+RECORDER_IMPORTING_DOMAINS = {
+    "recorder": "the recorder itself",
+    "sensor": "sensor/recorder.py compiles long-term statistics, off in the test recorder",
+}
+# Event types dropped before they reach the queue (the entity filter does not apply to events
+# without a top-level entity_id, e.g. call_service). Only types no test reads: a test has no
+# recorder access except the commit barrier `async_wait_recording_done` (guarded by
+# test_recorder_filter.py). state_changed cannot be excluded by type, the entity filter does it.
+RECORDER_EXCLUDED_EVENTS = (
+    "call_service", "automation_triggered", "script_started", "component_loaded",
+    "service_registered", "core_config_updated", "logbook_entry", "entity_registry_updated",
+    "device_registry_updated", "mqtt_connection_state", "homeassistant_start",
+    "homeassistant_started", "homeassistant_final_write", "homeassistant_stop",
+    "homeassistant_close",
+)
+
+
+def config_yaml_files() -> list[Path]:
+    """The YAML files HA loads entity platforms from: configuration.yaml and packages/*.yaml."""
+    return [REPO / "configuration.yaml", *sorted((REPO / "packages").glob("*.yaml"))]
+
+
+def config_entity_platforms() -> list[tuple[str, str, str, dict[str, Any]]]:
+    """(file, domain, platform, entry) of every `<domain>: [- platform: x]` entry in the config.
+
+    Only top-level domain lists count: `platform:` inside triggers (`state`, `time_pattern`, ...)
+    is nested and not an entity platform.
+    """
+    found = []
+    for path in config_yaml_files():
+        data = yaml.load(path.read_text(), Loader=_AnyTagLoader) or {}
+        for domain, value in data.items():
+            if isinstance(value, list):
+                found += [
+                    (path.name, domain, e["platform"], e)
+                    for e in value
+                    if isinstance(e, dict) and "platform" in e
+                ]
+    return found
+
+
+def history_sources() -> list[str]:
+    """Entity ids whose state history a configured platform reads (sorted, unique)."""
+    return sorted(
+        {
+            entry[HISTORY_PLATFORMS[platform]]
+            for _, _, platform, entry in config_entity_platforms()
+            if platform in HISTORY_PLATFORMS
+        }
+    )
+
+
+@pytest.fixture
+def recorder_config() -> dict[str, Any]:
+    """Override PHACC's fixture: record only the history sources, drop unread event types."""
+    return {
+        "include": {"entities": history_sources()},
+        "exclude": {"event_types": list(RECORDER_EXCLUDED_EVENTS)},
+    }
 
 
 async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> None:

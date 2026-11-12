@@ -14,7 +14,7 @@
       heating_pv_boost 16 s, victron 21 s, airflow_cooling 21 s, pergola 26 s; `--yaml` 2 s.
       A fresh agent given only "confirm the wallbox tests are green while developing" chose
       `--package energy` from the guidance by itself (9 s, one command).
-- [ ] Step 6 recorder records only what the config's history readers need, awaiting implementation
+- [x] Step 6 recorder records only what the config's history readers need [DONE]
 - [ ] Step 7 Close (after the PR is merged)
 
 ## Overview
@@ -144,6 +144,35 @@ Keeping it in sync with the config (owner requirement):
 - Event exclusion: only event types proven unread by any test; a test that needs one (e.g. a
   logbook test) removes it; documented next to the list.
 
+Built (Step 6): `recorder_config` override, `HISTORY_PLATFORMS` / `NO_HISTORY_PLATFORMS` /
+`RECORDER_IMPORTING_DOMAINS` / `RECORDER_EXCLUDED_EVENTS` and the derivation (`config_entity_platforms`,
+`history_sources`; scans the top-level `<domain>: [- platform: x]` lists of `configuration.yaml` and
+`packages/*.yaml`; trigger `platform:` is nested and ignored) in `tests/ha/conftest.py`; guards in the
+new harness module `tests/ha/test_recorder_filter.py` (in `HARNESS_EVERY_PACKAGE`, static except one
+test, 4 s): (1) every platform classified in exactly one dict, no stale entry; (2) classification vs the
+installed component source (history platforms import the recorder, the others and every other top-level
+domain do not, `sensor`/`recorder` listed); (3) include list non-empty, holds each history entry's
+source, literal ids; (4) no test module reads the recorder database (`get_instance`, `history`,
+`logbook`, ... ; the exclusion of event types is safe because nothing can read them back; only
+`async_wait_recording_done` is used); (5) with `ha`: every source that has a state is in the DB, no
+other entity is. Entity filter semantics (source read, `helpers/entityfilter.py` case 6,
+`recorder/core.py` `_event_listener`): include entities only = exact membership; events without a
+top-level `entity_id` (`call_service`, registry events, ...) bypass it, hence the event-type list.
+Mutations (restored): dropping the history_stats / statistics / filter sources from the derived list
+-> `test_history_sources_derived` fails each time; filter not applied -> test 5 fails; a
+`- platform: trend` in victron.yaml -> test 1 fails; a test module importing `get_instance` -> test 4 fails.
+Coverage gap (measured): NO existing test depends on recorded history. With
+`include.entities = [sensor.nothing]` the whole suite (53 passed, 1 xfailed) stays green, so
+dropping the history_stats source does NOT fail `test_cycling_history_stats`: history_stats follows
+live state events and reads the DB only on its first update. The list is therefore guarded by tests
+1-3 and 5, not by behaviour tests; a behaviour test needs a reload/restart that forces a DB read.
+Stability: whole `tests/ha` via `ci-local.sh` 3x green (65 passed, 1 xfailed each); 20x:
+heating_pv_boost 180 passed, heating_cooling_indicator 20, airflow_cooling 280 passed + 20 xfailed,
+test_recorder_filter 100.
+Timings (wall, `ci-local.sh`, 4 cores, before -> after): full 66.6 s (noisy: 57 s in the earlier
+check) -> 45.5-46.5 s (3 runs; pytest 40 s); `--package pergola` 31.4 -> 22.5 s; single test
+(`test_wallbox_wrappers`) 7.0 -> 5.5 s. (The prototype measured 51 -> 35 s on a quieter machine.)
+
 ## Steps
 1. **[DONE] `ci-local.sh` flags.** Argument parsing (`--e2e`, `--yaml`, `--package NAME`, `--`),
    targeted-run summary, pytest args pass-through. The `tests/ha` setup moves into one function
@@ -179,7 +208,7 @@ Keeping it in sync with the config (owner requirement):
      cross-package tests; the 20× stability rule becomes
      `ci-local.sh -- tests/ha/test_x.py --count=20 -n 4`.
    - `README.md` local-checks line: one sentence on the targeted options.
-6. [TODO] Recorder filter. `recorder_config` override in `tests/ha/conftest.py` per the design,
+6. **[DONE] Recorder filter.** `recorder_config` override in `tests/ha/conftest.py` per the design,
    the classification + guards, mutation checks, stability (whole suite 3x, changed/affected
    files 20x), timings recorded here. Knowledge: `ha-test-harness` skill (fixtures section: what
    the recorder records and why, how to add a history-reading platform; Run timings if stated),

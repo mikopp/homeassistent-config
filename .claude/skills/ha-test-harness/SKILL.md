@@ -87,6 +87,18 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   broker fixture first so it is torn down after HA. `publish` is pipelined; `mqtt_sync` proves every earlier message
   was handled (needed before a clock move and before a seed); `wait_subscribed` before a non-retained publish.
   Isolation proof: `test_broker_isolation.py`.
+- **Test recorder** (`recorder_config` in `conftest.py`): PHACC's `recorder_mock` commits per event, so recording a boot
+  cost ~1.1 s CPU per test (~2.2 s boot → ~0.9 s without). The override records only the source entities of the
+  config's `filter` / `statistics` / `history_stats` entries (`HISTORY_PLATFORMS`: platform → source key; derived from
+  `packages/*.yaml` and `configuration.yaml` at run time) and drops event types no test reads (`RECORDER_EXCLUDED_EVENTS`;
+  `call_service` etc. carry no top-level `entity_id`, so the entity filter alone would keep them). Only the sources need
+  recording: those platforms read their source's state history (source read at the pin); `integration`, `utility_meter`,
+  `template`, `mqtt`, `climate_template` import no recorder. New platform in the YAML: classify it in `HISTORY_PLATFORMS` or
+  `NO_HISTORY_PLATFORMS` (with the reason), else `test_recorder_filter.py` fails (it also checks the classification
+  against the installed component source). A test that needs a recorded entity or event outside this set must extend
+  `recorder_config`; `test_recorder_filter.py` fails on a test module that queries the recorder database (only
+  `async_wait_recording_done` is allowed). No test depends on the recorded history today (history_stats follows live
+  events): dropping every source from the filter leaves the suite green except the filter's own guard.
 - Teardown order in `ha`: automations off, then the config entries are unloaded WHILE the recorder runs (else
   unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
   schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
