@@ -13,8 +13,9 @@ reset, so "empty keeps the last value" is checked against the value the previous
 Failures are collected; one assert names every failing step. Any mqtt WARNING fails the test too:
 a template that raises keeps the last state and only logs.
 
-Not covered: a non-numeric payload (`n/a`) on the six meters. Their template guards only the
-empty payload, so such a payload raises (warning, last value kept); nothing publishes one.
+Not covered, accepted (owner): a non-numeric payload (`n/a`) on the six meters. Their template
+guards only the empty payload, so such a payload raises (warning, last value kept); nothing
+publishes one.
 """
 
 from __future__ import annotations
@@ -83,8 +84,8 @@ METERS = [
 
 _ON, _OFF = is_state("on"), is_state("off")
 # loxone/heating/warm_enough: ON for 1/on/yes/true (any case, trimmed), anything else is OFF.
-# The template has no empty-payload guard: an empty or garbage payload is OFF, i.e. "not warm
-# enough" (observed, pinned as is).
+# The template has no empty-payload guard on purpose (owner): an empty or garbage payload is OFF,
+# i.e. "not warm enough".
 _FLAG: list[tuple[str, Callable[[str], bool], str]] = [
     ("On", _ON, "live payload"),
     ("Off", _OFF, ""),
@@ -95,7 +96,7 @@ _FLAG: list[tuple[str, Callable[[str], bool], str]] = [
     (" YES ", _ON, "case and whitespace"),
     ("no", _OFF, ""),
     ("on", _ON, ""),
-    ("", _OFF, "empty payload is OFF (no guard)"),
+    ("", _OFF, "empty payload is OFF (by design)"),
     ("on", _ON, ""),
     ("n/a", _OFF, "garbage is OFF"),
     ("On", _ON, "back to the live payload"),
