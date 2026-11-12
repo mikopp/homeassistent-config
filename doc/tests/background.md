@@ -577,3 +577,27 @@ K-7 (fresh headless sessions from the repo root, `claude -p … --model haiku --
 - Keeping the harness `ha_integration_test_harness` with a retagged `:stable` image, a timeout shim and `docker exec` clock moves: replaced by an own client and `docker run --network host` of the pinned image.
 - Per-test `docker run` of the Mosquitto app image, compiling mosquitto on the runner, a job inside the app image: see the options table in Step 4.
 
+
+
+## Targeted local runs and the test recorder filter (PR #162)
+Why `ci-local.sh` got `--package`, `--yaml` and `--`, and why the test recorder records only history sources. Current
+facts are in the skill and `tests/ha/conftest.py`; this keeps the measurements behind the choices.
+- Before: every call ran all YAML checks and all of `tests/ha` (about 60 s of tests plus pip/venv setup); copying the raw
+  pytest line from the skill skipped the venv, custom component and pinned mosquitto and failed in fresh sessions.
+- Timings (wall time of the whole script, 4 cores): full run 57 s; one test 6-11 s; `--package` energy 8.5 s,
+  heating_pv_boost 16 s, victron 21 s, airflow_cooling 21 s, pergola 26 s; `--yaml` 2 s. A fresh agent given only
+  "confirm the wallbox tests are green" picked `--package energy` from the guidance by itself.
+- xdist: one file 7.3 s with `-n 0` vs 10.0 s with workers; `--package pergola` 79 s with `-n 0` vs 25 s with `-n auto`,
+  victron 63 s vs 22 s. Hence `-n 0` for explicit ids, `-n auto` for packages.
+- Install stamps (hash of requirement files + python version + command): saves about 1.5 s per call; verified that editing
+  `requirements_test.txt` reinstalls `.venv-test` only. The `.venv-e2e` branch was only syntax-checked.
+- Recorder (py-spy and per-thread CPU, single test, warm): ~0.4 s script, ~1.7 s Python + HA imports, ~1 s first-boot
+  integration imports (both once per process), ~2.2 s boot per test of which ~1.1 s the Recorder thread (a SQLite commit
+  per event, `commit_interval: 0`, GIL contention); recording nothing: boot 2.2 -> 0.9 s. Result of the filter: full
+  `tests/ha` 66.6 -> ~46 s, `--package pergola` 31 -> 22.5 s, single test 7.0 -> 5.5 s (prototype on a quieter machine
+  51 -> 35 s).
+- Coverage gap found on the way: with `include.entities = [sensor.nothing]` the whole suite stayed green, because
+  history_stats follows live events and reads the DB only on its first update; closed by
+  `test_history_stats_read_back_from_recorder` (reload forces the read). Mutation checks and 20x stability runs of the
+  structural guards were done; the results are not kept.
+- Dropped alternative: a separate script for targeted runs (would duplicate the venv/mosquitto setup).

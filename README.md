@@ -127,7 +127,7 @@ Runs on pull requests and on pushes to `master`. Home Assistant core runs inside
 ### `e2e.yaml` — real Home Assistant in Docker (`tests/e2e`)
 Same triggers and change detection, plus a nightly run against the Home Assistant beta image (informational). Boots this repo's real `configuration.yaml` in the pinned image (`.github/ha-versions/ha/Dockerfile`) against the host mosquitto: full boot of every package, `check_config`, totals surviving a real restart, and a log free of errors and deprecations. Logs of a failed run are uploaded as an artifact.
 
-**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer.
+**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer. While developing, `--package <name>` or `-- <pytest test id / args>` runs only the matching `tests/ha` tests (`--yaml`: only the YAML checks); the full run without arguments is the pre-push check (usage: header of the script).
 
 ### `yaml-lint.yml` — YAML style and lint
 Runs on every push and on manual dispatch; checks only, it never commits.
@@ -157,9 +157,9 @@ The `tests/` directory contains a `pytest` suite:
 |------|----------|
 | `ha/test_templates.py` | In-process layer (`tests/ha`, no Docker): renders every state and runtime template extracted from YAML; asserts no rendering errors |
 | `ha/test_pergola.py` | In-process: automation scenarios for the pergola state machine (rain detection, frost lock, sun tracking transitions) |
-| `ha/test_airflow.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table); on a frozen clock the real indicators (delays, hysteresis), controller and drying-boost automations on real triggers, drying schedules, climate hvac_action, reload recovery |
+| `ha/test_airflow_cooling.py` | In-process: airflow decision table, bypass estimation and dew-point threshold sensors (one looping test per table); on a frozen clock the real indicators (delays, hysteresis), controller and drying-boost automations on real triggers, drying schedules, climate hvac_action, reload recovery |
 | `ha/test_heating_cooling_indicator.py` | In-process: indicator thresholds, order clamp and 1 °C hysteresis |
-| `ha/test_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
+| `ha/test_energy_wallbox.py` | In-process: wallbox wrapper sensors, unit normalisation (W/kW, Wh/kWh) and availability propagation |
 | `ha/test_victron.py` | In-process, real MQTT broker: Victron instant-power formulas (Venus OS payloads, expiry); on real minute ticks the energy accumulators (η, conversion loss, counter-delta baselines, battery residual) and the grid import/export integration; keep-alive publish |
 | `ha/test_heating_pv_boost.py` | In-process, real MQTT broker: PV surplus, compressor and cycling formulas, cooling interlock, derived setpoint (ebusd, Shelly and Victron payloads); on a frozen clock the hot-water return mask, slab decision delays, last compressor run, history_stats and daily meter reset |
-| `ha/test_shelly_pool_pump.py` | In-process, real MQTT broker: pool pump Shelly payloads through the real value_templates |
+| `ha/test_energy_pool_pump.py` | In-process, real MQTT broker: pool pump Shelly payloads through the real value_templates |

@@ -1,6 +1,6 @@
 ---
 name: ha-test-harness
-description: "Writing, running, debugging or reviewing tests in tests/ha (in-process HA, PHACC, real mosquitto, Clock) or tests/e2e (real HA container), their CI workflows, flaky or hanging tests, frozen-clock moves, log_guard, mutation checks, PHACC/Python/mosquitto pins. Use before touching tests/**, tests.yaml, e2e.yaml or ci-local.sh."
+description: "Writing, running (a single test or one package's tests), debugging or reviewing tests in tests/ha (in-process HA, PHACC, real mosquitto, Clock) or tests/e2e (real HA container), their CI workflows, flaky or hanging tests, frozen-clock moves, log_guard, mutation checks, PHACC/Python/mosquitto pins. Use before touching tests/**, tests.yaml, e2e.yaml or ci-local.sh."
 ---
 
 # Tests: in-process layer (`tests/ha`) and real-HA layer (`tests/e2e`)
@@ -11,7 +11,10 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 
 ## Where does a new test go?
 1. Behaviour of the config given inputs (templates, automations, helpers, MQTT ingest, clock)? →
-   `tests/ha/test_<pkg>.py`. This is the default.
+   `tests/ha/test_<package>[_<topic>].py` (`<package>` = a `packages/*.yaml` name; the collection guard fails
+   otherwise; harness modules are listed in `tests/ha/conftest.py`). This is the default. A test that loads/drives
+   another package's real entities gets `@pytest.mark.package("<other>")` so it also runs under that package
+   (not for a mere seed of an entity id).
 2. Only a real container can show it? → `tests/e2e/`, marked `@pytest.mark.needs_real_ha("<reason>")`
    with a reason from `REAL_HA_REASONS` in `tests/e2e/conftest.py` (`full-boot`, `check-config`,
    `restart-persistence`, `runtime-logs`); collection fails without it. Module docstring starts
@@ -20,12 +23,16 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 4. Package-specific facts a test establishes → the package note's "Tests" section.
 
 ## Run
-- Everything: `.github/scripts/ci-local.sh` (`--e2e` adds Docker). Needs python3.14
-  (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of `.github/ha-versions/mosquitto/Dockerfile`.
-- `tests/ha` alone: `.venv-test/bin/python -m pytest -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . tests/ha -n 4`
-  (`.venv-test`: `requirements_test.txt`, which pins PHACC and with it HA). Each layer has its own
-  ini; there is no root pytest config; `--confcutdir` keeps conftests above the layer out.
-- `tests/e2e` alone: `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant --timeout=300 --timeout-method=thread`
+- Development: targeted, `.github/scripts/ci-local.sh --package <pkg>` (that package's tests incl. cross-package
+  ones, repeatable) or `.github/scripts/ci-local.sh -- tests/ha/test_x.py::test_y -k … -x` (anything after `--` goes to
+  pytest); `--yaml` = YAML checks only. `-n` default: auto for `--package`, 0 for explicit ids (workers only add start-up; a whole package is ~3x faster with `-n auto`); a passed `-n` wins.
+  A targeted run is never verification (YAML checks skipped; summary says so).
+- End of task / before pushing: `.github/scripts/ci-local.sh` (no arguments; `--e2e` adds Docker, full only: e2e has
+  no per-package split). Needs python3.14 (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of
+  `.github/ha-versions/mosquitto/Dockerfile`. The script does the venv/custom-component/mosquitto setup (`.venv-test`:
+  `requirements_test.txt`, which pins PHACC and with it HA); do not call raw pytest for `tests/ha`. Each layer has
+  its own ini; there is no root pytest config. Usage reference: header of the script.
+- `tests/e2e` alone (no script equivalent): `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant --timeout=300 --timeout-method=thread`
   (`tests/e2e/requirements.txt`, Docker, mosquitto on the host; `E2E_IMAGE` overrides the image;
   failure logs in `tests/e2e/.artifacts/`).
 - CI: `tests.yaml` and `e2e.yaml`; both skip their steps (and pass) on a PR touching none of
@@ -84,6 +91,21 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   broker fixture first so it is torn down after HA. `publish` is pipelined; `mqtt_sync` proves every earlier message
   was handled (needed before a clock move and before a seed); `wait_subscribed` before a non-retained publish.
   Isolation proof: `test_broker_isolation.py`.
+- **Test recorder** (`recorder_config` in `conftest.py`): PHACC's `recorder_mock` commits per event, so recording a boot
+  cost ~1.1 s CPU per test (~2.2 s boot → ~0.9 s without). The override records only the source entities of the
+  config's `filter` / `statistics` / `history_stats` entries (`HISTORY_PLATFORMS`: platform → source key; derived from
+  `packages/*.yaml` and `configuration.yaml` at run time) and drops event types no test reads (`RECORDER_EXCLUDED_EVENTS`;
+  `call_service` etc. carry no top-level `entity_id`, so the entity filter alone would keep them). Only the sources need
+  recording: those platforms read their source's state history (source read at the pin); `integration`, `utility_meter`,
+  `template`, `mqtt`, `climate_template` import no recorder. New platform in the YAML: classify it in `HISTORY_PLATFORMS` or
+  `NO_HISTORY_PLATFORMS` (with the reason), else `test_recorder_filter.py` fails (it also checks the classification
+  against the installed component source). A test that needs a recorded entity or event outside this set must extend
+  `recorder_config`; `test_recorder_filter.py` fails on a test module that queries the recorder database (only
+  `async_wait_recording_done` is allowed). `test_heating_pv_boost.py::test_history_stats_read_back_from_recorder` pins
+  the history read-back: history_stats follows live events and queries the recorder only on its first update, so the
+  test records two runs, commits them, calls `history_stats.reload` (`async_setup_reload_service`: new entities, empty
+  cache) and asserts literal values (2 runs, 0.5 h) that only the database holds; dropping the history_stats source
+  from `history_sources()` makes it fail (0 / 0.0 / 0.0). The statistics and filter sources have no such test.
 - Teardown order in `ha`: automations off, then the config entries are unloaded WHILE the recorder runs (else
   unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
   schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
@@ -125,7 +147,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 - **Test the real entity, never a copy of its formula.** A test that renders a Jinja copy of a YAML formula tests the
   copy (the Docker-era copies had drifted from the config). Expected values come from an independent Python port or
   literal anchors, not from the same template.
-- **Stability: 20× on changed tests** (`--count=20 -n 4` on the changed files), the whole `tests/ha` once.
+- **Stability: 20× on changed tests** (`.github/scripts/ci-local.sh -- tests/ha/test_x.py --count=20 -n 4`), the full `ci-local.sh` once at the end.
 - **No retry/rerun plugins.** A flaky test is a bug: find the cause (both flakes found so far were test or fixture
   bugs), or open a GitHub issue; never "passed again" as proof.
 - A confirmed config bug is pinned by a `strict` xfail test (it fails the run when the bug is fixed), with its issue number.

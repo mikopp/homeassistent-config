@@ -12,6 +12,9 @@ blueprints; a file that does not parse fails the extraction) and rendered in two
 ONE render test on ONE HA instance: render all templates in a loop, collect every failure, one
 assert that lists them all. No parametrize, so the cost is one HA boot, not one per template.
 A plain sync test checks the extractor itself (blueprint tags parse, bad YAML fails).
+
+With `--package NAME` (tests/ha/conftest.py) only the templates extracted from
+packages/NAME.yaml are rendered; without it, all of them.
 """
 
 from __future__ import annotations
@@ -65,8 +68,8 @@ def _is_undefined_error(message: str) -> bool:
     return "is undefined" in message or "UndefinedError" in message
 
 
-async def test_every_template_renders(ha: HomeAssistant) -> None:
-    """All extracted templates render; failures are collected and listed in one assert."""
+async def test_every_template_renders(ha: HomeAssistant, request: pytest.FixtureRequest) -> None:
+    """All extracted templates (of the selected packages) render; failures are listed in one assert."""
     templates = _extract()
     # Guard against a silently empty extraction (e.g. a path change): it would pass vacuously.
     assert templates["state_templates"] and templates["runtime_templates"], templates
@@ -74,6 +77,17 @@ async def test_every_template_renders(ha: HomeAssistant) -> None:
     files = {t["file"] for kind in templates.values() for t in kind}
     for top in ("packages/", "blueprints/"):
         assert any(f.startswith(top) for f in files), f"no template extracted from {top}"
+    # `--package`: keep only the templates whose source file is a selected package's YAML (the
+    # guards above still check the full extraction).
+    if selected := request.config.getoption("package"):
+        files = {f"packages/{name}.yaml" for name in selected}
+        templates = {
+            kind: [t for t in items if t["file"] in files] for kind, items in templates.items()
+        }
+        # A selected package without a single template would pass vacuously (e.g. a renamed file).
+        assert templates["state_templates"] or templates["runtime_templates"], (
+            f"no template extracted from {sorted(files)}"
+        )
     await apply_baseline(ha)
 
     failures: list[str] = []

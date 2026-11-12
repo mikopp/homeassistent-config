@@ -1,8 +1,8 @@
 ---
 paths:
   - "packages/energy.yaml"
-  - "tests/ha/test_wallbox.py"
-  - "tests/ha/test_shelly_pool_pump.py"
+  - "tests/ha/test_energy_wallbox.py"
+  - "tests/ha/test_energy_pool_pump.py"
   - "plans/energy-live-entity-ids.md"
 ---
 # energy package notes (`packages/energy.yaml`)
@@ -63,7 +63,7 @@ the `ha-mqtt` skill.
 - All Shelly entities use `expire_after: 120`; the Loxone ones have none (invariant above).
 - The go-e source entities are owned by the MQTT integration; their ids can change if the device is
   re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the seeds
-  in `tests/baseline.py` and `tests/ha/test_wallbox.py` must change with them.
+  in `tests/baseline.py` and `tests/ha/test_energy_wallbox.py` must change with them.
 
 ## Entity map
 MQTT entities here have no `default_entity_id` (#146), so their ids are not derivable (rule in
@@ -90,10 +90,10 @@ is open: `plans/energy-live-entity-ids.md`.
 - MQTT sensors without `default_entity_id`: ids depend on the old registry (#146).
 
 ## Tests
-- `tests/ha/test_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
+- `tests/ha/test_energy_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
   without `state_class`), asserting on the WRAPPER, so the template incl. unit normalisation (W/kW,
   Wh/kWh) and availability run. Source entities have no real path in CI and are seeded.
-- `tests/ha/test_shelly_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
+- `tests/ha/test_energy_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
   the real `value_template`s; every case checks all five entities (power, energy, voltage,
   current, switch).
 - New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every

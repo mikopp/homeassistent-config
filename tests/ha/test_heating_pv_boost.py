@@ -33,6 +33,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -296,6 +297,10 @@ SURPLUS_CASES = [
 ]
 
 
+# The surplus reads the REAL Victron templates (solar yield, η accumulators, PV net power), fed by
+# Victron MQTT topics: a change to victron.yaml can fail this test, so it also runs under
+# `--package victron`.
+@pytest.mark.package("victron")
 async def test_surplus_table(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
     """All surplus cases on one HA; every failing case is listed in the one assert."""
     # The templates read the clamp under its production id. It has no default_entity_id; a
@@ -466,6 +471,9 @@ COOLING_CASES = [
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean): also runs under
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_cooling_interlock(ha: HomeAssistant, broker: Broker) -> None:
     """All interlock cases on one HA; every failing case is listed in the one assert."""
     failures = await _run_table(ha, broker, None, _COOLING_TABLE, COOLING_CASES,
@@ -628,6 +636,9 @@ TARGET_CASES = [
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean): also runs under
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_target_temp(ha: HomeAssistant, broker: Broker) -> None:
     """All setpoint cases on one HA; every failing case is listed in the one assert."""
     # Helpers (indicator thresholds, boost offset, boost switch off) and the non-MQTT baseline.
@@ -718,6 +729,10 @@ _SLAB_HELPERS = {
 }
 
 
+# The decision reads the REAL Victron surplus and battery SOC (Victron MQTT topics) and the REAL
+# heating_cooling_indicator season: also runs under `--package victron` and
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("victron", "heating_cooling_indicator")
 async def test_slab_mode_wanted_delays(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
     """The slab decision: master switch, 15 min delay_on, Schmitt hold, 20 min delay_off.
 
@@ -914,6 +929,54 @@ async def test_cycling_history_stats(ha: HomeAssistant, broker: Broker, clock: C
     await check("two heating runs, one hot-water run", runs=near(2), runtime=near(0.5),
                 average=near(15.0), duty=near(round(0.5 / 24 * 100, 1), 0.05))
     assert not failures, f"{len(failures)} cycling check(s) failed:\n" + "\n".join(failures)
+
+
+async def test_history_stats_read_back_from_recorder(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """After a reload the history_stats sensors get their value from the RECORDED history only.
+
+    history_stats follows live state events and queries the recorder just once, on its first
+    update (`HistoryStats.async_update`, `_has_recorder_data` False). `history_stats.reload`
+    (`async_setup_reload_service`) resets the platform: new entities with an empty cache, so
+    their first update is a database read. Two heating runs of 10 and 20 min and one hot-water
+    run are recorded first (committed by `async_wait_recording_done`), then the platform is
+    reloaded; the literal anchors (2 runs, 0.5 h, 0.5/24 duty) can only come from the database,
+    so a source missing from the filtered test recorder (`history_sources()` in conftest.py)
+    fails here, not only in the structural guards of test_recorder_filter.py.
+    """
+    ids = {"runs": entity_id(ha, "sensor", "history_stats", "heating_compressor_runs_today"),
+           "runtime": entity_id(ha, "sensor", "history_stats",
+                                "heating_compressor_runtime_today"),
+           "duty": entity_id(ha, "sensor", "history_stats", "heating_compressor_duty_cycle_24h")}
+    # Same runs as test_cycling_history_stats (energy-mode driven: ehp/Comp + Hc1Pump + clamp).
+    await clock.move_to(local_at(next_day(), 10))
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic, _COMP.topic, _PUMP.topic)
+    await _send(ha, broker, (_PUMP, "on"))
+    await _send(ha, broker, (_HVAC, "heat"), *_clamp(83))
+    await clock.advance(60)
+    for minutes in (10, 20):
+        await _send(ha, broker, *_clamp(1800))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=minutes)
+        await _send(ha, broker, *_clamp(83))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=83, minutes=5)
+    # A hot-water run is not counted.
+    await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
+    await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=15)
+    await _send(ha, broker, *_clamp(83))
+    await clock.advance(60)
+    await async_wait_recording_done(ha)
+    live = check_states(ha, ids, {"runs": near(2), "runtime": near(0.5)}, "before reload")
+    assert not live, "precondition failed:\n" + "\n".join(live)
+    # Reset the platform: the new sensors have no live history, only the database.
+    await ha.services.async_call("history_stats", "reload", blocking=True)
+    await ha.async_block_till_done()
+    failures = check_states(
+        ha, ids,
+        {"runs": near(2), "runtime": near(0.5), "duty": near(round(0.5 / 24 * 100, 1), 0.05)},
+        "after reload (database read)",
+    )
+    assert not failures, f"{len(failures)} read-back check(s) failed:\n" + "\n".join(failures)
 
 
 async def test_daily_meters_reset_at_midnight(

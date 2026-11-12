@@ -2,7 +2,7 @@
 paths:
   - "packages/airflow_cooling.yaml"
   - "custom_templates/airflow_decision.jinja"
-  - "tests/ha/test_airflow.py"
+  - "tests/ha/test_airflow_cooling.py"
   - "dashboards/airflow-dashboard.yaml"
   - "doc/airflow/design.md"
 ---
@@ -16,7 +16,7 @@ you must not break.
 
 ## Invariants
 ### Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
-CONFIRMED by `tests/ha/test_airflow.py::test_decision_table` at 2026.10.1.
+CONFIRMED by `tests/ha/test_airflow_cooling.py::test_decision_table` at 2026.10.1.
 - **Indicators feed only the decision; consumers read only the decision.** The indicators
   (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
   `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
@@ -90,7 +90,7 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
 - `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
   default on a helper that the repo rule forbids (code, not fixed in a docs step). → GitHub issue #142
 
-## Tests (`tests/ha/test_airflow.py`, in-process)
+## Tests (`tests/ha/test_airflow_cooling.py`, in-process)
 - Tables (decision, bypass, dew points; one looping test each) seed the delayed indicators: seed
   season/dew first, then the indicators (CONFIRMED: otherwise a season/dew change re-renders the
   seeded indicators to `unknown`, they have no internal state without the delay). The season is
