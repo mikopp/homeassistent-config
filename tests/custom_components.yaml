@@ -13,10 +13,10 @@ dependencies:
   - name: Template Climate
     domain: climate_template
     repository: https://github.com/mikopp/hass-template-climate
-    # Optional: branch to install from (defaults to "main" if omitted).
-    # Lets CI validate this config against an unmerged hass-template-climate
-    # branch/PR before it lands on main — set it temporarily on a throwaway
-    # branch, never on master.
+    # Optional: branch, tag or full commit SHA to install (defaults to "main").
+    # A tag or SHA pins the component; a branch follows it. A branch of an
+    # unmerged hass-template-climate PR lets CI validate this config against it
+    # before it lands on main: set that temporarily on a throwaway branch only.
     # ref: some-branch-to-validate
     hacs: mikopp/hass-template-climate
     description: >

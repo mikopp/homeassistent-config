@@ -1,6 +1,7 @@
 """Every Jinja template in the config renders on the in-process HA.
 
-Templates are extracted by .github/scripts/extract_templates.py and rendered in two modes:
+Templates are extracted by .github/scripts/extract_templates.py (packages, global files and
+blueprints; a file that does not parse fails the extraction) and rendered in two modes:
 - state templates (no runtime variables): strict. The shared baseline is applied first, so an
   error, an undefined variable or a sentinel output (unknown, unavailable, None, empty) is a
   real failure.
@@ -8,8 +9,9 @@ Templates are extracted by .github/scripts/extract_templates.py and rendered in 
   only exist inside a live run, so undefined-variable errors are expected; any other error
   (syntax, unknown filter, type error on defined data) is a failure.
 
-ONE test on ONE HA instance: render all templates in a loop, collect every failure, one assert
-that lists them all. No parametrize, so the cost is one HA boot, not one per template.
+ONE render test on ONE HA instance: render all templates in a loop, collect every failure, one
+assert that lists them all. No parametrize, so the cost is one HA boot, not one per template.
+A plain sync test checks the extractor itself (blueprint tags parse, bad YAML fails).
 
 With `--package NAME` (tests/ha/conftest.py) only the templates extracted from
 packages/NAME.yaml are rendered; without it, all of them.
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,14 +35,14 @@ from conftest import REPO, apply_baseline
 _SENTINELS = {"unknown", "unavailable", "None", "none", ""}
 
 
-def _extract() -> dict[str, list[dict[str, str]]]:
-    """Run the CI extractor on the repo (loaded by path: .github/scripts is not a package)."""
+def _extract(root: Path = REPO) -> dict[str, list[dict[str, str]]]:
+    """Run the CI extractor on `root` (loaded by path: .github/scripts is not a package)."""
     path = REPO / ".github" / "scripts" / "extract_templates.py"
     spec = importlib.util.spec_from_file_location("extract_templates", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.extract_templates(REPO)
+    return module.extract_templates(root)
 
 
 def _render(hass: HomeAssistant, source: str) -> tuple[str | None, str | None, list[str]]:
@@ -70,7 +73,12 @@ async def test_every_template_renders(ha: HomeAssistant, request: pytest.Fixture
     templates = _extract()
     # Guard against a silently empty extraction (e.g. a path change): it would pass vacuously.
     assert templates["state_templates"] and templates["runtime_templates"], templates
-    # `--package`: keep only the templates whose source file is a selected package's YAML.
+    # Per directory too: one directory dropping out (e.g. an unknown YAML tag) leaves the rest non-empty.
+    files = {t["file"] for kind in templates.values() for t in kind}
+    for top in ("packages/", "blueprints/"):
+        assert any(f.startswith(top) for f in files), f"no template extracted from {top}"
+    # `--package`: keep only the templates whose source file is a selected package's YAML (the
+    # guards above still check the full extraction).
     if selected := request.config.getoption("package"):
         files = {f"packages/{name}.yaml" for name in selected}
         templates = {
@@ -101,3 +109,12 @@ async def test_every_template_renders(ha: HomeAssistant, request: pytest.Fixture
             failures.append(f"{where}\n    error: {error}")
 
     assert not failures, f"{len(failures)} template(s) failed:\n" + "\n".join(failures)
+
+
+def test_extractor_reads_blueprint_tags_and_fails_on_bad_yaml(tmp_path: Path) -> None:
+    """`!input` parses and its file's templates are extracted; a YAML error fails, naming the file."""
+    (tmp_path / "bp.yaml").write_text('variables:\n  x: !input x\n  y: "{{ x }}"\n')
+    assert [t["file"] for t in _extract(tmp_path)["runtime_templates"]] == ["bp.yaml"]
+    (tmp_path / "bad.yaml").write_text("a: !unknown_tag b\n")
+    with pytest.raises(ValueError, match="bad.yaml"):
+        _extract(tmp_path)

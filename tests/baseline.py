@@ -211,22 +211,36 @@ BASELINE_STATES: dict[str, tuple[str, dict]] = {
     "binary_sensor.geotherm_heating_cooling_request": ("off", {}),
     "binary_sensor.geotherm_heating_cooling_active_uih": ("off", {}),
     "binary_sensor.geotherm_heating_hwc_active": ("off", {}),
-    "binary_sensor.geotherm_heating_backup_heater": ("off", {}),
     # Loxone comfort signal — "not warm enough", i.e. the house wants heat.
     "binary_sensor.loxone_heating_heating_loxone_warm_enough": ("off", {}),
     # Compressor-cycling observation (ebusd MQTT): integral mid-pause, settings as tuned by the
     # owner (start −180 °min), lifetime counters at plausible values.
     "sensor.geotherm_heating_energy_integral": ("-90", {"unit_of_measurement": "°min"}),
     "binary_sensor.geotherm_heating_compressor_demand": ("off", {}),
+    # Energy-mode inputs (ehp/Comp, ehp/Hc1Pump): compressor and pump off, i.e. mode "off".
+    "binary_sensor.geotherm_heating_compressor_running": ("off", {}),
+    "binary_sensor.geotherm_heating_circuit_pump": ("off", {}),
     "sensor.geotherm_heating_circuit_flow_temp_desired": ("26", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_compressor_start_integral": ("-180", {"unit_of_measurement": "°min"}),
     "sensor.geotherm_heating_compressor_hysteresis": ("7", {"unit_of_measurement": "K"}),
-    "sensor.geotherm_heating_backup_start_integral": ("-600", {"unit_of_measurement": "°min"}),
     "sensor.geotherm_heating_compressor_starts": ("20000", {"state_class": "total_increasing", "unit_of_measurement": "count"}),
+    "sensor.geotherm_hot_water_compressor_starts": ("9419", {"state_class": "total_increasing", "unit_of_measurement": "count"}),
     "sensor.geotherm_heating_compressor_hours": ("15000", {"unit_of_measurement": "h", "device_class": "duration"}),
     "sensor.geotherm_heating_yield_total": ("60000", {"unit_of_measurement": "kWh", "device_class": "energy"}),
     # Daily meters behind sensor.heating_efficiency_today (utility_meter; its source energy
     # sensors are MQTT and absent in CI, so seed the meters directly).
     "sensor.heating_yield_daily": ("0", {"unit_of_measurement": "kWh"}),
     "sensor.heating_electricity_daily": ("0", {"unit_of_measurement": "kWh"}),
+    # Per-mode meters behind the space-heating and hot-water efficiencies (utility_meter tariffs,
+    # same sources as above).
+    "sensor.heating_electricity_by_mode_active_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_passive_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_water_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_cooling": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_off": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_active_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_passive_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_water_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_cooling": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_off": ("0", {"unit_of_measurement": "kWh"}),
 }

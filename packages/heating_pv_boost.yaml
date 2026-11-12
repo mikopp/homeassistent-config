@@ -202,18 +202,6 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | float | round(1) }}"
 
-    # ehp/BackupIntegral — the backup heater starts at BackupIntegral + CompIntegral. Watched
-    # because deepening CompIntegral moves that point too; resistive heat must not take over.
-    - name: "Heating Backup Start Integral"
-      unique_id: heating_backup_start_integral
-      default_entity_id: sensor.geotherm_heating_backup_start_integral
-      state_topic: "ebusd/ehp/BackupIntegral"
-      unit_of_measurement: "°min"
-      entity_category: diagnostic
-      icon: mdi:heating-coil
-      device: *ebusd_geotherm
-      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(0) }}"
-
     # ── Lifetime counters (machine-side, survive HA restarts) ─────────────────
     # ehp/CompStartsHc — compressor starts in HEATING mode only (DHW has its own counter), so
     # its daily delta is the authoritative "heating starts per day".
@@ -223,6 +211,18 @@ mqtt:
       state_topic: "ebusd/ehp/CompStartsHc"
       state_class: total_increasing
       # Unit needed so the daily utility_meter and long-term statistics are not unitless.
+      unit_of_measurement: "count"
+      icon: mdi:counter
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | int }}"
+
+    # ehp/CompStartsHwc — compressor starts in HOT-WATER mode only; the counterpart of
+    # CompStartsHc, so the two daily deltas split all starts by mode.
+    - name: "Hot Water Compressor Starts"
+      unique_id: hot_water_compressor_starts
+      default_entity_id: sensor.geotherm_hot_water_compressor_starts
+      state_topic: "ebusd/ehp/CompStartsHwc"
+      state_class: total_increasing
       unit_of_measurement: "count"
       icon: mdi:counter
       device: *ebusd_geotherm
@@ -324,17 +324,32 @@ mqtt:
         {% set f = value.split(';') %}
         {% if f | count > 1 %}{{ 'ON' if f[1] | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}{% endif %}
 
-    # ── Resistive backup heater ───────────────────────────────────────────────
-    # An immersion element exists (BackupType internalheatandwater, 347 h on it), currently
-    # disabled for both circuits. Spending PV surplus on resistive heat delivers roughly a quarter
-    # of the heat per kWh that the compressor does, so a boost must never run while this is on.
-    - name: "Heating Backup Heater"
-      unique_id: heating_backup_heater
-      default_entity_id: binary_sensor.geotherm_heating_backup_heater
-      state_topic: "ebusd/ehp/Backup"
-      icon: mdi:heating-coil
+    # ── Compressor and heating-circuit pump (the inputs of the energy mode) ──
+    # ehp/Comp and ehp/Hc1Pump are plain on/off registers ("AN/AUS"). Unlike the Shelly clamp
+    # they have no expire_after, so a run is never split by a measurement dropout. Anything that
+    # is not a recognised on/off renders '' and is ignored (last value kept).
+    # → doc/heating_pv_boost/notes.md "Energy modes"
+    - name: "Heating Compressor Running"
+      unique_id: heating_compressor_running
+      default_entity_id: binary_sensor.geotherm_heating_compressor_running
+      state_topic: "ebusd/ehp/Comp"
+      device_class: running
+      icon: mdi:heat-pump
       device: *ebusd_geotherm
-      value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+      value_template: >-
+        {% set v = value | trim | lower %}
+        {{ 'ON' if v in ['1', 'on', 'yes', 'true'] else 'OFF' if v in ['0', 'off', 'no', 'false'] else '' }}
+
+    - name: "Heating Circuit Pump"
+      unique_id: heating_circuit_pump
+      default_entity_id: binary_sensor.geotherm_heating_circuit_pump
+      state_topic: "ebusd/ehp/Hc1Pump"
+      device_class: running
+      icon: mdi:pump
+      device: *ebusd_geotherm
+      value_template: >-
+        {% set v = value | trim | lower %}
+        {{ 'ON' if v in ['1', 'on', 'yes', 'true'] else 'OFF' if v in ['0', 'off', 'no', 'false'] else '' }}
 
     # ── Compressor demand (observation only) ──────────────────────────────────
     # ehp/CompDemand — "regulation wants to start the heat source" (enum 0=no 1=yes). Rises when
@@ -481,10 +496,10 @@ schedule:
 
 # ── COMPRESSOR CYCLING STATISTICS ───────────────────────────────────────────────
 # Observation only (plans/heating-compressor-cycling.md). All built on
-# binary_sensor.heating_compressor_heating_active (Shelly clamp > 500 W AND not in hot-water
-# mode), so hot-water (DHW) runs are EXCLUDED and only space-heating runs are counted.
-# sensor.heating_compressor_starts_daily (below) is the heating-only start count from the
-# machine's own counter, so the two now measure the same thing and should roughly agree.
+# binary_sensor.heating_compressor_heating_active (energy mode = active_heating), so hot-water
+# runs are excluded. Run edges come from ehp/Comp, so these should match the machine's own
+# start counter (sensor.heating_compressor_starts_daily) except for a heating run that rolls
+# into hot water, which ends here at the mode flip. → doc/heating_pv_boost/notes.md "Energy modes"
 sensor:
   - platform: history_stats
     name: "Heating Compressor Runs Today"
@@ -517,12 +532,18 @@ sensor:
       hours: 24
 
 # Daily deltas of the machine-side counters and the Shelly heating energy, reset at midnight.
-# Entity ids follow the key: sensor.heating_compressor_starts_daily etc.
+# A meter without tariffs takes its entity id from `name:` at first registration, so key and
+# name slug are kept equal: sensor.heating_compressor_starts_daily etc.
 utility_meter:
   heating_compressor_starts_daily:
     name: "Heating Compressor Starts Daily"
     unique_id: heating_compressor_starts_daily
     source: sensor.geotherm_heating_compressor_starts
+    cycle: daily
+  hot_water_compressor_starts_daily:
+    name: "Hot Water Compressor Starts Daily"
+    unique_id: hot_water_compressor_starts_daily
+    source: sensor.geotherm_hot_water_compressor_starts
     cycle: daily
   heating_yield_daily:
     name: "Heating Yield Daily"
@@ -536,6 +557,28 @@ utility_meter:
     unique_id: heating_electricity_daily
     source: sensor.technikraum_heizung_heizung_energy
     cycle: daily
+  # The same two sources split by energy mode: one tariff per mode, switched by
+  # automation.heating_energy_tariff_follows_mode. Each increment is booked to the mode active
+  # when it arrives. Ids: select.<key>, sensor.<key>_<tariff>.
+  # → doc/heating_pv_boost/notes.md "Energy modes"
+  heating_electricity_by_mode:
+    name: "Heating Electricity By Mode"
+    unique_id: heating_electricity_by_mode
+    source: sensor.technikraum_heizung_heizung_energy
+    cycle: daily
+    tariffs: &energy_modes
+      - active_heating
+      - passive_heating
+      - water_heating
+      - cooling
+      - "off"
+  # Only active_heating and water_heating should grow; any other tariff is a misbooking check.
+  heating_yield_by_mode:
+    name: "Heating Yield By Mode"
+    unique_id: heating_yield_by_mode
+    source: sensor.geotherm_heating_yield_total
+    cycle: daily
+    tariffs: *energy_modes
 
 # ── DERIVED SENSORS AND THE DECISION ────────────────────────────────────────────
 template:
@@ -643,7 +686,6 @@ template:
           {% set s = this.state %}
           {% if s == 'slab_charging' %}mdi:sun-thermometer
           {% elif s == 'ebusd_offline' %}mdi:lan-disconnect
-          {% elif s == 'backup_heater' %}mdi:heating-coil
           {% elif s == 'cooling' %}mdi:snowflake
           {% elif s == 'hot_water' %}mdi:water-boiler
           {% elif s == 'heating' %}mdi:fire
@@ -651,7 +693,6 @@ template:
           {% else %}mdi:radiator-disabled{% endif %}
         state: >
           {% if not is_state('binary_sensor.heating_ebusd_online', 'on') %}ebusd_offline
-          {% elif is_state('binary_sensor.geotherm_heating_backup_heater', 'on') %}backup_heater
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}cooling
           {% elif not is_state('binary_sensor.heating_season_active', 'on') %}off_season
           {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}slab_charging
@@ -697,11 +738,9 @@ template:
               + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
 
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
-      # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight. Includes
-      # hot water (DHW) and the circulation pump's standby draw — no DHW-free yield register
-      # exists, so unlike the run statistics above it cannot exclude hot water — and YieldTotal
-      # moves in whole kWh, so
-      # read it as a day-over-day trend at the end of the day, not as an instantaneous COP.
+      # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight, ALL modes
+      # together (the per-mode split is below). YieldTotal moves in whole kWh, so read it as a
+      # day-over-day trend at the end of the day, not as an instantaneous COP.
       # 0 until at least 1 kWh of electricity has been used today (too coarse before that).
       - name: "Heating Efficiency Today"
         unique_id: heating_efficiency_today
@@ -713,6 +752,68 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_daily') | float %}
           {% set elec = states('sensor.heating_electricity_daily') | float %}
+          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+
+      # ── Energy mode: which bucket the heat pump's energy goes to right now ──
+      # The single decision behind the per-mode meters and the heating run statistics.
+      # First match wins: compressor (hot water / heating), then pump only (hot-water run-on /
+      # passive cooling / passive heating), else off. Cooling uses hvac_action, i.e. what the
+      # machine does now, not the cooling interlock (that one also fires on a mere request).
+      # → doc/heating_pv_boost/notes.md "Energy modes"
+      - name: "Heating Energy Mode"
+        unique_id: heating_energy_mode
+        default_entity_id: sensor.heating_energy_mode
+        icon: >
+          {% set s = this.state %}
+          {% if s == 'active_heating' %}mdi:fire
+          {% elif s == 'passive_heating' %}mdi:pump
+          {% elif s == 'water_heating' %}mdi:water-boiler
+          {% elif s == 'cooling' %}mdi:snowflake
+          {% else %}mdi:power-standby{% endif %}
+        availability: >
+          {{ has_value('binary_sensor.geotherm_heating_compressor_running')
+             and has_value('binary_sensor.geotherm_heating_circuit_pump')
+             and has_value('sensor.geotherm_heating_hvac_action') }}
+        state: >
+          {% set action = states('sensor.geotherm_heating_hvac_action') %}
+          {% if is_state('binary_sensor.geotherm_heating_compressor_running', 'on') %}
+            {{ 'water_heating' if action == 'water' else 'active_heating' }}
+          {% elif is_state('binary_sensor.geotherm_heating_circuit_pump', 'on') %}
+            {{ 'water_heating' if action == 'water'
+               else 'cooling' if action == 'cooling' else 'passive_heating' }}
+          {% else %}off{% endif %}
+
+      # ── Efficiency per mode (heat out ÷ electricity in, today) ────────────
+      # From the per-mode meters. Space heating counts the pump-only (passive) electricity too.
+      # Same 1 kWh floor as the combined figure; no efficiency for cooling or off (no yield).
+      - name: "Space Heating Efficiency Today"
+        unique_id: space_heating_efficiency_today
+        default_entity_id: sensor.space_heating_efficiency_today
+        state_class: measurement
+        icon: mdi:radiator
+        availability: >
+          {{ has_value('sensor.heating_yield_by_mode_active_heating')
+             and has_value('sensor.heating_yield_by_mode_passive_heating')
+             and has_value('sensor.heating_electricity_by_mode_active_heating')
+             and has_value('sensor.heating_electricity_by_mode_passive_heating') }}
+        state: >
+          {% set heat = (states('sensor.heating_yield_by_mode_active_heating') | float)
+                      + (states('sensor.heating_yield_by_mode_passive_heating') | float) %}
+          {% set elec = (states('sensor.heating_electricity_by_mode_active_heating') | float)
+                      + (states('sensor.heating_electricity_by_mode_passive_heating') | float) %}
+          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+
+      - name: "Hot Water Efficiency Today"
+        unique_id: hot_water_efficiency_today
+        default_entity_id: sensor.hot_water_efficiency_today
+        state_class: measurement
+        icon: mdi:water-boiler
+        availability: >
+          {{ has_value('sensor.heating_yield_by_mode_water_heating')
+             and has_value('sensor.heating_electricity_by_mode_water_heating') }}
+        state: >
+          {% set heat = states('sensor.heating_yield_by_mode_water_heating') | float %}
+          {% set elec = states('sensor.heating_electricity_by_mode_water_heating') | float %}
           {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
 
   - binary_sensor:
@@ -755,14 +856,11 @@ template:
           {{ is_state('sensor.geotherm_heating_hvac_action', 'water')
              or is_state('binary_sensor.geotherm_heating_hwc_active', 'on') }}
 
-      # ── Compressor activity ───────────────────────────────────────────────
-      # The ebus hcmode ("heat") only says the generator is in heating mode — it stays "heat"
-      # while the circulation pump idles between compressor runs. Whether the compressor is
-      # actually running is read from the Shelly clamp instead, which needs no extra ebus
-      # register: measured idle circulation is ~83 W (standby ~9 W), a heating run ~1.8 kW, hot
-      # water ~3.5 kW. 500 W sits well clear of both ends. Covers ANY compressor run (heating or
-      # hot water) — the cycling statistics use binary_sensor.heating_compressor_heating_active
-      # below instead, which drops the hot-water runs.
+      # ── Compressor activity (Shelly clamp) ────────────────────────────────
+      # Electrical view of a run for the PV surplus logic: measured idle circulation ~83 W
+      # (standby ~9 W), a heating run ~1.8 kW, hot water ~3.5 kW; 500 W sits well clear of both
+      # ends. Covers ANY compressor run. The run statistics use ehp/Comp through
+      # binary_sensor.heating_compressor_heating_active below instead.
       - name: "Heating Compressor Active"
         unique_id: heating_compressor_active
         device_class: running
@@ -770,27 +868,17 @@ template:
         availability: "{{ has_value('sensor.technikraum_heizung_heizung_power') }}"
         state: "{{ (states('sensor.technikraum_heizung_heizung_power') | float) > 500 }}"
 
-      # Compressor running for SPACE HEATING only: the clamp says "running" and the ebus
-      # hvac_action is not "water" (hot-water charging). Feeds the compressor-cycling statistics
-      # (runs/runtime/duty cycle/last run) so hot-water runs are excluded from them.
-      # Deliberately NOT binary_sensor.heating_dhw_active: that one holds on for 25 min after the
-      # last hot-water activity (delay_off), which would hide the next heating run and its start.
-      # hvac_action follows the generator mode immediately, so this sensor follows the real run.
-      # Edge case: a run that starts as heating and continues into hot water without the compressor
-      # stopping (seen 2026-11-06 05:35 -> 05:50) ends its heating segment when the mode flips to
-      # "water" (on -> off here, so last-run reports the heating part only); a run that starts as
-      # hot water and then turns to heating starts a new segment on the flip. Accepted: that is
-      # exactly the heating-only view wanted.
+      # Compressor running for SPACE HEATING only: energy mode active_heating (ehp/Comp on, not
+      # hot water). Feeds the run statistics (runs/runtime/duty cycle/last run).
+      # A run that rolls from heating into hot water without the compressor stopping ends its
+      # heating segment at the mode flip; one that turns from hot water to heating starts a new
+      # segment there. Accepted: that is the heating-only view wanted.
       - name: "Heating Compressor Heating Active"
         unique_id: heating_compressor_heating_active
         device_class: running
         icon: mdi:radiator
-        availability: >
-          {{ has_value('binary_sensor.heating_compressor_active')
-             and has_value('sensor.geotherm_heating_hvac_action') }}
-        state: >
-          {{ is_state('binary_sensor.heating_compressor_active', 'on')
-             and not is_state('sensor.geotherm_heating_hvac_action', 'water') }}
+        availability: "{{ has_value('sensor.heating_energy_mode') }}"
+        state: "{{ is_state('sensor.heating_energy_mode', 'active_heating') }}"
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -849,7 +937,6 @@ template:
              shoulder season the slab needs little heat and an over-charge mostly overheats. #}
           {% elif not is_state('sensor.heating_cooling_indicator', 'active_heating') %}false
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}false
-          {% elif is_state('binary_sensor.geotherm_heating_backup_heater', 'on') %}false
           {% elif not is_state('schedule.heating_pv_window', 'on') %}false
           {% elif soc < soc_floor %}false
           {% elif saturated %}false
@@ -859,9 +946,8 @@ template:
 
   # ── Compressor cycling: length of the last run ─────────────────────────────
   # Fires when a run ends and measures it from the on→off transition itself, so it needs no
-  # stored start time. Counts space-heating runs only (hot-water runs are excluded through
-  # binary_sensor.heating_compressor_heating_active; a heating run that rolls into hot water ends
-  # when the mode flips). Keeps its value until the next heating run ends.
+  # stored start time. Space-heating runs only (binary_sensor.heating_compressor_heating_active).
+  # Keeps its value until the next heating run ends.
   - trigger:
       - trigger: state
         entity_id: binary_sensor.heating_compressor_heating_active
@@ -921,12 +1007,17 @@ automation:
         data:
           topic: "ebusd/hwc/Status/get"
           payload: "?3"
-      # Tier 2 (priority 5) — safety interlocks, already debounced by the 15 min delay_on in
-      # binary_sensor.heating_slab_mode_wanted.
+      # The energy-mode inputs: their edges are the run edges and the tariff switches.
       - action: mqtt.publish
         data:
-          topic: "ebusd/ehp/Backup/get"
-          payload: "?5"
+          topic: "ebusd/ehp/Comp/get"
+          payload: "?3"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/ehp/Hc1Pump/get"
+          payload: "?3"
+      # Tier 2 (priority 5) — safety interlocks, already debounced by the 15 min delay_on in
+      # binary_sensor.heating_slab_mode_wanted.
       - action: mqtt.publish
         data:
           topic: "ebusd/mc/CoolingRequestHc2/get"
@@ -979,11 +1070,11 @@ automation:
           payload: "?9"
       - action: mqtt.publish
         data:
-          topic: "ebusd/ehp/BackupIntegral/get"
+          topic: "ebusd/ehp/CompStartsHc/get"
           payload: "?9"
       - action: mqtt.publish
         data:
-          topic: "ebusd/ehp/CompStartsHc/get"
+          topic: "ebusd/ehp/CompStartsHwc/get"
           payload: "?9"
       - action: mqtt.publish
         data:
@@ -1042,28 +1133,34 @@ automation:
             {% endif %}
     mode: single
 
-  # The immersion heater delivers roughly a quarter of the heat per kWh that the compressor does.
-  # If it engages, surplus is being spent at a poor rate and a slab charge should not run.
-  - alias: "Heating: backup heater engaged"
-    id: heating_backup_heater_engaged
-    description: "Alert when the resistive backup heater runs"
+  # ── Energy tariffs follow the energy mode ─────────────────────────────────
+  # Points both per-mode meters at the current mode, also on HA start (the selects restore their
+  # last option, which may be stale). An unavailable mode leaves the tariff as it is.
+  # → doc/heating_pv_boost/notes.md "Energy modes"
+  - alias: "Heating: energy tariff follows mode"
+    id: heating_energy_tariff_follows_mode
+    description: "Book heat-pump electricity and yield to the current energy mode"
     triggers:
       - trigger: state
-        entity_id: binary_sensor.geotherm_heating_backup_heater
-        to: "on"
-        for:
-          minutes: 2
+        entity_id: sensor.heating_energy_mode
+        to: ~
+      - trigger: homeassistant
+        event: start
     actions:
-      - action: notify.mobile_app_greywinds_iphone
-        data:
-          title: "Heating: backup heater running"
-          message: >
-            The resistive backup heater is on while the heating circuit draws
-            {{ states('sensor.technikraum_heizung_heizung_power') }} W. Slab charging is blocked while it runs,
-            because resistive heat delivers far less per kWh than the compressor.
-            Outside {{ states('sensor.wheatherstation_outdoor_temperature') }} °C,
-            flow {{ states('sensor.geotherm_heating_circuit_flow_temp') }} °C.
-    mode: single
+      - if:
+          - condition: template
+            value_template: >
+              {{ states('sensor.heating_energy_mode')
+                 in state_attr('select.heating_electricity_by_mode', 'options') | default([], true) }}
+        then:
+          - action: select.select_option
+            target:
+              entity_id:
+                - select.heating_electricity_by_mode
+                - select.heating_yield_by_mode
+            data:
+              option: "{{ states('sensor.heating_energy_mode') }}"
+    mode: queued
 
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
   # thresholds can be judged against real days before any register is written. Retire or quieten
@@ -1118,16 +1215,18 @@ group:
       - binary_sensor.geotherm_heating_cooling_request
       - binary_sensor.geotherm_heating_cooling_active_uih
       - binary_sensor.geotherm_heating_hwc_active
-      - binary_sensor.geotherm_heating_backup_heater
       - binary_sensor.ebusd_heating_ebusd_running
+      # Energy-mode inputs (ebusd)
+      - binary_sensor.geotherm_heating_compressor_running
+      - binary_sensor.geotherm_heating_circuit_pump
       # Compressor cycling observation (ebusd)
       - sensor.geotherm_heating_energy_integral
       - binary_sensor.geotherm_heating_compressor_demand
       - sensor.geotherm_heating_circuit_flow_temp_desired
       - sensor.geotherm_heating_compressor_start_integral
       - sensor.geotherm_heating_compressor_hysteresis
-      - sensor.geotherm_heating_backup_start_integral
       - sensor.geotherm_heating_compressor_starts
+      - sensor.geotherm_hot_water_compressor_starts
       - sensor.geotherm_heating_compressor_hours
       - sensor.geotherm_heating_yield_total
       # Compressor cycling statistics
@@ -1141,6 +1240,23 @@ group:
       - sensor.heating_electricity_daily
       - sensor.heating_efficiency_today
       - sensor.heating_compressor_stop_temp
+      - sensor.hot_water_compressor_starts_daily
+      # Energy split by mode
+      - sensor.heating_energy_mode
+      - select.heating_electricity_by_mode
+      - select.heating_yield_by_mode
+      - sensor.heating_electricity_by_mode_active_heating
+      - sensor.heating_electricity_by_mode_passive_heating
+      - sensor.heating_electricity_by_mode_water_heating
+      - sensor.heating_electricity_by_mode_cooling
+      - sensor.heating_electricity_by_mode_off
+      - sensor.heating_yield_by_mode_active_heating
+      - sensor.heating_yield_by_mode_passive_heating
+      - sensor.heating_yield_by_mode_water_heating
+      - sensor.heating_yield_by_mode_cooling
+      - sensor.heating_yield_by_mode_off
+      - sensor.space_heating_efficiency_today
+      - sensor.hot_water_efficiency_today
       # Loxone comfort signal
       - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors

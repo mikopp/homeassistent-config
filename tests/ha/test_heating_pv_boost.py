@@ -111,6 +111,9 @@ _VICTRON = {
 _HEAT = Input("shelly/shellypro3em-heizung/status/em:0", 120, _em)
 _HEAT_ENERGY = Input("shelly/shellypro3em-heizung/status/emdata:0", 120, _emdata)
 _HVAC = Input("ebusd/ehp/Status", None, _status)
+# Energy-mode inputs: ehp/Comp and ehp/Hc1Pump, plain on/off registers (no expire_after).
+_COMP = _ebus("ehp/Comp")
+_PUMP = _ebus("ehp/Hc1Pump")
 
 
 # ── Cases and the generic table runner ───────────────────────────────────────────────────
@@ -342,6 +345,8 @@ _COMPRESSOR_TABLE = Table(
     inputs={
         "heat": _HEAT,
         "hvac": _HVAC,
+        "comp": _COMP,
+        "pump": _PUMP,
         "flow_desired": Input("ebusd/mc/Status0a", None,
                               lambda t: f"27.5;45;on;on;{t}"),  # field 4 = flow setpoint
         "hysteresis": _ebus("ehp/CompHysteresis"),
@@ -360,13 +365,14 @@ _COMPRESSOR_TABLE = Table(
         "elec_daily": ("sensor", "utility_meter", "heating_electricity_daily_single_tariff"),
         "efficiency": ("sensor", "template", "heating_efficiency_today"),
     },
-    defaults={"heat": 83, "hvac": "heat", "flow_desired": 26, "hysteresis": "7.0",
-              "yield_inc": 0, "elec_inc": 0},
-    # Reset: clamp 1000 W (running; the clamp case starts from "off"), mode raw 7 (an unmapped
-    # enum → `unknown`, so the heating-only sensor is unavailable, which no case expects),
-    # stop 20 + 5 = 25, average 0.5 h / 1 run = 30 min, meters reset to 0.
-    reset={"heat": 1000, "hvac": "7", "flow_desired": 20, "hysteresis": "5.0",
-           "yield_inc": 0, "elec_inc": 0},
+    defaults={"heat": 83, "hvac": "heat", "comp": "off", "pump": "on", "flow_desired": 26,
+              "hysteresis": "7.0", "yield_inc": 0, "elec_inc": 0},
+    # Reset: clamp 1000 W (running; the clamp case starts from "off"), compressor on, mode raw 7
+    # (an unmapped enum → `unknown`, so the energy mode and the heating-only sensor are
+    # unavailable, which no case expects), stop 20 + 5 = 25, average 0.5 h / 1 run = 30 min,
+    # meters reset to 0.
+    reset={"heat": 1000, "hvac": "7", "comp": "on", "pump": "on", "flow_desired": 20,
+           "hysteresis": "5.0", "yield_inc": 0, "elec_inc": 0},
     reset_seeds={"runtime": ("0.5", _H), "runs": ("1", {})},
     reset_expect={"compressor": _ON, "heating": _UNAV, "stop_temp": near(25),
                   "average": near(30), "yield_daily": near(0), "elec_daily": near(0)},
@@ -380,16 +386,21 @@ COMPRESSOR_CASES = [
          expect={"compressor": _OFF},
          then=[Step(inputs={"heat": 1800}, expect={"compressor": _ON}),
                Step(expire=frozenset({"heat"}), expect={"compressor": _UNAV})]),
-    Case(name="heating_active_is_on_for_a_heating_run", inputs={"hvac": "heat", "heat": 1800},
-         expect={"heating": _ON}),
+    # The heating-only run sensor follows ehp/Comp (through the energy mode), not the clamp.
+    Case(name="heating_active_is_on_for_a_heating_run",
+         inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"heating": _ON}),
     # Heating → hot-water roll-over (hcmode raw 4 = water): all-runs on, heating-only off.
-    Case(name="heating_active_is_off_for_a_hot_water_run", inputs={"hvac": "heat", "heat": 1800},
-         expect={"heating": _ON},
+    Case(name="heating_active_is_off_for_a_hot_water_run",
+         inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"heating": _ON},
          then=[Step(inputs={"hvac": "4", "heat": 3500},
                     expect={"compressor": _ON, "heating": _OFF})]),
-    # Idle circulation in heating mode (hcmode raw 3 = heat) is not a run.
-    Case(name="heating_active_is_off_when_the_compressor_is_off", inputs={"hvac": "3", "heat": 83},
-         expect={"heating": _OFF}),
+    # Pump only in heating mode (hcmode raw 3 = heat) is not a run.
+    Case(name="heating_active_is_off_when_the_compressor_is_off",
+         inputs={"hvac": "3", "comp": "off", "heat": 83}, expect={"heating": _OFF}),
+    # A clamp dropout mid-run does not end the run: ehp/Comp still says on.
+    Case(name="heating_active_ignores_a_clamp_dropout",
+         inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"heating": _ON},
+         then=[Step(expire=frozenset({"heat"}), expect={"compressor": _UNAV, "heating": _ON})]),
     # 4 runs in 1.0 h → 15 min; no runs → 0, not a division error.
     Case(name="average_run_is_runtime_over_runs",
          seeds={"runtime": ("1.0", _H), "runs": ("4", {})}, expect={"average": near(15)},
@@ -468,6 +479,118 @@ async def test_cooling_interlock(ha: HomeAssistant, broker: Broker) -> None:
     failures = await _run_table(ha, broker, None, _COOLING_TABLE, COOLING_CASES,
                                 _ids(ha, _COOLING_TABLE.outputs))
     assert not failures, f"{len(failures)} interlock check(s) failed:\n" + "\n".join(failures)
+
+
+# ── 3b. Energy mode: sensor.heating_energy_mode ──────────────────────────────────────────
+_MODE_TABLE = Table(
+    inputs={"comp": _COMP, "pump": _PUMP, "hvac": _HVAC},
+    outputs={"mode": ("sensor", "template", "heating_energy_mode")},
+    defaults={"comp": "off", "pump": "off", "hvac": "heat"},
+    # Reset: hcmode raw 7 (unmapped → unknown) makes the mode unavailable, which no case expects.
+    reset={"comp": "on", "pump": "on", "hvac": "7"},
+    reset_expect={"mode": _UNAV},
+)
+_MODE = {m: is_state(m) for m in
+         ("active_heating", "passive_heating", "water_heating", "cooling", "off")}
+# One case per row of the mode table (first match wins), the row order, raw enum numbers and
+# ebusd's raw on/off numbers. → doc/heating_pv_boost/notes.md "Energy modes"
+MODE_CASES = [
+    Case(name="compressor_heating_is_active_heating", inputs={"comp": "on", "pump": "on"},
+         expect={"mode": _MODE["active_heating"]}),
+    Case(name="compressor_hot_water_is_water_heating",
+         inputs={"comp": "on", "pump": "on", "hvac": "water"},
+         expect={"mode": _MODE["water_heating"]}),
+    Case(name="compressor_hot_water_raw_enum", inputs={"comp": "on", "hvac": "4"},
+         expect={"mode": _MODE["water_heating"]}),
+    Case(name="pump_only_is_passive_heating", inputs={"pump": "on"},
+         expect={"mode": _MODE["passive_heating"]}),
+    Case(name="pump_only_in_hot_water_is_the_run_on", inputs={"pump": "on", "hvac": "water"},
+         expect={"mode": _MODE["water_heating"]}),
+    Case(name="pump_while_cooling_is_cooling", inputs={"pump": "on", "hvac": "cooling"},
+         expect={"mode": _MODE["cooling"]}),
+    Case(name="pump_while_cooling_raw_enum", inputs={"pump": "on", "hvac": "1"},
+         expect={"mode": _MODE["cooling"]}),
+    Case(name="nothing_running_is_off", expect={"mode": _MODE["off"]}),
+    Case(name="cooling_without_pump_is_off", inputs={"hvac": "cooling"},
+         expect={"mode": _MODE["off"]}),
+    # Row order: the compressor wins over the cooling indicator (passive cooling never runs it).
+    Case(name="compressor_wins_over_cooling", inputs={"comp": "on", "pump": "on", "hvac": "cooling"},
+         expect={"mode": _MODE["active_heating"]}),
+    # ebusd raw numbers for on/off; an unrecognised payload is ignored (last value kept).
+    Case(name="raw_numbers_and_garbage", inputs={"comp": "1", "pump": "0"},
+         expect={"mode": _MODE["active_heating"]},
+         then=[Step(inputs={"comp": "n/a"}, expect={"mode": _MODE["active_heating"]}),
+               Step(inputs={"comp": "0"}, expect={"mode": _MODE["off"]})]),
+]
+
+
+async def test_energy_mode(ha: HomeAssistant, broker: Broker) -> None:
+    """All energy-mode cases on one HA; every failing case is listed in the one assert."""
+    failures = await _run_table(ha, broker, None, _MODE_TABLE, MODE_CASES,
+                                _ids(ha, _MODE_TABLE.outputs))
+    assert not failures, f"{len(failures)} energy-mode check(s) failed:\n" + "\n".join(failures)
+
+
+# Tariff meter outputs: (sensor, utility_meter, "<meter unique_id>_<tariff>").
+_TARIFFS = ("active_heating", "passive_heating", "water_heating", "cooling", "off")
+
+
+def _tariff_ids(hass: HomeAssistant, meter: str) -> dict[str, str]:
+    """Registry ids of one per-mode meter's tariff sensors, keyed by tariff."""
+    return {t: entity_id(hass, "sensor", "utility_meter", f"{meter}_{t}") for t in _TARIFFS}
+
+
+async def test_energy_split_by_mode(ha: HomeAssistant, broker: Broker) -> None:
+    """Electricity and yield are booked to the energy mode active when each increment arrives.
+
+    New. Real chain: ebusd/Shelly payloads → energy mode → the tariff automation → the two
+    tariff `utility_meter`s → the two per-mode efficiencies (and the combined one). One step
+    per mode, each adding electricity (Shelly `emdata:0`, Wh) and yield (`YieldTotal`, kWh):
+    passive 0.2 kWh / 0; active 2.0 / 6; water 1.0 / 3; hot-water run-on 0.01 / 0;
+    cooling 0.3 / 0; off 0.05 / 0. Space heating = 6 / 2.2, hot water = 3 / 1.01.
+    """
+    yield_in = _COMPRESSOR_TABLE.inputs["yield"]
+    elec = _tariff_ids(ha, "heating_electricity_by_mode")
+    heat = _tariff_ids(ha, "heating_yield_by_mode")
+    ids = {f"elec_{t}": e for t, e in elec.items()} | {f"yield_{t}": e for t, e in heat.items()}
+    ids |= {"mode": entity_id(ha, "sensor", "template", "heating_energy_mode"),
+            "select_elec": "select.heating_electricity_by_mode",
+            "select_yield": "select.heating_yield_by_mode",
+            "space": entity_id(ha, "sensor", "template", "space_heating_efficiency_today"),
+            "dhw": entity_id(ha, "sensor", "template", "hot_water_efficiency_today"),
+            "combined": entity_id(ha, "sensor", "template", "heating_efficiency_today")}
+    await wait_subscribed(ha, broker, _COMP.topic, _PUMP.topic, _HVAC.topic, yield_in.topic,
+                          _HEAT_ENERGY.topic)
+    failures: list[str] = []
+    counters = {"wh": 1_000_000.0, "kwh": 60000}
+
+    async def step(where: str, comp: str, pump: str, hvac: str, elec_kwh: float, yield_kwh: int,
+                   mode: str) -> None:
+        """Set the mode, check the tariff switched, then add the step's energy."""
+        await _send(ha, broker, (_COMP, comp), (_PUMP, pump), (_HVAC, hvac))
+        failures.extend(check_states(ha, ids, {"mode": is_state(mode),
+                                               "select_elec": is_state(mode),
+                                               "select_yield": is_state(mode)}, where))
+        counters["wh"] += elec_kwh * 1000
+        counters["kwh"] += yield_kwh
+        await _send(ha, broker, (_HEAT_ENERGY, counters["wh"]), (yield_in, counters["kwh"]))
+
+    # First readings only initialise the meters (all tariffs start at 0).
+    await _send(ha, broker, (_HEAT_ENERGY, counters["wh"]), (yield_in, counters["kwh"]))
+    await step("passive heating", "off", "on", "heat", 0.2, 0, "passive_heating")
+    await step("active heating", "on", "on", "heat", 2.0, 6, "active_heating")
+    await step("water heating", "on", "on", "water", 1.0, 3, "water_heating")
+    await step("hot-water run-on", "off", "on", "water", 0.01, 0, "water_heating")
+    await step("cooling", "off", "on", "cooling", 0.3, 0, "cooling")
+    await step("off", "off", "off", "off", 0.05, 0, "off")
+    want = {"elec_active_heating": near(2.0), "elec_passive_heating": near(0.2),
+            "elec_water_heating": near(1.01), "elec_cooling": near(0.3), "elec_off": near(0.05),
+            "yield_active_heating": near(6), "yield_water_heating": near(3),
+            "yield_passive_heating": near(0), "yield_cooling": near(0), "yield_off": near(0),
+            "space": near(round(6 / 2.2, 2)), "dhw": near(round(3 / 1.01, 2)),
+            "combined": near(round(9 / 3.56, 2))}
+    failures.extend(check_states(ha, ids, want, "after all modes"))
+    assert not failures, f"{len(failures)} energy-split check(s) failed:\n" + "\n".join(failures)
 
 
 # ── 4. Derived setpoint: sensor.heating_target_temp ──────────────────────────────────────
@@ -622,7 +745,7 @@ async def test_slab_mode_wanted_delays(ha: HomeAssistant, broker: Broker, clock:
     Every gate of the decision is driven for real: active heating season (the REAL indicator
     via its seeded 48h mean, as in `test_target_temp`), the PV window (a schedule helper: the
     clock is moved to 10:00), ebusd online (ehp/Status republished, its flow temperature has
-    `force_update`), SOC 80 % over the 70 % floor, no cooling, no backup heater, no DHW.
+    `force_update`), SOC 80 % over the 70 % floor, no cooling, no DHW.
     """
     slab = entity_id(ha, "binary_sensor", "template", "heating_slab_mode_wanted")
     surplus = entity_id(ha, "sensor", "template", "heating_pv_surplus")
@@ -687,6 +810,11 @@ async def test_slab_mode_wanted_delays(ha: HomeAssistant, broker: Broker, clock:
     assert not failures, f"{len(failures)} slab check(s) failed:\n" + "\n".join(failures)
 
 
+def _clamp(watts: float) -> tuple[tuple[Input, Any], tuple[Input, Any]]:
+    """A compressor state as the two devices report it: the clamp and ehp/Comp (on above 500 W)."""
+    return (_HEAT, watts), (_COMP, "on" if watts > 500 else "off")
+
+
 async def _compressor_run(
     hass: HomeAssistant, broker: Broker, clock: Clock, *, mode: str, watts: float, minutes: float,
 ) -> None:
@@ -697,7 +825,7 @@ async def _compressor_run(
     """
     async def refresh() -> None:
         """Republish the mode and the clamp (same values: no state change)."""
-        await _send(hass, broker, (_HVAC, mode), (_HEAT, watts))
+        await _send(hass, broker, (_HVAC, mode), *_clamp(watts))
 
     await clock.hold(minutes * 60, refresh)
 
@@ -716,7 +844,8 @@ async def test_last_run(ha: HomeAssistant, broker: Broker, clock: Clock) -> None
            "heating": entity_id(ha, "binary_sensor", "template",
                                 "heating_compressor_heating_active"),
            "last_run": entity_id(ha, "sensor", "template", "heating_compressor_last_run")}
-    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic, _COMP.topic, _PUMP.topic)
+    await _send(ha, broker, (_PUMP, "on"))
     failures: list[str] = []
 
     def check(where: str, **want: Callable[[str], bool]) -> None:
@@ -724,38 +853,38 @@ async def test_last_run(ha: HomeAssistant, broker: Broker, clock: Clock) -> None
         failures.extend(check_states(ha, ids, want, where))
 
     # Idle circulation (83 W, heating mode): not running; no run has ended yet.
-    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    await _send(ha, broker, (_HVAC, "heat"), *_clamp(83))
     check("idle", active=_OFF, heating=_OFF, last_run=is_state("unknown"))
 
     # 1. A 7 min heating run (1.8 kW) is reported as 7.0 min when it ends.
-    await _send(ha, broker, (_HEAT, 1800))
+    await _send(ha, broker, *_clamp(1800))
     check("heating run starts", active=_ON, heating=_ON)
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=7)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     check("7 min heating run ends", active=_OFF, heating=_OFF, last_run=near(7.0))
 
     # 2. A 30 min hot-water run (3.5 kW, hcmode water) is a compressor run but not a heating
     #    run: last run keeps the 7.0.
-    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
     check("hot-water run starts", active=_ON, heating=_OFF)
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=30)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     check("30 min hot-water run ends", active=_OFF, heating=_OFF, last_run=near(7.0))
 
     # 3. The next heating run, 12 min, replaces it.
-    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 1800))
+    await _send(ha, broker, (_HVAC, "heat"), *_clamp(1800))
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=12)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     check("12 min heating run ends", last_run=near(12.0))
 
     # 4. New: 5 min of heating, then the mode flips to water with the compressor still on: the
     #    heating segment ends at the flip (5.0), the hot-water tail does not count.
-    await _send(ha, broker, (_HEAT, 1800))
+    await _send(ha, broker, *_clamp(1800))
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=5)
-    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
     check("heating rolls into hot water", active=_ON, heating=_OFF, last_run=near(5.0))
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=10)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     check("hot-water tail ends", active=_OFF, last_run=near(5.0))
     assert not failures, f"{len(failures)} last-run check(s) failed:\n" + "\n".join(failures)
 
@@ -775,7 +904,8 @@ async def test_cycling_history_stats(ha: HomeAssistant, broker: Broker, clock: C
            "duty": entity_id(ha, "sensor", "history_stats", "heating_compressor_duty_cycle_24h"),
            "average": entity_id(ha, "sensor", "template", "heating_compressor_average_run_today")}
     await clock.move_to(local_at(next_day(), 10))
-    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic, _COMP.topic, _PUMP.topic)
+    await _send(ha, broker, (_PUMP, "on"))
     failures: list[str] = []
 
     async def check(where: str, **want: Callable[[str], bool]) -> None:
@@ -783,18 +913,18 @@ async def test_cycling_history_stats(ha: HomeAssistant, broker: Broker, clock: C
         await async_wait_recording_done(ha)
         failures.extend(check_states(ha, ids, want, where))
 
-    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    await _send(ha, broker, (_HVAC, "heat"), *_clamp(83))
     await clock.advance(60)
     await check("no run today", runs=near(0), runtime=near(0), average=near(0))
     for minutes, pause in ((10, 5), (20, 5)):
-        await _send(ha, broker, (_HEAT, 1800))
+        await _send(ha, broker, *_clamp(1800))
         await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=minutes)
-        await _send(ha, broker, (_HEAT, 83))
+        await _send(ha, broker, *_clamp(83))
         await _compressor_run(ha, broker, clock, mode="heat", watts=83, minutes=pause)
     # A hot-water run is not counted.
-    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=15)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     await clock.advance(60)
     await check("two heating runs, one hot-water run", runs=near(2), runtime=near(0.5),
                 average=near(15.0), duty=near(round(0.5 / 24 * 100, 1), 0.05))
@@ -819,19 +949,21 @@ async def test_history_stats_read_back_from_recorder(
            "runtime": entity_id(ha, "sensor", "history_stats",
                                 "heating_compressor_runtime_today"),
            "duty": entity_id(ha, "sensor", "history_stats", "heating_compressor_duty_cycle_24h")}
+    # Same runs as test_cycling_history_stats (energy-mode driven: ehp/Comp + Hc1Pump + clamp).
     await clock.move_to(local_at(next_day(), 10))
-    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
-    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic, _COMP.topic, _PUMP.topic)
+    await _send(ha, broker, (_PUMP, "on"))
+    await _send(ha, broker, (_HVAC, "heat"), *_clamp(83))
     await clock.advance(60)
     for minutes in (10, 20):
-        await _send(ha, broker, (_HEAT, 1800))
+        await _send(ha, broker, *_clamp(1800))
         await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=minutes)
-        await _send(ha, broker, (_HEAT, 83))
+        await _send(ha, broker, *_clamp(83))
         await _compressor_run(ha, broker, clock, mode="heat", watts=83, minutes=5)
     # A hot-water run is not counted.
-    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=15)
-    await _send(ha, broker, (_HEAT, 83))
+    await _send(ha, broker, *_clamp(83))
     await clock.advance(60)
     await async_wait_recording_done(ha)
     live = check_states(ha, ids, {"runs": near(2), "runtime": near(0.5)}, "before reload")
@@ -854,12 +986,16 @@ async def test_daily_meters_reset_at_midnight(
 
     New. The compressor table resets them with `utility_meter.reset`; here the real cycle does
     it: 9 kWh heat / 3 kWh electricity during the day (efficiency 3.0), the clock crosses
-    midnight → both meters 0, efficiency 0, then the next increments count from 0.
+    midnight → both meters 0, efficiency 0, then the next increments count from 0. The per-mode
+    meters reset the same way: with no energy-mode input the tariffs stay at their first option
+    (active_heating), which collects everything here.
     """
     ids = {"yield": entity_id(ha, "sensor", "utility_meter", "heating_yield_daily_single_tariff"),
            "elec": entity_id(ha, "sensor", "utility_meter",
                              "heating_electricity_daily_single_tariff"),
-           "efficiency": entity_id(ha, "sensor", "template", "heating_efficiency_today")}
+           "efficiency": entity_id(ha, "sensor", "template", "heating_efficiency_today"),
+           "yield_active": _tariff_ids(ha, "heating_yield_by_mode")["active_heating"],
+           "elec_active": _tariff_ids(ha, "heating_electricity_by_mode")["active_heating"]}
     yield_in = _COMPRESSOR_TABLE.inputs["yield"]
     await clock.move_to(local_at(next_day(), 22))
     await wait_subscribed(ha, broker, yield_in.topic, _HEAT_ENERGY.topic)
@@ -872,12 +1008,15 @@ async def test_daily_meters_reset_at_midnight(
     # First readings only set the meters' start; then +9 kWh heat, +3 kWh electricity.
     await _send(ha, broker, (yield_in, 60000), (_HEAT_ENERGY, 1_000_000.0))
     await _send(ha, broker, (yield_in, 60009), (_HEAT_ENERGY, 1_003_000.0))
-    check("evening", **{"yield": near(9), "elec": near(3), "efficiency": near(3.0)})
+    check("evening", **{"yield": near(9), "elec": near(3), "efficiency": near(3.0),
+                        "yield_active": near(9), "elec_active": near(3)})
     # Cross local midnight (22:00 → 00:00:30); the Shelly counter expires (120 s), so it is
     # republished afterwards with an unchanged value.
     await clock.move_to(local_at(next_day(after=next_day()), 0, 0, 30))
     await _send(ha, broker, (_HEAT_ENERGY, 1_003_000.0))
-    check("after midnight", **{"yield": near(0), "elec": near(0), "efficiency": near(0)})
+    check("after midnight", **{"yield": near(0), "elec": near(0), "efficiency": near(0),
+                               "yield_active": near(0), "elec_active": near(0)})
     await _send(ha, broker, (yield_in, 60013), (_HEAT_ENERGY, 1_005_000.0))
-    check("next day", **{"yield": near(4), "elec": near(2), "efficiency": near(2.0)})
+    check("next day", **{"yield": near(4), "elec": near(2), "efficiency": near(2.0),
+                         "yield_active": near(4), "elec_active": near(2)})
     assert not failures, f"{len(failures)} meter check(s) failed:\n" + "\n".join(failures)
