@@ -268,9 +268,11 @@ only over the real broker; "unavailable" is a real `expire_after`. The daily met
 inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
-`tests/ha/test_heating_pv_boost_ebusd_registers.py` feeds every ebusd-fed entity (all registers
-except `ehp/Integral`, the harness sync channel) its live payload and variants (enum names and
-raw numbers, case, unmapped, short, empty, garbage) and fails on any mqtt WARNING. Only
+`tests/ha/test_heating_pv_boost_ebusd_registers.py` feeds every ebusd-fed entity its live payload
+and variants (enum names and raw numbers, case, unmapped, short, empty, garbage) and fails on any
+mqtt WARNING (`ehp/Integral`, the harness sync channel, has its own test). Its poll test asserts
+that every trigger of `heating_ebusd_poll_registration` sends exactly the 20 `/get` priorities
+seen on the live broker, and nothing while the scan reads `running`. Only
 `loxone/heating/warm_enough` is still never fed a message by any test: #159. A payload without
 field 3 renders `heating_hvac_action` as `unknown`: a sensor without `device_class`/unit stores an
 empty render as `''` (only numeric sensors ignore it, source read at 2026.10.4). The energy mode is a case table; the per-mode meters,

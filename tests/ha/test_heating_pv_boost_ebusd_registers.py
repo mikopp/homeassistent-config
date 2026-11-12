@@ -12,12 +12,13 @@ order WITHOUT a reset, so "ignored payload keeps the last value" is checked agai
 previous step produced. Failures are collected; one assert names every failing step.
 
 `ehp/Integral` is the `mqtt_sync` channel of the harness (tests/ha/conftest.py), so it has its own
-test below. The `loxone/...` topics are not here (no live payloads supplied yet).
+test below, and the outgoing side (the `/get` poll priorities HA registers) has the last one. The `loxone/...` topics are not here (no live payloads supplied yet).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -25,6 +26,7 @@ from homeassistant.core import HomeAssistant
 
 from conftest import (
     Broker,
+    _real_monotonic,
     wait_state,
     check_states,
     entity_id,
@@ -333,4 +335,86 @@ async def test_ebusd_integral(ha: HomeAssistant, broker: Broker) -> None:
         got = state.state if state else None
         if got is None or not near(want)(got):
             failures.append(f"Integral #{n} {payload!r}: {integral} = {got!r}, want {want}")
+    assert not failures, "\n".join(failures)
+
+
+# Poll priorities as they sit on the live broker (MQTT Explorer, 2026-11-12): `?N` on
+# `<register>/get` reads now AND polls at priority N. A literal, not read from the YAML, so a
+# typo in a topic or priority there fails. Backup/BackupIntegral are gone from the YAML (#161).
+_POLLS = {
+    "ebusd/ehp/Status/get": "?3", "ebusd/ehp/HcReturnTemp/get": "?3",
+    "ebusd/hwc/Status/get": "?3", "ebusd/ehp/Comp/get": "?3", "ebusd/ehp/Hc1Pump/get": "?3",
+    "ebusd/mc/CoolingRequestHc2/get": "?5", "ebusd/uih/CoolingDemand/get": "?5",
+    "ebusd/uih/CoolingActive/get": "?5", "ebusd/ehp/Integral/get": "?5",
+    "ebusd/ehp/CompDemand/get": "?5", "ebusd/mc/Status0a/get": "?5",
+    "ebusd/mc/TempDesiredLow/get": "?7", "ebusd/mc/TempDesired/get": "?7",
+    "ebusd/mc/OperatingMode/get": "?7",
+    "ebusd/ehp/CompIntegral/get": "?9", "ebusd/ehp/CompHysteresis/get": "?9",
+    "ebusd/ehp/CompStartsHc/get": "?9", "ebusd/ehp/CompStartsHwc/get": "?9",
+    "ebusd/ehp/CompHoursHc/get": "?9", "ebusd/ehp/YieldTotal/get": "?9",
+}
+
+
+async def test_ebusd_poll_registration(ha: HomeAssistant, broker: Broker) -> None:
+    """automation.heating_ebusd_poll_registration sends every `/get` priority, once per trigger.
+
+    The triggers (scan → finished / OK, ebusd running → on) each send exactly `_POLLS`; while the
+    scan reads `running` nothing is sent (a catalog mid-discovery is unreliable).
+    → doc/heating_pv_boost/notes.md "Polling"
+    """
+    await wait_subscribed(ha, broker, "ebusd/global/scan", "ebusd/global/running")
+    count = 0
+
+    def polls(mark: int) -> list[tuple[str, str]]:
+        """The `/get` messages seen on the broker since `mark`."""
+        return [m for m in broker.received[mark:]
+                if m[0].startswith("ebusd/") and m[0].endswith("/get")]
+
+    def wait_polls(mark: int, n: int, timeout: float = 10) -> None:
+        """Real-time wait until `n` polls arrived since `mark` (the automation publishes them one
+        after another, so a round trip through HA is not enough)."""
+        deadline = _real_monotonic() + timeout
+        while len(polls(mark)) < n:
+            if _real_monotonic() > deadline:
+                raise AssertionError(f"{len(polls(mark))} of {n} polls arrived since {mark}")
+            threading.Event().wait(0.01)
+
+    async def polls_after(mark: int, n: int) -> list[tuple[str, str]]:
+        """The `/get` messages HA sent since `mark`: wait for `n`, then for a sentinel behind them."""
+        nonlocal count
+        count += 1
+        if n:
+            await ha.async_add_executor_job(wait_polls, mark, n)
+        await mqtt_sync(ha, broker)
+        await publish(ha, broker, f"test/sentinel/{count}", "x")
+        await ha.async_add_executor_job(broker.wait_received, f"test/sentinel/{count}", "x", mark)
+        return polls(mark)
+
+    # HA's own start trigger runs the automation once at boot: let that run finish first.
+    await polls_after(0, len(_POLLS))
+
+    # (what is published, whether the automation must answer with the full list)
+    steps = [
+        (("ebusd/global/scan", "running"), False),
+        (("ebusd/global/running", "false"), False),
+        (("ebusd/global/running", "true"), False),    # gated: scan is still running
+        (("ebusd/global/scan", "finished"), True),
+        (("ebusd/global/scan", "running"), False),
+        (("ebusd/global/scan", "OK"), True),
+        (("ebusd/global/running", "false"), False),   # off is not a trigger
+        (("ebusd/global/running", "true"), True),     # ebusd restarted: priorities are lost
+    ]
+    failures: list[str] = []
+    for (topic, payload), expect_all in steps:
+        mark = len(broker.received)
+        await publish(ha, broker, topic, payload)
+        sent = await polls_after(mark, len(_POLLS) if expect_all else 0)
+        want = sorted(_POLLS.items()) if expect_all else []
+        if sorted(sent) != want:
+            missing = sorted(set(want) - set(sent))
+            extra = sorted(set(sent) - set(want))
+            failures.append(f"{topic}={payload}: sent {len(sent)} of {len(want)}"
+                            f"{f', missing {missing}' if missing else ''}"
+                            f"{f', unexpected {extra}' if extra else ''}"
+                            f"{', duplicates' if len(sent) != len(set(sent)) else ''}")
     assert not failures, "\n".join(failures)
