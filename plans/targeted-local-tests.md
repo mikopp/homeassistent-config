@@ -8,7 +8,13 @@
 - [x] Step 3 package selection (`--package`) [DONE]
 - [x] Step 4 skip unchanged dependency installs [DONE]
 - [x] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README) [DONE]
-- [ ] Step 6 Close
+- [x] Efficiency check (wall time of the whole `ci-local.sh` call, 4 cores, deps unchanged):
+      full run 57 s; one test 6-11 s (`-- tests/ha/test_energy_wallbox.py::test_wallbox_wrappers`
+      5.8 s, `-- tests/ha/test_pergola.py::test_deadbands` 10.7 s); `--package` energy 8.5 s,
+      heating_pv_boost 16 s, victron 21 s, airflow_cooling 21 s, pergola 26 s; `--yaml` 2 s.
+      A fresh agent given only "confirm the wallbox tests are green while developing" chose
+      `--package energy` from the guidance by itself (9 s, one command).
+- [ ] Step 6 Close (after the PR is merged)
 
 ## Overview
 `.github/scripts/ci-local.sh` always runs every YAML check and the whole `tests/ha` suite (~60 s of
