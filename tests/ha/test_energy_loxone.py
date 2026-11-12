@@ -29,6 +29,7 @@ from homeassistant.core import HomeAssistant
 
 from conftest import (
     Broker,
+    MqttWarnings,
     entity_id,
     is_state,
     mqtt_sync,
@@ -103,19 +104,6 @@ _FLAG: list[tuple[str, Callable[[str], bool], str]] = [
 ]
 
 
-class _MqttWarnings(logging.Handler):
-    """Collects WARNING+ records of the mqtt integration, tagged with the step being published."""
-
-    def __init__(self) -> None:
-        super().__init__(logging.WARNING)
-        self.step = ""
-        self.hits: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if record.name.startswith("homeassistant.components.mqtt"):
-            self.hits.append(f"{self.step}: {record.getMessage()}")
-
-
 # warm_enough drives the real heating_pv_boost entities: also runs under `--package heating_pv_boost`.
 @pytest.mark.package("heating_pv_boost")
 async def test_loxone_inputs(ha: HomeAssistant, broker: Broker) -> None:
@@ -124,7 +112,7 @@ async def test_loxone_inputs(ha: HomeAssistant, broker: Broker) -> None:
     flag = entity_id(ha, "binary_sensor", "mqtt", "heating_loxone_warm_enough")
     await wait_subscribed(ha, broker, "loxone/heating/warm_enough", *(m.topic for m in METERS))
     failures: list[str] = []
-    warnings = _MqttWarnings()
+    warnings = MqttWarnings()
     logging.getLogger("homeassistant.components.mqtt").addHandler(warnings)
     try:
         for meter in METERS:

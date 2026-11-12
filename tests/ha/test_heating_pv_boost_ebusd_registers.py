@@ -26,6 +26,7 @@ from homeassistant.core import HomeAssistant
 
 from conftest import (
     Broker,
+    MqttWarnings,
     _real_monotonic,
     wait_state,
     check_states,
@@ -278,19 +279,6 @@ TOPICS = [
 ]
 
 
-class _MqttWarnings(logging.Handler):
-    """Collects WARNING+ records of the mqtt integration, tagged with the step being published."""
-
-    def __init__(self) -> None:
-        super().__init__(logging.WARNING)
-        self.step = ""
-        self.hits: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if record.name.startswith("homeassistant.components.mqtt"):
-            self.hits.append(f"{self.step}: {record.getMessage()}")
-
-
 async def test_ebusd_registers(ha: HomeAssistant, broker: Broker) -> None:
     """Every ebusd payload of the table, one HA; every failing step is named in the one assert."""
     ids = {uid: entity_id(ha, domain, "mqtt", uid) for uid, domain in _ENTITIES.items()}
@@ -298,7 +286,7 @@ async def test_ebusd_registers(ha: HomeAssistant, broker: Broker) -> None:
     failures: list[str] = []
     # A template that raises on a payload keeps the last state, so the state check alone cannot
     # see a missing empty/garbage guard; the warning the mqtt integration logs for it does.
-    warnings = _MqttWarnings()
+    warnings = MqttWarnings()
     logging.getLogger("homeassistant.components.mqtt").addHandler(warnings)
     try:
         for topic in TOPICS:

@@ -98,6 +98,11 @@ is open: `plans/energy-live-entity-ids.md`.
   current, switch).
 - New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
   `state:` template strictly and fails on a sentinel output.
+- `tests/ha/test_energy_shelly.py`: the rain water pump (all five entities) and the Heizung Pro 3EM
+  power/energy get the live payloads verbatim (odd spacing, `null` fields, unused phase data) plus
+  variants (running pump, rounding, relay on/off, null energy block, export). A null `aenergy` block
+  on the plug is ignored silently (HA swallows the undefined-attribute render), a null `total_act`
+  on the Pro 3EM would log a warning without the template's `is not none` branch.
 - `tests/ha/test_energy_loxone.py`: the six Loxone washer/tumble-dry/dishwasher power and energy
   sensors (and `loxone/heating/warm_enough`) get the live broker payloads over the real broker, plus
   non-zero power sequences (representative kW values, not captured), rounding, whitespace and empty
