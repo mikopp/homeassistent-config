@@ -92,7 +92,7 @@ install_once() {
   while [ "$1" != "--" ]; do files+=("$1"); shift; done
   shift
   stamp="$venv/.ci-local-$name.sha256"
-  want=$({ cat ${files[@]+"${files[@]}"}; "$venv/bin/python" --version 2>&1; echo "$*"; } | sha256_of)
+  want=$({ [ ${#files[@]} -eq 0 ] || cat "${files[@]}"; "$venv/bin/python" --version 2>&1; echo "$*"; } | sha256_of)
   if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
     echo "   deps unchanged: $venv ($name)"
     return 0

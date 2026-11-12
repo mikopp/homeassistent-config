@@ -127,7 +127,7 @@ Runs on pull requests and on pushes to `master`. Home Assistant core runs inside
 ### `e2e.yaml` — real Home Assistant in Docker (`tests/e2e`)
 Same triggers and change detection, plus a nightly run against the Home Assistant beta image (informational). Boots this repo's real `configuration.yaml` in the pinned image (`.github/ha-versions/ha/Dockerfile`) against the host mosquitto: full boot of every package, `check_config`, totals surviving a real restart, and a log free of errors and deprecations. Logs of a failed run are uploaded as an artifact.
 
-**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer.
+**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer. While developing, `--package <name>` or `-- <pytest test id / args>` runs only the matching `tests/ha` tests (`--yaml`: only the YAML checks); the full run without arguments is the pre-push check (usage: header of the script).
 
 ### `yaml-lint.yml` — YAML style and lint
 Runs on every push and on manual dispatch; checks only, it never commits.

@@ -7,7 +7,7 @@
 - [x] Step 2 rename test files [DONE]
 - [x] Step 3 package selection (`--package`) [DONE]
 - [x] Step 4 skip unchanged dependency installs [DONE]
-- [ ] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README)
+- [x] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README) [DONE]
 - [ ] Step 6 Close
 
 ## Overview
@@ -140,7 +140,7 @@ more (6.7 s), then it skips (6.1 s). The `.venv-e2e` branch is only syntax-check
    under `--package victron` `test_templates` passes (only the two pergola tests error at setup).
 4. **[DONE] Skip unchanged installs.** Hash stamps. Depends on: step 1. Verify: second call skips
    pip; editing `requirements_test.txt` (temporarily) triggers the reinstall; timing recorded.
-5. **[TODO] Agent guidance.** Where agents read it:
+5. **[DONE] Agent guidance.** Where agents read it:
    - `CLAUDE.md` "Local CI checks": during development use the targeted form
      (`--package <pkg>` or `-- <test id>`); the full `ci-local.sh` (no arguments) once at the end,
      before pushing, is mandatory.
