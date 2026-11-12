@@ -10,6 +10,9 @@ Templates are extracted by .github/scripts/extract_templates.py and rendered in 
 
 ONE test on ONE HA instance: render all templates in a loop, collect every failure, one assert
 that lists them all. No parametrize, so the cost is one HA boot, not one per template.
+
+With `--package NAME` (tests/ha/conftest.py) only the templates extracted from
+packages/NAME.yaml are rendered; without it, all of them.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import importlib.util
 import logging
 from typing import Any
 
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers.template import Template
@@ -61,11 +65,21 @@ def _is_undefined_error(message: str) -> bool:
     return "is undefined" in message or "UndefinedError" in message
 
 
-async def test_every_template_renders(ha: HomeAssistant) -> None:
-    """All extracted templates render; failures are collected and listed in one assert."""
+async def test_every_template_renders(ha: HomeAssistant, request: pytest.FixtureRequest) -> None:
+    """All extracted templates (of the selected packages) render; failures are listed in one assert."""
     templates = _extract()
     # Guard against a silently empty extraction (e.g. a path change): it would pass vacuously.
     assert templates["state_templates"] and templates["runtime_templates"], templates
+    # `--package`: keep only the templates whose source file is a selected package's YAML.
+    if selected := request.config.getoption("package"):
+        files = {f"packages/{name}.yaml" for name in selected}
+        templates = {
+            kind: [t for t in items if t["file"] in files] for kind, items in templates.items()
+        }
+        # A selected package without a single template would pass vacuously (e.g. a renamed file).
+        assert templates["state_templates"] or templates["runtime_templates"], (
+            f"no template extracted from {sorted(files)}"
+        )
     await apply_baseline(ha)
 
     failures: list[str] = []

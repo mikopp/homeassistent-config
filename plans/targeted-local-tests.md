@@ -5,7 +5,7 @@
       files renamed after their package, cross-package tests run under each package they cover)
 - [x] Step 1 `ci-local.sh` selection flags [DONE]
 - [x] Step 2 rename test files [DONE]
-- [ ] Step 3 package selection (`--package`), awaiting approval
+- [x] Step 3 package selection (`--package`) [DONE]
 - [ ] Step 4 skip unchanged dependency installs, awaiting approval
 - [ ] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README)
 - [ ] Step 6 Close
@@ -37,8 +37,10 @@ Rules:
   (unless `--yaml`), and the summary ends with `TARGETED RUN – not a full verification; run
   ci-local.sh without arguments before pushing` instead of "All local checks passed." Exit code is
   still 0/1 so loops work.
-- xdist: `-n auto` for the full run; for a targeted run decided by timing at Step 1 (a single test
-  with workers only adds start-up), unless the pytest args contain `-n`. Result: `-n 0` (one file: 7.3 s vs 10.0 s total, pytest 3.9 s vs 6.1 s).
+- xdist: `-n auto` for the full run, unless the pytest args contain `-n`. Targeted runs, decided by
+  timing: explicit test ids only (no `--package`) → `-n 0` (Step 1, one file: 7.3 s vs 10.0 s total,
+  pytest 3.9 s vs 6.1 s; workers only add start-up). `--package` → `-n auto` (Step 3, 4 cores,
+  total wall time of `ci-local.sh`): `pergola` 79 s (`-n 0`) vs 25 s (`-n auto`), `victron` 63 s vs 22 s.
 - `--e2e` combined with a selection: rejected with a message (e2e has no per-package split).
 - Unknown package name → fail fast listing the valid names (from `packages/*.yaml`).
 
@@ -63,22 +65,39 @@ stays as it is (K-2).
 ### Package selection (Step 3)
 - **Primary package from the file name**: the longest `packages/*.yaml` name that the module name
   starts with (`test_heating_pv_boost` → `heating_pv_boost`, not a shorter match).
-- **Cross-package tests**: `@pytest.mark.package("victron")` (on a test or as module `pytestmark`)
-  adds packages; the test then runs under `--package` of its own file's package AND each marked one.
-  Candidates found so far (to confirm at Step 3 by reading the tests):
-  - `test_pergola.py::test_pv_power_wrapper` and the pergola tests fed by the Victron MQTT topics
-    → also `victron`.
-  - `test_heating_pv_boost.py` surplus table and η accumulators (Victron templates) → also `victron`.
+- **Cross-package tests**: `@pytest.mark.package("victron")` (on a test, or on a `pytest.param`) adds
+  packages; the test then runs under `--package` of its own file's package AND each marked one.
+  Rule: mark a test when a change to package X's YAML could make it fail (it loads/drives X's real
+  entities), not when it only seeds a state with an X entity id. Final marks (each has a comment):
+  - `test_pergola.py`: `test_pv_power_wrapper` → `victron` (wraps the real Victron MQTT sensors);
+    `test_sun_rules` → `victron` (PV-alone shining cases) and `heating_cooling_indicator`;
+    `test_cover_formulas`, `test_deadbands`, `test_season_sync` and the `master_switch` parameter of
+    `test_protected_states` → `heating_cooling_indicator` (season through the real indicator).
+  - `test_heating_pv_boost.py`: `test_surplus_table` → `victron` (real Victron templates);
+    `test_slab_mode_wanted_delays` → `victron` (surplus, SOC) and `heating_cooling_indicator`;
+    `test_cooling_interlock`, `test_target_temp` → `heating_cooling_indicator`.
+  - `test_airflow_cooling.py`: every test that sets the season (`test_decision_table`,
+    `test_controller`, the three `test_drying_boost*`, `test_indicator`, `test_drying_needed`,
+    `test_hvac_action`, `test_reload_recovery`) → `heating_cooling_indicator`. Not marked:
+    `test_bypass_estimation`, `test_dew_point_thresholds`, `test_drying_boost_config_edge_only`.
+  - No marks: energy (go-e seeded, pool pump self-contained), `test_victron.py`,
+    `test_heating_cooling_indicator.py`. `test_reload_recovery` only tolerates a Victron log line
+    (`allow_log`, #155), it does not drive Victron: not marked `victron`.
 - **Harness**: `test_packages_load.py` runs with every `--package` (a package edit can break
   loading of all packages). `test_templates.py` runs with every `--package` but renders only the
   templates whose extracted `file` is a selected `packages/<name>.yaml` (the extractor already
   records the file); without `--package`, all templates as today. `test_versions.py` and
   `test_broker_isolation.py` run only in the full run.
 - **Implementation**: `tests/ha/conftest.py` gets `pytest_addoption("--package", action="append")`
-  and `pytest_collection_modifyitems` that deselects items outside the selection; the marker is
-  registered in `tests/ha/pytest.ini`.
-- **Guard** (fails collection, so the mapping cannot rot): a test module whose name matches no
-  package and is not in the harness list; a `package` marker naming no `packages/<name>.yaml`.
+  and `pytest_collection_modifyitems` that deselects items outside the selection (harness lists
+  `HARNESS_EVERY_PACKAGE`, `HARNESS_FULL_RUN_ONLY` as constants); the marker is registered in
+  `tests/ha/pytest.ini`. `test_templates.py` reads the selection from
+  `request.config.getoption("package")`; every package has templates, an empty selection fails.
+- **Guard** (always active, also in full runs): a test module whose name matches no package and is
+  not in the harness lists; a `package` marker naming no `packages/<name>.yaml`. It is a static
+  source scan in `pytest_configure` (so it fails once with a clear message, also under xdist, where
+  an error raised during collection in a worker is an INTERNALERROR); a runtime check in the
+  collection hook backs it up for marker names that are not string literals.
 
 ### Faster setup (Step 4)
 Every call reinstalls `.github/workflows/requirements.txt`, yamllint and `requirements_test.txt`
@@ -95,7 +114,7 @@ reinstalls. Timing before/after recorded here.
 2. **[DONE] Rename test files.** `git mv` per the table, references updated. Depends on: nothing
    (independent of step 1). Verify: full `tests/ha` same count; grep finds no old name outside
    `background.md`.
-3. **[TODO] Package selection.** Option, filter, marker, guard, template filter, cross-package
+3. **[DONE] Package selection.** Option, filter, marker, guard, template filter, cross-package
    markers. Depends on: steps 1 and 2. Verify:
    - every test runs under at least one selection; union of all `--package` runs + harness = full count;
    - `--package victron` includes the marked pergola/heating tests, `--package pergola` too;
@@ -103,6 +122,13 @@ reinstalls. Timing before/after recorded here.
      a broken pergola template → `--package pergola` fails, `--package victron` passes
      (restored with `git checkout`);
    - full suite once.
+   Verified: full run 60 passed, 1 xfailed; per package (selected tests incl. 1 `test_packages_load`
+   and 1 `test_templates`): airflow_cooling 17, energy 4, heating_cooling_indicator 23,
+   heating_pv_boost 11, pergola 16, victron 17; the union plus `test_versions` (5) and
+   `test_broker_isolation` (2) is the full 61. Mutations: module `test_nosuchpkg_x.py` and marker
+   `package("nosuch")` fail with the guard message; an unclosed `{{` in pergola.yaml fails
+   `--package pergola` in `test_templates` (all tests of a broken package also error at setup);
+   under `--package victron` `test_templates` passes (only the two pergola tests error at setup).
 4. **[TODO] Skip unchanged installs.** Hash stamps. Depends on: step 1. Verify: second call skips
    pip; editing `requirements_test.txt` (temporarily) triggers the reinstall; timing recorded.
 5. **[TODO] Agent guidance.** Where agents read it:

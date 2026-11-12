@@ -5,6 +5,7 @@ It loads THIS repo's packages through HA's own YAML loader, and the real MQTT in
 to a real mosquitto started per test. Each test gets a fresh HA (function scope).
 
 Parts, top to bottom:
+- package selection (`--package`, marker `package`, the collection guard);
 - real clock and free-port helpers;
 - config staging (`stage_config`, `hass_config_dir`);
 - the shared baseline (`seed`, `apply_baseline`, data in tests/baseline.py);
@@ -17,6 +18,7 @@ Parts, top to bottom:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import importlib.util
 import json
@@ -51,6 +53,108 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+# ── Package selection (`--package`) ───────────────────────────────────────────
+# `ci-local.sh --package NAME` passes `--package NAME` here. A test belongs to its PRIMARY package
+# (from its module name, `test_<package>[_<topic>].py`) plus every package named in
+# `@pytest.mark.package("a", "b")` (a test that loads or drives another package's real entities).
+# → plans/targeted-local-tests.md
+# Harness modules that belong to no package; each is kept or dropped as a whole.
+# Runs under EVERY --package: a package edit can break loading or template rendering of any package.
+HARNESS_EVERY_PACKAGE = ("test_packages_load", "test_templates")
+# Runs only without --package (pins and broker isolation do not depend on a package's YAML).
+HARNESS_FULL_RUN_ONLY = ("test_versions", "test_broker_isolation")
+
+
+def package_names() -> list[str]:
+    """Names of the feature packages: the `packages/*.yaml` stems."""
+    return sorted(p.stem for p in (REPO / "packages").glob("*.yaml"))
+
+
+def primary_package(module: str, names: list[str]) -> str | None:
+    """The package a test module is named after: the longest name that `test_<name>[_...]` starts with.
+
+    Boundary-aware (`test_energy_wallbox` → `energy`, not a package that merely shares a prefix).
+    """
+    rest = module.removeprefix("test_")
+    hits = [n for n in names if rest == n or rest.startswith(n + "_")]
+    return max(hits, key=len) if hits else None
+
+
+def _marker_names(path: Path) -> set[str]:
+    """Package names given as string literals to `pytest.mark.package(...)` anywhere in a test file."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        f = node.func if isinstance(node, ast.Call) else None
+        if isinstance(f, ast.Attribute) and f.attr == "package" and ast.unparse(f).endswith("mark.package"):
+            names.update(a.value for a in node.args if isinstance(a, ast.Constant))
+    return names
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Guard the module/marker → package mapping before anything runs (full runs included).
+
+    Static (source scan of tests/ha/test_*.py), so it fails once, with a clear message, also under
+    xdist where a collection error in a worker would surface as an INTERNALERROR.
+    """
+    names = package_names()
+    harness = (*HARNESS_EVERY_PACKAGE, *HARNESS_FULL_RUN_ONLY)
+    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+        # A module named after no package and not in the harness lists.
+        if primary_package(path.stem, names) is None and path.stem not in harness:
+            raise pytest.UsageError(
+                f"{path.name} matches no package: name it test_<package>[_<topic>].py "
+                f"(packages: {', '.join(names)}) or add it to the harness lists in tests/ha/conftest.py"
+            )
+        # A `package` marker naming no packages/<name>.yaml.
+        if unknown := sorted(_marker_names(path) - set(names)):
+            raise pytest.UsageError(
+                f"{path.name}: @pytest.mark.package names no packages/<name>.yaml: "
+                f"{', '.join(unknown)} (packages: {', '.join(names)})"
+            )
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """`--package NAME` (repeatable): run only the tests of those packages (see above)."""
+    parser.addoption(
+        "--package",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="run only the tests of packages/NAME.yaml (repeatable); harness tests per conftest.py",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Apply `--package`: keep a test when its package set meets the selection.
+
+    Package set = the module's primary package plus every `package` marker name. Harness
+    modules follow their lists. Without `--package` nothing is dropped.
+    """
+    if not (selected := set(config.getoption("package"))):
+        return
+    names = package_names()
+    keep: list[pytest.Item] = []
+    dropped: list[pytest.Item] = []
+    for item in items:
+        module = item.path.stem
+        marked = {n for m in item.iter_markers("package") for n in m.args}
+        # Backstop of the static guard for names it cannot see (not string literals).
+        if unknown := sorted(marked - set(names)):
+            raise pytest.UsageError(
+                f"{item.nodeid}: @pytest.mark.package names no packages/<name>.yaml: {', '.join(unknown)}"
+            )
+        if module in HARNESS_EVERY_PACKAGE:
+            wanted = True
+        elif module in HARNESS_FULL_RUN_ONLY:
+            wanted = False
+        else:
+            wanted = bool(({primary_package(module, names)} | marked) & selected)
+        (keep if wanted else dropped).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+    items[:] = keep
 
 
 # ── Real clock, unaffected by freezer ─────────────────────────────────────────

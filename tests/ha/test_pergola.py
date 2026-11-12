@@ -692,6 +692,9 @@ async def _run_formulas(env: _Env, cases: list[Formula]) -> list[str]:
     return failures
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean → sync automation):
+# a change to its YAML can fail this test, so it also runs under `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_cover_formulas(pergola_env: _Env) -> None:
     """Every slat-angle branch (PG-4.3/4.4) on a real sun position; one HA, one assert."""
     failures = await _run_formulas(pergola_env, FORMULAS)
@@ -727,6 +730,9 @@ DEADBANDS = [
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean → sync automation):
+# a change to its YAML can fail this test, so it also runs under `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_deadbands(pergola_env: _Env) -> None:
     """Sun-tracking and not_enough_sun deadbands (PG-5) on real ticks; one HA, one assert.
 
@@ -819,6 +825,9 @@ SUN_CASES = [
 ]
 
 
+# Two other packages: the season comes from the REAL heating_cooling_indicator, and the
+# "PV alone counts as shining" cases are fed by the real Victron MQTT sensors (victron.yaml).
+@pytest.mark.package("heating_cooling_indicator", "victron")
 async def test_sun_rules(pergola_env: _Env) -> None:
     """Rules 5-9 and sun shining (PG-2.2, PG-8) on real sun positions; one HA, one assert.
 
@@ -1070,7 +1079,13 @@ PROTECTED = {
 }
 
 
-@pytest.mark.parametrize("scenario", list(PROTECTED))
+# Only the master-switch scenario drives the REAL heating_cooling_indicator (season flip), so only
+# that parameter also runs under `--package heating_cooling_indicator`.
+@pytest.mark.parametrize(
+    "scenario",
+    [pytest.param(k, marks=pytest.mark.package("heating_cooling_indicator")) if k == "master_switch" else k
+     for k in PROTECTED],
+)
 async def test_protected_states(pergola_env: _Env, scenario: str) -> None:
     """Protected states and the master switch: one forward scenario per fresh HA."""
     check = await _start(pergola_env)
@@ -1080,6 +1095,9 @@ async def test_protected_states(pergola_env: _Env, scenario: str) -> None:
 
 
 # ── PV wrapper over the real broker ───────────────────────────────────────────
+# sensor.pergola_pv_power wraps the REAL Victron MQTT sensors (solar yield DC, AC load total):
+# a change to victron.yaml can fail this test, so it also runs under `--package victron`.
+@pytest.mark.package("victron")
 async def test_pv_power_wrapper(pergola_env: _Env) -> None:
     """sensor.pergola_pv_power (PG-8): MPPT value; 0 when the MPPT topic is quiet but the GX
     reports (house load); unavailable when both are quiet; sun shining stays available while
@@ -1131,6 +1149,9 @@ _SYNC_STEPS = [  # (48h mean, indicator reached, pergola_heating)
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean → sync automation):
+# a change to its YAML can fail this test, so it also runs under `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_season_sync(pergola_env: _Env) -> None:
     """The sync automation follows every real indicator change; an unavailable indicator
     leaves pergola_heating as it is.

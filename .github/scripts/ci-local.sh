@@ -174,19 +174,19 @@ setup_tests_ha() {
 
 # run_tests_ha: the pytest call. Full run: all of tests/ha with -n auto. Targeted run: the pass-through
 # args decide the path (an explicit tests/... path replaces the default tests/ha, else everything
-# would run) and -n (the user's wins; else -n 0: workers only add start-up to a few tests, 7 s vs 10 s).
+# would run) and -n (the user's wins). Default -n: auto for a --package run (whole packages take
+# 60-75 s serial vs 18-22 s with workers, measured on 4 cores), 0 for explicit test ids only (a few
+# tests: workers only add start-up, 7 s vs 10 s).
 run_tests_ha() {
-  local paths=(tests/ha) nargs=() a
+  local paths=(tests/ha) nargs=(-n auto) a
   if [ "$SELECTED" = 1 ]; then
-    nargs=(-n 0)
+    [ ${#PKG_ARGS[@]} -gt 0 ] || nargs=(-n 0)
     for a in ${PYTEST_EXTRA[@]+"${PYTEST_EXTRA[@]}"}; do
       case $a in
         tests/*) paths=() ;;
         -n|-n[0-9]*|-nauto|--numprocesses|--numprocesses=*) nargs=() ;;
       esac
     done
-  else
-    nargs=(-n auto)
   fi
   step "In-process tests (tests/ha)" .venv-test/bin/python -m pytest \
     -c tests/ha/pytest.ini --confcutdir tests/ha --rootdir . \

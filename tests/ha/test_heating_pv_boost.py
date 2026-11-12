@@ -33,6 +33,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -293,6 +294,10 @@ SURPLUS_CASES = [
 ]
 
 
+# The surplus reads the REAL Victron templates (solar yield, η accumulators, PV net power), fed by
+# Victron MQTT topics: a change to victron.yaml can fail this test, so it also runs under
+# `--package victron`.
+@pytest.mark.package("victron")
 async def test_surplus_table(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
     """All surplus cases on one HA; every failing case is listed in the one assert."""
     # The templates read the clamp under its production id. It has no default_entity_id; a
@@ -455,6 +460,9 @@ COOLING_CASES = [
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean): also runs under
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_cooling_interlock(ha: HomeAssistant, broker: Broker) -> None:
     """All interlock cases on one HA; every failing case is listed in the one assert."""
     failures = await _run_table(ha, broker, None, _COOLING_TABLE, COOLING_CASES,
@@ -505,6 +513,9 @@ TARGET_CASES = [
 ]
 
 
+# The season comes from the REAL heating_cooling_indicator (seeded 48h mean): also runs under
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("heating_cooling_indicator")
 async def test_target_temp(ha: HomeAssistant, broker: Broker) -> None:
     """All setpoint cases on one HA; every failing case is listed in the one assert."""
     # Helpers (indicator thresholds, boost offset, boost switch off) and the non-MQTT baseline.
@@ -595,6 +606,10 @@ _SLAB_HELPERS = {
 }
 
 
+# The decision reads the REAL Victron surplus and battery SOC (Victron MQTT topics) and the REAL
+# heating_cooling_indicator season: also runs under `--package victron` and
+# `--package heating_cooling_indicator`.
+@pytest.mark.package("victron", "heating_cooling_indicator")
 async def test_slab_mode_wanted_delays(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
     """The slab decision: master switch, 15 min delay_on, Schmitt hold, 20 min delay_off.
 

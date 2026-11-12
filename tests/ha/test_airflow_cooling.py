@@ -73,6 +73,9 @@ _DEW = "sensor.airflow_min_indoor_dew_5min"
 # season, inside the band at the baseline thresholds 12 / 16 / 20, reached from neutral in at
 # most two steps (the reset goes back to neutral first, so no chain is longer than that).
 _SEASON = "sensor.heating_cooling_indicator"
+# Tests that set the season set it through the REAL heating_cooling_indicator (seeded 48h mean):
+# a change to its YAML can fail them, so they also run under `--package heating_cooling_indicator`.
+_SEASON_FROM_INDICATOR = pytest.mark.package("heating_cooling_indicator")
 _MEAN = "sensor.wheatherstation_outdoor_temperature_48h_mean"
 _SEASON_MEAN = {"active_heating": "11.0", "neutral": "14.0", "passive_cooling": "17.0",
                 "active_cooling": "21.0"}
@@ -240,6 +243,7 @@ def _render_macro(hass: HomeAssistant, prev_profile: str) -> str:
     ).async_render(parse_result=False)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_decision_table(ha: HomeAssistant) -> None:
     """All decision cases on one HA; every failing case is listed in the one assert."""
     await apply_baseline(ha)
@@ -848,6 +852,7 @@ CONTROLLER = [
 ]
 
 
+@_SEASON_FROM_INDICATOR
 async def test_controller(airflow_ha: HomeAssistant, clock: Clock) -> None:
     ha = airflow_ha
     """All controller cases on one HA; every failing check is listed in the one assert."""
@@ -1018,12 +1023,14 @@ async def _run_boost_cases(ha: HomeAssistant, clock: Clock, cases: list[BoostCas
     return failures
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_boost(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """All boost cases on one HA; every failing check is listed in the one assert."""
     failures = await _run_boost_cases(airflow_ha, clock, BOOSTS)
     assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_boost_input_flap_before_the_bug(
     airflow_ha: HomeAssistant, clock: Clock
 ) -> None:
@@ -1037,6 +1044,7 @@ async def test_drying_boost_input_flap_before_the_bug(
     assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 @pytest.mark.xfail(strict=True, raises=AssertionError,
                    reason="config bug: an input flap restarts the boost (#153); passes once fixed")
 async def test_drying_boost_unavailable_to_boost_does_not_fire(
@@ -1260,6 +1268,7 @@ FLUSH_CASES = [
 ]
 
 
+@_SEASON_FROM_INDICATOR
 @pytest.mark.parametrize("cases", [FREE_CASES, MOIST_CASES, HEAT_CASES, FLUSH_CASES],
                          ids=["free_cooling", "moisture_low", "heat_low", "flush"])
 async def test_indicator(airflow_ha: HomeAssistant, clock: Clock, cases: list[ICase]) -> None:
@@ -1268,6 +1277,7 @@ async def test_indicator(airflow_ha: HomeAssistant, clock: Clock, cases: list[IC
     assert not failures, f"{len(failures)} indicator check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_needed(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """binary_sensor.airflow_humidity_drying_needed through the real schedules and workday.
 
@@ -1334,6 +1344,7 @@ async def test_drying_needed(airflow_ha: HomeAssistant, clock: Clock) -> None:
     assert not failures, f"{len(failures)} drying check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """climate.airflow_climate's hvac_action from the REAL decision and the device profile.
 
@@ -1378,6 +1389,7 @@ async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
     assert not failures, f"{len(failures)} hvac_action check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 @pytest.mark.allow_log(
     r"while processing template .*for attribute '_attr_native_value' in entity "
     r"'sensor\.solar_yield_watts'",
