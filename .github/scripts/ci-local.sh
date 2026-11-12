@@ -76,18 +76,46 @@ FAILED=()
 PYVER=$(awk -F'[:@ ]' '/^FROM /{print $3}' .github/ha-versions/python/Dockerfile)
 PY=$(command -v "python$PYVER" || command -v python3) || { echo "No python3 found"; exit 1; }
 
+# sha256_of: sha256 of stdin (sha256sum on Linux, shasum on macOS, which has no sha256sum).
+sha256_of() {
+  if command -v sha256sum >/dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# install_once <venv> <name> <file>... -- <install command...>: run the install only when its input
+# changed. The stamp <venv>/.ci-local-<name>.sha256 holds the hash of the file contents, the venv's
+# python version and the command; it is written only after a successful install, so a failed or
+# partial install (and a new venv, which has no stamp) always runs again. pip's own resolve takes
+# seconds even when nothing changed. Returns the install's exit code (0 when skipped).
+install_once() {
+  local venv=$1 name=$2 files=() stamp want
+  shift 2
+  while [ "$1" != "--" ]; do files+=("$1"); shift; done
+  shift
+  stamp="$venv/.ci-local-$name.sha256"
+  want=$({ cat ${files[@]+"${files[@]}"}; "$venv/bin/python" --version 2>&1; echo "$*"; } | sha256_of)
+  if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+    echo "   deps unchanged: $venv ($name)"
+    return 0
+  fi
+  "$@" || return 1
+  echo "$want" > "$stamp"
+}
+
 # Create the venv once and (re)install CI Python deps from the same manifest CI uses.
 if [ ! -x "$VENV/bin/python" ]; then
   "$PY" -m venv "$VENV" || exit 1
 fi
-if ! "$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt; then
+# A failed full install (fallback below) writes no stamp, so the next run tries the full manifest
+# again, as before; only a successful full install is skipped.
+if ! install_once "$VENV" ci-manifest .github/workflows/requirements.txt -- \
+     "$VENV/bin/pip" install --quiet -r .github/workflows/requirements.txt; then
   # The test harness needs the pinned (newer) Python and is only used by pytest, which runs in CI.
   # The Docker-free checks below need just pyyaml, so fall back to those.
   echo "WARN: full CI manifest not installable on $("$VENV/bin/python" --version); installing Docker-free deps only"
   "$VENV/bin/pip" install --quiet pyyaml requests || exit 1
 fi
 # yamllint comes from the venv, so no system install (brew/apt) is needed locally or in cloud sessions.
-"$VENV/bin/pip" install --quiet yamllint || exit 1
+install_once "$VENV" yamllint -- "$VENV/bin/pip" install --quiet yamllint || exit 1
 YAMLLINT="$VENV/bin/yamllint"
 echo "Using $("$VENV/bin/python" --version) (CI pin: $PYVER)"
 
@@ -152,9 +180,11 @@ setup_tests_ha() {
   if [ ! -x .venv-test/bin/python ]; then "$PY_TEST" -m venv .venv-test || exit 1; fi
   # (a venv made by `uv venv` has no pip; use uv then)
   if [ -x .venv-test/bin/pip ]; then
-    .venv-test/bin/pip install --quiet -r requirements_test.txt || exit 1
+    install_once .venv-test requirements requirements_test.txt -- \
+      .venv-test/bin/pip install --quiet -r requirements_test.txt || exit 1
   else
-    VIRTUAL_ENV="$PWD/.venv-test" uv pip install --quiet -r requirements_test.txt || exit 1
+    install_once .venv-test requirements requirements_test.txt -- \
+      env VIRTUAL_ENV="$PWD/.venv-test" uv pip install --quiet -r requirements_test.txt || exit 1
   fi
   # climate_template into custom_components/ (the one shared installer; skips if present).
   "$VENV/bin/python" .github/scripts/install_custom_components.py || exit 1
@@ -205,7 +235,8 @@ if [ "$E2E" = 1 ]; then
   else
     # Own venv: its pins (pytest 9.2) differ from the PHACC ones.
     [ -x .venv-e2e/bin/python ] || "${PY_TEST:-$PY}" -m venv .venv-e2e || exit 1
-    .venv-e2e/bin/pip install --quiet -r tests/e2e/requirements.txt || exit 1
+    install_once .venv-e2e requirements tests/e2e/requirements.txt -- \
+      .venv-e2e/bin/pip install --quiet -r tests/e2e/requirements.txt || exit 1
     step "Real-HA tests (tests/e2e)" .venv-e2e/bin/python -m pytest \
       -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e \
       -p no:homeassistant --timeout=300 --timeout-method=thread

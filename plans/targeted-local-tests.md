@@ -6,7 +6,7 @@
 - [x] Step 1 `ci-local.sh` selection flags [DONE]
 - [x] Step 2 rename test files [DONE]
 - [x] Step 3 package selection (`--package`) [DONE]
-- [ ] Step 4 skip unchanged dependency installs, awaiting approval
+- [x] Step 4 skip unchanged dependency installs [DONE]
 - [ ] Step 5 agent guidance (CLAUDE.md, ha-test-harness skill, README)
 - [ ] Step 6 Close
 
@@ -100,10 +100,19 @@ stays as it is (K-2).
   collection hook backs it up for marker names that are not string literals.
 
 ### Faster setup (Step 4)
-Every call reinstalls `.github/workflows/requirements.txt`, yamllint and `requirements_test.txt`
-(pip resolves even when nothing changed). Store a hash of each requirements file in its venv
-(e.g. `.venv-test/.req-hash`) and skip the install when it matches; a changed file or a new venv
-reinstalls. Timing before/after recorded here.
+Every call reinstalled `.github/workflows/requirements.txt`, yamllint and `requirements_test.txt`
+(pip resolves even when nothing changed). `install_once` in `ci-local.sh` keeps a stamp
+`<venv>/.ci-local-<name>.sha256` = sha256 of the requirement file contents + the venv's python
+version + the install command; the install is skipped on a match, the stamp is written only after a
+successful install. A new venv has no stamp, so it installs. The `.venv` full-manifest install that
+falls back to pyyaml+requests writes no stamp, so the next run retries the full manifest (as before).
+Applied to `.venv` (manifest, yamllint), `.venv-test` (pip or uv branch) and `.venv-e2e`.
+
+Timing, `ci-local.sh -- tests/ha/test_heating_cooling_indicator.py` (wall time):
+before 7.3 s / 7.4 s; after (first run, writes stamps) 7.2 s, then 5.9 s / 5.8 s. The gain is about
+1.5 s per call (below the 3 s mark), kept because the helper is small. Verified: appending
+`# tmp` to `requirements_test.txt` reinstalls `.venv-test` only (6.7 s); restoring it reinstalls once
+more (6.7 s), then it skips (6.1 s). The `.venv-e2e` branch is only syntax-checked (`--e2e` not run).
 
 ## Steps
 1. **[DONE] `ci-local.sh` flags.** Argument parsing (`--e2e`, `--yaml`, `--package NAME`, `--`),
@@ -129,7 +138,7 @@ reinstalls. Timing before/after recorded here.
    `package("nosuch")` fail with the guard message; an unclosed `{{` in pergola.yaml fails
    `--package pergola` in `test_templates` (all tests of a broken package also error at setup);
    under `--package victron` `test_templates` passes (only the two pergola tests error at setup).
-4. **[TODO] Skip unchanged installs.** Hash stamps. Depends on: step 1. Verify: second call skips
+4. **[DONE] Skip unchanged installs.** Hash stamps. Depends on: step 1. Verify: second call skips
    pip; editing `requirements_test.txt` (temporarily) triggers the reinstall; timing recorded.
 5. **[TODO] Agent guidance.** Where agents read it:
    - `CLAUDE.md` "Local CI checks": during development use the targeted form
