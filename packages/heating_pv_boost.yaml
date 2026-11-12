@@ -42,7 +42,8 @@ mqtt:
           {% elif raw in ['3', 'heat'] %}heat
           {% elif raw in ['4', 'water'] %}water
           {% else %}unknown{% endif %}
-        {% endif %}
+        {% else %}unknown{% endif %}
+        {# A payload without field 3 renders unknown: a text sensor (no device_class) stores '' as its state. #}
 
     # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT's flow temperature ("circuit"
     # because ehp/FlowTemp (VF2), the system-wide flow sensor, is a different register).

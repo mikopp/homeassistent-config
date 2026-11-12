@@ -750,6 +750,23 @@ async def wait_subscribed(hass: HomeAssistant, broker: Broker, *topics: str) -> 
         await hass.async_add_executor_job(broker.wait_subscribed, topic)
 
 
+class MqttWarnings(logging.Handler):
+    """Collects WARNING+ records of the mqtt integration, tagged with the step being published.
+
+    A value_template that raises keeps the last state and only logs, so a state check cannot see a
+    missing guard; a test attaches this to `homeassistant.components.mqtt` and asserts `hits` is empty.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.step = ""
+        self.hits: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name.startswith("homeassistant.components.mqtt"):
+            self.hits.append(f"{self.step}: {record.getMessage()}")
+
+
 # Sync channel: ebusd's energy integral. HA subscribes to it (packages/heating_pv_boost.yaml) and
 # no template, automation or other sensor reads it (only the group and a dashboard), so a
 # publish there moves nothing but its own sensor.
