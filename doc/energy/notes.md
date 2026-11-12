@@ -98,6 +98,9 @@ is open: `plans/energy-live-entity-ids.md`.
   current, switch).
 - New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
   `state:` template strictly and fails on a sentinel output.
+- `tests/ha/test_energy_expire_after.py` (frozen clock): the pool pump, rain water pump and Pro 3EM
+  entities go `unavailable` after 120 s and come back with a message; the Loxone meters, the Loxone
+  flag and every ebusd register keep their value for a week (an `expire_after` added to one fails).
 - `tests/ha/test_energy_shelly.py`: the rain water pump (all five entities) and the Heizung Pro 3EM
   power/energy get the live payloads verbatim (odd spacing, `null` fields, unused phase data) plus
   variants (running pump, rounding, relay on/off, null energy block, export). A null `aenergy` block
