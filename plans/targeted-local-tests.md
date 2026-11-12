@@ -3,7 +3,7 @@
 ## Status
 - [x] Plan and owner decisions (Step 3 wanted, package-load test runs with every package, test
       files renamed after their package, cross-package tests run under each package they cover)
-- [ ] Step 1 `ci-local.sh` selection flags, awaiting approval
+- [x] Step 1 `ci-local.sh` selection flags [DONE]
 - [ ] Step 2 rename test files, awaiting approval
 - [ ] Step 3 package selection (`--package`), awaiting approval
 - [ ] Step 4 skip unchanged dependency installs, awaiting approval
@@ -38,7 +38,7 @@ Rules:
   ci-local.sh without arguments before pushing` instead of "All local checks passed." Exit code is
   still 0/1 so loops work.
 - xdist: `-n auto` for the full run; for a targeted run decided by timing at Step 1 (a single test
-  with workers only adds start-up), unless the pytest args contain `-n`. Result noted here.
+  with workers only adds start-up), unless the pytest args contain `-n`. Result: `-n 0` (one file: 7.3 s vs 10.0 s total, pytest 3.9 s vs 6.1 s).
 - `--e2e` combined with a selection: rejected with a message (e2e has no per-package split).
 - Unknown package name → fail fast listing the valid names (from `packages/*.yaml`).
 
@@ -87,7 +87,7 @@ Every call reinstalls `.github/workflows/requirements.txt`, yamllint and `requir
 reinstalls. Timing before/after recorded here.
 
 ## Steps
-1. **[TODO] `ci-local.sh` flags.** Argument parsing (`--e2e`, `--yaml`, `--package NAME`, `--`),
+1. **[DONE] `ci-local.sh` flags.** Argument parsing (`--e2e`, `--yaml`, `--package NAME`, `--`),
    targeted-run summary, pytest args pass-through. The `tests/ha` setup moves into one function
    used by both modes. Header comment (usage block) updated in the K-5 style. Depends on: nothing.
    Verify: full run unchanged (same test count); `-- tests/ha/test_pergola.py::test_deadbands`
