@@ -15,7 +15,8 @@
       A fresh agent given only "confirm the wallbox tests are green while developing" chose
       `--package energy` from the guidance by itself (9 s, one command).
 - [x] Step 6 recorder records only what the config's history readers need [DONE]
-- [ ] Step 7 Close (after the PR is merged)
+- [ ] Step 7 behaviour test: history read back from the recorder, in progress
+- [ ] Step 8 Close (before merge, so the plan file is not part of the merge)
 
 ## Overview
 `.github/scripts/ci-local.sh` always runs every YAML check and the whole `tests/ha` suite (~60 s of
@@ -213,7 +214,16 @@ check) -> 45.5-46.5 s (3 runs; pytest 40 s); `--package pergola` 31.4 -> 22.5 s;
    files 20x), timings recorded here. Knowledge: `ha-test-harness` skill (fixtures section: what
    the recorder records and why, how to add a history-reading platform; Run timings if stated),
    confirmed facts via the `record-learning` skill. Depends on: steps 1-5.
-7. [TODO] Close: per `doc/KNOWLEDGE.md#K-6`.
+7. [TODO] Behaviour test for the recorder filter (owner follow-up). Gap found in Step 6: no test
+   depends on recorded history (history_stats follows live events and reads the DB only on its
+   first update), so dropping a source from the include list fails only the structural guards.
+   Add a test that forces a DB read of a history source, e.g. history_stats after a reload/restart
+   of its entity (or a statistics/filter sensor's startup load) with state changes recorded
+   BEFORE, and asserts the value computed from history. Mutation: drop that source from
+   `history_sources()` → the new test fails. 20x stable. Skill/notes updated (the gap fact
+   in the skill is replaced). Depends on: step 6.
+8. [TODO] Close: per `doc/KNOWLEDGE.md#K-6`, BEFORE merge (owner): the plan file is deleted on
+   this branch so it is not part of the merge.
 
 ## Knowledge homes updated (`doc/KNOWLEDGE.md#K-1`)
 - `CLAUDE.md` (Local CI checks), `.claude/skills/ha-test-harness/SKILL.md` (Run, where a test goes,
