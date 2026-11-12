@@ -14,7 +14,8 @@
       heating_pv_boost 16 s, victron 21 s, airflow_cooling 21 s, pergola 26 s; `--yaml` 2 s.
       A fresh agent given only "confirm the wallbox tests are green while developing" chose
       `--package energy` from the guidance by itself (9 s, one command).
-- [ ] Step 6 Close (after the PR is merged)
+- [ ] Step 6 recorder records only what the config's history readers need, awaiting implementation
+- [ ] Step 7 Close (after the PR is merged)
 
 ## Overview
 `.github/scripts/ci-local.sh` always runs every YAML check and the whole `tests/ha` suite (~60 s of
@@ -120,6 +121,29 @@ before 7.3 s / 7.4 s; after (first run, writes stamps) 7.2 s, then 5.9 s / 5.8 s
 `# tmp` to `requirements_test.txt` reinstalls `.venv-test` only (6.7 s); restoring it reinstalls once
 more (6.7 s), then it skips (6.1 s). The `.venv-e2e` branch is only syntax-checked (`--e2e` not run).
 
+### Recorder filter (Step 6)
+Measured (py-spy + per-thread CPU, single test `test_wallbox_wrappers`, warm): a single test is
+~0.4 s script, ~1.7 s Python + HA imports, ~1 s first-boot integration imports (both once per
+process), ~2.2 s HA boot per test, ~0.9 s body + teardown. The boot is all CPU; ~1.1 s of it is the
+Recorder thread: PHACC's `recorder_mock` commits after every event (`commit_interval: 0`), so every
+boot-time state and event is one SQLite commit, competing with the loop for the GIL (92 % of its
+samples in `_process_one_event` → commit). Recording nothing: steady boot 2.2 s → 0.9 s.
+Prototype (reverted): override PHACC's `recorder_config` fixture with `include.entities` = the
+`entity_id` sources of every `filter` / `statistics` / `history_stats` platform in `packages/*.yaml`
+(15 entities, derived at run time) plus `exclude.event_types` for events no test reads
+(call_service, automation_triggered, registry updates, ...): full `tests/ha` 51 s → 35 s
+(60 passed, 1 xfailed), `--package pergola` 25 → 20 s, single test 6.5 → 5.5 s.
+Keeping it in sync with the config (owner requirement):
+- The include list is derived from the YAML at run time, never hand-written.
+- A guard test lists every `platform:` used in the config (packages, configuration.yaml) and fails
+  for a platform not classified in conftest as "reads recorder history" (source key named) or
+  "does not": a new platform forces a decision instead of silently missing history.
+- A guard that the derived list is non-empty and contains each history platform's source.
+- Mutation: drop the history_stats source from the include → `test_cycling_history_stats` fails;
+  drop the statistics/filter source → the test reading it fails (or, if none does, say so).
+- Event exclusion: only event types proven unread by any test; a test that needs one (e.g. a
+  logbook test) removes it; documented next to the list.
+
 ## Steps
 1. **[DONE] `ci-local.sh` flags.** Argument parsing (`--e2e`, `--yaml`, `--package NAME`, `--`),
    targeted-run summary, pytest args pass-through. The `tests/ha` setup moves into one function
@@ -155,7 +179,12 @@ more (6.7 s), then it skips (6.1 s). The `.venv-e2e` branch is only syntax-check
      cross-package tests; the 20× stability rule becomes
      `ci-local.sh -- tests/ha/test_x.py --count=20 -n 4`.
    - `README.md` local-checks line: one sentence on the targeted options.
-6. [TODO] Close: per `doc/KNOWLEDGE.md#K-6`.
+6. [TODO] Recorder filter. `recorder_config` override in `tests/ha/conftest.py` per the design,
+   the classification + guards, mutation checks, stability (whole suite 3x, changed/affected
+   files 20x), timings recorded here. Knowledge: `ha-test-harness` skill (fixtures section: what
+   the recorder records and why, how to add a history-reading platform; Run timings if stated),
+   confirmed facts via the `record-learning` skill. Depends on: steps 1-5.
+7. [TODO] Close: per `doc/KNOWLEDGE.md#K-6`.
 
 ## Knowledge homes updated (`doc/KNOWLEDGE.md#K-1`)
 - `CLAUDE.md` (Local CI checks), `.claude/skills/ha-test-harness/SKILL.md` (Run, where a test goes,
