@@ -61,7 +61,7 @@ REPO = Path(__file__).resolve().parents[2]
 # `ci-local.sh --package NAME` passes `--package NAME` here. A test belongs to its PRIMARY package
 # (from its module name, `test_<package>[_<topic>].py`) plus every package named in
 # `@pytest.mark.package("a", "b")` (a test that loads or drives another package's real entities).
-# → plans/targeted-local-tests.md
+# → .claude/skills/ha-test-harness/SKILL.md (Run, where a test goes)
 # Harness modules that belong to no package; each is kept or dropped as a whole.
 # Runs under EVERY --package: a package edit can break loading or template rendering of any package.
 HARNESS_EVERY_PACKAGE = ("test_packages_load", "test_templates", "test_recorder_filter")

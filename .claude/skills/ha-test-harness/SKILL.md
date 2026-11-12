@@ -25,7 +25,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 ## Run
 - Development: targeted, `.github/scripts/ci-local.sh --package <pkg>` (that package's tests incl. cross-package
   ones, repeatable) or `.github/scripts/ci-local.sh -- tests/ha/test_x.py::test_y -k … -x` (anything after `--` goes to
-  pytest); `--yaml` = YAML checks only. `-n` default: auto for `--package`, 0 for explicit ids; a passed `-n` wins.
+  pytest); `--yaml` = YAML checks only. `-n` default: auto for `--package`, 0 for explicit ids (workers only add start-up; a whole package is ~3x faster with `-n auto`); a passed `-n` wins.
   A targeted run is never verification (YAML checks skipped; summary says so).
 - End of task / before pushing: `.github/scripts/ci-local.sh` (no arguments; `--e2e` adds Docker, full only: e2e has
   no per-package split). Needs python3.14 (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of
