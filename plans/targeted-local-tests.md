@@ -15,7 +15,7 @@
       A fresh agent given only "confirm the wallbox tests are green while developing" chose
       `--package energy` from the guidance by itself (9 s, one command).
 - [x] Step 6 recorder records only what the config's history readers need [DONE]
-- [ ] Step 7 behaviour test: history read back from the recorder, in progress
+- [x] Step 7 behaviour test: history read back from the recorder [DONE]: `test_history_stats_read_back_from_recorder` (reload forces the DB read; mutation fails it; 20x green)
 - [ ] Step 8 Close (before merge, so the plan file is not part of the merge)
 
 ## Overview
@@ -214,7 +214,7 @@ check) -> 45.5-46.5 s (3 runs; pytest 40 s); `--package pergola` 31.4 -> 22.5 s;
    files 20x), timings recorded here. Knowledge: `ha-test-harness` skill (fixtures section: what
    the recorder records and why, how to add a history-reading platform; Run timings if stated),
    confirmed facts via the `record-learning` skill. Depends on: steps 1-5.
-7. [TODO] Behaviour test for the recorder filter (owner follow-up). Gap found in Step 6: no test
+7. **[DONE]** Behaviour test for the recorder filter (`test_heating_pv_boost.py::test_history_stats_read_back_from_recorder`: `history_stats.reload` after committed runs; dropping the history_stats source fails it, 20x green) (owner follow-up). Gap found in Step 6: no test
    depends on recorded history (history_stats follows live events and reads the DB only on its
    first update), so dropping a source from the include list fails only the structural guards.
    Add a test that forces a DB read of a history source, e.g. history_stats after a reload/restart

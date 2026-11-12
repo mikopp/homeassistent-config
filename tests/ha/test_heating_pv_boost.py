@@ -801,6 +801,52 @@ async def test_cycling_history_stats(ha: HomeAssistant, broker: Broker, clock: C
     assert not failures, f"{len(failures)} cycling check(s) failed:\n" + "\n".join(failures)
 
 
+async def test_history_stats_read_back_from_recorder(
+    ha: HomeAssistant, broker: Broker, clock: Clock
+) -> None:
+    """After a reload the history_stats sensors get their value from the RECORDED history only.
+
+    history_stats follows live state events and queries the recorder just once, on its first
+    update (`HistoryStats.async_update`, `_has_recorder_data` False). `history_stats.reload`
+    (`async_setup_reload_service`) resets the platform: new entities with an empty cache, so
+    their first update is a database read. Two heating runs of 10 and 20 min and one hot-water
+    run are recorded first (committed by `async_wait_recording_done`), then the platform is
+    reloaded; the literal anchors (2 runs, 0.5 h, 0.5/24 duty) can only come from the database,
+    so a source missing from the filtered test recorder (`history_sources()` in conftest.py)
+    fails here, not only in the structural guards of test_recorder_filter.py.
+    """
+    ids = {"runs": entity_id(ha, "sensor", "history_stats", "heating_compressor_runs_today"),
+           "runtime": entity_id(ha, "sensor", "history_stats",
+                                "heating_compressor_runtime_today"),
+           "duty": entity_id(ha, "sensor", "history_stats", "heating_compressor_duty_cycle_24h")}
+    await clock.move_to(local_at(next_day(), 10))
+    await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic)
+    await _send(ha, broker, (_HVAC, "heat"), (_HEAT, 83))
+    await clock.advance(60)
+    for minutes in (10, 20):
+        await _send(ha, broker, (_HEAT, 1800))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=minutes)
+        await _send(ha, broker, (_HEAT, 83))
+        await _compressor_run(ha, broker, clock, mode="heat", watts=83, minutes=5)
+    # A hot-water run is not counted.
+    await _send(ha, broker, (_HVAC, "water"), (_HEAT, 3500))
+    await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=15)
+    await _send(ha, broker, (_HEAT, 83))
+    await clock.advance(60)
+    await async_wait_recording_done(ha)
+    live = check_states(ha, ids, {"runs": near(2), "runtime": near(0.5)}, "before reload")
+    assert not live, "precondition failed:\n" + "\n".join(live)
+    # Reset the platform: the new sensors have no live history, only the database.
+    await ha.services.async_call("history_stats", "reload", blocking=True)
+    await ha.async_block_till_done()
+    failures = check_states(
+        ha, ids,
+        {"runs": near(2), "runtime": near(0.5), "duty": near(round(0.5 / 24 * 100, 1), 0.05)},
+        "after reload (database read)",
+    )
+    assert not failures, f"{len(failures)} read-back check(s) failed:\n" + "\n".join(failures)
+
+
 async def test_daily_meters_reset_at_midnight(
     ha: HomeAssistant, broker: Broker, clock: Clock
 ) -> None:

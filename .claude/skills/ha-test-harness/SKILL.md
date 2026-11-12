@@ -97,8 +97,11 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   `NO_HISTORY_PLATFORMS` (with the reason), else `test_recorder_filter.py` fails (it also checks the classification
   against the installed component source). A test that needs a recorded entity or event outside this set must extend
   `recorder_config`; `test_recorder_filter.py` fails on a test module that queries the recorder database (only
-  `async_wait_recording_done` is allowed). No test depends on the recorded history today (history_stats follows live
-  events): dropping every source from the filter leaves the suite green except the filter's own guard.
+  `async_wait_recording_done` is allowed). `test_heating_pv_boost.py::test_history_stats_read_back_from_recorder` pins
+  the history read-back: history_stats follows live events and queries the recorder only on its first update, so the
+  test records two runs, commits them, calls `history_stats.reload` (`async_setup_reload_service`: new entities, empty
+  cache) and asserts literal values (2 runs, 0.5 h) that only the database holds; dropping the history_stats source
+  from `history_sources()` makes it fail (0 / 0.0 / 0.0). The statistics and filter sources have no such test.
 - Teardown order in `ha`: automations off, then the config entries are unloaded WHILE the recorder runs (else
   unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
   schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
