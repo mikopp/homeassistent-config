@@ -119,8 +119,8 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   MQTT/filter/statistics sensors (#146); `load_repo_config` pre-registers the Victron ones.
 - The template test (`test_templates.py`) renders every extracted state/runtime template in one HA, blueprints
   included (`!input` yields the input name, so their templates render leniently as runtime); a YAML parse error
-  fails the extraction, naming the file. 15 of the 56 MQTT entities are never fed a message by any test, so their
-  `value_template` only gets that syntax check (#159).
+  fails the extraction, naming the file. the ebusd and Loxone inputs are fed real payloads by
+  `test_heating_pv_boost_ebusd_registers.py` and `test_energy_loxone.py` (#159), not only that syntax check.
 - Pre-start seeding takes an explicit prefix list of the missing integrations' entities, never "whatever does not exist
   yet": a seed once took `sensor.airflow_avg_indoor_humidity_5min` before the filter platform registered it and the
   config entity became `_2` (`test_packages_load` asserts no `_2` ids).

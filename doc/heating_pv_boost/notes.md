@@ -272,8 +272,9 @@ production ids on a fresh registry; other MQTT ids may not (#146).
 and variants (enum names and raw numbers, case, unmapped, short, empty, garbage) and fails on any
 mqtt WARNING (`ehp/Integral`, the harness sync channel, has its own test). Its poll test asserts
 that every trigger of `heating_ebusd_poll_registration` sends exactly the 20 `/get` priorities
-seen on the live broker, and nothing while the scan reads `running`. Only
-`loxone/heating/warm_enough` is still never fed a message by any test: #159. A payload without
+seen on the live broker, and nothing while the scan reads `running`. `loxone/heating/warm_enough`
+is fed by `tests/ha/test_energy_loxone.py`: an empty or garbage payload renders OFF ("not warm
+enough"), the template has no empty guard (observed, pinned). A payload without
 field 3 renders `heating_hvac_action` as `unknown`: a sensor without `device_class`/unit stores an
 empty render as `''` (only numeric sensors ignore it, source read at 2026.10.4). The energy mode is a case table; the per-mode meters,
 the tariff automation and both efficiencies are tested end to end (`test_energy_split_by_mode`).
