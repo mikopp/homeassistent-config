@@ -268,9 +268,12 @@ only over the real broker; "unavailable" is a real `expire_after`. The daily met
 inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
-Nine of its MQTT entities (ebusd `OperatingMode`, `CompIntegral`, `CompStartsHc`, `CompStartsHwc`,
-`CompHoursHc`, `global/scan`, `CompDemand`, `global/running`, and `loxone/heating/warm_enough`)
-are never fed a message by any test: #159. The energy mode is a case table; the per-mode meters,
+`tests/ha/test_heating_pv_boost_ebusd_registers.py` feeds every ebusd-fed entity (all registers
+except `ehp/Integral`, the harness sync channel) its live payload and variants (enum names and
+raw numbers, case, unmapped, short, empty, garbage) and fails on any mqtt WARNING. Only
+`loxone/heating/warm_enough` is still never fed a message by any test: #159. A short
+`ehp/Status` payload sets `heating_hvac_action` to `''` (no `device_class`, so the empty render
+is not ignored); the test pins that as observed. The energy mode is a case table; the per-mode meters,
 the tariff automation and both efficiencies are tested end to end (`test_energy_split_by_mode`).
 The tariff selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
 `select.select_option` and records only calls to external entities (ComfoConnect).
