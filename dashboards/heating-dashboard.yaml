@@ -19,10 +19,15 @@ views:
             name: Hot water active (masks return temp)
           - entity: binary_sensor.heating_compressor_active
             name: Compressor running (Shelly > 500 W)
+          - entity: binary_sensor.geotherm_heating_compressor_running
+            name: Compressor running (ehp)
+          - entity: binary_sensor.geotherm_heating_circuit_pump
+            name: Heating circuit pump running (ehp)
+          - entity: sensor.heating_energy_mode
+            name: Energy mode
           - entity: binary_sensor.heating_compressor_heating_active
             name: Compressor running for heating (excl. hot water)
           - entity: binary_sensor.heating_cooling_active
-          - entity: binary_sensor.geotherm_heating_backup_heater
           - entity: binary_sensor.heating_ebusd_online
           - entity: binary_sensor.heating_loxone_online
 
@@ -49,21 +54,21 @@ views:
 
       # ── 1b. Compressor cycling (plans/heating-compressor-cycling.md) ────────
       # Goal: fewer, longer runs. Short-cycling looks like many runs of ~5 min.
+      # Starts = the machine's own counters. Runs = HA's count of heating runs from ehp/Comp; it
+      # can be one higher than the starts when a run turns from hot water into heating.
+      # The rows carry no name override, so a row and its popup show the same name.
       - type: entities
         title: Compressor Cycling
         entities:
           - entity: sensor.heating_compressor_starts_daily
-            name: Heating starts today (machine counter)
+          - entity: sensor.hot_water_compressor_starts_daily
           - entity: sensor.heating_compressor_runs_today
-            name: Heating runs today (excl. hot water)
           - entity: sensor.heating_compressor_average_run_today
             name: Average run today (target ≥ 20 min)
           - entity: sensor.heating_compressor_last_run
             name: Last run
           - entity: sensor.heating_compressor_duty_cycle_24h
             name: Duty cycle (24 h)
-          - entity: sensor.heating_efficiency_today
-            name: Efficiency today (heat ÷ electricity)
           - entity: sensor.heating_compressor_stop_temp
             name: Compressor stop temp (setpoint + hysteresis, keep ≤ 35 °C)
           - entity: sensor.geotherm_heating_energy_integral
@@ -74,8 +79,48 @@ views:
             name: "Setting: start integral"
           - entity: sensor.geotherm_heating_compressor_hysteresis
             name: "Setting: compressor hysteresis"
-          - entity: sensor.geotherm_heating_backup_start_integral
-            name: "Setting: backup start integral (added to start integral)"
+
+      # ── 1c. Energy by mode, today (plans/heating-cycling-from-ehp.md) ──────
+      # Each kWh is booked to the energy mode active when it arrives. Heating = active (compressor)
+      # + passive (pump only). Yield outside active heating / water heating is a misbooking check.
+      - type: entities
+        title: Energy by Mode (today)
+        entities:
+          - entity: sensor.heating_energy_mode
+            name: Energy mode now
+          - type: section
+            label: Efficiency (heat ÷ electricity)
+          - entity: sensor.space_heating_efficiency_today
+          - entity: sensor.hot_water_efficiency_today
+          - entity: sensor.heating_efficiency_today
+          - type: section
+            label: Electricity
+          - entity: sensor.heating_electricity_by_mode_active_heating
+            name: Active heating (compressor)
+          - entity: sensor.heating_electricity_by_mode_passive_heating
+            name: Passive heating (pump only)
+          - entity: sensor.heating_electricity_by_mode_water_heating
+            name: Water heating
+          - entity: sensor.heating_electricity_by_mode_cooling
+            name: Cooling (passive)
+          - entity: sensor.heating_electricity_by_mode_off
+            name: "Off (standby)"
+          - entity: sensor.heating_electricity_daily
+            name: All modes
+          - type: section
+            label: Heat (yield)
+          - entity: sensor.heating_yield_by_mode_active_heating
+            name: Active heating
+          - entity: sensor.heating_yield_by_mode_water_heating
+            name: Water heating
+          - entity: sensor.heating_yield_by_mode_passive_heating
+            name: "Passive heating (check: should be 0)"
+          - entity: sensor.heating_yield_by_mode_cooling
+            name: "Cooling (check: should be 0)"
+          - entity: sensor.heating_yield_by_mode_off
+            name: "Off (check: should be 0)"
+          - entity: sensor.heating_yield_daily
+            name: All modes
 
       # Overshoot at the moment a run ends ≈ hysteresis → the hysteresis cut the run short;
       # integral back near 0 at the end → the deficit was paid back.
@@ -152,7 +197,6 @@ views:
           - entity: binary_sensor.geotherm_heating_cooling_request
           - entity: binary_sensor.geotherm_heating_cooling_active_uih
           - entity: binary_sensor.geotherm_heating_hwc_active
-          - entity: binary_sensor.geotherm_heating_backup_heater
 
       - type: entities
         title: ebusd Bridge and Comfort Signal
@@ -181,7 +225,7 @@ views:
       - type: tile
         entity: automation.heating_ebusd_connectivity_changed
       - type: tile
-        entity: automation.heating_backup_heater_engaged
+        entity: automation.heating_energy_tariff_follows_mode
       - type: tile
         entity: automation.heating_slab_charge_decision_changed
 
@@ -196,7 +240,7 @@ views:
           - binary_sensor.heating_compressor_active
           - binary_sensor.heating_compressor_heating_active
           - binary_sensor.heating_cooling_active
-          - binary_sensor.geotherm_heating_backup_heater
+          - sensor.heating_energy_mode
           - binary_sensor.heating_ebusd_online
           - sensor.ebusd_heating_ebusd_scan_status
 

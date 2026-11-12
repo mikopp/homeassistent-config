@@ -47,8 +47,13 @@ def _package_unique_ids() -> dict[str, set[str]]:
     for path in sorted((ROOT / "packages").glob("*.yaml")):
         package = yaml.load(path.read_text(), Loader=_AnyTagLoader)
         ids = _unique_ids({k: v for k, v in package.items() if k != "utility_meter"})
-        # A utility meter without tariffs registers its sensor as "<unique_id>_single_tariff".
-        ids |= {f"{uid}_single_tariff" for uid in _unique_ids(package.get("utility_meter"))}
+        # A utility meter without tariffs registers its sensor as "<unique_id>_single_tariff";
+        # one with tariffs registers a select under "<unique_id>" and "<unique_id>_<tariff>".
+        for meter in (package.get("utility_meter") or {}).values():
+            if tariffs := meter.get("tariffs"):
+                ids |= {meter["unique_id"]} | {f"{meter['unique_id']}_{t}" for t in tariffs}
+            else:
+                ids.add(f"{meter['unique_id']}_single_tariff")
         result[path.name] = ids
     return result
 
