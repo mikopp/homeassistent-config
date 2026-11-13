@@ -70,15 +70,9 @@ Use HA's `utility_meter` with `tariffs:` (daily cycle). An automation sets each 
 
 - Electricity: one meter on the Shelly energy with one tariff per mode (`active_heating`,
   `passive_heating`, `water_heating`, `cooling`, `off`). Heating electricity = active + passive.
-- Yield: one meter on `YieldTotal`, same tariffs. Only `active_heating` and `water_heating` should
-  grow; the others are a check (non-zero = yield booked to the wrong mode).
-- Efficiency today: heating = heating yield ÷ (active + passive heating electricity); hot water =
-  hot-water yield ÷ hot-water electricity. No efficiency for cooling or off. Keep the
-  "under 1 kWh → 0" rule from the existing efficiency sensor.
-
-HYPOTHESIS: `YieldTotal` arrives in whole kWh at the poll rate, so an increment that lands just
-after a mode switch is booked to the wrong mode. Over a day with ~1 h hot-water runs this should
-roughly balance. Check against the totals for a few days before relying on the split.
+- Yield and efficiencies: implemented; current state (one `space_heating` yield bucket for the
+  active and passive heating cycle, `unknown` below the floor) in `doc/heating_pv_boost/notes.md`
+  "Energy modes".
 
 ### Run statistics
 
@@ -147,4 +141,4 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 - Backup removal: scope (b), everything.
 - Next: deploy, add the bridge lines, then the 3-day comparison (step 8). Still to settle with
   live data: `hvac_action` reading `cooling` (first cooling period), where the hot-water run-on
-  goes, `YieldTotal` misbooking at mode switches, and the `ehp/Comp` reporting lag vs the Shelly.
+  goes, and the `ehp/Comp` reporting lag vs the Shelly.

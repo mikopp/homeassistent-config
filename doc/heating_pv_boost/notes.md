@@ -167,6 +167,8 @@ on the machine.
 | `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
 | `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
 | `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
+| `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day efficiency (see "Energy modes") |
+| `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics; ids from `name:`, verify after deploy |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.ebusd_heating_ebusd_scan_status`, `binary_sensor.ebusd_heating_ebusd_running` | `ebusd/global/scan`, `/running` |
 
@@ -228,6 +230,13 @@ on the machine.
 - Space heating efficiency = `space_heating` yield ÷ (active + passive electricity); hot water
   = water yield ÷ water electricity. The combined `sensor.heating_efficiency_today` stays
   (owner). All three render `unknown` (not 0) below 1 kWh electricity (owner).
+- **Rolling 30 days** (owner): `sql:` sensors sum `MAX(sum) − MIN(sum)` per statistic over the
+  last 30 days + 1 h of long-term statistics (raw history is only 14 days; pattern and pitfalls in
+  the `ha-energy-metering` skill). Attribute `days` = window covered. The space-heating yield
+  also lists the pre-merge `heating_yield_by_mode_active_heating`/`_passive_heating` statistics,
+  so keep those statistics until ~30 days after the merge. Efficiency = ratio of the 30-day sums
+  (not a mean of daily ratios), `unknown` below 10 kWh electricity (a whole-kWh yield step then
+  moves it ≤ 2.5 %). Up to ~1 h behind (owner: fine).
 - Run statistics count `active_heating` segments: a heating run that rolls into hot water ends at
   the flip, one that turns from hot water into heating starts a new segment there.
 
@@ -290,6 +299,10 @@ empty render as `''` (only numeric sensors ignore it, source read at 2026.10.4).
 `heating_energy_meters_follow_mode` and both efficiencies are tested end to end (`test_energy_split_by_mode`).
 The meters' mode selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
 `select.select_option` and records only calls to external entities (ComfoConnect).
+`tests/ha/test_heating_pv_boost_rolling.py`: the 30-day `sql` queries, rendered from the config, run
+on a standalone SQLite with fabricated rows (window edge, id lists, partial history, empty → 0), the
+30d efficiency table (floor → `unknown`, missing input → `unavailable`) and a clean `sql` load; no HA
+long-term statistics (owner).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
 `unknown` after boot until the delay elapses.

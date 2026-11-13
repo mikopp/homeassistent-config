@@ -121,7 +121,7 @@ views:
           - entity: sensor.heating_yield_daily
             name: All modes
 
-      # ── 1d. Efficiency, rolling 30 days (plans/heating-yield-efficiency.md) ──
+      # ── 1d. Efficiency, rolling 30 days (→ doc/heating_pv_boost/notes.md "Energy modes") ──
       # Ratio of the 30-day sums from long-term statistics, up to ~1 h behind; unknown below
       # 10 kWh electricity. "Days covered" < 30 while the history is younger than the window.
       - type: entities
