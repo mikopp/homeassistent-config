@@ -9,8 +9,8 @@ pytest-homeassistant==2026.11.1
 # manifests for the release above (tests/ha/test_versions.py guards it); bump them together.
 holidays==0.108  # workday
 cronsim==2.7  # utility_meter
-sqlparse==0.6.0  # sql
-aiohasupervisor==0.8.1  # hassio: mqtt's config flow imports it (the package lists it only in its bluetooth extra)
+sqlparse==0.6.1  # sql
+aiohasupervisor==0.10.0  # hassio: mqtt's config flow imports it (the package lists it only in its bluetooth extra)
 # Plugins the old test package brought along and pytest-homeassistant does not: --timeout=N bounds
 # a hang (ci-local.sh, tests.yaml), --count=N is the stability gate (each test repeated N times).
 pytest-timeout==2.4.0
