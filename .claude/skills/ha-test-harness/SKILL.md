@@ -118,7 +118,8 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   with a long-running script on the frozen clock (hangs HA's shutdown).
 - The package's plugin runs `logging.basicConfig(level=INFO)` and sets `sqlalchemy.engine` to INFO at import (`plugins.py` l.157-158): every recorder SQL statement hits stderr (~3300 lines/run). `conftest.py` resets that logger to WARNING; `-p no:logging` does not silence it and is not needed.
 - `log_guard` (autouse): fails setup, call or teardown on WARNING+ from `homeassistant.helpers.frame`, any
-  `homeassistant.*` "deprecated" message, or a template error. Opt out per test with
+  `homeassistant.*` "deprecated" message, a template error, or any WARNING+ from a `custom_components.*` logger
+  (a custom component reports config problems there, not under `homeassistant.*`). Opt out per test with
   `@pytest.mark.allow_log(regex, reason=…)`; `_KNOWN_CONFIG_LOGS` lists config defects tolerated everywhere
   (an entry is an open defect, issue number in its comment). `expected_lingering_timers` is True on purpose.
 - Entity ids: look up by unique_id (`entity_id()`); a fresh registry derives other ids than production for
@@ -144,7 +145,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   `ha_client.py` with a timeout on every call and deadline polling, no fixed sleeps.
 - Bootstrap boot (onboarding, MQTT and workday through the real config flows, production-like entity ids), then a clean
   restart: only the log after it is judged (a fresh HA logs ERROR on `homeassistant: start` MQTT publishes before the
-  MQTT entry exists). `test_zz_log_hygiene.py` runs last; its `EXTERNAL_NOISE` (environment) and `KNOWN_CONFIG_BUGS`
+  MQTT entry exists). It fails on ERROR+, deprecations, tracebacks, and WARNING from `custom_components.*`. `test_zz_log_hygiene.py` runs last; its `EXTERNAL_NOISE` (environment) and `KNOWN_CONFIG_BUGS`
   (issue numbers) lists are explicit: add an entry only with its cause.
 - A restore test must make the value final before the restart (e.g. an integral fed absurd power, then 0 W), else the
   sum keeps moving afterwards and the assertion is weak; `wait_stable` for a value that settles after a burst.

@@ -454,7 +454,13 @@ re-arm run is dropped, the boost lapses and restarts only at the next edge.
 
 ---
 
-## AF-8 `hvac_action` (climate display)
+## AF-8 `hvac_mode` / `hvac_action` (climate display)
+
+`hvac_mode` shows the **intent**: with automatic control on it is `dry` while the decision is a
+flush (`moisture_flush_boost` / `moisture_flush_cooling`), else `auto`; with it off, the manual
+profile (`heat` warm / `heat_cool` comfort / `cool` cool / `off`). Selecting `dry` turns automatic
+control on, like `auto`: there is no manual drying. `dry` must stay listed (humidity control
+depends on it: `doc/airflow/notes.md`, climate_template).
 
 `climate.airflow_climate`'s `hvac_action` shows what the **device** does: `drying` when the decision
 is a flush (`moisture_flush_boost` / `moisture_flush_cooling`) **and** the profile is `cool`;

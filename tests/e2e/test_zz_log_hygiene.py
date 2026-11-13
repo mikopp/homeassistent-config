@@ -9,7 +9,9 @@ API, which is the point.
 
 What is judged: the log from the clean boot on (the bootstrap boot of a fresh install is excluded,
 see `session` in conftest.py) through every restart the other tests made. The container logs at
-WARNING and above (HA's default), so INFO lines are not there.
+WARNING and above (HA's default), so INFO lines are not there. Failing: ERROR and above,
+deprecations, tracebacks, and any WARNING from a custom component's own logger
+(`custom_components.*`), where it reports config problems.
 
 The rule is "everything fails except what is listed", so a new error source is a failure until
 somebody decides it is noise. Two lists, each entry with a regex, the reason, and (for noise that
@@ -52,7 +54,7 @@ EXTERNAL_NOISE = [
         re.compile(r"^habluetooth\.manager Missing required permissions for Bluetooth management"),
         "the e2e container runs without NET_ADMIN/NET_RAW; Bluetooth recovery is not under test",
     ),
-    # The staged custom component climate_template (mikopp/hass-template-climate, installed by
+    # The staged custom component climate_template (litinoveweedle/hass-template-climate, installed by
     # tests/custom_components.yaml) still uses the climate attributes HA now logs as deprecated and
     # stops working with them in 2027.11. Not this config's code and not fixable here: tracked in
     # plans/climate-template-deprecations.md. Only these two message shapes of that component are allowed;
@@ -154,6 +156,10 @@ def test_no_errors_or_deprecations_in_the_session_log(ha_log):
             problems.append(f"{level} deprecation [{record['logger']}] {message}")
         elif level in ("ERROR", "CRITICAL"):
             problems.append(f"{level} [{record['logger']}] {message}")
+        # A custom component logs its config problems at WARNING under its own logger, e.g.
+        # upstream climate_template drops humidity control when `dry` is not in hvac_modes.
+        elif level == "WARNING" and record["logger"].startswith("custom_components."):
+            problems.append(f"{level} custom component [{record['logger']}] {message}")
         elif any("Traceback" in x for x in record["extra"]):
             problems.append(f"traceback after: [{record['logger']}] {message}")
     assert not problems, "Home Assistant logged problems:\n" + "\n".join(problems)

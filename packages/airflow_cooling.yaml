@@ -773,8 +773,8 @@ schedule:
         to: "20:30:00"
 
 # --- CLIMATE ENTITY ---
-# Requires HACS custom component: mikopp/hass-template-climate
-# https://github.com/mikopp/hass-template-climate
+# Requires HACS custom component: litinoveweedle/hass-template-climate
+# https://github.com/litinoveweedle/hass-template-climate
 climate:
   - platform: climate_template
     name: "Airflow Climate"
@@ -817,15 +817,20 @@ climate:
     #   heat_cool — manual comfort profile - will in the future also be used for spring times to heat with sun, but don't let it heat up as much as in winter.
     #   cool      — manual cool profile
     #   auto      — automation enabled (profile auto-selected) - uses heating-cooling indicator
+    #   dry       — automation enabled and its decision is drying (moisture flush); selecting it = auto.
+    #               Also required: climate_template enables humidity control only with dry listed.
+    #               → doc/airflow/design.md#AF-8
     hvac_modes:
       - "off"
       - "heat"
       - "heat_cool"
       - "cool"
       - "auto"
+      - "dry"
     hvac_mode_template: >
       {% if is_state('input_boolean.airflow_cooling_automatic_enabled', 'on') %}
-        auto
+        {{ 'dry' if states('sensor.airflow_cooling_state')
+                   in ['moisture_flush_boost', 'moisture_flush_cooling'] else 'auto' }}
       {% elif is_state('select.comfoconnect_pro_temperature_profile', 'warm') %}
         heat
       {% elif is_state('select.comfoconnect_pro_temperature_profile', 'comfort') %}
@@ -839,7 +844,7 @@ climate:
       - choose:
           - conditions:
               - condition: template
-                value_template: "{{ hvac_mode == 'auto' }}"
+                value_template: "{{ hvac_mode in ['auto', 'dry'] }}"
             sequence:
               - action: input_boolean.turn_on
                 target:
