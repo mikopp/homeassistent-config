@@ -533,7 +533,7 @@ sensor:
       hours: 24
 
 # Daily deltas of the machine-side counters and the Shelly heating energy, reset at midnight.
-# A meter without tariffs takes its entity id from `name:` at first registration, so key and
+# A meter without mode buckets takes its entity id from `name:` at first registration, so key and
 # name slug are kept equal: sensor.heating_compressor_starts_daily etc.
 utility_meter:
   heating_compressor_starts_daily:
@@ -558,9 +558,9 @@ utility_meter:
     unique_id: heating_electricity_daily
     source: sensor.technikraum_heizung_heizung_energy
     cycle: daily
-  # The same two sources split by energy mode: one tariff per mode, switched by
-  # automation.heating_energy_tariff_follows_mode. Each increment is booked to the mode active
-  # when it arrives. Ids: select.<key>, sensor.<key>_<tariff>.
+  # The same two sources split by energy mode: one bucket per mode, selected by
+  # automation.heating_energy_meters_follow_mode. Each increment is counted to the mode selected
+  # when it arrives. Ids: select.<key>, sensor.<key>_<mode>.
   # → doc/heating_pv_boost/notes.md "Energy modes"
   heating_electricity_by_mode:
     name: "Heating Electricity By Mode"
@@ -1014,7 +1014,7 @@ automation:
         data:
           topic: "ebusd/hwc/Status/get"
           payload: "?3"
-      # The energy-mode inputs: their edges are the run edges and the tariff switches.
+      # The energy-mode inputs: their edges are the run edges and the meter mode switches.
       - action: mqtt.publish
         data:
           topic: "ebusd/ehp/Comp/get"
@@ -1140,13 +1140,13 @@ automation:
             {% endif %}
     mode: single
 
-  # ── Energy tariffs follow the energy mode ─────────────────────────────────
+  # ── Energy meters follow the energy mode ──────────────────────────────────
   # Points both per-mode meters at the current mode, also on HA start (the selects restore their
-  # last option, which may be stale). An unavailable mode leaves the tariff as it is.
+  # last option, which may be stale). An unavailable mode leaves both selects as they are.
   # → doc/heating_pv_boost/notes.md "Energy modes"
-  - alias: "Heating: energy tariff follows mode"
-    id: heating_energy_tariff_follows_mode
-    description: "Book heat-pump electricity and yield to the current energy mode"
+  - alias: "Heating: energy meters follow mode"
+    id: heating_energy_meters_follow_mode
+    description: "Count heat-pump electricity and yield to the current energy mode"
     triggers:
       - trigger: state
         entity_id: sensor.heating_energy_mode

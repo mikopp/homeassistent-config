@@ -224,7 +224,7 @@ views:
       - type: tile
         entity: automation.heating_ebusd_connectivity_changed
       - type: tile
-        entity: automation.heating_energy_tariff_follows_mode
+        entity: automation.heating_energy_meters_follow_mode
       - type: tile
         entity: automation.heating_slab_charge_decision_changed
 

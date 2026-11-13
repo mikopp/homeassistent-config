@@ -164,8 +164,8 @@ on the machine.
 | `binary_sensor.heating_compressor_heating_active` | energy mode = `active_heating`; drives the run statistics |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
-| `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (tariff meter) |
-| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (tariff meter) |
+| `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
+| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
 | `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.ebusd_heating_ebusd_scan_status`, `binary_sensor.ebusd_heating_ebusd_running` | `ebusd/global/scan`, `/running` |
@@ -213,13 +213,21 @@ on the machine.
   which also fires on a cooling need or request. The interlock keeps the wider OR.
 - The geoTHERM cools passively only (owner): the compressor never runs for cooling, so checking
   the compressor first is safe.
-- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two `utility_meter`s
-  with one tariff per mode; `automation.heating_energy_tariff_follows_mode` sets their selects on
-  every mode change and on HA start. Each increment is booked to the mode active when it arrives
-  (`utility_meter` source at 2026.10). An unavailable mode leaves the tariff unchanged.
-- Space heating efficiency = (active + passive yield) ÷ (active + passive electricity); hot water
-  = water yield ÷ water electricity; 0 below 1 kWh electricity. The combined
-  `sensor.heating_efficiency_today` stays (owner).
+- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two per-mode
+  `utility_meter`s; `automation.heating_energy_meters_follow_mode` sets their mode selects on
+  every mode change and on HA start. An unavailable mode leaves both selects unchanged.
+- After a mode-select change the next source change is counted entirely to the new mode
+  (CONFIRMED, `utility_meter` `sensor.py` at 2026.10.1).
+- The electricity meter keeps all five modes (Shelly Wh about every 60 s; the passive heating
+  cycle's circulation-pump draw stays visible). The yield meter has one `space_heating` bucket
+  for the active and passive heating cycle (owner): `YieldTotal` steps in whole kWh at the
+  slowest poll, so an active cycle's last kWh often arrives after the switch to the passive
+  cycle. Re-selecting the current option changes nothing, so that switch cannot misbook.
+  `cooling`/`off` should stay at 0; growth there shows misbooking at other mode boundaries
+  (active → hot water, hot water → passive, → off: accepted).
+- Space heating efficiency = `space_heating` yield ÷ (active + passive electricity); hot water
+  = water yield ÷ water electricity. The combined `sensor.heating_efficiency_today` stays
+  (owner). All three render `unknown` (not 0) below 1 kWh electricity (owner).
 - Run statistics count `active_heating` segments: a heating run that rolls into hot water ends at
   the flip, one that turns from hot water into heating starts a new segment there.
 
@@ -279,8 +287,8 @@ is fed by `tests/ha/test_energy_loxone.py`: an empty or garbage payload renders 
 enough"), by design (owner): the template has no empty guard. A payload without
 field 3 renders `heating_hvac_action` as `unknown`: a sensor without `device_class`/unit stores an
 empty render as `''` (only numeric sensors ignore it, source read at 2026.10.4). The energy mode is a case table; the per-mode meters,
-the tariff automation and both efficiencies are tested end to end (`test_energy_split_by_mode`).
-The tariff selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
+`heating_energy_meters_follow_mode` and both efficiencies are tested end to end (`test_energy_split_by_mode`).
+The meters' mode selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
 `select.select_option` and records only calls to external entities (ComfoConnect).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are

@@ -71,7 +71,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
    automation maps active/passive heating → `space_heating`; Space Heating Efficiency Today
    reads the combined yield; `group.heating_pv_boost` members; dashboard row
    "Space heating (active + passive cycle)". Depends on: nothing.
-2. [TODO] Wording: drop "tariff" from comments, notes, dashboard and test names/docstrings.
+2. [DONE] Wording: drop "tariff" from comments, notes, dashboard and test names/docstrings.
    Rename the automation alias/id `heating_energy_tariff_follows_mode` →
    `heating_energy_meters_follow_mode` (new automation entity; dashboard ref at line 228 updated;
    old entity is an orphan to delete after deploy). Depends on: 1.
@@ -128,4 +128,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
 - Step 1 done: yield meter has its own mode list; the automation sends active/passive heating to
   `space_heating`; today efficiencies render `unknown` below 1 kWh; group and dashboard updated.
   YAML checks pass; `tests/ha` not yet adapted (step 3), so the package tests are expected to fail.
-- Next: step 2 (wording, automation rename).
+- Step 2 done: no "tariff" wording left in package comments, dashboard and note (only the HA
+  `tariffs:` key); automation renamed to `heating_energy_meters_follow_mode`; note's "Energy
+  modes" matches step 1. YAML checks pass. Test names/docstrings follow in step 3.
+- Next: step 3 (tests).
