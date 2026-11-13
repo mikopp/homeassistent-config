@@ -6,7 +6,7 @@ config check get it from the image tag in the FROM line of .github/ha-versions/h
 Dependabot bumps the image and PHACC in separate PRs, so these tests fail until their year.month
 match again. Patch releases may differ.
 
-They also check that the integration requirements PHACC does not install (holidays, cronsim)
+They also check that the integration requirements PHACC does not install (holidays, cronsim, sqlparse)
 equal the pins in HA's own manifests, that the Python running the tests is one HA accepts, and that
 the Python CI sets up (.github/ha-versions/ha-python.txt) is exactly HA's.
 
@@ -41,7 +41,7 @@ HA_PYTHON = VERSIONS / "ha-python.txt"
 COMPONENTS = Path(homeassistant.__file__).parent / "components"
 
 # (integration, package) pairs whose package requirements_test.txt installs by hand.
-INTEGRATION_REQUIREMENTS = [("workday", "holidays"), ("utility_meter", "cronsim")]
+INTEGRATION_REQUIREMENTS = [("workday", "holidays"), ("utility_meter", "cronsim"), ("sql", "sqlparse")]
 
 
 def test_in_process_ha_matches_docker_image() -> None:
