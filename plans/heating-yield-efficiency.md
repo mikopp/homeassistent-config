@@ -67,7 +67,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
 ## Steps
 
 ### Phase A — single space-heating yield
-1. [TODO] Yield meter: own mode list (`space_heating`, `water_heating`, `cooling`, `off`);
+1. [DONE] Yield meter: own mode list (`space_heating`, `water_heating`, `cooling`, `off`);
    automation maps active/passive heating → `space_heating`; Space Heating Efficiency Today
    reads the combined yield; `group.heating_pv_boost` members; dashboard row
    "Space heating (active + passive cycle)". Depends on: nothing.
@@ -125,4 +125,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
   on long-term statistics; 1 h lag fine; 30d floor 10 kWh electricity → `unknown`; "today"
   efficiencies also `unknown` below 1 kWh; tests must not use HA long-term statistics; no
   "tariff" wording; PV surplus out of scope.
-- Next: owner approval to start Phase A step 1.
+- Step 1 done: yield meter has its own mode list; the automation sends active/passive heating to
+  `space_heating`; today efficiencies render `unknown` below 1 kWh; group and dashboard updated.
+  YAML checks pass; `tests/ha` not yet adapted (step 3), so the package tests are expected to fail.
+- Next: step 2 (wording, automation rename).

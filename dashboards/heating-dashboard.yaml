@@ -81,8 +81,9 @@ views:
             name: "Setting: compressor hysteresis"
 
       # ── 1c. Energy by mode, today (plans/heating-cycling-from-ehp.md) ──────
-      # Each kWh is booked to the energy mode active when it arrives. Heating = active (compressor)
-      # + passive (pump only). Yield outside active heating / water heating is a misbooking check.
+      # Each kWh counts to the energy mode active when it arrives. Electricity splits the active
+      # (compressor) and passive (pump only) heating cycle; yield has one space-heating bucket for
+      # both. Yield outside space heating / water heating is a misbooking check.
       - type: entities
         title: Energy by Mode (today)
         entities:
@@ -109,12 +110,10 @@ views:
             name: All modes
           - type: section
             label: Heat (yield)
-          - entity: sensor.heating_yield_by_mode_active_heating
-            name: Active heating
+          - entity: sensor.heating_yield_by_mode_space_heating
+            name: Space heating (active + passive cycle)
           - entity: sensor.heating_yield_by_mode_water_heating
             name: Water heating
-          - entity: sensor.heating_yield_by_mode_passive_heating
-            name: "Passive heating (check: should be 0)"
           - entity: sensor.heating_yield_by_mode_cooling
             name: "Cooling (check: should be 0)"
           - entity: sensor.heating_yield_by_mode_off

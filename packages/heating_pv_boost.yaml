@@ -567,19 +567,26 @@ utility_meter:
     unique_id: heating_electricity_by_mode
     source: sensor.technikraum_heizung_heizung_energy
     cycle: daily
-    tariffs: &energy_modes
+    tariffs:
       - active_heating
       - passive_heating
       - water_heating
       - cooling
       - "off"
-  # Only active_heating and water_heating should grow; any other tariff is a misbooking check.
+  # Yield has one space_heating bucket for the active and passive heating cycle together:
+  # YieldTotal steps in whole kWh at the slowest poll, so an active cycle's last kWh often
+  # arrives after the switch to the passive cycle. Only space_heating and water_heating should
+  # grow; cooling and off are misbooking checks. → doc/heating_pv_boost/notes.md "Energy modes"
   heating_yield_by_mode:
     name: "Heating Yield By Mode"
     unique_id: heating_yield_by_mode
     source: sensor.geotherm_heating_yield_total
     cycle: daily
-    tariffs: *energy_modes
+    tariffs:
+      - space_heating
+      - water_heating
+      - cooling
+      - "off"
 
 # ── DERIVED SENSORS AND THE DECISION ────────────────────────────────────────────
 template:
@@ -742,7 +749,7 @@ template:
       # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight, ALL modes
       # together (the per-mode split is below). YieldTotal moves in whole kWh, so read it as a
       # day-over-day trend at the end of the day, not as an instantaneous COP.
-      # 0 until at least 1 kWh of electricity has been used today (too coarse before that).
+      # unknown until at least 1 kWh of electricity has been used today (too coarse before that).
       - name: "Heating Efficiency Today"
         unique_id: heating_efficiency_today
         state_class: measurement
@@ -753,7 +760,7 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_daily') | float %}
           {% set elec = states('sensor.heating_electricity_daily') | float %}
-          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+          {{ (heat / elec) | round(2) if elec >= 1 else none }}
 
       # ── Energy mode: which bucket the heat pump's energy goes to right now ──
       # The single decision behind the per-mode meters and the heating run statistics.
@@ -785,24 +792,23 @@ template:
           {% else %}off{% endif %}
 
       # ── Efficiency per mode (heat out ÷ electricity in, today) ────────────
-      # From the per-mode meters. Space heating counts the pump-only (passive) electricity too.
-      # Same 1 kWh floor as the combined figure; no efficiency for cooling or off (no yield).
+      # From the per-mode meters. Space heating = the space_heating yield over the active plus
+      # passive heating cycle's electricity. Same 1 kWh floor as the combined figure; no
+      # efficiency for cooling or off (no yield).
       - name: "Space Heating Efficiency Today"
         unique_id: space_heating_efficiency_today
         default_entity_id: sensor.space_heating_efficiency_today
         state_class: measurement
         icon: mdi:radiator
         availability: >
-          {{ has_value('sensor.heating_yield_by_mode_active_heating')
-             and has_value('sensor.heating_yield_by_mode_passive_heating')
+          {{ has_value('sensor.heating_yield_by_mode_space_heating')
              and has_value('sensor.heating_electricity_by_mode_active_heating')
              and has_value('sensor.heating_electricity_by_mode_passive_heating') }}
         state: >
-          {% set heat = (states('sensor.heating_yield_by_mode_active_heating') | float)
-                      + (states('sensor.heating_yield_by_mode_passive_heating') | float) %}
+          {% set heat = states('sensor.heating_yield_by_mode_space_heating') | float %}
           {% set elec = (states('sensor.heating_electricity_by_mode_active_heating') | float)
                       + (states('sensor.heating_electricity_by_mode_passive_heating') | float) %}
-          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+          {{ (heat / elec) | round(2) if elec >= 1 else none }}
 
       - name: "Hot Water Efficiency Today"
         unique_id: hot_water_efficiency_today
@@ -815,7 +821,7 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_by_mode_water_heating') | float %}
           {% set elec = states('sensor.heating_electricity_by_mode_water_heating') | float %}
-          {{ (heat / elec) | round(2) if elec >= 1 else 0 }}
+          {{ (heat / elec) | round(2) if elec >= 1 else none }}
 
   - binary_sensor:
       # ── Season gate ───────────────────────────────────────────────────────
@@ -1148,19 +1154,26 @@ automation:
       - trigger: homeassistant
         event: start
     actions:
+      - variables:
+          mode: "{{ states('sensor.heating_energy_mode') }}"
+          # Active and passive heating cycle share the yield meter's space_heating bucket;
+          # re-selecting the current option changes nothing, so their switch cannot misbook.
+          yield_mode: "{{ 'space_heating' if mode in ['active_heating', 'passive_heating'] else mode }}"
       - if:
           - condition: template
             value_template: >
-              {{ states('sensor.heating_energy_mode')
-                 in state_attr('select.heating_electricity_by_mode', 'options') | default([], true) }}
+              {{ mode in state_attr('select.heating_electricity_by_mode', 'options') | default([], true) }}
         then:
           - action: select.select_option
             target:
-              entity_id:
-                - select.heating_electricity_by_mode
-                - select.heating_yield_by_mode
+              entity_id: select.heating_electricity_by_mode
             data:
-              option: "{{ states('sensor.heating_energy_mode') }}"
+              option: "{{ mode }}"
+          - action: select.select_option
+            target:
+              entity_id: select.heating_yield_by_mode
+            data:
+              option: "{{ yield_mode }}"
     mode: queued
 
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
@@ -1251,8 +1264,7 @@ group:
       - sensor.heating_electricity_by_mode_water_heating
       - sensor.heating_electricity_by_mode_cooling
       - sensor.heating_electricity_by_mode_off
-      - sensor.heating_yield_by_mode_active_heating
-      - sensor.heating_yield_by_mode_passive_heating
+      - sensor.heating_yield_by_mode_space_heating
       - sensor.heating_yield_by_mode_water_heating
       - sensor.heating_yield_by_mode_cooling
       - sensor.heating_yield_by_mode_off
