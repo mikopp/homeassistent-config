@@ -75,7 +75,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
    Rename the automation alias/id `heating_energy_tariff_follows_mode` →
    `heating_energy_meters_follow_mode` (new automation entity; dashboard ref at line 228 updated;
    old entity is an orphan to delete after deploy). Depends on: 1.
-3. [TODO] Tests: separate electricity/yield mode lists in `tests/ha/test_heating_pv_boost.py`;
+3. [DONE] Tests: separate electricity/yield mode lists in `tests/ha/test_heating_pv_boost.py`;
    `test_energy_split_by_mode` asserts the combined bucket and a regression step (active cycle,
    switch to passive, THEN YieldTotal +1 → counted to `space_heating`); midnight-reset test and
    `tests/baseline.py` seeds updated; "today" efficiencies `unknown` below 1 kWh. Depends on: 1.
@@ -131,4 +131,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
 - Step 2 done: no "tariff" wording left in package comments, dashboard and note (only the HA
   `tariffs:` key); automation renamed to `heating_energy_meters_follow_mode`; note's "Energy
   modes" matches step 1. YAML checks pass. Test names/docstrings follow in step 3.
-- Next: step 3 (tests).
+- Step 3 done: tests written from the spec (mode lists, regression step, `unknown` floor incl.
+  0.99/1.0 kWh boundary, unavailable mode keeps the selects, midnight reset, baseline seeds above
+  the floor); mutation checks fail as expected; full `ci-local.sh` passes (75 passed, 1 xfailed).
+- Next: step 4 (Phase B).

@@ -641,7 +641,7 @@ async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> Non
             calls[action] = async_mock_service(hass, domain, name)
         else:
             # The real action exists because a config entity of that domain does (the
-            # heating_pv_boost tariff selects make `select` real): keep it for those, record
+            # heating_pv_boost per-mode meter selects make `select` real): keep it for those, record
             # only the calls to the external entities, as the stub would.
             calls[action] = _record_external_calls(hass, domain, name)
     # Entities of integrations the test HA does not run exist in production from the start
