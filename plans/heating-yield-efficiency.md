@@ -83,7 +83,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
 ### Phase B — rolling 30-day efficiency
 4. [DONE] `sql:` block with the six 30-day kWh sums (with `days` attribute); three 30d efficiency
    templates (unknown below the floor); group members. Depends on: 1 (space-heating yield id).
-5. [TODO] Dashboard: new card "Efficiency (rolling 30 days)" after "Energy by Mode (today)".
+5. [DONE] Dashboard: new card "Efficiency (rolling 30 days)" after "Energy by Mode (today)".
    Depends on: 4.
 6. [DONE] Tests — pure unit tests, no HA long-term statistics (owner):
    - efficiency templates: seed the six 30d kWh inputs; check sum ratio, the floor → `unknown`
@@ -97,7 +97,7 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
    Depends on: 4.
 
 ### Phase C — verify, deploy notes
-7. [TODO] Full `.github/scripts/ci-local.sh` (and `--e2e`); `git ls-files --eol` clean.
+7. [TODO] Full `.github/scripts/ci-local.sh` (`--e2e` runs in GitHub CI only, owner); `git ls-files --eol` clean.
    Deploy notes from `git diff origin/master...HEAD`: restart HA; check the yield mode select;
    look up new ids (space-heating yield, six `sql` sensors, renamed automation) by unique_id;
    delete orphans (old active/passive yield sensors + statistics, old automation); check the
@@ -138,4 +138,6 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
   (`unknown` below 10 kWh), group members; YAML checks pass, sql sensors load in-process;
   `test_every_template_renders` needs `tests/baseline.py` seeds for the six 30d inputs (step 6).
 - Step 6 done: `tests/ha/test_heating_pv_boost_rolling.py` (queries run on a standalone SQLite, efficiency table, sql load check), `sqlparse==0.6.0` pinned + guarded, `sql` in `RECORDER_IMPORTING_DOMAINS`, baseline seeds; mutations fail as expected; full `ci-local.sh` passes (80 passed, 1 xfailed).
-- Next: step 5 (dashboard).
+- Step 5 done: card "Efficiency (rolling 30 days)" after "Energy by Mode (today)" (three
+  efficiencies, days covered, 30-day yield and electricity sums).
+- Next: step 7 (full local CI + deploy notes; e2e via GitHub CI), then Close.
