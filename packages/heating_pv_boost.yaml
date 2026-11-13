@@ -588,6 +588,124 @@ utility_meter:
       - cooling
       - "off"
 
+# ── ROLLING 30-DAY ENERGY SUMS (recorder long-term statistics) ──────────────────
+# kWh used/produced over the last 30 days, read from the hourly long-term statistics: they are
+# never purged (raw history is 14 days) and their `sum` runs across daily and device meter resets.
+# Per statistic id: MAX(sum) − MIN(sum) over rows starting at or after now − (30 d + 1 h); the ids
+# are summed. COALESCE keeps an empty window at 0 (a NULL result logs a warning every poll).
+# `days` (attribute) = span actually covered; up to ~1 h lag from the hourly compilation.
+# The six queries are identical except the IN list; none may name the states-table id column
+# (sql rejects that as a full-table scan). `sql:` has no default_entity_id: ids come from `name:`
+# (sensor.heating_yield_30d etc.); verify after deploy.
+# → doc/heating_pv_boost/notes.md "Energy modes"
+sql:
+  - name: "Heating Yield 30d"
+    unique_id: heating_yield_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.geotherm_heating_yield_total')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
+  - name: "Heating Electricity 30d"
+    unique_id: heating_electricity_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.technikraum_heizung_heizung_energy')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
+  # Lists the combined space_heating yield plus the active/passive heating cycle yield ids it
+  # replaced, so the window carries across that merge.
+  - name: "Space Heating Yield 30d"
+    unique_id: space_heating_yield_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.heating_yield_by_mode_space_heating',
+                                 'sensor.heating_yield_by_mode_active_heating',
+                                 'sensor.heating_yield_by_mode_passive_heating')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
+  - name: "Space Heating Electricity 30d"
+    unique_id: space_heating_electricity_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.heating_electricity_by_mode_active_heating',
+                                 'sensor.heating_electricity_by_mode_passive_heating')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
+  - name: "Hot Water Yield 30d"
+    unique_id: hot_water_yield_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.heating_yield_by_mode_water_heating')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
+  - name: "Hot Water Electricity 30d"
+    unique_id: hot_water_electricity_30d
+    unit_of_measurement: kWh
+    column: kwh
+    query: >
+      {%- set now_ts = now().timestamp() -%}
+      SELECT COALESCE(SUM(d.delta), 0) AS kwh,
+             COALESCE(ROUND(({{ now_ts }} - MIN(d.first_ts)) / 86400.0, 1), 0) AS days
+      FROM (
+        SELECT MAX(s.sum) - MIN(s.sum) AS delta, MIN(s.start_ts) AS first_ts
+        FROM statistics s
+        JOIN statistics_meta m ON m.id = s.metadata_id
+        WHERE m.statistic_id IN ('sensor.heating_electricity_by_mode_water_heating')
+          AND s.start_ts >= {{ now_ts - (30 * 86400 + 3600) }}
+        GROUP BY m.statistic_id
+      ) d
+
 # ── DERIVED SENSORS AND THE DECISION ────────────────────────────────────────────
 template:
   - sensor:
@@ -822,6 +940,50 @@ template:
           {% set heat = states('sensor.heating_yield_by_mode_water_heating') | float %}
           {% set elec = states('sensor.heating_electricity_by_mode_water_heating') | float %}
           {{ (heat / elec) | round(2) if elec >= 1 else none }}
+
+      # ── Efficiency, rolling 30 days (heat out ÷ electricity in) ────────────
+      # Ratio of the 30-day sums from the `sql:` block above (never a mean of daily ratios).
+      # unknown below 10 kWh electricity in the window: a whole-kWh yield step would move the
+      # ratio by more than ~2.5 %. Input ids come from the sql sensors' `name:`; verify after
+      # deploy. → doc/heating_pv_boost/notes.md "Energy modes"
+      - name: "Heating Efficiency 30d"
+        unique_id: heating_efficiency_30d
+        default_entity_id: sensor.heating_efficiency_30d
+        state_class: measurement
+        icon: mdi:gauge
+        availability: >
+          {{ has_value('sensor.heating_yield_30d')
+             and has_value('sensor.heating_electricity_30d') }}
+        state: >
+          {% set heat = states('sensor.heating_yield_30d') | float %}
+          {% set elec = states('sensor.heating_electricity_30d') | float %}
+          {{ (heat / elec) | round(2) if elec >= 10 else none }}
+
+      - name: "Space Heating Efficiency 30d"
+        unique_id: space_heating_efficiency_30d
+        default_entity_id: sensor.space_heating_efficiency_30d
+        state_class: measurement
+        icon: mdi:radiator
+        availability: >
+          {{ has_value('sensor.space_heating_yield_30d')
+             and has_value('sensor.space_heating_electricity_30d') }}
+        state: >
+          {% set heat = states('sensor.space_heating_yield_30d') | float %}
+          {% set elec = states('sensor.space_heating_electricity_30d') | float %}
+          {{ (heat / elec) | round(2) if elec >= 10 else none }}
+
+      - name: "Hot Water Efficiency 30d"
+        unique_id: hot_water_efficiency_30d
+        default_entity_id: sensor.hot_water_efficiency_30d
+        state_class: measurement
+        icon: mdi:water-boiler
+        availability: >
+          {{ has_value('sensor.hot_water_yield_30d')
+             and has_value('sensor.hot_water_electricity_30d') }}
+        state: >
+          {% set heat = states('sensor.hot_water_yield_30d') | float %}
+          {% set elec = states('sensor.hot_water_electricity_30d') | float %}
+          {{ (heat / elec) | round(2) if elec >= 10 else none }}
 
   - binary_sensor:
       # ── Season gate ───────────────────────────────────────────────────────
@@ -1270,6 +1432,16 @@ group:
       - sensor.heating_yield_by_mode_off
       - sensor.space_heating_efficiency_today
       - sensor.hot_water_efficiency_today
+      # Rolling 30-day sums (sql; ids from `name:`, verify after deploy) and efficiencies
+      - sensor.heating_yield_30d
+      - sensor.heating_electricity_30d
+      - sensor.space_heating_yield_30d
+      - sensor.space_heating_electricity_30d
+      - sensor.hot_water_yield_30d
+      - sensor.hot_water_electricity_30d
+      - sensor.heating_efficiency_30d
+      - sensor.space_heating_efficiency_30d
+      - sensor.hot_water_efficiency_30d
       # Loxone comfort signal
       - binary_sensor.loxone_heating_heating_loxone_warm_enough
       # Derived sensors
