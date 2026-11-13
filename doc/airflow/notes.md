@@ -56,6 +56,14 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
   sticks until the next edge. Away counts only when explicitly `on` (`unknown`/`unavailable` = not away).
   Edge table: design `AF-7.2`.
 
+### climate_template (upstream litinoveweedle/hass-template-climate, pinned in `tests/custom_components.yaml`)
+- Humidity control needs `dry` in `hvac_modes`: without it the component drops `set_humidity` /
+  `target_humidity_template` with only a WARNING under its own logger and the entity loads without
+  TARGET_HUMIDITY. CONFIRMED: `climate.py` at 0.8.2 and `test_climate_humidity_control` (fails with
+  `dry` removed). So `dry` stays listed (meaning: design `AF-8`).
+- At 0.8.2 it still logs the HA 2026.11 climate temperature deprecations
+  (`plans/climate-template-deprecations.md`).
+
 ## Entity map
 Full inventory with roles: design `AF-2` (inputs, thresholds, indicators, actuators, views) and
 `AF-9` (helpers). Season thresholds: `input_number.heating_indicator_*` (design `AF-4`).

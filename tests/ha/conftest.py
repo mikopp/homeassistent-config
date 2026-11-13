@@ -990,7 +990,11 @@ async def clock(ha: HomeAssistant, freezer: FrozenDateTimeFactory) -> Clock:
 # - a deprecation warning from any homeassistant logger,
 # - a template error or warning: WARNING or above from the template helper or the template
 #   integration, or a message that names a template failure (an automation's template
-#   condition, an MQTT value_template, ...).
+#   condition, an MQTT value_template, ...),
+# - anything at WARNING or above from a staged custom component (`custom_components.*`, today only
+#   climate_template). Why: it logs config problems under its own logger, not `homeassistant.*`,
+#   e.g. upstream climate_template drops humidity control with only a warning when `dry` is
+#   missing from hvac_modes (custom_components/climate_template/climate.py, CONFIRMED at 0.8.2).
 # A test that provokes such a log on purpose declares it: @pytest.mark.allow_log(regex, reason=).
 _TEMPLATE_LOGGERS = ("homeassistant.helpers.template", "homeassistant.components.template")
 _TEMPLATE_MESSAGE = re.compile(
@@ -1009,13 +1013,19 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # Known config issues the guard tolerates in EVERY test, each with its reason. Keep this list
 # short: an entry is a defect to fix in the YAML (needs approval), not a permanent exception.
 _KNOWN_CONFIG_LOGS = (
-    # The staged custom component climate_template (external, tests/custom_components.yaml) reads and
-    # writes the climate attributes HA now logs as deprecated (stops working in 2027.11). Not this
-    # repo's code: tracked in plans/climate-template-deprecations.md. Only that component's frame warnings
-    # about `_attr_*` are tolerated; another deprecation from it, or any other integration's, fails.
+    # The staged custom component climate_template (litinoveweedle/hass-template-climate,
+    # tests/custom_components.yaml) reads and writes the climate attributes HA now logs as deprecated
+    # and provides the deprecated target_temperature(_high|_low) properties (stops working in
+    # 2027.11; still so at 0.8.2). Not this repo's code: tracked in
+    # plans/climate-template-deprecations.md. Only these two message shapes are tolerated; another
+    # deprecation or warning from it, or any other integration's deprecation, fails.
     re.compile(
         r"Detected that custom integration 'climate_template' (?:writes|reads) the deprecated "
         r"TemplateClimate\._attr_\w+, use _attr_native_\w+ instead at custom_components/climate_template/"
+    ),
+    re.compile(
+        r"^custom_components\.climate_template\.climate::TemplateClimate provides the deprecated "
+        r"target_temperature(?:_high|_low)?, "
     ),
     # packages/victron.yaml counter-delta baselines render the string 'unknown' (src unknown and
     # this.state unknown) into a numeric energy sensor on a time_pattern tick before the Venus
@@ -1030,9 +1040,14 @@ _KNOWN_CONFIG_LOGS = (
 
 def _guarded(record: logging.LogRecord) -> str | None:
     """Why a log record fails the test, or None when it does not."""
-    if record.levelno < logging.WARNING or not record.name.startswith("homeassistant"):
+    if record.levelno < logging.WARNING:
         return None
     message = record.getMessage()
+    # A custom component's own logger: every warning counts (see the block comment above).
+    if record.name.startswith("custom_components."):
+        return "custom component"
+    if not record.name.startswith("homeassistant"):
+        return None
     if record.name.startswith("homeassistant.helpers.frame"):
         return "frame"
     if "deprecated" in message.lower():
