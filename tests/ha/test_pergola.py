@@ -47,7 +47,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import cancelling
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant.common import async_fire_time_changed
 
 from conftest import (
     REPO,

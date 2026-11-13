@@ -1,4 +1,16 @@
 version: 2
+
+# One PR for the Home Assistant release: the docker image tag (.github/ha-versions/ha/Dockerfile)
+# and pytest-homeassistant (requirements_test.txt) are versioned alike and tests/ha/test_versions.py
+# fails when only one of them moves. A plain `groups:` cannot span ecosystems; a multi-ecosystem
+# group can (GitHub docs, "Configuring multi-ecosystem updates": top-level `multi-ecosystem-groups`,
+# each member sets `multi-ecosystem-group` and a required `patterns`). UNVERIFIED on a live
+# Dependabot run: check that the first HA bump arrives as one PR touching both files.
+multi-ecosystem-groups:
+  home-assistant:
+    schedule:
+      interval: weekly
+
 updates:
   # Keep GitHub Actions (uses: ...) up to date.
   - package-ecosystem: github-actions
@@ -12,23 +24,24 @@ updates:
     schedule:
       interval: weekly
 
-  # In-process test layer (requirements_test.txt): PHACC, which pins Home Assistant itself.
+  # In-process test layer (requirements_test.txt): pytest-homeassistant, which pins Home Assistant
+  # itself. Member of the home-assistant group, so it moves with the image tag below.
   - package-ecosystem: pip
     directory: /
-    schedule:
-      interval: weekly
+    multi-ecosystem-group: "home-assistant"
+    patterns: ["*"]
     ignore:
-      # These follow the HA version (tests/ha/test_versions.py); bump them together with PHACC.
+      # These follow the HA version (tests/ha/test_versions.py); bump them together with the package.
       - dependency-name: holidays
       - dependency-name: cronsim
 
-  # Pinned HA version used by CI (patch and minor bumps arrive as PRs).
-  # Bump PHACC in requirements_test.txt in the same PR: tests/ha/test_versions.py fails until
-  # the image tag and PHACC's Home Assistant have the same year.month.
+  # Pinned HA version used by CI (patch and minor bumps arrive as PRs). Member of the
+  # home-assistant group: the image tag and pytest-homeassistant must be the same release
+  # (tests/ha/test_versions.py fails until they are). Not the python or mosquitto entries below.
   - package-ecosystem: docker
     directory: /.github/ha-versions/ha
-    schedule:
-      interval: weekly
+    multi-ecosystem-group: "home-assistant"
+    patterns: ["*"]
 
   # Python version of the YAML tooling/lint jobs (setup-python reads it from this Dockerfile,
   # since Dependabot cannot bump `python-version:` in workflow files). NOT the Python of the test

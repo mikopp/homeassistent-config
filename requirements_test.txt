@@ -1,12 +1,17 @@
 # Dependencies of the in-process test layer (tests/ha).
 #
-# PHACC pins the exact Home Assistant release (0.13.375 = homeassistant==2026.10.4). Its year.month
-# must match the FROM line of .github/ha-versions/ha/Dockerfile; tests/ha/test_versions.py guards it.
-pytest-homeassistant-custom-component==0.13.375
-# Integration requirements PHACC does not install. They must equal the pins in HA's own manifests
-# for the release above (tests/ha/test_versions.py guards it); bump them together with PHACC.
-holidays==0.106  # workday
+# pytest-homeassistant (home-assistant/core, packages/pytest-homeassistant) is versioned like Home
+# Assistant and pins it exactly: 2026.11.1 depends on homeassistant==2026.11.1. That version must
+# equal the tag in the FROM line of .github/ha-versions/ha/Dockerfile; tests/ha/test_versions.py
+# guards it. Never install pytest-homeassistant-custom-component next to it (overlapping fixtures).
+pytest-homeassistant==2026.11.1
+# Integration requirements the package does not install. They must equal the pins in HA's own
+# manifests for the release above (tests/ha/test_versions.py guards it); bump them together.
+holidays==0.108  # workday
 cronsim==2.7  # utility_meter
 sqlparse==0.6.0  # sql
-# --count=N for the stability gate (each test repeated N times).
-pytest-repeat
+aiohasupervisor==0.8.1  # hassio: mqtt's config flow imports it (the package lists it only in its bluetooth extra)
+# Plugins the old test package brought along and pytest-homeassistant does not: --timeout=N bounds
+# a hang (ci-local.sh, tests.yaml), --count=N is the stability gate (each test repeated N times).
+pytest-timeout==2.4.0
+pytest-repeat==0.9.4

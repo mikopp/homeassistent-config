@@ -116,7 +116,7 @@ Dashboard element fragments live in `dashboards/elements/` and are included via 
 ## CI / GitHub Actions
 
 ### `tests.yaml` — in-process tests (`tests/ha`)
-Runs on pull requests and on pushes to `master`. Home Assistant core runs inside pytest (pytest-homeassistant-custom-component) with this repo's real packages loaded, and a real mosquitto per test for the MQTT inputs.
+Runs on pull requests and on pushes to `master`. Home Assistant core runs inside pytest (pytest-homeassistant) with this repo's real packages loaded, and a real mosquitto per test for the MQTT inputs.
 
 1. Skips the test steps on a pull request that touches none of the paths in `.github/test-paths` (the job still reports green)
 2. Sets up the Python Home Assistant requires (`.github/ha-versions/ha-python.txt`) and installs `requirements_test.txt` (pip cache keyed on that file)
