@@ -514,6 +514,9 @@ NO_HISTORY_PLATFORMS = {
 RECORDER_IMPORTING_DOMAINS = {
     "recorder": "the recorder itself",
     "sensor": "sensor/recorder.py compiles long-term statistics, off in the test recorder",
+    # Queries the recorder database with its own SELECT (the 30-day sums read the long-term
+    # statistics tables), not the state history of an entity: nothing to add to the filter.
+    "sql": "runs its query on the recorder database; reads no entity's state history",
 }
 # Event types dropped before they reach the queue (the entity filter does not apply to events
 # without a top-level entity_id, e.g. call_service). Only types no test reads: a test has no

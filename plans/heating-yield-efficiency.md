@@ -81,11 +81,11 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
    `tests/baseline.py` seeds updated; "today" efficiencies `unknown` below 1 kWh. Depends on: 1.
 
 ### Phase B — rolling 30-day efficiency
-4. [TODO] `sql:` block with the six 30-day kWh sums (with `days` attribute); three 30d efficiency
+4. [DONE] `sql:` block with the six 30-day kWh sums (with `days` attribute); three 30d efficiency
    templates (unknown below the floor); group members. Depends on: 1 (space-heating yield id).
 5. [TODO] Dashboard: new card "Efficiency (rolling 30 days)" after "Energy by Mode (today)".
    Depends on: 4.
-6. [TODO] Tests — pure unit tests, no HA long-term statistics (owner):
+6. [DONE] Tests — pure unit tests, no HA long-term statistics (owner):
    - efficiency templates: seed the six 30d kWh inputs; check sum ratio, the floor → `unknown`
      (not `unavailable`), missing input → `unavailable`;
    - the SQL query: render the query template and run it against a standalone in-memory SQLite
@@ -134,4 +134,8 @@ as the literal HA `utility_meter` config key (and in HA-generated ids such as
 - Step 3 done: tests written from the spec (mode lists, regression step, `unknown` floor incl.
   0.99/1.0 kWh boundary, unavailable mode keeps the selects, midnight reset, baseline seeds above
   the floor); mutation checks fail as expected; full `ci-local.sh` passes (75 passed, 1 xfailed).
-- Next: step 4 (Phase B).
+- Step 4 done: six `sql:` 30-day sums (query cutoff via Jinja `now()`), three 30d efficiencies
+  (`unknown` below 10 kWh), group members; YAML checks pass, sql sensors load in-process;
+  `test_every_template_renders` needs `tests/baseline.py` seeds for the six 30d inputs (step 6).
+- Step 6 done: `tests/ha/test_heating_pv_boost_rolling.py` (queries run on a standalone SQLite, efficiency table, sql load check), `sqlparse==0.6.0` pinned + guarded, `sql` in `RECORDER_IMPORTING_DOMAINS`, baseline seeds; mutations fail as expected; full `ci-local.sh` passes (80 passed, 1 xfailed).
+- Next: step 5 (dashboard).

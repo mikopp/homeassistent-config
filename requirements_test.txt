@@ -7,5 +7,6 @@ pytest-homeassistant-custom-component==0.13.375
 # for the release above (tests/ha/test_versions.py guards it); bump them together with PHACC.
 holidays==0.106  # workday
 cronsim==2.7  # utility_meter
+sqlparse==0.6.0  # sql
 # --count=N for the stability gate (each test repeated N times).
 pytest-repeat

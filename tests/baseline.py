@@ -247,4 +247,13 @@ BASELINE_STATES: dict[str, tuple[str, dict]] = {
     "sensor.heating_yield_by_mode_water_heating": ("3", {"unit_of_measurement": "kWh"}),
     "sensor.heating_yield_by_mode_cooling": ("0", {"unit_of_measurement": "kWh"}),
     "sensor.heating_yield_by_mode_off": ("0", {"unit_of_measurement": "kWh"}),
+    # Rolling 30-day sums behind the 30d efficiencies (`sql` sensors on the long-term statistics;
+    # the test recorder holds none, so they read 0). Electricity above the 10 kWh floor (below it
+    # the efficiencies render `unknown`), space heating + hot water = overall, every efficiency 3.0.
+    "sensor.heating_yield_30d": ("150", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_30d": ("50", {"unit_of_measurement": "kWh"}),
+    "sensor.space_heating_yield_30d": ("105", {"unit_of_measurement": "kWh"}),
+    "sensor.space_heating_electricity_30d": ("35", {"unit_of_measurement": "kWh"}),
+    "sensor.hot_water_yield_30d": ("45", {"unit_of_measurement": "kWh"}),
+    "sensor.hot_water_electricity_30d": ("15", {"unit_of_measurement": "kWh"}),
 }
