@@ -6,7 +6,7 @@
 The custom component `climate_template` (mikopp/hass-template-climate, staged from
 `tests/custom_components.yaml` into `custom_components/` for the tests) logs deprecation warnings
 on HA 2026.11.1 (observed in the in-process layer; the e2e layer runs the same component in the
-real container, and its tolerance is UNVERIFIED until a CI run shows the container log). HA says the old behaviour "stops working in Home Assistant 2027.11":
+real container, the CI container log shows the same messages; the e2e tolerance was mutation-checked against it). HA says the old behaviour "stops working in Home Assistant 2027.11":
 - `homeassistant.helpers.frame`: the component reads/writes `_attr_temperature_unit`,
   `_attr_current_temperature`, `_attr_target_temperature(_low|_high)`; HA wants the `_attr_native_*`
   names.

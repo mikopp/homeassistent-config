@@ -59,15 +59,15 @@ EXTERNAL_NOISE = [
     # any other deprecation or error it logs still fails.
     Allowed(
         re.compile(
-            r"^NOMATCH1 Detected that custom integration 'climate_template' "
+            r"^homeassistant\.helpers\.frame Detected that custom integration 'climate_template' "
             r"(?:writes|reads) the deprecated TemplateClimate\._attr_\w+, use _attr_native_\w+ instead "
             r"at custom_components/climate_template/"
         ),
-        "x",
+        "climate_template (external custom component) uses deprecated climate temperature attributes",
     ),
     Allowed(
         re.compile(
-            r"^NOMATCH2 custom_components\.climate_template\.climate"
+            r"^custom_components\.climate_template\.climate custom_components\.climate_template\.climate"
             r"::TemplateClimate provides the deprecated (?:target_temperature(?:_high|_low)?), "
         ),
         "climate_template (external custom component) provides deprecated target temperature properties",
