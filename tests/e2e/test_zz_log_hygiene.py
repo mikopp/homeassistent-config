@@ -28,8 +28,10 @@ import pytest
 
 pytestmark = pytest.mark.needs_real_ha("runtime-logs")
 
+# The timestamp carries a UTC offset since HA 2026.11 ("2026-11-13 17:38:16.002+01:00 WARNING ..."),
+# none before; both parse, a record that does not match is dropped silently (hence the boot check below).
 LINE = re.compile(
-    r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ (?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL) "
+    r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+(?:[+-]\d\d:\d\d|Z)? (?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL) "
     r"\((?P<thread>[^)]*)\) \[(?P<logger>[^\]]*)\] (?P<message>.*)$"
 )
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -49,6 +51,26 @@ EXTERNAL_NOISE = [
     Allowed(
         re.compile(r"^habluetooth\.manager Missing required permissions for Bluetooth management"),
         "the e2e container runs without NET_ADMIN/NET_RAW; Bluetooth recovery is not under test",
+    ),
+    # The staged custom component climate_template (mikopp/hass-template-climate, installed by
+    # tests/custom_components.yaml) still uses the climate attributes HA now logs as deprecated and
+    # stops working with them in 2027.11. Not this config's code and not fixable here: tracked in
+    # plans/climate-template-deprecations.md. Only these two message shapes of that component are allowed;
+    # any other deprecation or error it logs still fails.
+    Allowed(
+        re.compile(
+            r"^homeassistant\.helpers\.frame Detected that custom integration 'climate_template' "
+            r"(?:writes|reads) the deprecated TemplateClimate\._attr_\w+, use _attr_native_\w+ instead "
+            r"at custom_components/climate_template/"
+        ),
+        "climate_template (external custom component) uses deprecated climate temperature attributes",
+    ),
+    Allowed(
+        re.compile(
+            r"^custom_components\.climate_template\.climate custom_components\.climate_template\.climate"
+            r"::TemplateClimate provides the deprecated (?:target_temperature(?:_high|_low)?), "
+        ),
+        "climate_template (external custom component) provides deprecated target temperature properties",
     ),
     Allowed(
         re.compile(r"^metno "),

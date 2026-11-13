@@ -1,14 +1,15 @@
 """Keep both test layers on one Home Assistant release.
 
-The in-process layer (tests/ha) gets Home Assistant from the exact pin inside
-pytest-homeassistant-custom-component (PHACC, requirements_test.txt); the Docker layer and the CI
-config check get it from the image tag in the FROM line of .github/ha-versions/ha/Dockerfile.
-Dependabot bumps the image and PHACC in separate PRs, so these tests fail until their year.month
-match again. Patch releases may differ.
+The in-process layer (tests/ha) gets Home Assistant from the exact pin inside pytest-homeassistant
+(home-assistant/core, requirements_test.txt), which is versioned like Home Assistant: its release
+number is the HA release it pins. The Docker layer and the CI config check get HA from the image
+tag in the FROM line of .github/ha-versions/ha/Dockerfile. Dependabot bumps the image and the test
+package in one PR (multi-ecosystem group in .github/dependabot.yml); these tests fail until the
+full versions (patch included) match again.
 
-They also check that the integration requirements PHACC does not install (holidays, cronsim, sqlparse)
-equal the pins in HA's own manifests, that the Python running the tests is one HA accepts, and that
-the Python CI sets up (.github/ha-versions/ha-python.txt) is exactly HA's.
+They also check that the integration requirements the package does not install (holidays, cronsim,
+sqlparse, aiohasupervisor) equal the pins in HA's own manifests, that the Python running the tests is one HA
+accepts, and that the Python CI sets up (.github/ha-versions/ha-python.txt) is exactly HA's.
 
 The MQTT broker is pinned like Home Assistant: .github/ha-versions/mosquitto/Dockerfile names the
 official Home Assistant Mosquitto app, and the mosquitto the tests start (the first one on PATH,
@@ -24,10 +25,11 @@ import re
 import shutil
 import subprocess
 import sys
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import homeassistant
+from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.const import MAJOR_VERSION, MINOR_VERSION, REQUIRED_PYTHON_VER
 
 DOCKERFILE = Path(__file__).resolve().parents[2] / ".github" / "ha-versions" / "ha" / "Dockerfile"
@@ -41,22 +43,51 @@ HA_PYTHON = VERSIONS / "ha-python.txt"
 COMPONENTS = Path(homeassistant.__file__).parent / "components"
 
 # (integration, package) pairs whose package requirements_test.txt installs by hand.
-INTEGRATION_REQUIREMENTS = [("workday", "holidays"), ("utility_meter", "cronsim"), ("sql", "sqlparse")]
+INTEGRATION_REQUIREMENTS = [("workday", "holidays"), ("utility_meter", "cronsim"), ("sql", "sqlparse"), ("hassio", "aiohasupervisor")]
+
+
+# Test requirements file; read as text so the pin line itself is checked, not only the installed one.
+REQUIREMENTS = DOCKERFILE.parents[3] / "requirements_test.txt"
 
 
 def test_in_process_ha_matches_docker_image() -> None:
-    """The Dockerfile image tag and PHACC's HA share the same year.month."""
+    """The Dockerfile image tag is the installed Home Assistant, patch release included."""
     # Only a pinned X.Y.Z tag matches; latest/stable/beta/dev do not.
-    match = re.search(r"^FROM\s+\S+:(\d+)\.(\d+)\.\d+\s*$", DOCKERFILE.read_text(), re.M)
+    match = re.search(r"^FROM\s+\S+:(\d+\.\d+\.\d+)\s*$", DOCKERFILE.read_text(), re.M)
     assert match, (
         f"{DOCKERFILE} must pin a Home Assistant release tag (YYYY.M.P), "
         "not latest/stable/beta/dev"
     )
-    image = (int(match[1]), int(match[2]))
-    assert image == (MAJOR_VERSION, MINOR_VERSION), (
-        f"Docker image is Home Assistant {image[0]}.{image[1]}, but "
-        f"pytest-homeassistant-custom-component runs {MAJOR_VERSION}.{MINOR_VERSION}: "
+    assert match[1] == HA_VERSION, (
+        f"Docker image is Home Assistant {match[1]}, but the in-process tests run {HA_VERSION}: "
         "bump both together (requirements_test.txt and .github/ha-versions/ha/Dockerfile)"
+    )
+
+
+def test_test_package_pin_is_the_installed_version() -> None:
+    """requirements_test.txt pins pytest-homeassistant, and the installed one is that version.
+
+    The package depends on `homeassistant==<its own version>`, so the installed HA cannot differ
+    from the package; what can differ is the pin line (an edited file with a stale venv, or the
+    reverse) and the package itself (the obsolete pytest-homeassistant-custom-component must not
+    be installed next to it: overlapping fixtures).
+    """
+    pin = re.search(r"^pytest-homeassistant==(\S+)\s*$", REQUIREMENTS.read_text(), re.M)
+    assert pin, f"{REQUIREMENTS.name} must pin pytest-homeassistant==<Home Assistant release>"
+    assert pin[1] == version("pytest-homeassistant"), (
+        f"{REQUIREMENTS.name} pins pytest-homeassistant=={pin[1]}, installed is "
+        f"{version('pytest-homeassistant')}: reinstall requirements_test.txt"
+    )
+    assert pin[1] == HA_VERSION, (
+        f"{REQUIREMENTS.name} pins pytest-homeassistant=={pin[1]}, Home Assistant is {HA_VERSION}"
+    )
+    try:
+        old = version("pytest-homeassistant-custom-component")
+    except PackageNotFoundError:
+        return
+    raise AssertionError(
+        f"pytest-homeassistant-custom-component {old} is installed next to pytest-homeassistant: "
+        "uninstall it (recreate the venv)"
     )
 
 

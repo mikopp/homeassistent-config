@@ -26,11 +26,11 @@ checks, knowledge-layout check and all of `tests/ha` (no Docker); `--e2e` adds t
 
 ## HA version gate — check before trusting any info
 The pinned HA version is the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag like
-`ghcr.io/home-assistant/home-assistant:2026.10.1`; Dependabot bumps it; the e2e layer runs this image).
+`ghcr.io/home-assistant/home-assistant:2026.11.1`; Dependabot bumps it; the e2e layer runs this image).
 `.HA_VERSION` was removed in #116 and must not be read. Before applying ANY information from internet
 search, official HA docs, ha-mcp results, or even this repo's own existing code/comments — check it's
-still accurate for that major version: HA renames/removes config keys and shifts YAML syntax. The PHACC
-pin in `requirements_test.txt` (in-process tests), the Python and the mosquitto pins are guarded by
+still accurate for that major version: HA renames/removes config keys and shifts YAML syntax. The pytest-homeassistant
+pin in `requirements_test.txt` (in-process tests; same release as the image), the Python and the mosquitto pins are guarded by
 `tests/ha/test_versions.py`.
 
 - Read the `FROM` line first, at the start of any research into HA behavior/config/docs. The live

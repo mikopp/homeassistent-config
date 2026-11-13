@@ -1,6 +1,6 @@
 ---
 name: ha-test-harness
-description: "Writing, running (a single test or one package's tests), debugging or reviewing tests in tests/ha (in-process HA, PHACC, real mosquitto, Clock) or tests/e2e (real HA container), their CI workflows, flaky or hanging tests, frozen-clock moves, log_guard, mutation checks, PHACC/Python/mosquitto pins. Use before touching tests/**, tests.yaml, e2e.yaml or ci-local.sh."
+description: "Writing, running (a single test or one package's tests), debugging or reviewing tests in tests/ha (in-process HA, pytest-homeassistant, real mosquitto, Clock) or tests/e2e (real HA container), their CI workflows, flaky or hanging tests, frozen-clock moves, log_guard, mutation checks, pytest-homeassistant/Python/mosquitto pins. Use before touching tests/**, tests.yaml, e2e.yaml or ci-local.sh."
 ---
 
 # Tests: in-process layer (`tests/ha`) and real-HA layer (`tests/e2e`)
@@ -30,9 +30,9 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
 - End of task / before pushing: `.github/scripts/ci-local.sh` (no arguments; `--e2e` adds Docker, full only: e2e has
   no per-package split). Needs python3.14 (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of
   `.github/ha-versions/mosquitto/Dockerfile`. The script does the venv/custom-component/mosquitto setup (`.venv-test`:
-  `requirements_test.txt`, which pins PHACC and with it HA); do not call raw pytest for `tests/ha`. Each layer has
+  `requirements_test.txt`, which pins pytest-homeassistant and with it HA); do not call raw pytest for `tests/ha`. Each layer has
   its own ini; there is no root pytest config. Usage reference: header of the script.
-- `tests/e2e` alone (no script equivalent): `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant --timeout=300 --timeout-method=thread`
+- `tests/e2e` alone (no script equivalent): `pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:pytest_homeassistant --timeout=300 --timeout-method=thread`
   (`tests/e2e/requirements.txt`, Docker, mosquitto on the host; `E2E_IMAGE` overrides the image;
   failure logs in `tests/e2e/.artifacts/`).
 - CI: `tests.yaml` and `e2e.yaml`; both skip their steps (and pass) on a PR touching none of
@@ -40,21 +40,27 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   `upload-artifact` skips dot-directories: `tests/e2e/.artifacts/` needs `include-hidden-files: true`.
 
 ## Pins and guards (`tests/ha/test_versions.py`)
-- PHACC's HA year.month must equal the Dockerfile `FROM` year.month; `holidays`/`cronsim` equal HA's
-  manifest pins (PHACC does not install them).
+- `pytest-homeassistant` (home-assistant/core `packages/pytest-homeassistant`) is versioned like HA and pins it exactly:
+  its version must equal the Dockerfile `FROM` tag, patch included, and the `requirements_test.txt` pin line must equal
+  the installed version; `holidays`/`cronsim`/`sqlparse` equal HA's manifest pins (the package does not install them).
+  Never install `pytest-homeassistant-custom-component` next to it (overlapping fixtures; the guard fails). The package
+  brings no `pytest-timeout`/`pytest-cov`; `requirements_test.txt` pins `pytest-timeout` and `pytest-repeat` itself.
+  pytest needs `addopts = -p no:respx` (tests/ha/pytest.ini), else it aborts at start with "httpx was already imported".
 - `ha-python.txt` must equal the minor HA requires (not the 3.15 of the YAML tooling; Dependabot must not bump it).
 - The first `mosquitto` on PATH must be the version the pinned HA Mosquitto app ships (FAILS, never skips; the
   message names the fix). Bump: Dependabot raises the `FROM` line, you add the `# mosquitto-in-app:` mapping line.
   Install: `.github/scripts/install-mosquitto.sh` (copies the binary out of the app image).
-- Bump PHACC and the Dockerfile together, in one PR.
+- Bump the package and the Dockerfile together, in one PR (Dependabot: multi-ecosystem group `home-assistant`, see the
+  comment in `.github/dependabot.yml`).
 
 ## `tests/ha` fixtures and their gotchas (`tests/ha/conftest.py`)
 - **Fresh HA per test (function scope).** Why: totals, `this.state` hysteresis, pending timers,
   `last_triggered`, recorder history and retained MQTT cannot be reset. A module-scoped `hass` was built and
-  rejected (PHACC's fixtures are function-scoped, the per-test leak checks no longer see the shared HA).
+  rejected (the package's fixtures are function-scoped, the per-test leak checks no longer see the shared HA).
 - **Tables are one looping test**, not parametrize: one fresh HA, a case list, inputs reset (and the
   reset CHECKED) before each case, failures collected, one assert naming every failing case.
-- `ha`: the repo's package domains on PHACC's `hass`, real sun integration, real `workday` entry
+- `ha`: the repo's package domains on the package's `hass` (which enables custom integrations itself: `climate_template` from
+  the staged `custom_components/` loads without a fixture; `test_packages_load` asserts `climate.airflow_climate` exists, mutation-checked with `custom_integrations_enabled` False), real sun integration, real `workday` entry
   (AT), `weather.get_forecasts` stubbed, MQTT on the real broker; HA is set up `not_running` and then started
   (else templates render before `input_*` exist and `homeassistant: start` never fires). Config entries load
   AFTER the package domains (else `sun` hides the YAML `sensor` platforms).
@@ -91,7 +97,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   broker fixture first so it is torn down after HA. `publish` is pipelined; `mqtt_sync` proves every earlier message
   was handled (needed before a clock move and before a seed); `wait_subscribed` before a non-retained publish.
   Isolation proof: `test_broker_isolation.py`.
-- **Test recorder** (`recorder_config` in `conftest.py`): PHACC's `recorder_mock` commits per event, so recording a boot
+- **Test recorder** (`recorder_config` in `conftest.py`): the package's `recorder_mock` commits per event, so recording a boot
   cost ~1.1 s CPU per test (~2.2 s boot → ~0.9 s without). The override records only the source entities of the
   config's `filter` / `statistics` / `history_stats` entries (`HISTORY_PLATFORMS`: platform → source key; derived from
   `packages/*.yaml` and `configuration.yaml` at run time) and drops event types no test reads (`RECORDER_EXCLUDED_EVENTS`;
@@ -110,7 +116,7 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   unloading MQTT flips entities to unavailable and a `history_stats` source queries the stopped recorder: "cannot
   schedule new futures after shutdown"; automations reacting would wait 10 s on the gone MQTT client). A test must not end
   with a long-running script on the frozen clock (hangs HA's shutdown).
-- PHACC's plugin runs `logging.basicConfig(level=INFO)` and sets `sqlalchemy.engine` to INFO at import (`plugins.py` l.157-158): every recorder SQL statement hits stderr (~3300 lines/run). `conftest.py` resets that logger to WARNING; `-p no:logging` does not silence it and is not needed.
+- The package's plugin runs `logging.basicConfig(level=INFO)` and sets `sqlalchemy.engine` to INFO at import (`plugins.py` l.157-158): every recorder SQL statement hits stderr (~3300 lines/run). `conftest.py` resets that logger to WARNING; `-p no:logging` does not silence it and is not needed.
 - `log_guard` (autouse): fails setup, call or teardown on WARNING+ from `homeassistant.helpers.frame`, any
   `homeassistant.*` "deprecated" message, or a template error. Opt out per test with
   `@pytest.mark.allow_log(regex, reason=…)`; `_KNOWN_CONFIG_LOGS` lists config defects tolerated everywhere

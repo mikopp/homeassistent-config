@@ -176,7 +176,7 @@ setup_tests_ha() {
     echo "   SKIPPED: python$HAPY not found (the Python Home Assistant requires); brew install python@$HAPY"
     return 1
   fi
-  # A second venv, same recipe as .venv above: Home Assistant (PHACC) needs its own Python.
+  # A second venv, same recipe as .venv above: Home Assistant (pytest-homeassistant) needs its own Python.
   if [ ! -x .venv-test/bin/python ]; then "$PY_TEST" -m venv .venv-test || exit 1; fi
   # (a venv made by `uv venv` has no pip; use uv then)
   if [ -x .venv-test/bin/pip ]; then
@@ -233,13 +233,13 @@ if [ "$E2E" = 1 ]; then
   if ! command -v docker >/dev/null; then
     echo "── Real-HA tests (tests/e2e)"; echo "   FAILED: --e2e needs docker"; FAILED+=("tests/e2e")
   else
-    # Own venv: its pins (pytest 9.2) differ from the PHACC ones.
+    # Own venv: its pins (pytest 9.2) differ from the pytest-homeassistant ones.
     [ -x .venv-e2e/bin/python ] || "${PY_TEST:-$PY}" -m venv .venv-e2e || exit 1
     install_once .venv-e2e requirements tests/e2e/requirements.txt -- \
       .venv-e2e/bin/pip install --quiet -r tests/e2e/requirements.txt || exit 1
     step "Real-HA tests (tests/e2e)" .venv-e2e/bin/python -m pytest \
       -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e \
-      -p no:homeassistant --timeout=300 --timeout-method=thread
+      -p no:pytest_homeassistant --timeout=300 --timeout-method=thread
   fi
 elif [ "$SELECTED" = 0 ]; then
   SKIPPED+=("tests/e2e (needs Docker, run with --e2e)")

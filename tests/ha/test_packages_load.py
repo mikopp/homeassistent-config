@@ -12,6 +12,9 @@ async def test_packages_load(ha: HomeAssistant) -> None:
         "sensor.airflow_cooling_state",
         "sensor.victron_grid_total_power",
         "input_select.pergola_automation_state",
+        # From the custom component climate_template (platform in packages/airflow_cooling.yaml):
+        # missing when custom integrations are not enabled in the test HA.
+        "climate.airflow_climate",
     ):
         assert ha.states.get(eid) is not None, eid
     # No id collision: a `_2` suffix means two entities wanted one id (e.g. a fixture seed that

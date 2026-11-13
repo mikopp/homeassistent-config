@@ -86,7 +86,7 @@ jobs:
           cache: pip
           cache-dependency-path: tests/e2e/requirements.txt
 
-      # No Home Assistant and no PHACC here: HA runs in the container, the tests drive it over
+      # No Home Assistant and no pytest-homeassistant here: HA runs in the container, the tests drive it over
       # REST/websocket.
       - name: Install e2e requirements
         if: steps.changes.outputs.run == 'true'
@@ -119,7 +119,7 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: >-
           pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e
-          -p no:homeassistant --timeout=300 --timeout-method=thread
+          -p no:pytest_homeassistant --timeout=300 --timeout-method=thread
 
       # The HA container log and the mosquitto log of the session, only worth keeping on failure.
       - name: Upload logs

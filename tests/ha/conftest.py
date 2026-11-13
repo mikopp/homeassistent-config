@@ -1,6 +1,6 @@
 """Fixtures of the in-process test layer.
 
-The real Home Assistant core runs inside pytest (pytest-homeassistant-custom-component, PHACC).
+The real Home Assistant core runs inside pytest (pytest-homeassistant, home-assistant/core).
 It loads THIS repo's packages through HA's own YAML loader, and the real MQTT integration talks
 to a real mosquitto started per test. Each test gets a fresh HA (function scope).
 
@@ -48,7 +48,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import async_load_custom_templates
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import (
+from pytest_homeassistant.common import (
     MockConfigEntry,
     async_fire_time_changed,
     async_mock_service,
@@ -209,7 +209,7 @@ def stage_config(tmp_path: Path) -> str:
 
 @pytest.fixture
 def hass_config_dir(tmp_path: Path) -> str:
-    """Override PHACC's config dir with a staged copy of this repo."""
+    """Override the package's config dir with a staged copy of this repo."""
     return stage_config(tmp_path)
 
 
@@ -471,7 +471,7 @@ def broker(tmp_path: Path, socket_enabled: None) -> Generator[Broker]:
     """A fresh broker per test, so retained messages cannot leak between tests.
 
     Kept over one broker per worker that is cleared between tests: clearing measured no faster
-    (about 24 ms per test either way) and needs workarounds (PHACC's thread check fails the
+    (about 24 ms per test either way) and needs workarounds (the package's thread check fails the
     first test; the subscription log is shared). tests/ha/test_broker_isolation.py proves the isolation.
     """
     b = Broker(tmp_path)
@@ -495,7 +495,7 @@ def _victron_mqtt_unique_ids() -> list[str]:
 
 
 # ── Test recorder: record only what the config reads back ─────────────────────
-# PHACC's `recorder_mock` commits to SQLite after every event (`commit_interval: 0`); recording the
+# The package's `recorder_mock` commits to SQLite after every event (`commit_interval: 0`); recording the
 # whole boot cost ~1.1 s of CPU per test (the recorder thread competes with the loop for the GIL).
 # The recorder is only READ by the entity platforms below, so it records only their sources and
 # drops event types no test reads. Both parts are derived or guarded, never a hand-kept list:
@@ -568,7 +568,7 @@ def history_sources() -> list[str]:
 
 @pytest.fixture
 def recorder_config() -> dict[str, Any]:
-    """Override PHACC's fixture: record only the history sources, drop unread event types."""
+    """Override the package's fixture: record only the history sources, drop unread event types."""
     return {
         "include": {"entities": history_sources()},
         "exclude": {"event_types": list(RECORDER_EXCLUDED_EVENTS)},
@@ -579,7 +579,7 @@ async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> Non
     """Set up this repo's package domains on `hass` and start it.
 
     `mqtt_port`: the real broker to connect to, or None to leave MQTT out (its entities then
-    do not exist). Custom integrations must already be enabled (`enable_custom_integrations`).
+    do not exist). Custom integrations are enabled by the package's `hass` fixture.
     """
     # Production location/time zone (CI used the same coordinates via sed).
     await hass.config.async_set_time_zone("Europe/Vienna")
@@ -673,12 +673,11 @@ async def ha(
     broker: Broker,  # first: torn down AFTER HA, so HA never sees the broker vanish
     recorder_mock: Any,
     hass: HomeAssistant,
-    enable_custom_integrations: None,
 ) -> AsyncGenerator[HomeAssistant]:
     """A fresh HA with this repo's package domains set up, MQTT connected to the real broker.
 
     Teardown unloads the config entries (MQTT, workday) HERE, while the recorder still runs.
-    PHACC's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
+    The package's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
     on `hass`, so it is finalised first) has stopped the recorder. Unloading the MQTT entry
     writes `unavailable` for every MQTT entity; a history_stats sensor whose source follows one
     (heating_compressor_*_today ← heating_compressor_heating_active ← the Shelly clamp) then
@@ -1000,7 +999,7 @@ _TEMPLATE_MESSAGE = re.compile(
 )
 
 
-# PHACC's plugin (plugins.py, import time) runs logging.basicConfig(level=INFO) and sets the
+# The package's plugin (plugins.py, import time) runs logging.basicConfig(level=INFO) and sets the
 # "sqlalchemy.engine" logger to INFO, so every recorder SQL statement is echoed to stderr (about
 # 3000 lines per run, in the CI log too). Only the SQL echo is silenced: WARNING and above from
 # sqlalchemy, and everything from homeassistant.*, still reach log_guard.
@@ -1010,6 +1009,14 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # Known config issues the guard tolerates in EVERY test, each with its reason. Keep this list
 # short: an entry is a defect to fix in the YAML (needs approval), not a permanent exception.
 _KNOWN_CONFIG_LOGS = (
+    # The staged custom component climate_template (external, tests/custom_components.yaml) reads and
+    # writes the climate attributes HA now logs as deprecated (stops working in 2027.11). Not this
+    # repo's code: tracked in plans/climate-template-deprecations.md. Only that component's frame warnings
+    # about `_attr_*` are tolerated; another deprecation from it, or any other integration's, fails.
+    re.compile(
+        r"Detected that custom integration 'climate_template' (?:writes|reads) the deprecated "
+        r"TemplateClimate\._attr_\w+, use _attr_native_\w+ instead at custom_components/climate_template/"
+    ),
     # packages/victron.yaml counter-delta baselines render the string 'unknown' (src unknown and
     # this.state unknown) into a numeric energy sensor on a time_pattern tick before the Venus
     # counters arrived. Any test that crosses a real minute boundary before publishing them
