@@ -16,6 +16,13 @@ HA YAML rules for this repo; loaded when a config, template, dashboard or test f
 - **Never add `| float(default)` or any fallback default** — helpers are always available once HA starts; defaults mask config errors.
 - **Never set `initial:` values** — HA resets to `initial` on every restart, overwriting any user change. Set desired values once in the UI after deploy.
 
+### Helpers the owner operates go on the package's dashboard
+- A new helper (or other entity) that the owner is meant to switch or set by hand is added to the
+  package's dashboard in `dashboards/` in the same change, and named in the PR's post-deploy steps.
+- Only when the package has a dashboard. A package without one gets none created for this.
+- Not when the user or the package note says the entity or helper stays off the dashboard
+  (explicit exclusion).
+
 ## Template sensors and binary sensors
 - **Always add an `availability:` template** to any template sensor/binary sensor that reads from non-guaranteed sensors (e.g. device sensors, integrations that can go unavailable). Pattern:
   ```yaml

@@ -180,6 +180,26 @@ views:
           - entity: input_number.heating_return_temp_max
             name: Return Temp saturation limit
 
+      # ── 2b. Comfort control (Phase 2 writer) ───────────────────────────────
+      # Master switch of the writer, with wanted vs actual and the hold stamps, so a lost write
+      # is visible. → doc/heating_pv_boost/notes.md
+      - type: entities
+        title: Comfort Control
+        entities:
+          - entity: input_boolean.heating_comfort_control_enabled
+          - entity: binary_sensor.loxone_heating_heating_loxone_warm_enough
+            name: Loxone warm enough
+          - entity: sensor.heating_wanted_operating_mode
+            name: Mode wanted
+          - entity: sensor.geotherm_heating_hvac_mode
+            name: Mode actual
+          - entity: sensor.heating_target_temp
+            name: Setpoint wanted
+          - entity: sensor.geotherm_heating_temp_desired
+            name: Setpoint actual
+          - entity: input_datetime.heating_mode_last_written
+          - entity: input_datetime.heating_temp_desired_last_written
+
       - type: gauge
         entity: sensor.heating_pv_surplus
         name: PV Surplus
