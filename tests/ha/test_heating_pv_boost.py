@@ -689,32 +689,41 @@ def _mean(value: float) -> dict[str, SeedValue]:
     return {_MEAN: (str(value), _C)}
 
 
+_COMFORT = "input_number.heating_comfort_temp"
+
+
+def _comfort(value: float) -> dict[str, SeedValue]:
+    """Seed of the comfort helper (a non-MQTT input, like the 48h mean)."""
+    return {_COMFORT: (str(value), {"unit_of_measurement": "°C"})}
+
+
 _TARGET_TABLE = Table(
-    inputs={"setback": _ebus("mc/TempDesiredLow")},
+    # No MQTT input: comfort and season are seeded per case.
+    inputs={},
     outputs={
         "target": ("sensor", "template", "heating_target_temp"),
         "season_active": ("binary_sensor", "template", "heating_season_active"),
         "indicator": ("sensor", "template", "heating_cooling_indicator"),
     },
-    defaults={"setback": "21.0"},
-    # Reset: setback 18.0 in neutral → 19.0, a target no case expects.
-    reset={"setback": "18.0"},
-    reset_seeds=_mean(14.0),
+    defaults={},
+    # Reset: comfort 18.0 in neutral → 19.0, a target no case expects.
+    reset={},
+    reset_seeds=_mean(14.0) | _comfort(18.0),
     reset_expect={"indicator": is_state("neutral"), "target": near(19.0)},
 )
-# One case per former Docker test (same names, same values).
 TARGET_CASES = [
-    # Neutral counts as heating season → TempDesiredLow + 1.
-    Case(name="target_temp_is_setback_plus_one_in_heating_season", seeds=_mean(14.0),
+    # Neutral counts as heating season → comfort + 1.
+    Case(name="target_temp_is_comfort_plus_one_in_heating_season",
+         seeds=_mean(14.0) | _comfort(21.0),
          expect={"indicator": is_state("neutral"), "target": near(22.0)}),
-    # Out of season the setpoint collapses onto the setback (neutral → active_cooling, 2 steps).
-    Case(name="target_temp_falls_back_to_setback_out_of_season", seeds=_mean(22.0),
+    # Out of season the setpoint collapses onto the comfort value (neutral → active_cooling).
+    Case(name="target_temp_falls_back_to_comfort_out_of_season",
+         seeds=_mean(22.0) | _comfort(21.0),
          expect={"indicator": is_state("active_cooling"), "season_active": _OFF,
                  "target": near(21.0)}),
-    # The only human knob: a changed setback moves the setpoint (neutral → active_heating).
-    Case(name="target_temp_tracks_a_changed_setback", inputs={"setback": "20.0"},
-         seeds=_mean(8.0), expect={"indicator": is_state("active_heating"),
-                                   "target": near(21.0)}),
+    # The only comfort knob: a changed comfort moves the setpoint (neutral → active_heating).
+    Case(name="target_temp_tracks_a_changed_comfort", seeds=_mean(8.0) | _comfort(20.0),
+         expect={"indicator": is_state("active_heating"), "target": near(21.0)}),
 ]
 
 

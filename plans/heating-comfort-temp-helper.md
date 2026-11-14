@@ -142,7 +142,7 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ### Phase B — tests (read the `ha-test-harness` skill first)
 
-5. [TODO] Tests:
+5. [DONE] Tests:
    - `tests/baseline.py`: add `"input_number.heating_comfort_temp": 21` to `BASELINE_NUMBERS`
      (keeps today's 22.0 in-season target, so most expectations stay).
    - `tests/ha/test_heating_pv_boost.py` `_TARGET_TABLE`: the input `setback` (MQTT TDL) becomes the
@@ -254,18 +254,20 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ## Status
 
-Phase A done; awaiting approval of Phase B. All owner questions answered.
+Phases A and B done; Phase C (docs, dashboard, README, cross-refs) not started. All owner
+questions answered.
 
-Phase A result: helper added; target derives from it (no `availability:`); writer gates only on
-the target; TDL sensor, poll line and group entry removed; notification shows comfort; boost-offset
-comment corrected. `ci-local.sh --yaml` passes. `--package heating_pv_boost`: 26 passed, 11 failed,
-all in Phase B scope (TDL rows / poll count 20 / helper not seeded / TDL-derived expectations):
-`test_expire_after`, `test_target_temp`, `test_ebusd_registers`, `test_ebusd_poll_registration`,
-and 7 comfort tests (table, ebusd offline, mode hold, stale read-back, Loxone silent, warm_enough
-unknown, hold ends while disarmed).
+Phase B result: helper seeded at 21 (`tests/baseline.py`, comfort tests' `_HELPERS`); target table
+seeds the helper (comfort 21 → 22.0 in season, 21.0 out of season, 20 → 21.0; reset 18 → 19.0);
+comfort tests publish no TDL, `tdl_unknown_writes_nothing` deleted, hold test moves the comfort
+helper; TDL rows removed from the register and expire_after tests, poll test expects 19 `/get`.
+Mutation checks (comfort hard-coded → target table + hold test fail; TDL poll re-added → poll test
+"20 of 19"; writer gated on TDL again → comfort table 10 failures), both tables in reversed order
+pass, changed tests 20× green (240 passed), full `ci-local.sh` green (90 passed, 1 xfailed; e2e not
+run: no Docker).
 
 - [DONE] 1–4 Phase A (code)
-- [TODO] 5 Phase B (tests)
+- [DONE] 5 Phase B (tests)
 - [TODO] 6–7 Phase C (docs, dashboard, cross-refs)
 - [TODO] 8–9 Phase D (owner deploy, verification)
 - [TODO] 10 Close

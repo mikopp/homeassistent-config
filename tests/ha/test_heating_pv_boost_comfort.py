@@ -5,7 +5,7 @@
 and `sensor.heating_target_temp`; the plan's "Control law" rows 1-7 are the spec.
 
 How the inputs get in (real broker; the assertions read what HA published to it):
-- the read-backs (`mc/OperatingMode`, `mc/TempDesired`, `mc/TempDesiredLow`), `ehp/Status`
+- the read-backs (`mc/OperatingMode`, `mc/TempDesired`), `ehp/Status`
   (ebusd online) and `loxone/heating/warm_enough` go over the broker;
 - the season is the REAL indicator, driven by the seeded 48h outdoor mean (as in
   test_heating_pv_boost.py); the slab decision `binary_sensor.heating_slab_mode_wanted` is seeded
@@ -46,8 +46,8 @@ _WANTED = "sensor.heating_wanted_operating_mode"
 _MODE_SET = "ebusd/mc/OperatingMode/set"
 _TEMP_SET = "ebusd/mc/TempDesired/set"
 _STATUS = "ebusd/ehp/Status"
-_INPUT_TOPICS = (_STATUS, "ebusd/mc/TempDesiredLow", "ebusd/mc/OperatingMode",
-                 "ebusd/mc/TempDesired", "loxone/heating/warm_enough")
+_INPUT_TOPICS = (_STATUS, "ebusd/mc/OperatingMode", "ebusd/mc/TempDesired",
+                 "loxone/heating/warm_enough")
 
 # 48h mean → season (thresholds 12 / 16 / 20 from the baseline); `None` makes the indicator unknown.
 _SEASON = {"neutral": 14.0, "active_heating": 8.0, "active_cooling": 22.0,
@@ -72,6 +72,7 @@ async def _season(hass: HomeAssistant, season: str | None) -> None:
 
 # Helper values the decision needs (production values; no baseline, see `_helpers`).
 _HELPERS = {
+    "input_number.heating_comfort_temp": 21,
     "input_number.heating_boost_offset": 1.5,
     "input_number.heating_indicator_heating_below": 12,
     "input_number.heating_indicator_passive_cooling_above": 16,
@@ -99,12 +100,11 @@ async def _end_hold(hass: HomeAssistant) -> None:
         await _call(hass, "input_datetime", "set_datetime", entity_id=stamp, timestamp=0)
 
 
-async def _inputs(hass: HomeAssistant, broker: Broker, *, status: bool = True, tdl: str = "21.0",
+async def _inputs(hass: HomeAssistant, broker: Broker, *, status: bool = True,
                   mode: str = "low", temp: str = "21.0", warm: str | None = "OFF") -> None:
     """Publish the ebusd read-backs, ebusd liveness and the Loxone flag; wait until handled."""
     if status:
         await publish(hass, broker, _STATUS, "25.2;1.5;1.2;heat;0a01")
-    await publish(hass, broker, "ebusd/mc/TempDesiredLow", tdl)
     await publish(hass, broker, "ebusd/mc/OperatingMode", mode)
     await publish(hass, broker, "ebusd/mc/TempDesired", temp)
     if warm is not None:
@@ -133,18 +133,17 @@ class Case:
     warm: str | None = "OFF"
     mode: str = "low"
     temp: str = "21.0"
-    tdl: str = "21.0"
     armed: bool = True
 
 
-# TDL 21, boost offset 1.5 (baseline). Read-backs are chosen so every case differs from wanted
+# Comfort 21, boost offset 1.5 (`_HELPERS`). Read-backs are chosen so every case differs from wanted
 # unless it is the idempotence case.
 _CASES = [
     Case("row1_indicator_unknown_writes_nothing", None, "unavailable", [],
          mode="low", temp="30.0"),
-    Case("row2_passive_cooling_off_and_tdl", "passive_cooling", "off",
+    Case("row2_passive_cooling_off_and_comfort", "passive_cooling", "off",
          [(_MODE_SET, "off"), (_TEMP_SET, "21.0")], mode="on", temp="22.0", warm="ON"),
-    Case("row2_active_cooling_off_and_tdl", "active_cooling", "off",
+    Case("row2_active_cooling_off_and_comfort", "active_cooling", "off",
          [(_MODE_SET, "off"), (_TEMP_SET, "21.0")], mode="on", temp="22.0", slab="on"),
     Case("row3_boost_overrides_warm_enough", "active_heating", "on",
          [(_MODE_SET, "on"), (_TEMP_SET, "23.5")], slab="on", warm="ON", mode="off"),
@@ -168,9 +167,6 @@ _CASES = [
          [], warm="ON", mode="off", temp="22.04"),
     Case("master_switch_off_writes_nothing", "neutral", "on", [], warm="OFF", mode="off",
          temp="30.0", armed=False),
-    # Last: the seeded unknown state of an MQTT entity hides the next same-value message.
-    Case("tdl_unknown_writes_nothing", "neutral", "on", [], warm="OFF", mode="off", temp="30.0",
-         tdl=""),
 ]
 
 
@@ -183,10 +179,7 @@ async def test_comfort_control_table(ha: HomeAssistant, broker: Broker, clock: C
         await _master(ha, False)
         await _end_hold(ha)
         await _season(ha, case.season)
-        await _inputs(ha, broker, mode=case.mode, temp=case.temp, warm=case.warm,
-                      tdl=case.tdl or "21.0")
-        if case.tdl == "":
-            await seed(ha, {"sensor.geotherm_heating_temp_desired_low": ("unknown", {})})
+        await _inputs(ha, broker, mode=case.mode, temp=case.temp, warm=case.warm)
         await seed(ha, {_SLAB: (case.slab, {})})
         got_wanted = ha.states.get(_WANTED).state
         if got_wanted != case.wanted:
@@ -208,7 +201,7 @@ async def test_no_write_while_ebusd_offline(ha: HomeAssistant, broker: Broker, c
     await _helpers(ha)
     await wait_subscribed(ha, broker, *_INPUT_TOPICS)
     await _season(ha, "neutral")
-    await _inputs(ha, broker, mode="off", temp="21.0", warm="OFF")  # wanted on, TDL + 1 = 22.0
+    await _inputs(ha, broker, mode="off", temp="21.0", warm="OFF")  # wanted on, comfort + 1 = 22.0
     await seed(ha, {_SLAB: ("off", {})})
     # ehp/Status is not republished: online = last update < 900 s ago.
     await clock.advance(timedelta(minutes=16))
@@ -228,7 +221,7 @@ async def test_mode_hold_defers_change_but_not_setpoint(
     """One mode change per 30 min: a change inside the hold waits for its end; TempDesired does not.
 
     Neutral, not warm enough: on. Loxone says warm enough: off is wanted, but the write of `on`
-    just happened. A new TDL moves the setpoint at once, the mode follows when the hold ends.
+    just happened. A new comfort value moves the setpoint at once, the mode follows when the hold ends.
     """
     await _helpers(ha)
     await wait_subscribed(ha, broker, *_INPUT_TOPICS)
@@ -246,13 +239,14 @@ async def test_mode_hold_defers_change_but_not_setpoint(
     index = len(broker.received)
     await _master(ha, True)
     assert await _fence(ha, broker, index) == [(_MODE_SET, "on"), (_TEMP_SET, "22.0")]
-    # The machine echoes the write; Loxone then reports warm enough (off wanted) and TDL moves.
+    # The machine echoes the write; Loxone then reports warm enough (off wanted), comfort moves.
     await _inputs(ha, broker, mode="on", temp="22.0", warm="ON")
     index = len(broker.received)
-    await _inputs(ha, broker, tdl="22.0", mode="on", temp="22.0", warm="ON")
+    await _call(ha, "input_number", "set_value", entity_id="input_number.heating_comfort_temp",
+                value=22)
     assert await _fence(ha, broker, index) == [(_TEMP_SET, "23.0")], \
         "setpoint must follow at once and the mode must wait"
-    await _inputs(ha, broker, tdl="22.0", mode="on", temp="23.0", warm="ON")
+    await _inputs(ha, broker, mode="on", temp="23.0", warm="ON")
     assert ha.states.get(_WANTED).state == "off"
 
     index = len(broker.received)
@@ -261,7 +255,7 @@ async def test_mode_hold_defers_change_but_not_setpoint(
     await clock.hold(2 * 60, refresh)
     assert await _fence(ha, broker, index) == [(_MODE_SET, "off")], "deferred change not applied"
     # A fresh hold started: the next change waits again.
-    await _inputs(ha, broker, tdl="22.0", mode="off", temp="23.0", warm="OFF")
+    await _inputs(ha, broker, mode="off", temp="23.0", warm="OFF")
     index = len(broker.received)
     await clock.hold(5 * 60, refresh)
     assert await _fence(ha, broker, index) == [], "second mode change inside the new hold"
