@@ -140,7 +140,8 @@ on the machine.
   (on change only, no heartbeat). Loxone does not control room valves.
 - **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
-- `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day, `low` at night).
+- `mc/OperatingMode` = **`on`**, set by hand (owner, 2026-11-14; was `auto` with the time program
+  from 10-30); `TempDesiredLow` 21.
 - Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150); `ehp/CompHysteresis` 7 K at last
   read (forced stop at setpoint + 7, e.g. 31 °C at a 24 °C setpoint; the 8–9 K cap below is
   relative to this). Check `sensor.geotherm_heating_compressor_hysteresis` before relying on it.
@@ -173,11 +174,11 @@ on the machine.
 
 ## Decisions in force
 
-- **Mode law (Phase 2):** `auto` is normal operation; HA writes `on` only for Loxone "not warm
-  enough" or a slab boost, then back to `auto`, never `low` (by day both give the same setpoint).
-  In cooling season (`passive_cooling`/`active_cooling`) HA sets the heating mode `off` (cooling
-  unaffected), `auto` again in `neutral`/`active_heating`; never `off` on an unknown indicator.
-  Slab boost only in `active_heating` (shoulder season mostly overheats). See the slab plan's
+- **Mode law (Phase 2, revised 2026-11-14, not yet implemented):** HA writes only `on` or `off`,
+  never `auto`/`low` (the geoTHERM time program is ignored). In `active_heating` and `neutral`:
+  Loxone warm enough → `off`, otherwise (incl. unknown or silent 24 h) → `on`; a slab boost
+  (`active_heating` only) overrides to `on`. Cooling season → `off` (cooling unaffected); unknown
+  indicator → no write. At most one mode change per 30 min. Full table: the slab plan's
   "Control law".
 - **Compressor tuning (cycling plan):**
   - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts): short runs are a

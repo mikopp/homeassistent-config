@@ -334,7 +334,9 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       and outdoor temp to the "Why runs end" graph. Update the tests.
 - [x] 9a. (owner, 2026-11-06) `ebusctl info`: `EHP00 SW=0383 HW=7201`. The pump-speed registers
       (SW ≥ 407) do not exist. Tuning table #1 has no software path.
-- [ ] 10. **Next (owner, manual):** night setback test, tuning table #0. Set `TempDesiredLow` 21 → 22 °C,
+- [ ] 10. (2026-11-14: superseded by the revised mode law, slab plan "Control law": the geoTHERM
+      runs `on`, so there is no night setback any more; Loxone's `warm_enough` switches it `off`.
+      Re-judge run lengths and starts under that law.) **Next (owner, manual):** night setback test, tuning table #0. Set `TempDesiredLow` 21 → 22 °C,
       leave `CompHysteresis` at 7 K, run 3 nights, log night starts / run length / integral at the
       stop / daily yield and electricity under Observations. Then tuning table #2 (`CompHysteresis`
       8 K) as a separate step for mild middays. A buffer tank is assessed and parked (Observations).
