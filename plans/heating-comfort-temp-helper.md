@@ -254,13 +254,15 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ## Status
 
-Phases A–C done; next: owner deploy (step 8). Open: the note is 27.2 KB, over the 24 KB limit
-(26.4 KB before this plan); a split (e.g. its Tests section into `doc/heating_pv_boost/tests.md`,
-K-3) is a separate decision.
+Phases A–C done; next: owner deploy (step 8). Rebased on #172: helper added to its Comfort Control
+card (and Temperatures; removed from Settings); the note's Tests section moved to
+`doc/heating_pv_boost/tests.md` with symlink rule `heating_pv_boost_tests.md` (K-3) so the note is
+23.7 KB (under the cap #172's record-learning gate enforces); K-7 loading check passed (not at
+start, loaded on a test file, not on README).
 
 Phase C result: notes (comfort invariant, TDL without logic, "Frost protection" section,
 Raumaufschaltung C5 options with `Keine` set, entity map, writer, tests), dashboard (helper in
-Temperatures and Settings, TDL rows removed), README (setpoint, mode law, room influence off),
+Temperatures and Comfort Control, TDL rows removed), README (setpoint, mode law, room influence off),
 cross-refs in the slab and cycling plans. Full `ci-local.sh` green.
 
 Phase B result: helper seeded at 21 (`tests/baseline.py`, comfort tests' `_HELPERS`); target table

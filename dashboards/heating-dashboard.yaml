@@ -187,6 +187,7 @@ views:
         title: Comfort Control
         entities:
           - entity: input_boolean.heating_comfort_control_enabled
+          - entity: input_number.heating_comfort_temp
           - entity: binary_sensor.loxone_heating_heating_loxone_warm_enough
             name: Loxone warm enough
           - entity: sensor.heating_wanted_operating_mode
@@ -290,7 +291,6 @@ views:
       - type: entities
         title: Settings
         entities:
-          - entity: input_number.heating_comfort_temp
           - entity: input_boolean.heating_pv_boost_enabled
           - entity: input_number.heating_boost_offset
           - entity: input_number.heating_pv_surplus_threshold
