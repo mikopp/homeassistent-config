@@ -295,12 +295,20 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       `on`/`off` law, see "Control law").
 - [x] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
       (live 2026-10-30: TDL 21, TempDesired 22)
-- [ ] 11. Phase 2 — comfort control (`on`/`off` from Loxone + derived setpoint, 30 min hold;
-      control law revised by the owner 2026-11-14, see "Control law"). Owner sets TDL 21 and keeps
-      the geoTHERM on `on` by hand until this is deployed.
-      Prerequisite (manual, user): two bridge lines `topic ebusd/mc/OperatingMode/set out 0` and
-      `topic ebusd/mc/TempDesired/set out 0`, then restart Mosquitto — see
-      `plans/heating-baseline-and-phase2-prerequisites.md` step 2. ebusd writes verified by the owner.
+- [x] 11. Phase 2 — comfort control IMPLEMENTED (not yet deployed): `sensor.heating_wanted_operating_mode`,
+      `sensor.heating_target_temp` (boost only in `active_heating`), `automation.heating_comfort_control`
+      (writes only on a read-back difference, 30 min mode hold via
+      `input_datetime.heating_mode_last_written`, no write with the master switch off / ebusd offline /
+      unknown season), tests in `tests/ha/test_heating_pv_boost_comfort.py`. Control law revised by
+      the owner 2026-11-14, see "Control law". Post-deploy steps (owner, in this order):
+      1. Add `topic ebusd/mc/OperatingMode/set out 0` and `topic ebusd/mc/TempDesired/set out 0` to the
+         Mosquitto bridge (`plans/heating-baseline-and-phase2-prerequisites.md` step 2), restart Mosquitto.
+      2. Prove each line with an idempotent write of the CURRENT value (e.g. publish the current
+         mode name / setpoint, `22.0` form for TempDesired: the one-decimal payload is unverified)
+         and see ebusd accept it.
+      3. Arm `input_boolean.heating_comfort_control_enabled` (no `initial:`; off until then).
+      Open: the setpoint payload form against live ebusd; whether ebusd echoes a written value on
+      the read topic (the writer waits for the read-back, polls refresh it otherwise).
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
 - [ ] 14. Compressor short-cycling observation + tuning — separate plan,
