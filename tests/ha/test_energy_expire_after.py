@@ -1,9 +1,8 @@
 """`expire_after` of the MQTT inputs, in-process on a frozen clock: #159.
 
 The Shelly entities (pool pump, rain water pump, Heizung Pro 3EM) have `expire_after: 120`: they
-go `unavailable` once their device stops publishing. The Loxone appliance meters, the Loxone
-comfort flag and every ebusd register have NONE, on purpose: Loxone publishes only on change and
-has no heartbeat, ebusd does not re-report an unchanged register, and a run must never be split
+go `unavailable` once their device stops publishing. The Loxone appliance meters and every ebusd
+register have NONE, on purpose: the Loxone meters publish only on change, ebusd does not re-report an unchanged register, and a run must never be split
 by a measurement dropout (doc/energy/notes.md, doc/heating_pv_boost/notes.md). Neither half is
 checked anywhere else for the pump plugs, and nothing fails if an expiry is added to an entity
 that must hold its value.
@@ -60,7 +59,6 @@ _HOLDING_TOPICS = {
     "loxone/washer/power": "0.000", "loxone/washer/energy": "277.606",
     "loxone/tumble-dry/power": "0.000", "loxone/tumble-dry/energy": "419.756",
     "loxone/dishwasher/power": "0.000", "loxone/dishwasher/energy": "603.574",
-    "loxone/heating/warm_enough": "On",
     "ebusd/ehp/Status": "23.88;1.540;1.513;heat;08", "ebusd/ehp/HcReturnTemp": "24.12;ok",
     "ebusd/mc/TempDesiredLow": "21.0", "ebusd/mc/TempDesired": "22.0",
     "ebusd/mc/OperatingMode": "on", "ebusd/mc/Status0a": "24.19;off;on;off;24",
@@ -75,7 +73,6 @@ _HOLDING_TOPICS = {
 _HOLDING = [
     *[("sensor", f"loxone_{d}_{f}") for d in ("washer", "tumble_dry", "dishwasher")
       for f in ("power", "energy")],
-    ("binary_sensor", "heating_loxone_warm_enough"),
     *[("sensor", u) for u in (
         "heating_hvac_action", "heating_circuit_flow_temp", "heating_circuit_return_temp",
         "heating_temp_desired_low", "heating_temp_desired", "heating_hvac_mode",
@@ -97,11 +94,14 @@ def _states(hass: HomeAssistant, ids: dict[str, str]) -> dict[str, str | None]:
     return {uid: (s.state if (s := hass.states.get(eid)) else None) for uid, eid in ids.items()}
 
 
-# The comfort flag and the ebusd registers are heating_pv_boost entities: also runs under
+# The ebusd registers are heating_pv_boost entities: also runs under
 # `--package heating_pv_boost`.
 @pytest.mark.package("heating_pv_boost")
 async def test_expire_after(ha: HomeAssistant, broker: Broker, clock: Clock) -> None:
-    """Shelly entities expire after 120 s and come back; Loxone and ebusd entities never expire."""
+    """Shelly entities expire after 120 s and come back; Loxone meters and ebusd never expire.
+
+    The Loxone comfort flag expires after 24 h: tested in test_heating_pv_boost_comfort.py.
+    """
     ids = {uid: entity_id(ha, domain, "mqtt", uid) for domain, uid in _EXPIRING + _HOLDING}
     topics = _EXPIRING_TOPICS | _HOLDING_TOPICS
     await wait_subscribed(ha, broker, *topics)
