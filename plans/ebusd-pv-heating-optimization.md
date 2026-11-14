@@ -291,7 +291,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
 - [x] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode — owner, 2026-10-30.
       Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
       valves. The geoTHERM now runs `auto` on its own time program; HA will switch to `on` only
-      for "not warm enough" or a boost (decided 2026-10-30, see "Control law").
+      for "not warm enough" or a boost (decided 2026-10-30; superseded 2026-11-14 by the
+      `on`/`off` law, see "Control law").
 - [x] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
       (live 2026-10-30: TDL 21, TempDesired 22)
 - [ ] 11. Phase 2 — comfort control (`on`/`off` from Loxone + derived setpoint, 30 min hold;

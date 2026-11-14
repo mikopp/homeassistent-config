@@ -36,7 +36,7 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
 - **Every enum read accepts both forms** (decoded name or raw number), mapping through one table;
   unmapped → `unknown`. Which form arrives is not predictable from the declared type (live:
   `mc/OperatingMode` reads `low`, `mc/CoolingRequestHc2` reads `0`). **Writes take names**
-  (`auto`, `on`); never echo a normalised read back on a write.
+  (`on`, `off`); never echo a normalised read back on a write.
 - **Never register a poll priority while `ebusd/global/scan` reads `running`** (owner-confirmed):
   the catalog may be mid-discovery. `automation.heating_ebusd_poll_registration` gates every
   trigger on `scan != 'running'` (not an allowlist of resting values: whether the steady state is
@@ -261,7 +261,9 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   could split one run in two).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
   in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
-  MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
+  MQTT restart). Under the 10-30 setup (`auto`) normal was 2 per day (time program). With the
+  geoTHERM on `on` (2026-11-14) the time program causes none; once Phase 2 runs, flips follow
+  Loxone's `warm_enough` and are capped at one per 30 min.
 - **Settings:** log `CompHysteresis` and `CompIntegral` at the start of each baseline day and every
   change (date, time, old, new). They have no long-term statistics.
 - **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
