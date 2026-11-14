@@ -128,14 +128,14 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ### Phase A — code (needs approval)
 
-1. [TODO] **Helper.** Add `input_number.heating_comfort_temp` (Design) with a K-5 comment; add it to
+1. [DONE] **Helper.** Add `input_number.heating_comfort_temp` (Design) with a K-5 comment; add it to
    the `group.heating_pv_boost` Helpers list. Depends on Q1.
-2. [TODO] **Target sensor.** Rewrite `sensor.heating_target_temp` on the helper; drop its
+2. [DONE] **Target sensor.** Rewrite `sensor.heating_target_temp` on the helper; drop its
    `availability:`; rewrite its comment block ("collapses onto TempDesiredLow" → onto the comfort
    value) per K-5. Depends on Q2.
-3. [TODO] **Writer.** Remove the TDL gate from `automation.heating_comfort_control`; update the
+3. [DONE] **Writer.** Remove the TDL gate from `automation.heating_comfort_control`; update the
    condition comment and the automation `description:` if it names TDL.
-4. [TODO] **Remove TDL + notification.** Remove the TDL MQTT sensor, its poll registration line
+4. [DONE] **Remove TDL + notification.** Remove the TDL MQTT sensor, its poll registration line
    and its group entry; change the Phase 1 notification text. Comment fix: the
    `heating_boost_offset` comment says the cap is "enforced through its own VR 90 room influence";
    with Raumaufschaltung = Keine there is no room influence: reword.
@@ -197,7 +197,7 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
      "Target Temp (derived from comfort, written by Phase 2)"; remove both TDL rows.
    - No relabel of the "Heat pump is doing (HVAC action)" row (Q8: owner, leave it).
    - `README.md:55`: setpoint derived from the HA comfort helper; TDL is the machine's frost floor.
-     README "Mode law" bullet: Q7 pending.
+     README "Mode law" bullet: rewrite to the current law (Q7: yes).
    - `plans/ebusd-pv-heating-optimization.md`: control-law table and the paragraphs at lines 37, 71,
      80, 86: `TDL` → `comfort` (`input_number.heating_comfort_temp`); add one line: below 3 °C
      outdoor `off` still heats to TDL (frost protection), link this plan.
@@ -248,17 +248,23 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 - **Q4** No default (no `initial:`); owner sets the helper to 21 by hand after deploy.
 - **Q5** TDL floor value does not matter to HA (panel setting, no logic).
 - **Q6** Frost-protection heating while Loxone says warm enough: accepted, ignore it.
-- **Q7** Open (re-asked): the README "Mode law" bullet says the law is "`auto` normally (the
-  Vaillant's own day/night program), `on` when …", which predates the on/off law of #169. Fix it
-  in this PR?
+- **Q7** Yes: fix the stale README "Mode law" bullet (`auto` normally …, predates the on/off law
+  of #169) in step 7.
 - **Q8** No relabel of the HVAC action row.
 
 ## Status
 
-Awaiting approval of Phase A. Plan written 2026-11-14 and updated with the owner's answers and the
-Raumaufschaltung research; no implementation started. Open: Q7.
+Phase A done; awaiting approval of Phase B. All owner questions answered.
 
-- [TODO] 1–4 Phase A (code)
+Phase A result: helper added; target derives from it (no `availability:`); writer gates only on
+the target; TDL sensor, poll line and group entry removed; notification shows comfort; boost-offset
+comment corrected. `ci-local.sh --yaml` passes. `--package heating_pv_boost`: 26 passed, 11 failed,
+all in Phase B scope (TDL rows / poll count 20 / helper not seeded / TDL-derived expectations):
+`test_expire_after`, `test_target_temp`, `test_ebusd_registers`, `test_ebusd_poll_registration`,
+and 7 comfort tests (table, ebusd offline, mode hold, stale read-back, Loxone silent, warm_enough
+unknown, hold ends while disarmed).
+
+- [DONE] 1–4 Phase A (code)
 - [TODO] 5 Phase B (tests)
 - [TODO] 6–7 Phase C (docs, dashboard, cross-refs)
 - [TODO] 8–9 Phase D (owner deploy, verification)
