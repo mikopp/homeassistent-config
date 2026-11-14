@@ -269,7 +269,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Awaiting deploy; verify no night-time surplus > 0 afterwards.
 - [x] 8b. Phase 2 prerequisite: `binary_sensor.heating_compressor_active` (Shelly clamp > 500 W) —
       owner chose the Shelly as the source, so no new ebus register or MQTT topic. Tests added.
-      Not yet used by the decision; Phase 2 consumes it. `Hc1Pump` still unread (open question in
+      REMOVED 2026-11-14 (owner: nothing read it, `ehp/Comp` is the compressor; Phase 2 re-adds an
+      electrical threshold if it needs one). `Hc1Pump` still unread (open question in
       Observations, finding 4).
 - [ ] 8c. Set `input_number.heating_pv_min_battery_soc` to 50 (UI, user). The current 30 equals the
       Victron's own floor, so the gate never blocked.

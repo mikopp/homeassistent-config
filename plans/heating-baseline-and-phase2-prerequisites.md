@@ -24,7 +24,7 @@ Each was re-checked against the code at base `0a4cab0` (master, includes #129-#1
 | # | Finding | Evidence |
 |---|---|---|
 | A | Raw history is purged after 5 days. The cycling plan's step 7 needs a 3-day baseline, then a `CompHysteresis` change, then a comparison "a week later" (about 10 days after the baseline starts), plus a cold-weather step-back. The baseline days will be gone by the comparison. | `configuration.yaml` l.7-8: `recorder: purge_keep_days: 5` (comment l.4-6 says LTS is separate and kept) |
-| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237), `..._backup_start_integral` (l.~249) have a unit but no `state_class`. The history_stats sensors, `binary_sensor.heating_compressor_active`, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
+| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237), `..._backup_start_integral` (l.~249) have a unit but no `state_class`. The history_stats sensors, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
 | B | The Phase 2 write path is not documented. The Mosquitto bridge is an explicit allowlist. Phase 2 must publish to `ebusd/mc/OperatingMode/set` and `ebusd/mc/TempDesired/set`. The notes only describe `in` lines and `/get out` lines; "`/set`" appears in neither the slab plan nor the notes (grep of `plans/`, `doc/*/notes.md`, `packages/CLAUDE.md` finds no ebusd `/set`). | `doc/heating_pv_boost/notes.md` "Invariants" (now documents `/set`); slab plan l.150-160 |
 | C | `sensor.geotherm_heating_compressor_starts` (unique_id `heating_compressor_starts`) has `state_class: total_increasing` but no `unit_of_measurement`. Sibling counters have units (`h`, `kWh`). The daily `utility_meter` built on it inherits this. Owner reports a utility_meter warning and unitless LTS. | `packages/heating_pv_boost.yaml` l.258-266; utility_meter l.556-560 |
 | D | The daily meters and history_stats only exist since the 2026-10-30 ~16:06 deploy. The first complete baseline day is 2026-10-31. Today's partial day must not be counted. | deploy time reported by owner |
@@ -48,8 +48,9 @@ Each was re-checked against the code at base `0a4cab0` (master, includes #129-#1
    separate access-level investigation is needed (see step 2).
 5. **Cross-reference edits to the slab and cycling plans: approved** (step 6 below). `step 10` is
    ticked from live data; `step 8c` is NOT ticked (the helper is still 30 and is the owner's UI
-   change). `Hc1Pump` is not needed by any step in these plans (Phase 2 uses the Shelly-based
-   `binary_sensor.heating_compressor_active`, which the owner chose), so it is not added.
+   change). `Hc1Pump` was not needed by any step in these plans when this was written (Phase 2 was to
+   use the Shelly-based `binary_sensor.heating_compressor_active`, removed 2026-11-14; `ehp/Hc1Pump`
+   is read since the energy mode).
    `input_boolean.heating_pv_boost_enabled` is the owner's switch; this work never changes it.
 
 ## Step 1 — Recorder retention (finding A) — approval required
@@ -136,9 +137,9 @@ Write the exact counting rules into `doc/heating_pv_boost/notes.md` (new short s
 - **First full baseline day is 2026-10-31.** 2026-10-30 is partial (meters began ~16:06) and is
   excluded. A baseline = 3 consecutive full days with comparable weather (record the daily mean
   outdoor temperature next to each day).
-- **Starts per day:** use `sensor.heating_compressor_starts_daily` (machine counter, heating only).
-  `sensor.heating_compressor_runs_today` counts every Shelly run including hot water; use it only as a
-  cross-check, expect it to be higher.
+- **Starts per day:** use `sensor.heating_compressor_starts_daily` (machine counter, heating only);
+  hot water has `sensor.hot_water_compressor_starts_daily`, and the two add up to the compressor
+  starts. There is no run counter any more (`runs_today` was dropped 2026-11-14).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values in
   {`auto`, `on`, `low`, `off`}. Ignore any transition into or out of `unavailable`/`unknown` (HA or
   MQTT restart). Expected normal: 2 per day (the time program). A restart-free day with more than 2
@@ -147,8 +148,8 @@ Write the exact counting rules into `doc/heating_pv_boost/notes.md` (new short s
   baseline day, and every change with date and time.
 - **Retention:** every number is read within the retention window, or copied into Observations
   (decision 1).
-- **Compressor vs circulation:** `binary_sensor.heating_compressor_active` is the Shelly clamp
-  (> 500 W). `ehp/Hc1Pump` is not read (slab plan Observations finding 4); a run of the circulation
+- **Compressor vs circulation:** the compressor is `ehp/Comp` (the Shelly > 500 W sensor was removed
+  2026-11-14). `ehp/Hc1Pump` is not read (slab plan Observations finding 4); a run of the circulation
   pump alone should stay below 500 W, but that is an inference, not a measurement.
 
 Tests: none (docs).
@@ -164,8 +165,9 @@ ha-mcp) checks:
   amount as the raw counters since midnight.
 - `sensor.heating_electricity_daily` is non-zero, which also proves that
   `sensor.technikraum_heizung_heizung_energy` is the real Shelly entity id (cycling plan step 6).
-- `sensor.heating_compressor_last_run_minutes` and `sensor.heating_compressor_stop_temp` update after
-  the first full run; `sensor.heating_compressor_runs_today` matches the observed number of runs.
+- `sensor.heating_compressor_last_run` and `sensor.heating_compressor_stop_temp` update after
+  the first full run; `sensor.heating_compressor_average_run_today` = runtime today ÷ (heating +
+  hot water starts today).
 - The three settings sensors are not `unavailable`.
 
 Results go into the cycling plan's Observations, not recorded via the `record-learning` skill (not proven

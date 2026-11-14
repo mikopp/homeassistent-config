@@ -91,7 +91,7 @@ short runs.
 | Signal | Source | What a good value looks like |
 |---|---|---|
 | Starts per day (heating) | `ehp/CompStartsHc` counter, plus HA count | < 8–10 |
-| Average / last run length | HA, from `binary_sensor.heating_compressor_active` | ≥ 20–30 min |
+| Average / last run length | HA, from `ehp/Comp` and the machine start counters | ≥ 20–30 min |
 | Duty cycle (24 h) | HA history_stats ratio | Rises as starts fall |
 | Energy integral | `ehp/Integral` (°min) | Shows the start point and how runs end |
 | Compressor demand | `ehp/CompDemand` | Who asked for the start |
@@ -131,7 +131,7 @@ short runs.
   - compressor on-time today (`time`)
   - duty cycle over the last 24 h (`ratio`)
 - Template sensor: average run today = on-time ÷ starts. Add an `availability:` guard.
-- Trigger template `sensor.heating_compressor_last_run_minutes`: on `to: off` from `on`, compute the
+- Trigger template `sensor.heating_compressor_last_run`: on `to: off` from `on`, compute the
   run length from `trigger.from_state.last_changed`.
 - `utility_meter` (daily) on `CompStartsHc` and `YieldTotal`, plus a daily
   efficiency template (yield Δ ÷ `Heizung Energy` Δ). Check the Shelly energy entity id via
@@ -282,9 +282,11 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
   one start. Aligning the DHW time window with a likely heating run could cut 1 start a day.
 
 **Measurement gaps:**
-- `binary_sensor.heating_compressor_active` counts heating and DHW runs together. `runs_today` was
-  12 vs 10–11 heating starts, and "average run today" and "last run" mix in DHW runs. Split them
-  (step 8).
+- The Shelly sensor `binary_sensor.heating_compressor_active` (removed 2026-11-14) counted heating and DHW runs together. At the baseline
+  `runs_today` was 12 vs 10–11 heating starts, and "average run today" and "last run" mixed in DHW
+  runs. Step 8 split them; since 2026-11-14 `runs_today` is gone, runtime today, duty cycle and last
+  run follow `ehp/Comp` and the average run is that runtime over the machine's heating + hot-water starts
+  (`plans/heating-cycling-from-ehp.md` step 9).
 - Outdoor temperature (`sensor.wheatherstation_outdoor_temperature`) is not on the "Why runs end"
   graph. The return temperature should be on it too, to read the spread.
 
@@ -305,7 +307,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       recorded in `plans/ebusd-pv-heating-optimization.md` and `doc/heating_pv_boost/notes.md`
 - [x] 1. 9 read-only MQTT sensors (integral, demand, flow setpoint, 3 settings, 3 counters)
 - [x] 2. Poll registration: tier 4 (`?5`) and tier 5 (`?9`)
-- [x] 3. Derived: history_stats (runs today, runtime today, 24 h duty cycle), average run today,
+- [x] 3. Derived: history_stats (runtime today, 24 h duty cycle; runs today dropped 2026-11-14), average run today,
       last run (trigger template), daily utility meters (starts, yield, electricity), efficiency today
 - [x] 4. Dashboard: "Compressor Cycling" entities card + "Why runs end" history graph
 - [x] 5. Tests (`test_last_run_…`, `test_average_run_…`, `test_efficiency_…`), conftest seeds,
@@ -319,12 +321,12 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       changing `CompHysteresis`.
 - [x] 8. (approved; implemented 2026-11-06, not yet deployed/CI-verified: no Python/Docker on the dev Mac,
       so yamllint/check_config/pytest were not run locally) New
-      `binary_sensor.heating_compressor_heating_active` repoints the 3 history_stats and the last-run
+      `binary_sensor.heating_compressor_heating_active` repoints the 3 history_stats and the last-run (since 2026-11-14 they read `ehp/Comp` again, any mode; step 9 of `heating-cycling-from-ehp.md`)
       trigger; dashboard graph gets heating-only line + outdoor temp (return temp was already there);
-      4 new tests; notes/README updated. **Exclude DHW runs** from the cycling sensors; do not count them
+      4 new tests; notes/README updated. **Exclude DHW runs** from the cycling sensors (reversed 2026-11-14: they are about the compressor, any mode); do not count them
       separately (owner, 2026-11-06). One new template binary sensor "Heating Compressor Heating
       Active" = `binary_sensor.heating_compressor_active` on **and**
-      `sensor.geotherm_heating_hvac_action` ≠ `water` (not `binary_sensor.heating_dhw_active`, whose
+      `sensor.geotherm_heating_hvac_action` ≠ `water` (not `binary_sensor.heating_dhw_active` — since dropped, `plans/heating-cycling-from-ehp.md` step 11 — whose
       25 min `delay_off` would drop the next heating run). Repoint the three history_stats and the
       last-run trigger to it; average run follows automatically. No new registers, no bridge lines.
       `sensor.heating_compressor_starts_daily` (`CompStartsHc`) is already heating-only. Efficiency

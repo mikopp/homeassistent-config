@@ -157,11 +157,10 @@ on the machine.
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_temp_desired_low` | `mc/TempDesiredLow` |
-| `binary_sensor.heating_compressor_active` | Shelly > 500 W (any run; PV surplus logic) |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
-| `sensor.heating_energy_mode` | the energy mode (see "Energy modes") |
-| `binary_sensor.heating_compressor_heating_active` | energy mode = `active_heating`; drives the run statistics |
+| `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` is "compressor running for heating" (the binary_sensor `heating_compressor_heating_active` was removed as a pure function of it) |
+| `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, unavailable while `binary_sensor.heating_return_temp_masked` is on: energy mode `water_heating` or itself unavailable (the raw return reads the DHW circuit then), held 5 min after (`delay_off`, owner) |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
 | `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
@@ -237,8 +236,11 @@ on the machine.
   so keep those statistics until ~30 days after the merge. Efficiency = ratio of the 30-day sums
   (not a mean of daily ratios), `unknown` below 10 kWh electricity (a whole-kWh yield step then
   moves it ≤ 2.5 %). Up to ~1 h behind (owner: fine).
-- Run statistics count `active_heating` segments: a heating run that rolls into hot water ends at
-  the flip, one that turns from hot water into heating starts a new segment there.
+- Runtime today, duty cycle, last run and the average run read `ehp/Comp` (the compressor, any
+  mode), so they are continuous across mode changes. `active_heating` is NOT a run: a heating run
+  that rolls into hot water ends its segment at the flip and one that turns from hot water into
+  heating starts a new one (2026-11-14: one compressor run 05:30–06:52 with hot water 05:50–06:30
+  gave two segments, and the machine counted one start, in heating).
 
 ## Baseline method (compressor-cycling comparison)
 
@@ -248,11 +250,14 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   A baseline is 3 consecutive full days with comparable weather; note the daily mean outdoor
   temperature next to each day.
 - **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only);
-  hot water: `sensor.hot_water_compressor_starts_daily`. `sensor.heating_compressor_runs_today`
-  counts `active_heating` segments (see "Energy modes"). Runs/runtime/duty cycle/last run exclude
-  hot water; `sensor.heating_efficiency_today` includes it, the per-mode efficiencies split it.
-  Baselines logged before 2026-11-06 counted hot-water runs too; runs logged before the switch
-  to `ehp/Comp` came from the Shelly clamp (could split one run in two).
+  hot water: `sensor.hot_water_compressor_starts_daily`; the two add up to the compressor starts
+  (owner). There is no run counter (`heating_compressor_runs_today` was dropped 2026-11-14: it
+  counted `active_heating` segments, 5 against 4 starts that day). Runtime today, duty cycle and
+  last run are the `ehp/Comp` on-time and run edges, all modes, hot water included; average run =
+  runtime ÷ (heating + hot water starts). `sensor.heating_efficiency_today` includes hot water too,
+  the per-mode efficiencies split it. Baselines logged before 2026-11-14 excluded hot-water runs
+  from runtime, duty cycle and last run; before 2026-11-06 they counted them (Shelly clamp, which
+  could split one run in two).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
   in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
   MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
@@ -260,8 +265,9 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   change (date, time, old, new). They have no long-term statistics.
 - **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
   the cycling plan's Observations.
-- **Compressor vs circulation:** `binary_sensor.heating_compressor_active` is the Shelly clamp
-  (> 500 W). `ehp/Hc1Pump` is not read; circulation alone staying below 500 W is an inference.
+- **Compressor vs circulation:** the compressor is `ehp/Comp` (the Shelly clamp power only feeds
+  `sensor.heating_pv_surplus`; the threshold sensor on it was removed 2026-11-14, nothing read it).
+  Circulation alone stays below the clamp's ~500 W: an inference, not a measurement.
 
 ## Known biases / open issues
 
@@ -304,8 +310,8 @@ on a standalone SQLite with fabricated rows (window edge, id lists, partial hist
 30d efficiency table (floor → `unknown`, missing input → `unavailable`) and a clean `sql` load; no HA
 long-term statistics (owner).
 
-CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) and `heating_dhw_active` (25 min) are
-`unknown` after boot until the delay elapses.
+CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) is `unknown` after boot until the delay
+elapses.
 
 ## Related
 

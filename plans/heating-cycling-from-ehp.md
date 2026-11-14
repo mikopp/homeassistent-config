@@ -77,10 +77,18 @@ Use HA's `utility_meter` with `tariffs:` (daily cycle). An automation sets each 
 ### Run statistics
 
 - Starts per day: daily `utility_meter`s on `CompStartsHc` (exists) and `CompStartsHwc` (new).
-- Runs, runtime, average run, last run, duty cycle: `binary_sensor.heating_compressor_heating_active`
-  becomes "energy mode = `active_heating`" (instead of Shelly > 500 W). Keeps the entity ids, so history continues.
-- `binary_sensor.heating_compressor_active` (Shelly) stays for the slab-boost surplus logic.
-  Not changed here.
+- `binary_sensor.heating_compressor_heating_active` (removed in step 10) became "energy mode = `active_heating`"
+  (instead of Shelly > 500 W), now a display indicator only. As a run source it split a run that
+  rolls heating → hot water → heating without the compressor stopping into two segments (seen
+  2026-11-14: one run 05:30–06:52, hot water 05:50–06:30).
+- Runtime today, duty cycle and last run: `binary_sensor.geotherm_heating_compressor_running`
+  (`ehp/Comp`, any mode), so such a run is one continuous run (owner: these are about the
+  compressor, not the mode). Average run today = runtime ÷ (heating + hot water starts today);
+  the two machine counters add up to the Comp starts (owner).
+- `sensor.heating_compressor_runs_today` is dropped: it counted the segments above (5 against 4
+  starts on 2026-11-14) and nothing needs a segment count.
+- `binary_sensor.heating_compressor_active` (Shelly > 500 W) was kept here as the electrical view and
+  removed in step 12 (no consumer). `sensor.heating_pv_surplus` reads the clamp power itself.
 
 UNKNOWN: how quickly `ehp/Comp` reports a change at a given poll priority. If the lag is long,
 runtimes shift by that lag. Measure it against the Shelly after deploy.
@@ -103,6 +111,7 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
    (compressor before cooling before pump), raw enum numbers, unavailable inputs.
 4. [DONE] Change `binary_sensor.heating_compressor_heating_active` to mode `active_heating`.
    Update tests `test_compressor_table`, `test_last_run` and `test_cycling_history_stats`.
+   (Superseded by step 9: the run statistics no longer read it.)
 
 ### Phase 3 — energy split
 5. [DONE] Tariff `utility_meter`s for electricity and yield, the tariff automation, and the two
@@ -116,12 +125,69 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
    same thing (entity names kept: renaming would change the ids on a fresh registry). Show the current energy mode; heating and hot water side by side (starts, energy,
    yield, efficiency); heating energy also split active / passive; cooling and off energy rows.
 
+9. [DONE] Drop `sensor.heating_compressor_runs_today` (sensor, dashboard row, recorder entry,
+   tests). Runtime today, the 24 h duty cycle and the last run read `ehp/Comp` (any mode); the
+   average run divides runtime by the sum of the two daily start meters. Tests:
+   `test_compressor_table` (average case over both meters), `test_last_run` (hot-water run counts,
+   heating → hot water → heating is one 19 min run), `test_cycling_history_stats` (one 30 min
+   run, 3 starts, 65 min, duty 65 min / 24 h).
+
 ### Phase 5 — verification
 8. [IN_PROGRESS] `ci-local.sh --e2e` green (done). After deploy, compare for 3 days: starts vs the graph, run edges
    vs the Shelly, `heating + hot_water + cooling` electricity vs the total, and the yield split.
 
+### Phase 6 — dashboard duplicates
+10. [DONE] "Heating Status" card audit. Removed `binary_sensor.heating_compressor_heating_active`
+    (a pure function of `sensor.heating_energy_mode`, only dashboard, recorder group and tests read
+    it; the "Why runs end" graph now plots the energy mode). Every row relabelled with its source.
+    Kept, not duplicates: Shelly clamp `heating_compressor_active` (other source; no decision
+    reads it today, see proposal below), `heating_dhw_active` (25 min tail, `hwc/Status` input; dropped later, step 11),
+    `heating_season_active` (2 of 4 indicator states), `heating_cooling_active` (interlock OR).
+    Tests: heating-only cases now assert `sensor.heating_energy_mode` (`COMPRESSOR_CASES`).
+    Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_heating_active` in the
+    UI (Settings > Entities). tests/ha not run on the dev Mac: CI must confirm.
+    Proposal (owner decided: remove, step 12): `binary_sensor.heating_compressor_active` had no
+    consumer.
+    HYPOTHESIS: the Shelly clamp leads `ehp/Comp` by about a minute (one observation, 2026-11-14:
+    07:45:03 vs 07:46:09); measure over several runs (open question above).
+
+11. [DONE] Drop `binary_sensor.heating_dhw_active` ("Hot water active (masks return temp)"; owner:
+    the energy mode says what runs). Consumers repointed to `sensor.heating_energy_mode`:
+    `sensor.heating_circuit_return_temp_valid` is unavailable while the mode is `water_heating` or
+    unavailable (no tail, no `hwc/Status` input), `sensor.heating_control_state` reads `hot_water`
+    from the mode; dashboard rows and the activity graph entry removed. Tests:
+    `test_return_temp_mask_follows_energy_mode` replaces `test_dhw_mask`.
+    Evidence (7 hot-water runs, checked 2026-11-14; observed in 7 of 7, kept here as an observation
+    until the owner promotes it): the raw `ehp/HcReturnTemp` rose from ~25 °C to 51-56 °C only while
+    hot water ran and was back at the pre-run level (24.7-26 °C) within the 5 min bucket where it
+    ended. Runs: 2026-11-13 17:00-17:25 and 2026-11-14 05:50-06:30 (both followed at once by a heating
+    run; per-mode meter as the hot-water marker), and 2026-11-04, 07, 08, 09, 11 at ~17:00-17:30
+    (each ends with the compressor stopping to ~80 W idle; Shelly power > ~2.9 kW as the marker,
+    since the per-mode meters only exist from 2026-11-12). Residual values in the stop bucket
+    were at most 28.25 °C (below `heating_return_temp_max` 30 °C). No thermal tail seen, so the
+    old 25 min hold is dropped. Limits: 5 min statistics cannot show a lag of seconds at run start
+    between `ehp/Comp` on and `hvac_action` `water` (the return was already 39-43 °C max in the first
+    bucket); a brief unmasked reading is harmless to the slab decision because `delay_off` 20 min
+    holds a charge through it. The old runs' energy mode is not historized, so a hot-water run-on
+    (pump on, compressor off) is not visible separately; the return was at baseline during those
+    minutes. Flow temp is polluted the same way but is not masked (it is only a liveness
+    signal and the stop-temp line). If a run is ever seen with a lingering high return after the
+    flip, add a short `delay_off` mask back on the energy mode.
+    `binary_sensor.geotherm_heating_hwc_active` (raw `hwc/Status`) stays, display only; its bridge
+    line and poll stay too (owner decides whether to drop it).
+    Post-deploy: delete the orphan `binary_sensor.heating_dhw_active` in the UI.
+
+12. [DONE] Remove `binary_sensor.heating_compressor_active` ("Compressor drawing > 500 W", Shelly
+    clamp; owner decision 2026-11-14): no decision read it, `ehp/Comp` is the compressor. Removed
+    from the package, the recorder list, the three dashboard places and the compressor table; the
+    clamp-vs-`ehp/Comp` step in `test_last_run` stays (it checks the last run ignores clamp spikes).
+    The clamp power sensor `sensor.technikraum_heizung_heizung_power` and the PV surplus are
+    unchanged. If Phase 2 needs an electrical threshold it re-adds one. The HYPOTHESIS below (clamp
+    leads `ehp/Comp` by about a minute) can still be measured on the power sensor directly.
+    Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_active` in the UI.
+
 ### Close
-9. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
+13. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
    plan (`doc/KNOWLEDGE.md#K-6`).
 
 ## Knowledge homes this plan will update
@@ -139,6 +205,12 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 - Owner answers: pump from `ehp/Hc1Pump`; passive cooling only; keep the combined efficiency;
   no `CompHoursHwc`; remove the backup-heater indicators.
 - Backup removal: scope (b), everything.
+- Step 9 done 2026-11-14 (runs_today dropped; runtime, duty cycle, last run on `ehp/Comp`, average on machine starts);
+  `tests/ha` not run on the dev Mac (no Python 3.14/mosquitto): CI must confirm.
+- Step 10 done (dashboard duplicate removed, labels). Orphan to delete after deploy.
+- Step 11 done 2026-11-14 (hot-water mask on the energy mode, `heating_dhw_active` dropped);
+  second orphan to delete after deploy.
+- Step 12 done 2026-11-14 (Shelly clamp threshold sensor removed); third orphan to delete.
 - Next: deploy, add the bridge lines, then the 3-day comparison (step 8). Still to settle with
   live data: `hvac_action` reading `cooling` (first cooling period), where the hot-water run-on
   goes, and the `ehp/Comp` reporting lag vs the Shelly.

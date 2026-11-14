@@ -680,7 +680,7 @@ async def ha(
     The package's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
     on `hass`, so it is finalised first) has stopped the recorder. Unloading the MQTT entry
     writes `unavailable` for every MQTT entity; a history_stats sensor whose source follows one
-    (heating_compressor_*_today ← heating_compressor_heating_active ← the Shelly clamp) then
+    (heating_compressor_*_today ← the ehp/Comp binary_sensor, an MQTT entity) then
     queried the stopped recorder: "RuntimeError: cannot schedule new futures after shutdown"
     at teardown. CONFIRMED by the traceback (entity_registry.write_unavailable_state →
     history_stats coordinator._async_update_from_event → recorder executor) and by this unload
