@@ -163,9 +163,11 @@ on the machine.
 | `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, unavailable while the energy mode is `water_heating` or itself unavailable (the raw return reads the DHW circuit then); no tail is held |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
-| `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (tariff meter) |
-| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (tariff meter) |
+| `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
+| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
 | `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
+| `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day efficiency (see "Energy modes") |
+| `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics; ids from `name:`, verify after deploy |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.ebusd_heating_ebusd_scan_status`, `binary_sensor.ebusd_heating_ebusd_running` | `ebusd/global/scan`, `/running` |
 
@@ -212,13 +214,28 @@ on the machine.
   which also fires on a cooling need or request. The interlock keeps the wider OR.
 - The geoTHERM cools passively only (owner): the compressor never runs for cooling, so checking
   the compressor first is safe.
-- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two `utility_meter`s
-  with one tariff per mode; `automation.heating_energy_tariff_follows_mode` sets their selects on
-  every mode change and on HA start. Each increment is booked to the mode active when it arrives
-  (`utility_meter` source at 2026.10). An unavailable mode leaves the tariff unchanged.
-- Space heating efficiency = (active + passive yield) ÷ (active + passive electricity); hot water
-  = water yield ÷ water electricity; 0 below 1 kWh electricity. The combined
-  `sensor.heating_efficiency_today` stays (owner).
+- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two per-mode
+  `utility_meter`s; `automation.heating_energy_meters_follow_mode` sets their mode selects on
+  every mode change and on HA start. An unavailable mode leaves both selects unchanged.
+- After a mode-select change the next source change is counted entirely to the new mode
+  (CONFIRMED, `utility_meter` `sensor.py` at 2026.10.1).
+- The electricity meter keeps all five modes (Shelly Wh about every 60 s; the passive heating
+  cycle's circulation-pump draw stays visible). The yield meter has one `space_heating` bucket
+  for the active and passive heating cycle (owner): `YieldTotal` steps in whole kWh at the
+  slowest poll, so an active cycle's last kWh often arrives after the switch to the passive
+  cycle. Re-selecting the current option changes nothing, so that switch cannot misbook.
+  `cooling`/`off` should stay at 0; growth there shows misbooking at other mode boundaries
+  (active → hot water, hot water → passive, → off: accepted).
+- Space heating efficiency = `space_heating` yield ÷ (active + passive electricity); hot water
+  = water yield ÷ water electricity. The combined `sensor.heating_efficiency_today` stays
+  (owner). All three render `unknown` (not 0) below 1 kWh electricity (owner).
+- **Rolling 30 days** (owner): `sql:` sensors sum `MAX(sum) − MIN(sum)` per statistic over the
+  last 30 days + 1 h of long-term statistics (raw history is only 14 days; pattern and pitfalls in
+  the `ha-energy-metering` skill). Attribute `days` = window covered. The space-heating yield
+  also lists the pre-merge `heating_yield_by_mode_active_heating`/`_passive_heating` statistics,
+  so keep those statistics until ~30 days after the merge. Efficiency = ratio of the 30-day sums
+  (not a mean of daily ratios), `unknown` below 10 kWh electricity (a whole-kWh yield step then
+  moves it ≤ 2.5 %). Up to ~1 h behind (owner: fine).
 - Runtime today, duty cycle, last run and the average run read `ehp/Comp` (the compressor, any
   mode), so they are continuous across mode changes. `active_heating` is NOT a run: a heating run
   that rolls into hot water ends its segment at the flip and one that turns from hot water into
@@ -266,19 +283,32 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
 In-process (`tests/ha/test_heating_pv_boost.py`, real broker, ebusd/Shelly/Victron payloads):
 surplus, compressor and cycling formulas, cooling interlock, derived setpoint (case tables), and
 on a frozen clock the DHW mask (delay_off), the slab decision (delay_on/off, master switch,
-Schmitt), the last run, the real history_stats (recorder) and the daily meters' midnight reset.
+Schmitt), the last run, the real history_stats (recorder; a `history_stats.reload` test proves the values are read back from the
+recorded history) and the daily meters' midnight reset.
 MQTT-fed inputs (ebusd strings by name and raw enum number, Shelly Pro 3EM JSON, Venus values) go
 only over the real broker; "unavailable" is a real `expire_after`. The daily meters are the real
 `utility_meter`s; the 48h mean (which drives the real season indicator) and the η accumulators'
 inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
-Nine of its MQTT entities (ebusd `OperatingMode`, `CompIntegral`, `CompStartsHc`, `CompStartsHwc`,
-`CompHoursHc`, `global/scan`, `CompDemand`, `global/running`, and `loxone/heating/warm_enough`)
-are never fed a message by any test: #159. The energy mode is a case table; the per-mode meters,
-the tariff automation and both efficiencies are tested end to end (`test_energy_split_by_mode`).
-The tariff selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
+`tests/ha/test_heating_pv_boost_ebusd_registers.py` feeds every ebusd-fed entity its live payload
+and variants (enum names and raw numbers, case, unmapped, short, empty, garbage) and fails on any
+mqtt WARNING (`ehp/Integral`, the harness sync channel, has its own test). Its poll test asserts
+that every trigger of `heating_ebusd_poll_registration` sends exactly the 20 `/get` priorities
+seen on the live broker, and nothing while the scan reads `running`. The ebusd registers and the
+Loxone flag have no `expire_after`: `tests/ha/test_energy_expire_after.py` holds their value for a
+week (`ebusd/global/running` is `true`/`false`, `scan` is `finished` when done: owner). `loxone/heating/warm_enough`
+is fed by `tests/ha/test_energy_loxone.py`: an empty or garbage payload renders OFF ("not warm
+enough"), by design (owner): the template has no empty guard. A payload without
+field 3 renders `heating_hvac_action` as `unknown`: a sensor without `device_class`/unit stores an
+empty render as `''` (only numeric sensors ignore it, source read at 2026.10.4). The energy mode is a case table; the per-mode meters,
+`heating_energy_meters_follow_mode` and both efficiencies are tested end to end (`test_energy_split_by_mode`).
+The meters' mode selects make the real `select` domain load, so `tests/ha/conftest.py` wraps the real
 `select.select_option` and records only calls to external entities (ComfoConnect).
+`tests/ha/test_heating_pv_boost_rolling.py`: the 30-day `sql` queries, rendered from the config, run
+on a standalone SQLite with fabricated rows (window edge, id lists, partial history, empty → 0), the
+30d efficiency table (floor → `unknown`, missing input → `unavailable`) and a clean `sql` load; no HA
+long-term statistics (owner).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) is `unknown` after boot until the delay
 elapses.

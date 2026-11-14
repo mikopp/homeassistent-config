@@ -27,6 +27,30 @@ stack trace, or deterministic repro. **OBSERVED** / **UNPROVEN** = weaker; never
   `state_class: total`, and the compiled statistics `sum` stepped down once by the old total (OBSERVED once,
   Victron #121). Fix: Developer Tools → Statistics, set that slot's *change* to ~0.001. Do not promise "no negative spike".
 
+## `utility_meter` with `tariffs:` (per-mode split) (CONFIRMED 2026.10.1, `utility_meter/sensor.py`, `select.py`)
+- After a select change the **next source change is counted entirely to the new option**: `_change_status()`
+  clears `_last_valid_state`, so the delta runs from the last value seen before the switch.
+  - Why it matters: a coarse or slowly polled source (whole-kWh steps) books energy produced before the switch
+    to the option after it (live: heat-pump yield of the compressor cycle landing in the pump-only mode).
+  - Fix: give such a source fewer options (merge modes it can't separate); keep the split on a fine source.
+- Re-selecting the option already set writes the same state, fires no `state_changed`, so nothing resets.
+  Two modes mapped to one option therefore never misbook across their switch.
+- Tariff sensors get `total_increasing` when the source is an energy sensor, so they compile long-term statistics.
+- YAML `utility_meter` has no reload service: changing it needs an HA restart.
+
+## Rolling N-day sums of kWh counters (CONFIRMED 2026.10.1, `statistics/sensor.py`, `sql/`)
+- **Not a `statistics` sensor** (`change`, `max_age`): it rebuilds its window from raw history at startup, so
+  `recorder: purge_keep_days` shorter than the window silently shrinks it after every restart.
+- Use `sql:` sensors on long-term statistics (`statistics.sum` per `statistics_meta.statistic_id`, hourly, never
+  purged; `sum` already absorbs meter resets): per id `MAX(sum) − MIN(sum)` over `start_ts >= cutoff`, summed
+  over ids. Listing an old and a new statistic id carries the window across an entity rename/merge.
+  - `query:` is a template: take the cutoff from Jinja `now()` (follows a frozen test clock; SQLite `'now'` does not).
+  - A NULL result logs a WARNING on every poll: wrap columns in `COALESCE`.
+  - The literal word `entity_id` in the query logs an error (full-table-scan guard, `sql/util.py`).
+  - Extra result columns become attributes; `sql:` has no `default_entity_id` (id from `name:`).
+  - Up to ~1 h behind (hourly compilation). Example: `packages/heating_pv_boost.yaml` 30-day sums.
+  - Tests: render the query and run it on a standalone SQLite with a minimal two-table schema (no recorder statistics).
+
 ## Recorder vs Energy Dashboard
 - `recorder: purge_keep_days` does NOT touch the Energy Dashboard. Why: the dashboard reads long-term statistics, a separate store retained indefinitely.
 

@@ -35,6 +35,7 @@ from typing import Any
 
 import holidays as _holidays  # workday's own dependency (requirements_test.txt pin)
 import pytest
+from homeassistant.components.climate import ClimateEntityFeature
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.template import Template
 
@@ -73,6 +74,9 @@ _DEW = "sensor.airflow_min_indoor_dew_5min"
 # season, inside the band at the baseline thresholds 12 / 16 / 20, reached from neutral in at
 # most two steps (the reset goes back to neutral first, so no chain is longer than that).
 _SEASON = "sensor.heating_cooling_indicator"
+# Tests that set the season set it through the REAL heating_cooling_indicator (seeded 48h mean):
+# a change to its YAML can fail them, so they also run under `--package heating_cooling_indicator`.
+_SEASON_FROM_INDICATOR = pytest.mark.package("heating_cooling_indicator")
 _MEAN = "sensor.wheatherstation_outdoor_temperature_48h_mean"
 _SEASON_MEAN = {"active_heating": "11.0", "neutral": "14.0", "passive_cooling": "17.0",
                 "active_cooling": "21.0"}
@@ -240,6 +244,7 @@ def _render_macro(hass: HomeAssistant, prev_profile: str) -> str:
     ).async_render(parse_result=False)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_decision_table(ha: HomeAssistant) -> None:
     """All decision cases on one HA; every failing case is listed in the one assert."""
     await apply_baseline(ha)
@@ -848,6 +853,7 @@ CONTROLLER = [
 ]
 
 
+@_SEASON_FROM_INDICATOR
 async def test_controller(airflow_ha: HomeAssistant, clock: Clock) -> None:
     ha = airflow_ha
     """All controller cases on one HA; every failing check is listed in the one assert."""
@@ -1018,12 +1024,14 @@ async def _run_boost_cases(ha: HomeAssistant, clock: Clock, cases: list[BoostCas
     return failures
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_boost(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """All boost cases on one HA; every failing check is listed in the one assert."""
     failures = await _run_boost_cases(airflow_ha, clock, BOOSTS)
     assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_boost_input_flap_before_the_bug(
     airflow_ha: HomeAssistant, clock: Clock
 ) -> None:
@@ -1037,6 +1045,7 @@ async def test_drying_boost_input_flap_before_the_bug(
     assert not failures, f"{len(failures)} boost check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 @pytest.mark.xfail(strict=True, raises=AssertionError,
                    reason="config bug: an input flap restarts the boost (#153); passes once fixed")
 async def test_drying_boost_unavailable_to_boost_does_not_fire(
@@ -1260,6 +1269,7 @@ FLUSH_CASES = [
 ]
 
 
+@_SEASON_FROM_INDICATOR
 @pytest.mark.parametrize("cases", [FREE_CASES, MOIST_CASES, HEAT_CASES, FLUSH_CASES],
                          ids=["free_cooling", "moisture_low", "heat_low", "flush"])
 async def test_indicator(airflow_ha: HomeAssistant, clock: Clock, cases: list[ICase]) -> None:
@@ -1268,6 +1278,7 @@ async def test_indicator(airflow_ha: HomeAssistant, clock: Clock, cases: list[IC
     assert not failures, f"{len(failures)} indicator check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_drying_needed(airflow_ha: HomeAssistant, clock: Clock) -> None:
     """binary_sensor.airflow_humidity_drying_needed through the real schedules and workday.
 
@@ -1334,8 +1345,12 @@ async def test_drying_needed(airflow_ha: HomeAssistant, clock: Clock) -> None:
     assert not failures, f"{len(failures)} drying check(s) failed:\n" + "\n".join(failures)
 
 
+@_SEASON_FROM_INDICATOR
 async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
-    """climate.airflow_climate's hvac_action from the REAL decision and the device profile.
+    """climate.airflow_climate's hvac_action and hvac_mode from the REAL decision and the profile.
+
+    hvac_mode is the intent (design AF-8): `dry` for a flush decision with automatic control on,
+    whatever the profile; hvac_action is what the device does.
 
     Replaces the Docker render tests (a copy with the decision injected as a literal) and
     `hvac_action_template_matches_mirror` (a text check of the copy; no copy is left). The
@@ -1347,23 +1362,24 @@ async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
                                  blocking=True)
     ids = await _start(ha, clock, local_at(_workday(), 7, 1))
     failures: list[str] = []
-    cases = [  # (name, scenario, device, decision state, expected hvac_action)
+    cases = [  # (name, scenario, device, decision state, expected hvac_action, expected hvac_mode)
         ("hvac_action_drying_from_flush", FLUSH, {"profile": "cool"},
-         "moisture_flush_cooling", "drying"),
+         "moisture_flush_cooling", "drying", "dry"),
         ("hvac_action_cooling_without_flush", FREE, {"profile": "cool"}, "free_cooling",
-         "cooling"),
+         "cooling", "auto"),
         # The re-arm blip: boost switch off for a moment while boost is decided.
         ("hvac_action_drying_survives_boost_blip", BOOST, {"profile": "cool", "boost": "off"},
-         "moisture_flush_boost", "drying"),
+         "moisture_flush_boost", "drying", "dry"),
+        # Mode is the intent: dry already, before the device runs the cool profile.
         ("hvac_action_not_drying_before_profile_applied", FLUSH, {"profile": "comfort"},
-         "moisture_flush_cooling", "fan"),
+         "moisture_flush_cooling", "fan", "dry"),
         # New: the other branches.
         ("new_hvac_action_heating", SEASONS["heating"], {"profile": "warm"}, "heating",
-         "heating"),
+         "heating", "auto"),
         ("new_hvac_action_idle_without_profile", {}, {"profile": "unavailable"}, "comfort",
-         "idle"),
+         "idle", "auto"),
     ]
-    for name, scenario, device, decision, action in cases:
+    for name, scenario, device, decision, action, mode in cases:
         await _auto(ha, False)
         await _device(ha, _DEVICE_REST)
         await _scenario(ha, clock)
@@ -1375,9 +1391,64 @@ async def test_hvac_action(airflow_ha: HomeAssistant, clock: Clock) -> None:
         climate = ha.states.get("climate.airflow_climate")
         if (got := climate.attributes.get("hvac_action")) != action:
             failures.append(f"{name}: hvac_action {got!r}, want {action!r}")
+        if climate.state != mode:
+            failures.append(f"{name}: hvac_mode {climate.state!r}, want {mode!r}")
+    # Automatic control off (decision `off`): the manual profile is the mode, never dry.
+    await _auto(ha, False)
+    await _scenario(ha, clock, FLUSH)
+    await _device(ha, {"profile": "cool"})
+    if (got := _state(ha, "climate.airflow_climate")) != "cool":
+        failures.append(f"manual_cool_during_flush: hvac_mode {got!r}, want 'cool'")
     assert not failures, f"{len(failures)} hvac_action check(s) failed:\n" + "\n".join(failures)
 
 
+async def test_climate_humidity_control(ha: HomeAssistant) -> None:
+    """climate.airflow_climate offers target humidity, backed by input_number.airflow_target_humidity.
+
+    Guards the custom component, not only the YAML: upstream climate_template enables
+    TARGET_HUMIDITY only when `dry` is among the hvac_modes and otherwise drops
+    `set_humidity`/`target_humidity_template` with just a warning (climate.py at 0.8.2), so the
+    entity would still load and every other test pass. Checks the feature flag, the attributes the
+    thermostat card reads, and a real `climate.set_humidity` reaching the helper.
+    """
+    climate = "climate.airflow_climate"
+    failures: list[str] = []
+    attrs = ha.states.get(climate).attributes
+    if not attrs.get("supported_features", 0) & ClimateEntityFeature.TARGET_HUMIDITY:
+        failures.append(f"TARGET_HUMIDITY not in supported_features {attrs.get('supported_features')!r}")
+    # Bounds are literal in packages/airflow_cooling.yaml.
+    for key, want in (("min_humidity", 30), ("max_humidity", 70)):
+        if attrs.get(key) != want:
+            failures.append(f"{key} {attrs.get(key)!r}, want {want}")
+    # The template mirrors the helper: change the helper, read the climate.
+    await _set_number(ha, "input_number.airflow_target_humidity", 45)
+    await ha.async_block_till_done()
+    if (got := ha.states.get(climate).attributes.get("humidity")) != 45:
+        failures.append(f"humidity after helper = 45: {got!r}")
+    # The setter writes the helper (set_humidity action), and the climate follows it.
+    if not failures:
+        await ha.services.async_call("climate", "set_humidity",
+                                     {"entity_id": climate, "humidity": 55}, blocking=True)
+        await ha.async_block_till_done()
+        if (got := _state(ha, "input_number.airflow_target_humidity")) != "55.0":
+            failures.append(f"helper after climate.set_humidity 55: {got!r}")
+        if (got := ha.states.get(climate).attributes.get("humidity")) != 55:
+            failures.append(f"humidity after climate.set_humidity 55: {got!r}")
+    assert not failures, f"{len(failures)} humidity check(s) failed:\n" + "\n".join(failures)
+
+
+async def test_climate_select_dry_enables_automatic_control(ha: HomeAssistant) -> None:
+    """Selecting hvac_mode `dry` on climate.airflow_climate turns automatic control on (AF-8)."""
+    await ha.services.async_call("input_boolean", "turn_off", {"entity_id": _AUTO}, blocking=True)
+    await ha.async_block_till_done()
+    await ha.services.async_call("climate", "set_hvac_mode",
+                                 {"entity_id": "climate.airflow_climate", "hvac_mode": "dry"},
+                                 blocking=True)
+    await ha.async_block_till_done()
+    assert _state(ha, _AUTO) == "on"
+
+
+@_SEASON_FROM_INDICATOR
 @pytest.mark.allow_log(
     r"while processing template .*for attribute '_attr_native_value' in entity "
     r"'sensor\.solar_yield_watts'",

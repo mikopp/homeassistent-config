@@ -39,8 +39,8 @@ service calls (root `CLAUDE.md` "MCP usage").
    - `packages/heating_pv_boost.yaml:537`, and remove its "verify it after deploy" comment once
      the id is confirmed
    - `tests/conftest.py`
-   - `tests/test_wallbox.py`
-   - `tests/test_shelly_pool_pump.py`
+   - `tests/ha/test_energy_wallbox.py`
+   - `tests/ha/test_energy_pool_pump.py`
    - dashboards
 
    A changed reference in YAML or tests is a behaviour change. It needs CI green, not only

@@ -3,8 +3,8 @@
 # inputs. The default home of behaviour tests; the real-HA-in-Docker layer is e2e.yaml.
 #
 # Three things are pinned, each in ONE file that tests/ha/test_versions.py guards:
-#   * Home Assistant: requirements_test.txt (PHACC) must match the image in
-#     .github/ha-versions/ha/Dockerfile (year.month);
+#   * Home Assistant: requirements_test.txt (pytest-homeassistant) must be the image in
+#     .github/ha-versions/ha/Dockerfile (same release, patch included);
 #   * Python: .github/ha-versions/ha-python.txt = the minor Home Assistant requires. NOT the
 #     Python of .github/ha-versions/python (that one runs the YAML tooling and may be newer);
 #   * mosquitto: .github/ha-versions/mosquitto/Dockerfile, the broker of the official Home
@@ -55,7 +55,7 @@ jobs:
           fi
 
       # Python minor from the single source (see the header); the pip cache is keyed on the file
-      # the install reads, so a PHACC bump rebuilds it and nothing else does.
+      # the install reads, so a pytest-homeassistant bump rebuilds it and nothing else does.
       - name: Set up Python
         if: steps.changes.outputs.run == 'true'
         uses: actions/setup-python@v7

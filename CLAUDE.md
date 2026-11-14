@@ -14,8 +14,11 @@
 Deploy/migration docs come from `git diff origin/master...HEAD`, never the live system.
 
 ## Local CI checks
-Run `.github/scripts/ci-local.sh` before pushing: YAML checks, knowledge-layout check and the in-process
-suite `tests/ha` (no Docker); `--e2e` adds the real-HA layer `tests/e2e` (Docker). CI runs both
+While developing, run the targeted form: `.github/scripts/ci-local.sh --package <pkg>` (that package's tests,
+incl. cross-package ones) or `.github/scripts/ci-local.sh -- <pytest test id / args>`; `--yaml` = YAML checks only.
+Before pushing / at the end of a task the full `.github/scripts/ci-local.sh` (no arguments) is mandatory: YAML
+checks, knowledge-layout check and all of `tests/ha` (no Docker); `--e2e` adds the real-HA layer `tests/e2e`
+(Docker). A targeted run never counts as verification. Usage details: header of the script. CI runs both
 (`tests.yaml`, `e2e.yaml`). Prerequisites: python3.15 (tooling; yamllint goes into `.venv`), python3.14
 (what HA requires, pinned in `.github/ha-versions/ha-python.txt`) and mosquitto at the version pinned in
 `.github/ha-versions/mosquitto/Dockerfile` (the HA Mosquitto app's broker; Linux:
@@ -23,11 +26,11 @@ suite `tests/ha` (no Docker); `--e2e` adds the real-HA layer `tests/e2e` (Docker
 
 ## HA version gate — check before trusting any info
 The pinned HA version is the `FROM` line of `.github/ha-versions/ha/Dockerfile` (an image tag like
-`ghcr.io/home-assistant/home-assistant:2026.10.1`; Dependabot bumps it; the e2e layer runs this image).
+`ghcr.io/home-assistant/home-assistant:2026.11.1`; Dependabot bumps it; the e2e layer runs this image).
 `.HA_VERSION` was removed in #116 and must not be read. Before applying ANY information from internet
 search, official HA docs, ha-mcp results, or even this repo's own existing code/comments — check it's
-still accurate for that major version: HA renames/removes config keys and shifts YAML syntax. The PHACC
-pin in `requirements_test.txt` (in-process tests), the Python and the mosquitto pins are guarded by
+still accurate for that major version: HA renames/removes config keys and shifts YAML syntax. The pytest-homeassistant
+pin in `requirements_test.txt` (in-process tests; same release as the image), the Python and the mosquitto pins are guarded by
 `tests/ha/test_versions.py`.
 
 - Read the `FROM` line first, at the start of any research into HA behavior/config/docs. The live

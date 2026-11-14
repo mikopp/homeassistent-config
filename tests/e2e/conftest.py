@@ -16,8 +16,8 @@ Parts, top to bottom:
 Environment: `E2E_IMAGE` (default: the `FROM` line of .github/ha-versions/ha/Dockerfile),
 `E2E_ARTIFACTS` (where logs land, default `tests/e2e/.artifacts`).
 
-Run: pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:homeassistant
-(`-p no:homeassistant` only matters when PHACC is installed in the same venv; `--confcutdir`
+Run: pytest -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e -p no:pytest_homeassistant
+(`-p no:pytest_homeassistant` only matters when pytest-homeassistant is installed in the same venv; `--confcutdir`
 keeps this run from collecting conftest files above tests/e2e).
 """
 

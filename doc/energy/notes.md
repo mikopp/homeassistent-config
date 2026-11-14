@@ -1,8 +1,8 @@
 ---
 paths:
   - "packages/energy.yaml"
-  - "tests/ha/test_wallbox.py"
-  - "tests/ha/test_shelly_pool_pump.py"
+  - "tests/ha/test_energy_wallbox.py"
+  - "tests/ha/test_energy_pool_pump.py"
   - "plans/energy-live-entity-ids.md"
 ---
 # energy package notes (`packages/energy.yaml`)
@@ -63,7 +63,7 @@ the `ha-mqtt` skill.
 - All Shelly entities use `expire_after: 120`; the Loxone ones have none (invariant above).
 - The go-e source entities are owned by the MQTT integration; their ids can change if the device is
   re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the seeds
-  in `tests/baseline.py` and `tests/ha/test_wallbox.py` must change with them.
+  in `tests/baseline.py` and `tests/ha/test_energy_wallbox.py` must change with them.
 
 ## Entity map
 MQTT entities here have no `default_entity_id` (#146), so their ids are not derivable (rule in
@@ -90,16 +90,27 @@ is open: `plans/energy-live-entity-ids.md`.
 - MQTT sensors without `default_entity_id`: ids depend on the old registry (#146).
 
 ## Tests
-- `tests/ha/test_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
+- `tests/ha/test_energy_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
   without `state_class`), asserting on the WRAPPER, so the template incl. unit normalisation (W/kW,
   Wh/kWh) and availability run. Source entities have no real path in CI and are seeded.
-- `tests/ha/test_shelly_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
+- `tests/ha/test_energy_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
   the real `value_template`s; every case checks all five entities (power, energy, voltage,
   current, switch).
 - New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
   `state:` template strictly and fails on a sentinel output.
-- The six Loxone washer/tumble-dry/dishwasher power and energy sensors are never fed a message by
-  any test (only the syntax check of `test_templates.py` covers their `value_template`): #159.
+- `tests/ha/test_energy_expire_after.py` (frozen clock): the pool pump, rain water pump and Pro 3EM
+  entities go `unavailable` after 120 s and come back with a message; the Loxone meters, the Loxone
+  flag and every ebusd register keep their value for a week (an `expire_after` added to one fails).
+- `tests/ha/test_energy_shelly.py`: the rain water pump (all five entities) and the Heizung Pro 3EM
+  power/energy get the live payloads verbatim (odd spacing, `null` fields, unused phase data) plus
+  variants (running pump, rounding, relay on/off, null energy block, export). A null `aenergy` block
+  on the plug is ignored silently (HA swallows the undefined-attribute render), a null `total_act`
+  on the Pro 3EM would log a warning without the template's `is not none` branch.
+- `tests/ha/test_energy_loxone.py`: the six Loxone washer/tumble-dry/dishwasher power and energy
+  sensors (and `loxone/heating/warm_enough`) get the live broker payloads over the real broker, plus
+  non-zero power sequences (representative kW values, not captured), rounding, whitespace and empty
+  payloads (ignored, last value kept), and their units are asserted. A non-numeric payload on these
+  six is not tested: their template guards only the empty payload (it would raise).
 
 ## Related
 - `doc/heating_pv_boost/notes.md` — consumer of the Heizung Pro 3EM power/energy.

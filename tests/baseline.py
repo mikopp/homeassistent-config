@@ -229,18 +229,31 @@ BASELINE_STATES: dict[str, tuple[str, dict]] = {
     "sensor.geotherm_heating_yield_total": ("60000", {"unit_of_measurement": "kWh", "device_class": "energy"}),
     # Daily meters behind sensor.heating_efficiency_today (utility_meter; its source energy
     # sensors are MQTT and absent in CI, so seed the meters directly).
-    "sensor.heating_yield_daily": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_electricity_daily": ("0", {"unit_of_measurement": "kWh"}),
-    # Per-mode meters behind the space-heating and hot-water efficiencies (utility_meter tariffs,
-    # same sources as above).
-    "sensor.heating_electricity_by_mode_active_heating": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_electricity_by_mode_passive_heating": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_electricity_by_mode_water_heating": ("0", {"unit_of_measurement": "kWh"}),
+    # Values above the efficiencies' 1 kWh electricity floor (below it they render `unknown`, which
+    # the strict render check in tests/ha/test_templates.py rejects), consistent across the meters:
+    # 9 kWh heat from 3 kWh, every efficiency 3.0.
+    "sensor.heating_yield_daily": ("9", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_daily": ("3", {"unit_of_measurement": "kWh"}),
+    # Per-mode meters behind the space-heating and hot-water efficiencies (utility_meter with one
+    # sensor per mode, same sources as above). Electricity: five energy modes; yield: the active
+    # and passive heating cycle share one `space_heating` sensor. Space heating 6 / (1.5 + 0.5),
+    # hot water 3 / 1.
+    "sensor.heating_electricity_by_mode_active_heating": ("1.5", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_passive_heating": ("0.5", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_by_mode_water_heating": ("1", {"unit_of_measurement": "kWh"}),
     "sensor.heating_electricity_by_mode_cooling": ("0", {"unit_of_measurement": "kWh"}),
     "sensor.heating_electricity_by_mode_off": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_yield_by_mode_active_heating": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_yield_by_mode_passive_heating": ("0", {"unit_of_measurement": "kWh"}),
-    "sensor.heating_yield_by_mode_water_heating": ("0", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_space_heating": ("6", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_yield_by_mode_water_heating": ("3", {"unit_of_measurement": "kWh"}),
     "sensor.heating_yield_by_mode_cooling": ("0", {"unit_of_measurement": "kWh"}),
     "sensor.heating_yield_by_mode_off": ("0", {"unit_of_measurement": "kWh"}),
+    # Rolling 30-day sums behind the 30d efficiencies (`sql` sensors on the long-term statistics;
+    # the test recorder holds none, so they read 0). Electricity above the 10 kWh floor (below it
+    # the efficiencies render `unknown`), space heating + hot water = overall, every efficiency 3.0.
+    "sensor.heating_yield_30d": ("150", {"unit_of_measurement": "kWh"}),
+    "sensor.heating_electricity_30d": ("50", {"unit_of_measurement": "kWh"}),
+    "sensor.space_heating_yield_30d": ("105", {"unit_of_measurement": "kWh"}),
+    "sensor.space_heating_electricity_30d": ("35", {"unit_of_measurement": "kWh"}),
+    "sensor.hot_water_yield_30d": ("45", {"unit_of_measurement": "kWh"}),
+    "sensor.hot_water_electricity_30d": ("15", {"unit_of_measurement": "kWh"}),
 }

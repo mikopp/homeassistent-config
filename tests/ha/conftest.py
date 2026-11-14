@@ -1,14 +1,17 @@
 """Fixtures of the in-process test layer.
 
-The real Home Assistant core runs inside pytest (pytest-homeassistant-custom-component, PHACC).
+The real Home Assistant core runs inside pytest (pytest-homeassistant, home-assistant/core).
 It loads THIS repo's packages through HA's own YAML loader, and the real MQTT integration talks
 to a real mosquitto started per test. Each test gets a fresh HA (function scope).
 
 Parts, top to bottom:
+- package selection (`--package`, marker `package`, the collection guard);
 - real clock and free-port helpers;
 - config staging (`stage_config`, `hass_config_dir`);
 - the shared baseline (`seed`, `apply_baseline`, data in tests/baseline.py);
 - the real broker (`Broker`, `broker`);
+- the test recorder's filter (`recorder_config`, derived from the config, guarded by
+  test_recorder_filter.py);
 - loading the repo config into HA (`load_repo_config`, `ha`);
 - waiting and lookup helpers (`entity_id`, `wait_state`);
 - the clock (`Clock`, `clock`, `local_at`, `next_day`);
@@ -17,6 +20,7 @@ Parts, top to bottom:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import importlib.util
 import json
@@ -44,13 +48,115 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.template import async_load_custom_templates
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import (
+from pytest_homeassistant.common import (
     MockConfigEntry,
     async_fire_time_changed,
     async_mock_service,
 )
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+# ── Package selection (`--package`) ───────────────────────────────────────────
+# `ci-local.sh --package NAME` passes `--package NAME` here. A test belongs to its PRIMARY package
+# (from its module name, `test_<package>[_<topic>].py`) plus every package named in
+# `@pytest.mark.package("a", "b")` (a test that loads or drives another package's real entities).
+# → .claude/skills/ha-test-harness/SKILL.md (Run, where a test goes)
+# Harness modules that belong to no package; each is kept or dropped as a whole.
+# Runs under EVERY --package: a package edit can break loading or template rendering of any package.
+HARNESS_EVERY_PACKAGE = ("test_packages_load", "test_templates", "test_recorder_filter")
+# Runs only without --package (pins and broker isolation do not depend on a package's YAML).
+HARNESS_FULL_RUN_ONLY = ("test_versions", "test_broker_isolation")
+
+
+def package_names() -> list[str]:
+    """Names of the feature packages: the `packages/*.yaml` stems."""
+    return sorted(p.stem for p in (REPO / "packages").glob("*.yaml"))
+
+
+def primary_package(module: str, names: list[str]) -> str | None:
+    """The package a test module is named after: the longest name that `test_<name>[_...]` starts with.
+
+    Boundary-aware (`test_energy_wallbox` → `energy`, not a package that merely shares a prefix).
+    """
+    rest = module.removeprefix("test_")
+    hits = [n for n in names if rest == n or rest.startswith(n + "_")]
+    return max(hits, key=len) if hits else None
+
+
+def _marker_names(path: Path) -> set[str]:
+    """Package names given as string literals to `pytest.mark.package(...)` anywhere in a test file."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        f = node.func if isinstance(node, ast.Call) else None
+        if isinstance(f, ast.Attribute) and f.attr == "package" and ast.unparse(f).endswith("mark.package"):
+            names.update(a.value for a in node.args if isinstance(a, ast.Constant))
+    return names
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Guard the module/marker → package mapping before anything runs (full runs included).
+
+    Static (source scan of tests/ha/test_*.py), so it fails once, with a clear message, also under
+    xdist where a collection error in a worker would surface as an INTERNALERROR.
+    """
+    names = package_names()
+    harness = (*HARNESS_EVERY_PACKAGE, *HARNESS_FULL_RUN_ONLY)
+    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+        # A module named after no package and not in the harness lists.
+        if primary_package(path.stem, names) is None and path.stem not in harness:
+            raise pytest.UsageError(
+                f"{path.name} matches no package: name it test_<package>[_<topic>].py "
+                f"(packages: {', '.join(names)}) or add it to the harness lists in tests/ha/conftest.py"
+            )
+        # A `package` marker naming no packages/<name>.yaml.
+        if unknown := sorted(_marker_names(path) - set(names)):
+            raise pytest.UsageError(
+                f"{path.name}: @pytest.mark.package names no packages/<name>.yaml: "
+                f"{', '.join(unknown)} (packages: {', '.join(names)})"
+            )
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """`--package NAME` (repeatable): run only the tests of those packages (see above)."""
+    parser.addoption(
+        "--package",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="run only the tests of packages/NAME.yaml (repeatable); harness tests per conftest.py",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Apply `--package`: keep a test when its package set meets the selection.
+
+    Package set = the module's primary package plus every `package` marker name. Harness
+    modules follow their lists. Without `--package` nothing is dropped.
+    """
+    if not (selected := set(config.getoption("package"))):
+        return
+    names = package_names()
+    keep: list[pytest.Item] = []
+    dropped: list[pytest.Item] = []
+    for item in items:
+        module = item.path.stem
+        marked = {n for m in item.iter_markers("package") for n in m.args}
+        # Backstop of the static guard for names it cannot see (not string literals).
+        if unknown := sorted(marked - set(names)):
+            raise pytest.UsageError(
+                f"{item.nodeid}: @pytest.mark.package names no packages/<name>.yaml: {', '.join(unknown)}"
+            )
+        if module in HARNESS_EVERY_PACKAGE:
+            wanted = True
+        elif module in HARNESS_FULL_RUN_ONLY:
+            wanted = False
+        else:
+            wanted = bool(({primary_package(module, names)} | marked) & selected)
+        (keep if wanted else dropped).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+    items[:] = keep
 
 
 # ── Real clock, unaffected by freezer ─────────────────────────────────────────
@@ -103,7 +209,7 @@ def stage_config(tmp_path: Path) -> str:
 
 @pytest.fixture
 def hass_config_dir(tmp_path: Path) -> str:
-    """Override PHACC's config dir with a staged copy of this repo."""
+    """Override the package's config dir with a staged copy of this repo."""
     return stage_config(tmp_path)
 
 
@@ -365,7 +471,7 @@ def broker(tmp_path: Path, socket_enabled: None) -> Generator[Broker]:
     """A fresh broker per test, so retained messages cannot leak between tests.
 
     Kept over one broker per worker that is cleared between tests: clearing measured no faster
-    (about 24 ms per test either way) and needs workarounds (PHACC's thread check fails the
+    (about 24 ms per test either way) and needs workarounds (the package's thread check fails the
     first test; the subscription log is shared). tests/ha/test_broker_isolation.py proves the isolation.
     """
     b = Broker(tmp_path)
@@ -388,11 +494,92 @@ def _victron_mqtt_unique_ids() -> list[str]:
     return [e["unique_id"] for e in data["mqtt"]["sensor"] if "default_entity_id" not in e]
 
 
+# ── Test recorder: record only what the config reads back ─────────────────────
+# The package's `recorder_mock` commits to SQLite after every event (`commit_interval: 0`); recording the
+# whole boot cost ~1.1 s of CPU per test (the recorder thread competes with the loop for the GIL).
+# The recorder is only READ by the entity platforms below, so it records only their sources and
+# drops event types no test reads. Both parts are derived or guarded, never a hand-kept list:
+# → .claude/skills/ha-test-harness/SKILL.md (fixtures), test_recorder_filter.py (the guards).
+# Entity platform → config key holding the entity whose state history it reads (source read at the
+# pinned HA: filter/statistics/history_stats import `recorder.history` and query the source's states).
+HISTORY_PLATFORMS = {"filter": "entity_id", "statistics": "entity_id", "history_stats": "entity_id"}
+# Every other entity platform the config uses, with the reason it needs no history (no recorder
+# import in its component source at the pinned HA). A new platform must be classified in one of
+# the two dicts, else test_recorder_filter.py fails.
+NO_HISTORY_PLATFORMS = {
+    "integration": "Riemann sum over live state changes, restores through RestoreEntity",
+    "climate_template": "custom component (custom_components/), live template state only",
+}
+# Top-level domains that import the recorder although the config never reads history from them.
+RECORDER_IMPORTING_DOMAINS = {
+    "recorder": "the recorder itself",
+    "sensor": "sensor/recorder.py compiles long-term statistics, off in the test recorder",
+    # Queries the recorder database with its own SELECT (the 30-day sums read the long-term
+    # statistics tables), not the state history of an entity: nothing to add to the filter.
+    "sql": "runs its query on the recorder database; reads no entity's state history",
+}
+# Event types dropped before they reach the queue (the entity filter does not apply to events
+# without a top-level entity_id, e.g. call_service). Only types no test reads: a test has no
+# recorder access except the commit barrier `async_wait_recording_done` (guarded by
+# test_recorder_filter.py). state_changed cannot be excluded by type, the entity filter does it.
+RECORDER_EXCLUDED_EVENTS = (
+    "call_service", "automation_triggered", "script_started", "component_loaded",
+    "service_registered", "core_config_updated", "logbook_entry", "entity_registry_updated",
+    "device_registry_updated", "mqtt_connection_state", "homeassistant_start",
+    "homeassistant_started", "homeassistant_final_write", "homeassistant_stop",
+    "homeassistant_close",
+)
+
+
+def config_yaml_files() -> list[Path]:
+    """The YAML files HA loads entity platforms from: configuration.yaml and packages/*.yaml."""
+    return [REPO / "configuration.yaml", *sorted((REPO / "packages").glob("*.yaml"))]
+
+
+def config_entity_platforms() -> list[tuple[str, str, str, dict[str, Any]]]:
+    """(file, domain, platform, entry) of every `<domain>: [- platform: x]` entry in the config.
+
+    Only top-level domain lists count: `platform:` inside triggers (`state`, `time_pattern`, ...)
+    is nested and not an entity platform.
+    """
+    found = []
+    for path in config_yaml_files():
+        data = yaml.load(path.read_text(), Loader=_AnyTagLoader) or {}
+        for domain, value in data.items():
+            if isinstance(value, list):
+                found += [
+                    (path.name, domain, e["platform"], e)
+                    for e in value
+                    if isinstance(e, dict) and "platform" in e
+                ]
+    return found
+
+
+def history_sources() -> list[str]:
+    """Entity ids whose state history a configured platform reads (sorted, unique)."""
+    return sorted(
+        {
+            entry[HISTORY_PLATFORMS[platform]]
+            for _, _, platform, entry in config_entity_platforms()
+            if platform in HISTORY_PLATFORMS
+        }
+    )
+
+
+@pytest.fixture
+def recorder_config() -> dict[str, Any]:
+    """Override the package's fixture: record only the history sources, drop unread event types."""
+    return {
+        "include": {"entities": history_sources()},
+        "exclude": {"event_types": list(RECORDER_EXCLUDED_EVENTS)},
+    }
+
+
 async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> None:
     """Set up this repo's package domains on `hass` and start it.
 
     `mqtt_port`: the real broker to connect to, or None to leave MQTT out (its entities then
-    do not exist). Custom integrations must already be enabled (`enable_custom_integrations`).
+    do not exist). Custom integrations are enabled by the package's `hass` fixture.
     """
     # Production location/time zone (CI used the same coordinates via sed).
     await hass.config.async_set_time_zone("Europe/Vienna")
@@ -457,7 +644,7 @@ async def load_repo_config(hass: HomeAssistant, *, mqtt_port: int | None) -> Non
             calls[action] = async_mock_service(hass, domain, name)
         else:
             # The real action exists because a config entity of that domain does (the
-            # heating_pv_boost tariff selects make `select` real): keep it for those, record
+            # heating_pv_boost per-mode meter selects make `select` real): keep it for those, record
             # only the calls to the external entities, as the stub would.
             calls[action] = _record_external_calls(hass, domain, name)
     # Entities of integrations the test HA does not run exist in production from the start
@@ -486,12 +673,11 @@ async def ha(
     broker: Broker,  # first: torn down AFTER HA, so HA never sees the broker vanish
     recorder_mock: Any,
     hass: HomeAssistant,
-    enable_custom_integrations: None,
 ) -> AsyncGenerator[HomeAssistant]:
     """A fresh HA with this repo's package domains set up, MQTT connected to the real broker.
 
     Teardown unloads the config entries (MQTT, workday) HERE, while the recorder still runs.
-    PHACC's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
+    The package's `hass` fixture does the same unload, but only after `recorder_mock` (which depends
     on `hass`, so it is finalised first) has stopped the recorder. Unloading the MQTT entry
     writes `unavailable` for every MQTT entity; a history_stats sensor whose source follows one
     (heating_compressor_*_today ← the ehp/Comp binary_sensor, an MQTT entity) then
@@ -564,6 +750,23 @@ async def wait_subscribed(hass: HomeAssistant, broker: Broker, *topics: str) -> 
     """Wait until HA subscribed to every topic, so no non-retained publish can be lost."""
     for topic in topics:
         await hass.async_add_executor_job(broker.wait_subscribed, topic)
+
+
+class MqttWarnings(logging.Handler):
+    """Collects WARNING+ records of the mqtt integration, tagged with the step being published.
+
+    A value_template that raises keeps the last state and only logs, so a state check cannot see a
+    missing guard; a test attaches this to `homeassistant.components.mqtt` and asserts `hits` is empty.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.step = ""
+        self.hits: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name.startswith("homeassistant.components.mqtt"):
+            self.hits.append(f"{self.step}: {record.getMessage()}")
 
 
 # Sync channel: ebusd's energy integral. HA subscribes to it (packages/heating_pv_boost.yaml) and
@@ -787,7 +990,11 @@ async def clock(ha: HomeAssistant, freezer: FrozenDateTimeFactory) -> Clock:
 # - a deprecation warning from any homeassistant logger,
 # - a template error or warning: WARNING or above from the template helper or the template
 #   integration, or a message that names a template failure (an automation's template
-#   condition, an MQTT value_template, ...).
+#   condition, an MQTT value_template, ...),
+# - anything at WARNING or above from a staged custom component (`custom_components.*`, today only
+#   climate_template). Why: it logs config problems under its own logger, not `homeassistant.*`,
+#   e.g. upstream climate_template drops humidity control with only a warning when `dry` is
+#   missing from hvac_modes (custom_components/climate_template/climate.py, CONFIRMED at 0.8.2).
 # A test that provokes such a log on purpose declares it: @pytest.mark.allow_log(regex, reason=).
 _TEMPLATE_LOGGERS = ("homeassistant.helpers.template", "homeassistant.components.template")
 _TEMPLATE_MESSAGE = re.compile(
@@ -796,7 +1003,7 @@ _TEMPLATE_MESSAGE = re.compile(
 )
 
 
-# PHACC's plugin (plugins.py, import time) runs logging.basicConfig(level=INFO) and sets the
+# The package's plugin (plugins.py, import time) runs logging.basicConfig(level=INFO) and sets the
 # "sqlalchemy.engine" logger to INFO, so every recorder SQL statement is echoed to stderr (about
 # 3000 lines per run, in the CI log too). Only the SQL echo is silenced: WARNING and above from
 # sqlalchemy, and everything from homeassistant.*, still reach log_guard.
@@ -806,6 +1013,20 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # Known config issues the guard tolerates in EVERY test, each with its reason. Keep this list
 # short: an entry is a defect to fix in the YAML (needs approval), not a permanent exception.
 _KNOWN_CONFIG_LOGS = (
+    # The staged custom component climate_template (litinoveweedle/hass-template-climate,
+    # tests/custom_components.yaml) reads and writes the climate attributes HA now logs as deprecated
+    # and provides the deprecated target_temperature(_high|_low) properties (stops working in
+    # 2027.11; still so at 0.8.2). Not this repo's code: tracked in
+    # plans/climate-template-deprecations.md. Only these two message shapes are tolerated; another
+    # deprecation or warning from it, or any other integration's deprecation, fails.
+    re.compile(
+        r"Detected that custom integration 'climate_template' (?:writes|reads) the deprecated "
+        r"TemplateClimate\._attr_\w+, use _attr_native_\w+ instead at custom_components/climate_template/"
+    ),
+    re.compile(
+        r"^custom_components\.climate_template\.climate::TemplateClimate provides the deprecated "
+        r"target_temperature(?:_high|_low)?, "
+    ),
     # packages/victron.yaml counter-delta baselines render the string 'unknown' (src unknown and
     # this.state unknown) into a numeric energy sensor on a time_pattern tick before the Venus
     # counters arrived. Any test that crosses a real minute boundary before publishing them
@@ -819,9 +1040,14 @@ _KNOWN_CONFIG_LOGS = (
 
 def _guarded(record: logging.LogRecord) -> str | None:
     """Why a log record fails the test, or None when it does not."""
-    if record.levelno < logging.WARNING or not record.name.startswith("homeassistant"):
+    if record.levelno < logging.WARNING:
         return None
     message = record.getMessage()
+    # A custom component's own logger: every warning counts (see the block comment above).
+    if record.name.startswith("custom_components."):
+        return "custom component"
+    if not record.name.startswith("homeassistant"):
+        return None
     if record.name.startswith("homeassistant.helpers.frame"):
         return "frame"
     if "deprecated" in message.lower():
