@@ -7,6 +7,25 @@ description: Record a proven learning/gotcha after a bug or feature. Use when yo
 
 Conventions behind this skill: `doc/KNOWLEDGE.md` (homes K-1, current vs background K-2, extending K-6).
 
+## 0. Is it worth writing? (before everything else)
+
+Proven is not enough: a note is read in every future session that touches the package, so each
+entry costs context. Write a learning only if ALL hold:
+
+- A future session would act differently without it.
+- It cannot be read from the YAML, the tests or `git log` (a `retain: false` publish, a visible
+  hold timer, a template's own logic are all visible there).
+- `grep` over the target note and the matching skill found no entry that already covers it.
+  Reworded duplicates count as covered: extend or tighten the existing entry instead.
+
+Do NOT record:
+- Recovery steps for a one-off situation (first arming, a deploy slip, a manual retry). They go in
+  the PR description.
+- That a procedure worked because the user said so: that is an outcome, not a mechanism.
+- Behaviour that follows directly from a config value you can see.
+
+If unsure, ask the user before writing; skipping costs nothing, a useless entry stays.
+
 ## 1. NEVER write an unconfirmed learning
 
 A learning is a claim future sessions will act on without re-deriving it. Only write one when the
@@ -28,7 +47,8 @@ mechanisms fitted to one confirming run, and both sent later sessions down wrong
 ## 2. Grade the evidence
 
 - **CONFIRMED** = a stack trace, a source read at the pinned HA version, or a deterministic
-  reproduction.
+  reproduction. It grades the proven *mechanism*: "the user did X and it worked" is at most
+  OBSERVED, and usually not a learning at all (section 0).
 - **OBSERVED** = real data from a real run, but a plausible alternative explanation is still open.
 - **UNPROVEN** = a hypothesis kept only so it is not re-litigated from scratch.
 
@@ -36,6 +56,9 @@ Never promote a learning a grade without new evidence. Write the grade next to a
 not CONFIRMED.
 
 ## 3. Route it to its one home
+
+Before editing any knowledge file: read `doc/KNOWLEDGE.md`, then `wc -c` the target. A note over
+its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replace something.
 
 | The learning is… | Write it to |
 |---|---|
