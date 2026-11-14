@@ -48,18 +48,21 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
 
 - **Division of responsibility**: Loxone owns human comfort and publishes one boolean (*is the
   house warm enough?*); Home Assistant owns energy and decides when to charge; the Vaillant owns
-  the machine (weather compensation, room influence, compressor protection)
+  the machine (weather compensation, frost protection, compressor protection; room influence is
+  off)
 - **Surplus**: PV generation minus house load *excluding the heating circuit*, so the figure does
   not collapse the moment the boost starts drawing — grid export is unusable here because the
   battery absorbs surplus first
-- **Setpoint**: derived from `mc/TempDesiredLow`, the only human knob. Nothing is captured or
+- **Setpoint**: derived from the HA helper `input_number.heating_comfort_temp`, the only comfort
+  knob; `mc/TempDesiredLow` is the machine's frost floor and HA ignores it. Nothing is captured or
   restored, and the target is always absolute so a retry or restart cannot compound it
 - **Interlocks**: cooling (the same hydraulics serve both), hot-water charging (which masks the
   return temperature), the resistive backup heater, battery state of charge, and the heat pump's
   own 20-minute compressor restart lock
-- **Mode law**: `auto` normally (the Vaillant's own day/night program), `on` when the house is
-  not warm enough or for a slab boost, `off` only in cooling season (heating mode only — cooling
-  is a separate register). Never `low`, and never `off` on an unknown season
+- **Mode law**: HA writes only `on` or `off` (the Vaillant's time program is unused): `off` when
+  Loxone says warm enough or in cooling season, `on` otherwise or for a slab boost (heating mode
+  only — cooling is a separate register); nothing on an unknown season, at most one change per
+  30 min. Below 3 °C outdoor the Vaillant's frost protection still heats in `off`
 - **Slab boost only in active heating season** — not in neutral (shoulder) season
 - **Compressor cycling observation**: energy integral, flow setpoint, compressor demand, the
   start-integral / hysteresis settings, lifetime counters, and derived starts per day, average and

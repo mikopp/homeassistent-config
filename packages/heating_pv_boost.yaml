@@ -80,21 +80,6 @@ mqtt:
         {% set f = value.split(';') %}
         {% if f | count > 1 and f[1] | trim | lower == 'ok' %}{{ f[0] | float | round(2) }}{% endif %}
 
-    # ── The only human knob ───────────────────────────────────────────────────
-    # mc/TempDesiredLow (Absenktemperatur). Every setpoint HA will write (Phase 2) is derived
-    # from this value, so it is the one register a person is expected to change.
-    # Polled at priority 7; fallback if it never arrives: mc/Params field 1 (9-field parse).
-    - name: "Heating Temp Desired Low"
-      unique_id: heating_temp_desired_low
-      default_entity_id: sensor.geotherm_heating_temp_desired_low
-      state_topic: "ebusd/mc/TempDesiredLow"
-      unit_of_measurement: "°C"
-      device_class: temperature
-      state_class: measurement
-      icon: mdi:thermometer-low
-      device: *ebusd_geotherm
-      value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
-
     # ── Current machine state, for observation and later write verification ───
     # Read-only views; the Phase 2 automation compares its wanted values against them and writes
     # through mqtt.publish on the /set topics (no separate number/select entities).
@@ -434,10 +419,22 @@ input_datetime:
     icon: mdi:clock-check-outline
 
 input_number:
+  # The only comfort knob: every setpoint HA writes to mc/TempDesired derives from it.
+  # mc/TempDesiredLow is the machine's frost / off floor (set at the panel), not a comfort base.
+  # → doc/heating_pv_boost/notes.md "Invariants"
+  heating_comfort_temp:
+    name: "Heating Comfort Temp"
+    min: 18
+    max: 24
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:home-thermometer
+    mode: box
+
   # How far above the normal heating-season setpoint a slab charge is allowed to push.
-  # This cap is what bounds comfort during a boost: the Vaillant will not exceed TempDesired,
-  # enforced through its own VR 90 room influence, so no room sensors are needed. Keep it small —
-  # a crash mid-boost leaves the house held at this offset until the watchdog runs.
+  # This cap bounds comfort during a boost: it shifts the weather curve by this much, and with
+  # Raumaufschaltung off no room feedback limits it. Keep it small — a crash mid-boost leaves the
+  # house held at this offset until the watchdog runs.
   heating_boost_offset:
     name: "Heating Boost Offset"
     min: 0.5
@@ -808,8 +805,8 @@ template:
       # Always the ABSOLUTE target — never a relative "current + offset", which is not idempotent:
       # a retry, a duplicated trigger or a restart mid-boost would compound it to +2x offset.
       #
-      # Matches control-law rows 2-7: collapses onto TempDesiredLow outside the heating season
-      # (cooling), +1 in the season, +offset while a slab boost is wanted (active_heating only).
+      # Matches control-law rows 2-7: the comfort helper outside the heating season (cooling),
+      # +1 in the season, +offset while a slab boost is wanted (active_heating only).
       # automation.heating_comfort_control writes it to mc/TempDesired; row 1 (unknown indicator)
       # is blocked there by the wanted-mode sensor.
       - name: "Heating Target Temp"
@@ -818,17 +815,16 @@ template:
         device_class: temperature
         state_class: measurement
         icon: mdi:thermometer-auto
-        availability: "{{ has_value('sensor.geotherm_heating_temp_desired_low') }}"
         state: >
-          {% set tdl = states('sensor.geotherm_heating_temp_desired_low') | float %}
+          {% set comfort = states('input_number.heating_comfort_temp') | float %}
           {% if not is_state('binary_sensor.heating_season_active', 'on') %}
-            {{ tdl | round(1) }}
+            {{ comfort | round(1) }}
           {# Boost only in active_heating (row 3), whatever the slab sensor says. #}
           {% elif is_state('sensor.heating_cooling_indicator', 'active_heating')
                   and is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
-            {{ (tdl + 1 + (states('input_number.heating_boost_offset') | float)) | round(1) }}
+            {{ (comfort + 1 + (states('input_number.heating_boost_offset') | float)) | round(1) }}
           {% else %}
-            {{ (tdl + 1) | round(1) }}
+            {{ (comfort + 1) | round(1) }}
           {% endif %}
 
       # ── The mode HA wants (Phase 2 decision) ──────────────────────────────
@@ -1218,11 +1214,7 @@ automation:
         data:
           topic: "ebusd/uih/CoolingActive/get"
           payload: "?5"
-      # Tier 3 (priority 7) — the human knob (changes rarely) plus read-only telemetry.
-      - action: mqtt.publish
-        data:
-          topic: "ebusd/mc/TempDesiredLow/get"
-          payload: "?7"
+      # Tier 3 (priority 7) — read-backs of the two registers HA writes (change rarely).
       - action: mqtt.publish
         data:
           topic: "ebusd/mc/TempDesired/get"
@@ -1395,10 +1387,9 @@ automation:
       - condition: state
         entity_id: sensor.heating_wanted_operating_mode
         state: ["on", "off"]
-      # TDL unknown means no setpoint to derive; the target sensor is unavailable then too.
+      # The target is a template entity: unknown while HA is still starting.
       - condition: template
-        value_template: >
-          {{ has_value('sensor.geotherm_heating_temp_desired_low') and has_value('sensor.heating_target_temp') }}
+        value_template: "{{ has_value('sensor.heating_target_temp') }}"
     actions:
       - variables:
           wanted_mode: "{{ states('sensor.heating_wanted_operating_mode') }}"
@@ -1477,7 +1468,7 @@ automation:
             battery {{ states('sensor.victron_battery_soc') }} %,
             return {{ states('sensor.heating_circuit_return_temp_valid') }} °C,
             setpoint would be {{ states('sensor.heating_target_temp') }} °C
-            (setback {{ states('sensor.geotherm_heating_temp_desired_low') }} °C).
+            (comfort {{ states('input_number.heating_comfort_temp') }} °C).
             Phase 1 — observation only, nothing was written to the heat pump.
     mode: single
 
@@ -1492,7 +1483,6 @@ group:
       - sensor.geotherm_heating_hvac_action
       - sensor.geotherm_heating_circuit_flow_temp
       - sensor.geotherm_heating_circuit_return_temp
-      - sensor.geotherm_heating_temp_desired_low
       - sensor.geotherm_heating_temp_desired
       - sensor.geotherm_heating_hvac_mode
       - sensor.ebusd_heating_ebusd_scan_status
@@ -1570,6 +1560,7 @@ group:
       - input_boolean.heating_comfort_control_enabled
       - input_datetime.heating_mode_last_written
       - input_datetime.heating_temp_desired_last_written
+      - input_number.heating_comfort_temp
       - input_number.heating_boost_offset
       - input_number.heating_pv_surplus_threshold
       - input_number.heating_pv_deficit_threshold

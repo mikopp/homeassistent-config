@@ -34,8 +34,9 @@ geoTHERM.
 **Decided (owner, 2026-11-14):**
 - **Heat = `on`, never `auto`.** `on` and `auto` differ only in the geoTHERM's day/night time
   program; the time program is ignored. Loxone owns the schedule through `warm_enough`. With `on`
-  the setpoint is always `TempDesired` (= `TDL + 1`), so `TempDesiredLow` no longer acts as a night
-  setback, only as the base the setpoint is derived from.
+  the setpoint is always `TempDesired` (= comfort + 1), so `TempDesiredLow` no longer acts as a
+  night setback. It is the machine's frost floor with no HA logic: below 3 °C outdoor `off` still
+  heats to it (`plans/heating-comfort-temp-helper.md`).
 - **Warm enough = `off`** in `active_heating` and `neutral`, unless a slab boost overrides it
   (boost only in `active_heating`).
 - **Not warm enough = `on`.** Loxone publishes `warm_enough` retained and re-sends it every hour
@@ -61,14 +62,14 @@ First matching row wins (owner, 2026-11-14):
 | # | Indicator | Slab mode wanted | Loxone `warm_enough` | `mc/OperatingMode` | `mc/TempDesired` |
 |---|---|---|---|---|---|
 | 1 | `unknown` / `unavailable` | — | — | unchanged | unchanged |
-| 2 | `passive_cooling` / `active_cooling` | — (never) | — | **`off`** | `TDL` |
-| 3 | `active_heating` | **on** | any (overridden) | **`on`** | `TDL + 1 + offset` |
-| 4 | `active_heating` | off / `unknown` | on | **`off`** | `TDL + 1` |
-| 5 | `active_heating` | off / `unknown` | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `TDL + 1` |
-| 6 | `neutral` | — (never) | on | **`off`** | `TDL + 1` |
-| 7 | `neutral` | — (never) | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `TDL + 1` |
+| 2 | `passive_cooling` / `active_cooling` | — (never) | — | **`off`** | `C` |
+| 3 | `active_heating` | **on** | any (overridden) | **`on`** | `C + 1 + offset` |
+| 4 | `active_heating` | off / `unknown` | on | **`off`** | `C + 1` |
+| 5 | `active_heating` | off / `unknown` | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `C + 1` |
+| 6 | `neutral` | — (never) | on | **`off`** | `C + 1` |
+| 7 | `neutral` | — (never) | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `C + 1` |
 
-`TDL` = `mc/TempDesiredLow`, the only human knob. **Slab boosting happens only in
+`C` = `input_number.heating_comfort_temp`, the only comfort knob. **Slab boosting happens only in
 `active_heating`** (owner, 2026-10-30) — implemented in `binary_sensor.heating_slab_mode_wanted`;
 `unknown` (20 min after every restart) counts as off. `binary_sensor.heating_season_active`
 (`active_heating` or `neutral`) gates rows 3–7.
@@ -77,13 +78,13 @@ First matching row wins (owner, 2026-11-14):
   mode is `off` → row 3, `on`.
 - Every mode change respects the 30 min hold. A `TempDesired`-only change (row 3 ↔ row 5, mode stays
   `on`) does not start or stop the compressor and is not held.
-- Rows 4 and 6 still write `TDL + 1` so nothing has to be saved or restored across a mode change.
+- Rows 4 and 6 still write `C + 1` so nothing has to be saved or restored across a mode change.
 - The order matches `sensor.heating_control_state` (cooling → off-season → slab → … → warm enough →
   heating).
 
 ### Why the setpoint is derived, not captured
 
-`TempDesired` is computed from `TempDesiredLow` every time, so there is nothing to save and restore
+`TempDesired` is computed from the comfort helper every time, so there is nothing to save and restore
 across a boost or an HA restart. Always compute the **absolute** target — never apply a relative
 `current + offset`, which is not idempotent and would compound to `+2×offset` on a retry or a
 restart mid-boost.

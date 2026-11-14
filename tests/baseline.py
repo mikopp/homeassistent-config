@@ -47,6 +47,8 @@ BASELINE_NUMBERS: dict[str, float] = {
     "input_number.pergola_slat_thickness": 3,
     "input_number.airflow_bypass_efficiency_max": 0.818,
     "input_number.airflow_bypass_efficiency_min": 0.05,
+    # The owner's comfort value (in-season setpoint 22.0).
+    "input_number.heating_comfort_temp": 21,
     "input_number.heating_boost_offset": 1.5,
     "input_number.heating_pv_surplus_threshold": 1500,
     "input_number.heating_pv_deficit_threshold": 500,
@@ -195,11 +197,10 @@ BASELINE_STATES: dict[str, tuple[str, dict]] = {
     # which subtracts it so the surplus figure is invariant under the heat pump's own draw.
     "sensor.technikraum_heizung_heizung_power": ("0", {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}),
     # ebusd heat-pump telemetry (MQTT — no broker in CI). Values mirror a real idle reading:
-    # generator off, flow ~25 °C, return ~25 °C, setback and setpoint both 21.0.
+    # generator off, flow ~25 °C, return ~25 °C, setpoint 21.0.
     "sensor.geotherm_heating_hvac_action": ("off", {}),
     "sensor.geotherm_heating_circuit_flow_temp": ("25.2", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_circuit_return_temp": ("24.9", {"unit_of_measurement": "°C", "device_class": "temperature"}),
-    "sensor.geotherm_heating_temp_desired_low": ("21.0", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_temp_desired": ("21.0", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_hvac_mode": ("low", {}),
     # ebusd bridge status — "finished" is the steady/safe state (scan not in progress), so the

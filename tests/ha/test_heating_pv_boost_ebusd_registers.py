@@ -43,7 +43,6 @@ _ENTITIES = {
     "heating_hvac_action": "sensor",
     "heating_circuit_flow_temp": "sensor",
     "heating_circuit_return_temp": "sensor",
-    "heating_temp_desired_low": "sensor",
     "heating_temp_desired": "sensor",
     "heating_hvac_mode": "sensor",
     "heating_circuit_flow_temp_desired": "sensor",
@@ -174,14 +173,7 @@ TOPICS = [
         Msg("26.0", {"heating_circuit_return_temp": near(26.0)}, "no status field → ignored"),
         Msg("", {"heating_circuit_return_temp": near(26.0)}, "empty ignored"),
     ]),
-    # ── mc/TempDesiredLow and mc/TempDesired: plain °C, one decimal ───────────────────────────
-    Topic("ebusd/mc/TempDesiredLow", [
-        Msg("21.0", {"heating_temp_desired_low": near(21.0)}, "live payload"),
-        Msg("19.5", {"heating_temp_desired_low": near(19.5)}),
-        Msg("19.54", {"heating_temp_desired_low": near(19.5)}, "rounded to one decimal"),
-        Msg("n/a", {"heating_temp_desired_low": near(19.5)}, "garbage ignored"),
-        Msg("", {"heating_temp_desired_low": near(19.5)}, "empty ignored"),
-    ]),
+    # ── mc/TempDesired: plain °C, one decimal ─────────────────────────────────────────────────
     Topic("ebusd/mc/TempDesired", [
         Msg("22.0", {"heating_temp_desired": near(22.0)}, "live payload"),
         Msg("24.5", {"heating_temp_desired": near(24.5)}),
@@ -335,8 +327,7 @@ _POLLS = {
     "ebusd/mc/CoolingRequestHc2/get": "?5", "ebusd/uih/CoolingDemand/get": "?5",
     "ebusd/uih/CoolingActive/get": "?5", "ebusd/ehp/Integral/get": "?5",
     "ebusd/ehp/CompDemand/get": "?5", "ebusd/mc/Status0a/get": "?5",
-    "ebusd/mc/TempDesiredLow/get": "?7", "ebusd/mc/TempDesired/get": "?7",
-    "ebusd/mc/OperatingMode/get": "?7",
+    "ebusd/mc/TempDesired/get": "?7", "ebusd/mc/OperatingMode/get": "?7",
     "ebusd/ehp/CompIntegral/get": "?9", "ebusd/ehp/CompHysteresis/get": "?9",
     "ebusd/ehp/CompStartsHc/get": "?9", "ebusd/ehp/CompStartsHwc/get": "?9",
     "ebusd/ehp/CompHoursHc/get": "?9", "ebusd/ehp/YieldTotal/get": "?9",
