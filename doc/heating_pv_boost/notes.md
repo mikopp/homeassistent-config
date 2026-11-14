@@ -2,6 +2,7 @@
 paths:
   - "packages/heating_pv_boost.yaml"
   - "tests/ha/test_heating_pv_boost.py"
+  - "tests/ha/test_heating_pv_boost_comfort.py"
   - "tests/e2e/test_restart.py"
   - "dashboards/heating-dashboard.yaml"
   - "plans/heating-*.md"
@@ -9,8 +10,9 @@ paths:
 ---
 # heating_pv_boost.yaml — Vaillant geoTHERM via ebusd
 
-Current facts for `packages/heating_pv_boost.yaml` (PV slab charging; Phase 1 = read-only, nothing
-written yet; rollout in `plans/ebusd-pv-heating-optimization.md`). No design doc yet.
+Current facts for `packages/heating_pv_boost.yaml` (PV slab charging; Phase 1 = read-only decision
+layer, Phase 2 = comfort control, the only writer, off until armed; rollout in
+`plans/ebusd-pv-heating-optimization.md`). No design doc yet.
 **Register decodes** (field lists, enums, unusable registers, tuning and cooling registers):
 `doc/heating_pv_boost/registers.md`, not auto-loaded; read it before adding or parsing
 a register.
@@ -36,7 +38,7 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
 - **Every enum read accepts both forms** (decoded name or raw number), mapping through one table;
   unmapped → `unknown`. Which form arrives is not predictable from the declared type (live:
   `mc/OperatingMode` reads `low`, `mc/CoolingRequestHc2` reads `0`). **Writes take names**
-  (`auto`, `on`); never echo a normalised read back on a write.
+  (`on`, `off`); never echo a normalised read back on a write.
 - **Never register a poll priority while `ebusd/global/scan` reads `running`** (owner-confirmed):
   the catalog may be mid-discovery. `automation.heating_ebusd_poll_registration` gates every
   trigger on `scan != 'running'` (not an allowlist of resting values: whether the steady state is
@@ -140,7 +142,8 @@ on the machine.
   (on change only, no heartbeat). Loxone does not control room valves.
 - **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
-- `mc/OperatingMode` = **`auto`** with the Vaillant's own time program (`on` by day, `low` at night).
+- `mc/OperatingMode` = **`on`**, set by hand (owner, 2026-11-14; was `auto` with the time program
+  from 10-30); `TempDesiredLow` 21.
 - Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150); `ehp/CompHysteresis` 7 K at last
   read (forced stop at setpoint + 7, e.g. 31 °C at a 24 °C setpoint; the 8–9 K cap below is
   relative to this). Check `sensor.geotherm_heating_compressor_hysteresis` before relying on it.
@@ -169,16 +172,46 @@ on the machine.
 | `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day efficiency (see "Energy modes") |
 | `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics; ids from `name:`, verify after deploy |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
+| `sensor.heating_wanted_operating_mode` | Phase 2 wanted mode: `on` / `off` / `none` (unknown season: write nothing); reads no actual register |
+| `sensor.heating_target_temp` | Phase 2 wanted `mc/TempDesired` (TDL, TDL + 1, TDL + 1 + offset; boost only in `active_heating`) |
+| `automation.heating_comfort_control` | the only writer: `ebusd/mc/OperatingMode/set`, `ebusd/mc/TempDesired/set` |
+| `input_boolean.heating_comfort_control_enabled` | master switch of the writer (no `initial:`; off = no write at all) |
+| `input_datetime.heating_mode_last_written` | when HA last wrote the mode: start of the 30 min hold |
+| `input_datetime.heating_temp_desired_last_written` | when HA last published the setpoint: 5 min re-send guard |
 | `sensor.ebusd_heating_ebusd_scan_status`, `binary_sensor.ebusd_heating_ebusd_running` | `ebusd/global/scan`, `/running` |
 
 ## Decisions in force
 
-- **Mode law (Phase 2):** `auto` is normal operation; HA writes `on` only for Loxone "not warm
-  enough" or a slab boost, then back to `auto`, never `low` (by day both give the same setpoint).
-  In cooling season (`passive_cooling`/`active_cooling`) HA sets the heating mode `off` (cooling
-  unaffected), `auto` again in `neutral`/`active_heating`; never `off` on an unknown indicator.
-  Slab boost only in `active_heating` (shoulder season mostly overheats). See the slab plan's
+- **Mode law (Phase 2, implemented in `automation.heating_comfort_control`; inert until the owner
+  adds the two `/set` bridge lines and arms `input_boolean.heating_comfort_control_enabled`):** HA writes only `on` or `off`,
+  never `auto`/`low` (the geoTHERM time program is ignored). In `active_heating` and `neutral`:
+  Loxone warm enough → `off`, otherwise (incl. unknown or silent 24 h) → `on`; a slab boost
+  (`active_heating` only) overrides to `on`. Cooling season → `off` (cooling unaffected); unknown
+  indicator → no write. At most one mode change per 30 min. Full table: the slab plan's
   "Control law".
+- **Writer mechanics.** One decision per output (`heating_wanted_operating_mode`,
+  `heating_target_temp`); the automation writes only when the read-back differs (mode compared by
+  normalised name, setpoint within 0.05 K), so an agreeing or not-yet-read (`unknown`) register
+  gets no message. No write with the master switch off, ebusd offline, wanted `none` or
+  `TempDesiredLow` unknown. Payloads: mode name, setpoint with one decimal (`22.0`); the decimal
+  form is UNVERIFIED against ebusd (prove it with the idempotent write of the current value).
+- **Hold = `input_datetime.heating_mode_last_written`**, stamped by the automation BEFORE it
+  publishes the mode (a missed write beats a repeated one). A helper survives restarts and ignores
+  hand changes at the wall; the mode sensor's `last_changed` would restart the hold on every HA
+  restart. A fresh helper (no `initial:`) reads today 00:00 local (source: `input_datetime`
+  `entity.py`). A change inside the hold is applied
+  by a template trigger (`now()` >= stamp + 30 min, re-evaluated each minute, so up to a minute
+  late) or by the next input change; setpoint changes are never held.
+- **Setpoint re-send guard:** `input_datetime.heating_temp_desired_last_written` (stamped before
+  the publish). Against a stale read-back the same setpoint is not re-published within 5 min; a
+  change of the wanted setpoint itself (`sensor.heating_target_temp`) bypasses the guard.
+- **Loxone silence** (`binary_sensor.heating_loxone_online`, 24 h) reads `last_reported`, and the
+  `warm_enough` MQTT entity has `force_update: true`: without it an identical payload never reaches
+  the state machine (`mqtt/entity.py` `_attrs_have_changed`; tested), so neither timestamp moves.
+  Known bias: Loxone publishes on change only, so silence detection works only if it also re-sends
+  `warm_enough` periodically (heartbeat; owner decision pending). Without one, an unchanged stretch
+  of more than 24 h, and an HA restart (no `expire_after`, no restore: `unknown` until the next
+  publish), force wanted mode `on`.
 - **Compressor tuning (cycling plan):**
   - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts): short runs are a
     mild-weather effect.
@@ -260,7 +293,9 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   could split one run in two).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
   in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
-  MQTT restart). Normal is 2 per day (time program); more than 2 on a restart-free day is the signal.
+  MQTT restart). Under the 10-30 setup (`auto`) normal was 2 per day (time program). With the
+  geoTHERM on `on` (2026-11-14) the time program causes none; once Phase 2 runs, flips follow
+  Loxone's `warm_enough` and are capped at one per 30 min.
 - **Settings:** log `CompHysteresis` and `CompIntegral` at the start of each baseline day and every
   change (date, time, old, new). They have no long-term statistics.
 - **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
@@ -309,6 +344,15 @@ The meters' mode selects make the real `select` domain load, so `tests/ha/confte
 on a standalone SQLite with fabricated rows (window edge, id lists, partial history, empty → 0), the
 30d efficiency table (floor → `unknown`, missing input → `unavailable`) and a clean `sql` load; no HA
 long-term statistics (owner).
+
+`tests/ha/test_heating_pv_boost_comfort.py` (Phase 2): the control-law rows 1-7 as a table (real
+indicator via the seeded 48h mean, slab seeded, read-backs, ehp/Status and Loxone over the broker),
+armed last so one evaluation is asserted; HA's own `test/fence` message proves "no write". Own
+tests: master switch off, TDL unknown, idempotence (raw enum read-back), ebusd offline then back,
+the 30 min hold (deferred mode, immediate setpoint, new hold after the write), a hold that ends
+while disarmed (arming applies it), a never-echoing read-back (no mode re-send inside the hold, no
+setpoint re-send inside 5 min), Loxone silent 24 h (an identical re-sent payload keeps it online),
+and `warm_enough` unknown / unavailable (heats).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) is `unknown` after boot until the delay
 elapses.

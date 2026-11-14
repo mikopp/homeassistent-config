@@ -1,7 +1,8 @@
 # --- EBUSD PV HEATING OPTIMISATION ---
-# Phase 1: read-only decision layer. Everything here observes and decides; NOTHING writes to the
-# heat pump yet, so the thresholds can be calibrated on live data first. Rollout (Phases 2/3):
-# plans/ebusd-pv-heating-optimization.md.
+# Phase 1: read-only decision layer (telemetry, PV surplus, interlocks, slab decision).
+# Phase 2: comfort control, the ONLY writer: automation.heating_comfort_control sends
+# mc/OperatingMode and mc/TempDesired, and only while input_boolean.heating_comfort_control_enabled
+# is on. Rollout: plans/ebusd-pv-heating-optimization.md.
 # → doc/heating_pv_boost/notes.md (facts, invariants); register decodes in
 #   doc/heating_pv_boost/registers.md.
 #
@@ -95,8 +96,8 @@ mqtt:
       value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
 
     # ── Current machine state, for observation and later write verification ───
-    # These are read-only views. Phase 2 adds separate number/select entities for writing, so
-    # there is no entity churn when control is enabled.
+    # Read-only views; the Phase 2 automation compares its wanted values against them and writes
+    # through mqtt.publish on the /set topics (no separate number/select entities).
     - name: "Heating Temp Desired"
       unique_id: heating_temp_desired
       default_entity_id: sensor.geotherm_heating_temp_desired
@@ -110,9 +111,9 @@ mqtt:
 
     # mc/OperatingMode is the configured heating SETTING — HVAC MODE (hvac_mode) in HA
     # climate-entity terms, as opposed to sensor.geotherm_heating_hvac_action above, which is the
-    # generator's real-time activity (HVAC action). Phase 2 control law writes "auto" normally,
-    # "on" for "not warm enough" or a boost, "off" only in cooling season, never "low"
-    # (→ doc/heating_pv_boost/notes.md "Decisions in force"). Read-only in Phase 1.
+    # generator's real-time activity (HVAC action). Phase 2 writes only "on" or "off", never
+    # "auto"/"low"; this sensor is the read-back it compares against
+    # (→ doc/heating_pv_boost/notes.md "Decisions in force").
     #
     # Governs HEATING only — upstream comment is "Betriebsmodus Heizen". Cooling is a separate
     # axis (mc/CoolingOperatingModeHc2), so writing this will never disturb cooling.
@@ -370,10 +371,13 @@ mqtt:
     # on change and sends no heartbeat, so an unchanging value must not decay to unavailable —
     # the same reason documented for the Loxone appliance meters in packages/energy.yaml.
     # Staleness is instead detected on value age (binary_sensor.heating_loxone_online).
+    # force_update: an identical payload (a heartbeat) otherwise never reaches the state machine
+    # (mqtt/entity.py _attrs_have_changed), so last_reported would not move.
     - name: "Heating Loxone Warm Enough"
       unique_id: heating_loxone_warm_enough
       default_entity_id: binary_sensor.loxone_heating_heating_loxone_warm_enough
       state_topic: "loxone/heating/warm_enough"
+      force_update: true
       icon: mdi:home-thermometer
       device:
         identifiers:
@@ -407,6 +411,29 @@ input_boolean:
   heating_pv_boost_enabled:
     name: "Heating PV Boost Enabled"
     icon: mdi:solar-power-variant
+
+  # Master switch of Phase 2: while off, automation.heating_comfort_control writes nothing.
+  # Arm it once, after the /set bridge lines exist (→ doc/heating_pv_boost/notes.md "Invariants").
+  heating_comfort_control_enabled:
+    name: "Heating Comfort Control Enabled"
+    icon: mdi:thermostat-auto
+
+input_datetime:
+  # When HA last wrote mc/OperatingMode: the start of the 30 min hold. A helper survives restarts
+  # (the mode sensor's last_changed would not); no initial:, a fresh helper reads today 00:00.
+  # → doc/heating_pv_boost/notes.md "Decisions in force"
+  heating_mode_last_written:
+    name: "Heating Mode Last Written"
+    has_date: true
+    has_time: true
+    icon: mdi:clock-check-outline
+
+  # When HA last published mc/TempDesired: stops a stale read-back from re-publishing it (5 min).
+  heating_temp_desired_last_written:
+    name: "Heating Temp Desired Last Written"
+    has_date: true
+    has_time: true
+    icon: mdi:clock-check-outline
 
 input_number:
   # How far above the normal heating-season setpoint a slab charge is allowed to push.
@@ -783,7 +810,10 @@ template:
       # Always the ABSOLUTE target — never a relative "current + offset", which is not idempotent:
       # a retry, a duplicated trigger or a restart mid-boost would compound it to +2x offset.
       #
-      # Phase 1 only publishes this for comparison against sensor.geotherm_heating_temp_desired.
+      # Matches control-law rows 2-7: collapses onto TempDesiredLow outside the heating season
+      # (cooling), +1 in the season, +offset while a slab boost is wanted (active_heating only).
+      # automation.heating_comfort_control writes it to mc/TempDesired; row 1 (unknown indicator)
+      # is blocked there by the wanted-mode sensor.
       - name: "Heating Target Temp"
         unique_id: heating_target_temp
         unit_of_measurement: "°C"
@@ -795,11 +825,30 @@ template:
           {% set tdl = states('sensor.geotherm_heating_temp_desired_low') | float %}
           {% if not is_state('binary_sensor.heating_season_active', 'on') %}
             {{ tdl | round(1) }}
-          {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
+          {# Boost only in active_heating (row 3), whatever the slab sensor says. #}
+          {% elif is_state('sensor.heating_cooling_indicator', 'active_heating')
+                  and is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}
             {{ (tdl + 1 + (states('input_number.heating_boost_offset') | float)) | round(1) }}
           {% else %}
             {{ (tdl + 1) | round(1) }}
           {% endif %}
+
+      # ── The mode HA wants (Phase 2 decision) ──────────────────────────────
+      # Control-law rows 2-7 as on / off / none; reads no actual register, so a write cannot
+      # feed back into it. → plans/ebusd-pv-heating-optimization.md "Control law"
+      - name: "Heating Wanted Operating Mode"
+        unique_id: heating_wanted_operating_mode
+        default_entity_id: sensor.heating_wanted_operating_mode
+        icon: mdi:radiator
+        availability: "{{ has_value('sensor.heating_cooling_indicator') }}"
+        state: >
+          {% set indicator = states('sensor.heating_cooling_indicator') %}
+          {% set warm = is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on')
+             and is_state('binary_sensor.heating_loxone_online', 'on') %}
+          {% if indicator in ['passive_cooling', 'active_cooling'] %}off
+          {% elif indicator == 'active_heating' and is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}on
+          {% elif indicator in ['active_heating', 'neutral'] %}{{ 'off' if warm else 'on' }}
+          {% else %}none{% endif %}
 
       # ── Reason-based status, for the dashboard and for notifications ──────
       # A derived view only; the decision sensors below remain the source of truth. Notifications
@@ -1036,19 +1085,21 @@ template:
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 900 }}
 
-      # Loxone publishes only on change with no heartbeat, so a long silence is normal and the
-      # window is correspondingly generous. Losing this signal is not fatal: HA holds heat during
-      # the heating season and the Vaillant governs comfort on its own weather curve.
+      # Loxone silent for 24 h: last_reported moves on an identical payload, last_updated does not.
+      # Silence detection works only if Loxone re-sends warm_enough periodically (heartbeat,
+      # owner decision pending); without one a >24 h unchanged stretch reads as silent (→ heat).
+      # → doc/heating_pv_boost/notes.md "Decisions in force"
       - name: "Heating Loxone Online"
         unique_id: heating_loxone_online
         device_class: connectivity
         state: >
           {% set s = states.binary_sensor.loxone_heating_heating_loxone_warm_enough %}
-          {{ s is not none and s.last_updated is not none
-             and (now() - s.last_updated).total_seconds() < 86400 }}
+          {{ s is not none and s.last_reported is not none
+             and (now() - s.last_reported).total_seconds() < 86400 }}
 
       # ── THE DECISION ──────────────────────────────────────────────────────
-      # Computed but not acted on yet; register writes come later
+      # Read by sensor.heating_wanted_operating_mode and sensor.heating_target_temp (control-law
+      # row 3), which automation.heating_comfort_control writes while armed
       # (plans/ebusd-pv-heating-optimization.md).
       #
       # Two thresholds, not one: a single number would chatter around the boundary. The Schmitt
@@ -1314,6 +1365,97 @@ automation:
               option: "{{ yield_mode }}"
     mode: queued
 
+  # ── Comfort control: the only writer of mc/OperatingMode and mc/TempDesired ─
+  # Writes the wanted mode and setpoint when they differ from the read-back (names and an
+  # absolute setpoint, never an echo or an offset). Mode: one change per 30 min, deferred not
+  # dropped; setpoint: not held, but not re-sent within 5 min while the read-back is stale.
+  # Each stamp is written BEFORE its publish: a missed write beats a repeated one.
+  # → doc/heating_pv_boost/notes.md "Decisions in force"
+  - alias: "Heating: comfort control"
+    id: heating_comfort_control
+    description: "Write mc/OperatingMode (on/off, 30 min hold) and mc/TempDesired from the wanted values"
+    triggers:
+      # A new wanted setpoint is a real change: it bypasses the 5 min re-send guard.
+      - trigger: state
+        entity_id: sensor.heating_target_temp
+        id: target
+      # Any other input of the comparison changed.
+      - trigger: state
+        entity_id:
+          - sensor.heating_wanted_operating_mode
+          - sensor.geotherm_heating_hvac_mode
+          - sensor.geotherm_heating_temp_desired
+          - input_boolean.heating_comfort_control_enabled
+          - binary_sensor.heating_ebusd_online
+        id: other
+      # The 30 min hold ends (false → true; re-evaluated each minute because of now()).
+      - trigger: template
+        value_template: >
+          {{ now().timestamp() - (state_attr('input_datetime.heating_mode_last_written', 'timestamp') | float) >= 1800 }}
+        id: other
+    conditions:
+      - condition: state
+        entity_id: input_boolean.heating_comfort_control_enabled
+        state: "on"
+      - condition: state
+        entity_id: binary_sensor.heating_ebusd_online
+        state: "on"
+      - condition: state
+        entity_id: sensor.heating_wanted_operating_mode
+        state: ["on", "off"]
+      # TDL unknown means no setpoint to derive; the target sensor is unavailable then too.
+      - condition: template
+        value_template: >
+          {{ has_value('sensor.geotherm_heating_temp_desired_low') and has_value('sensor.heating_target_temp') }}
+    actions:
+      - variables:
+          wanted_mode: "{{ states('sensor.heating_wanted_operating_mode') }}"
+          actual_mode: "{{ states('sensor.geotherm_heating_hvac_mode') }}"
+          wanted_temp: "{{ states('sensor.heating_target_temp') | float }}"
+          hold_over: >
+            {{ now().timestamp() - (state_attr('input_datetime.heating_mode_last_written', 'timestamp') | float) >= 1800 }}
+          resend_ok: >
+            {{ trigger.id == 'target'
+               or now().timestamp() - (state_attr('input_datetime.heating_temp_desired_last_written', 'timestamp') | float) >= 300 }}
+          # Both reads are normalised (names / one-decimal numbers); unknown cannot be compared.
+          mode_differs: >
+            {{ actual_mode in ['disabled', 'on', 'off', 'auto', 'eco', 'low'] and actual_mode != wanted_mode }}
+          temp_differs: >
+            {{ has_value('sensor.geotherm_heating_temp_desired')
+               and (states('sensor.geotherm_heating_temp_desired') | float - wanted_temp) | abs >= 0.05 }}
+      # Mode first (the compressor-relevant write); the stamp starts the next hold.
+      - if:
+          - condition: template
+            value_template: "{{ mode_differs and hold_over }}"
+        then:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.heating_mode_last_written
+            data:
+              timestamp: "{{ now().timestamp() }}"
+          - action: mqtt.publish
+            data:
+              topic: ebusd/mc/OperatingMode/set
+              payload: "{{ wanted_mode }}"
+              retain: false
+      - if:
+          - condition: template
+            value_template: "{{ temp_differs and resend_ok }}"
+        then:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.heating_temp_desired_last_written
+            data:
+              timestamp: "{{ now().timestamp() }}"
+          - action: mqtt.publish
+            data:
+              topic: ebusd/mc/TempDesired/set
+              payload: "{{ wanted_temp | round(1) }}"
+              retain: false
+    # queued: a trigger during a run is evaluated afterwards on the then-current states.
+    mode: queued
+    max: 10
+
   # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
   # thresholds can be judged against real days before any register is written. Retire or quieten
   # this once Phase 3 makes the decision visible through actual behaviour.
@@ -1424,6 +1566,7 @@ group:
       - sensor.heating_circuit_return_temp_valid
       - sensor.heating_target_temp
       - sensor.heating_control_state
+      - sensor.heating_wanted_operating_mode
       # Decision and gates
       - binary_sensor.heating_season_active
       - binary_sensor.heating_cooling_active
@@ -1432,6 +1575,9 @@ group:
       - binary_sensor.heating_slab_mode_wanted
       # Helpers
       - input_boolean.heating_pv_boost_enabled
+      - input_boolean.heating_comfort_control_enabled
+      - input_datetime.heating_mode_last_written
+      - input_datetime.heating_temp_desired_last_written
       - input_number.heating_boost_offset
       - input_number.heating_pv_surplus_threshold
       - input_number.heating_pv_deficit_threshold
