@@ -91,7 +91,7 @@ short runs.
 | Signal | Source | What a good value looks like |
 |---|---|---|
 | Starts per day (heating) | `ehp/CompStartsHc` counter, plus HA count | < 8–10 |
-| Average / last run length | HA, from `binary_sensor.heating_compressor_active` | ≥ 20–30 min |
+| Average / last run length | HA, from `ehp/Comp` and the machine start counters | ≥ 20–30 min |
 | Duty cycle (24 h) | HA history_stats ratio | Rises as starts fall |
 | Energy integral | `ehp/Integral` (°min) | Shows the start point and how runs end |
 | Compressor demand | `ehp/CompDemand` | Who asked for the start |
@@ -282,7 +282,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
   one start. Aligning the DHW time window with a likely heating run could cut 1 start a day.
 
 **Measurement gaps:**
-- `binary_sensor.heating_compressor_active` counts heating and DHW runs together. At the baseline
+- The Shelly sensor `binary_sensor.heating_compressor_active` (removed 2026-11-14) counted heating and DHW runs together. At the baseline
   `runs_today` was 12 vs 10–11 heating starts, and "average run today" and "last run" mixed in DHW
   runs. Step 8 split them; since 2026-11-14 `runs_today` is gone, runtime today, duty cycle and last
   run follow `ehp/Comp` and the average run is that runtime over the machine's heating + hot-water starts

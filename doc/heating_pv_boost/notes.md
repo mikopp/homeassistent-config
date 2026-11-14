@@ -157,7 +157,6 @@ on the machine.
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_temp_desired_low` | `mc/TempDesiredLow` |
-| `binary_sensor.heating_compressor_active` | Shelly > 500 W, the electrical view (any run). No decision reads it yet (`sensor.heating_pv_surplus` reads the clamp power itself); Phase 2 is meant to use it. Not a duplicate of `ehp/Comp`: other source |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
 | `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` is "compressor running for heating" (the binary_sensor `heating_compressor_heating_active` was removed as a pure function of it) |
@@ -249,8 +248,9 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   change (date, time, old, new). They have no long-term statistics.
 - **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
   the cycling plan's Observations.
-- **Compressor vs circulation:** `binary_sensor.heating_compressor_active` is the Shelly clamp
-  (> 500 W), the electrical view; the compressor itself is `ehp/Comp`. `ehp/Hc1Pump` is not read; circulation alone staying below 500 W is an inference.
+- **Compressor vs circulation:** the compressor is `ehp/Comp` (the Shelly clamp power only feeds
+  `sensor.heating_pv_surplus`; the threshold sensor on it was removed 2026-11-14, nothing read it).
+  Circulation alone stays below the clamp's ~500 W: an inference, not a measurement.
 
 ## Known biases / open issues
 

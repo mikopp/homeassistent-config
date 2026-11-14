@@ -352,7 +352,6 @@ _COMPRESSOR_TABLE = Table(
         "elec_wh": _HEAT_ENERGY,
     },
     outputs={
-        "compressor": ("binary_sensor", "template", "heating_compressor_active"),
         "mode": ("sensor", "template", "heating_energy_mode"),
         "average": ("sensor", "template", "heating_compressor_average_run_today"),
         "runtime": ("sensor", "history_stats", "heating_compressor_runtime_today"),
@@ -368,13 +367,12 @@ _COMPRESSOR_TABLE = Table(
     },
     defaults={"heat": 83, "hvac": "heat", "comp": "off", "pump": "on", "flow_desired": 26,
               "hysteresis": "7.0", "yield_inc": 0, "elec_inc": 0},
-    # Reset: clamp 1000 W (running; the clamp case starts from "off"), compressor on, mode raw 7
-    # (an unmapped enum → `unknown`, so the energy mode is unavailable), stop 20 + 5 = 25, average 0.5 h / 1 start = 30 min,
-    # meters reset to 0.
+    # Reset: clamp 1000 W, compressor on, mode raw 7 (an unmapped enum → the energy mode is
+    # unavailable), stop 20 + 5 = 25, average 0.5 h / 1 start = 30 min, meters reset to 0.
     reset={"heat": 1000, "hvac": "7", "comp": "on", "pump": "on", "flow_desired": 20,
            "hysteresis": "5.0", "yield_inc": 0, "elec_inc": 0},
     reset_seeds={"runtime": ("0.5", _H), "starts_hc": ("1", {}), "starts_hwc": ("0", {})},
-    reset_expect={"compressor": _ON, "mode": _UNAV, "stop_temp": near(25),
+    reset_expect={"mode": _UNAV, "stop_temp": near(25),
                   "average": near(30), "yield_daily": near(0), "elec_daily": near(0)},
     published=_counters,
     after_reset=_reset_meters,
@@ -382,20 +380,15 @@ _COMPRESSOR_TABLE = Table(
 
 _MODE_ACTIVE = is_state("active_heating")
 COMPRESSOR_CASES = [
-    # ~83 W idle circulation → off; ~1.8 kW run → on; the clamp expires → unavailable.
-    Case(name="compressor_active_follows_the_shelly_clamp", inputs={"heat": 83},
-         expect={"compressor": _OFF},
-         then=[Step(inputs={"heat": 1800}, expect={"compressor": _ON}),
-               Step(expire=frozenset({"heat"}), expect={"compressor": _UNAV})]),
     # The energy mode follows ehp/Comp, not the clamp: these cases are the compressor-vs-clamp
     # independence the removed heating-only indicator used to show.
     Case(name="mode_is_active_heating_for_a_heating_run",
          inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"mode": _MODE_ACTIVE}),
-    # Heating -> hot-water roll-over (hcmode raw 4 = water): clamp on, mode water_heating.
+    # Heating -> hot-water roll-over (hcmode raw 4 = water): mode water_heating.
     Case(name="mode_is_water_heating_for_a_hot_water_run",
          inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"mode": _MODE_ACTIVE},
          then=[Step(inputs={"hvac": "4", "heat": 3500},
-                    expect={"compressor": _ON, "mode": is_state("water_heating")})]),
+                    expect={"mode": is_state("water_heating")})]),
     # Pump only in heating mode (hcmode raw 3 = heat) is not a run.
     Case(name="mode_is_passive_when_the_compressor_is_off",
          inputs={"hvac": "3", "comp": "off", "heat": 83},
@@ -403,8 +396,7 @@ COMPRESSOR_CASES = [
     # A clamp dropout mid-run does not end the run: ehp/Comp still says on.
     Case(name="mode_ignores_a_clamp_dropout",
          inputs={"hvac": "heat", "comp": "on", "heat": 1800}, expect={"mode": _MODE_ACTIVE},
-         then=[Step(expire=frozenset({"heat"}),
-                    expect={"compressor": _UNAV, "mode": _MODE_ACTIVE})]),
+         then=[Step(expire=frozenset({"heat"}), expect={"mode": _MODE_ACTIVE})]),
     # 1.0 h on-time over 3 heating + 1 hot-water start = 4 starts → 15 min; no starts → 0, not a
     # division error.
     Case(name="average_run_is_runtime_over_all_compressor_starts",
@@ -832,8 +824,7 @@ async def test_last_run(ha: HomeAssistant, broker: Broker, clock: Clock) -> None
     rolls heating → hot water → heating is one run. The frozen clock makes each span exact
     (Docker: 6.5…8.0 min for a 7 min run).
     """
-    ids = {"active": entity_id(ha, "binary_sensor", "template", "heating_compressor_active"),
-           "last_run": entity_id(ha, "sensor", "template", "heating_compressor_last_run")}
+    ids = {"last_run": entity_id(ha, "sensor", "template", "heating_compressor_last_run")}
     await wait_subscribed(ha, broker, _HVAC.topic, _HEAT.topic, _COMP.topic, _PUMP.topic)
     await _send(ha, broker, (_PUMP, "on"))
     failures: list[str] = []
@@ -844,41 +835,40 @@ async def test_last_run(ha: HomeAssistant, broker: Broker, clock: Clock) -> None
 
     # Idle circulation (83 W, heating mode): not running; no run has ended yet.
     await _send(ha, broker, (_HVAC, "heat"), *_clamp(83))
-    check("idle", active=_OFF, last_run=is_state("unknown"))
+    check("idle", last_run=is_state("unknown"))
 
     # 1. A 7 min heating run (1.8 kW) is reported as 7.0 min when it ends.
     await _send(ha, broker, *_clamp(1800))
-    check("heating run starts", active=_ON)
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=7)
     await _send(ha, broker, *_clamp(83))
-    check("7 min heating run ends", active=_OFF, last_run=near(7.0))
+    check("7 min heating run ends", last_run=near(7.0))
 
     # 2. A 30 min hot-water run (3.5 kW, hcmode water) is a compressor run like any other.
     await _send(ha, broker, (_HVAC, "water"), *_clamp(3500))
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=30)
     await _send(ha, broker, *_clamp(83))
-    check("30 min hot-water run ends", active=_OFF, last_run=near(30.0))
+    check("30 min hot-water run ends", last_run=near(30.0))
 
     # 3. Heating 5 min → hot water 10 min → heating 4 min with the compressor never stopping is
     #    ONE run of 19 min; the mode flips do not end it.
     await _send(ha, broker, (_HVAC, "heat"), *_clamp(1800))
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=5)
-    check("heating before the flip", active=_ON, last_run=near(30.0))
+    check("heating before the flip", last_run=near(30.0))
     await _compressor_run(ha, broker, clock, mode="water", watts=3500, minutes=10)
-    check("hot water after the flip", active=_ON, last_run=near(30.0))
+    check("hot water after the flip", last_run=near(30.0))
     await _compressor_run(ha, broker, clock, mode="heat", watts=1800, minutes=4)
     await _send(ha, broker, *_clamp(83))
-    check("rolled-over run ends", active=_OFF, last_run=near(19.0))
+    check("rolled-over run ends", last_run=near(19.0))
 
     # 4. The clamp alone (a 3 min power spike with ehp/Comp off) is not a compressor run: last
-    #    run keeps the 19.0 (pins the source: a trigger on the clamp would report ~3 here).
+    #    run keeps the 19.0 (pins the source: a trigger on the clamp power would report ~3 here).
     async def spike() -> None:
         """Republish the clamp (expire_after 120 s) like the Shelly; ehp/Comp stays off."""
         await _send(ha, broker, (_HEAT, 1800))
 
     await clock.hold(180, spike)
     await _send(ha, broker, (_HEAT, 83))
-    check("clamp spike without ehp/Comp", active=_OFF, last_run=near(19.0))
+    check("clamp spike without ehp/Comp", last_run=near(19.0))
     assert not failures, f"{len(failures)} last-run check(s) failed:\n" + "\n".join(failures)
 
 

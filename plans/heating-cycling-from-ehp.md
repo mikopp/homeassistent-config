@@ -93,8 +93,8 @@ roughly balance. Check against the totals for a few days before relying on the s
   the two machine counters add up to the Comp starts (owner).
 - `sensor.heating_compressor_runs_today` is dropped: it counted the segments above (5 against 4
   starts on 2026-11-14) and nothing needs a segment count.
-- `binary_sensor.heating_compressor_active` (Shelly) stays as the electrical view (no decision reads it yet, see step 10).
-  Not changed here.
+- `binary_sensor.heating_compressor_active` (Shelly > 500 W) was kept here as the electrical view and
+  removed in step 12 (no consumer). `sensor.heating_pv_surplus` reads the clamp power itself.
 
 UNKNOWN: how quickly `ehp/Comp` reports a change at a given poll priority. If the lag is long,
 runtimes shift by that lag. Measure it against the Shelly after deploy.
@@ -152,8 +152,8 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     Tests: heating-only cases now assert `sensor.heating_energy_mode` (`COMPRESSOR_CASES`).
     Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_heating_active` in the
     UI (Settings > Entities). tests/ha not run on the dev Mac: CI must confirm.
-    Proposal (NOT applied, owner decides): `binary_sensor.heating_compressor_active` has no
-    consumer; either keep for Phase 2 or remove it and the clamp comparison.
+    Proposal (owner decided: remove, step 12): `binary_sensor.heating_compressor_active` had no
+    consumer.
     HYPOTHESIS: the Shelly clamp leads `ehp/Comp` by about a minute (one observation, 2026-11-14:
     07:45:03 vs 07:46:09); measure over several runs (open question above).
 
@@ -183,8 +183,17 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     line and poll stay too (owner decides whether to drop it).
     Post-deploy: delete the orphan `binary_sensor.heating_dhw_active` in the UI.
 
+12. [DONE] Remove `binary_sensor.heating_compressor_active` ("Compressor drawing > 500 W", Shelly
+    clamp; owner decision 2026-11-14): no decision read it, `ehp/Comp` is the compressor. Removed
+    from the package, the recorder list, the three dashboard places and the compressor table; the
+    clamp-vs-`ehp/Comp` step in `test_last_run` stays (it checks the last run ignores clamp spikes).
+    The clamp power sensor `sensor.technikraum_heizung_heizung_power` and the PV surplus are
+    unchanged. If Phase 2 needs an electrical threshold it re-adds one. The HYPOTHESIS below (clamp
+    leads `ehp/Comp` by about a minute) can still be measured on the power sensor directly.
+    Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_active` in the UI.
+
 ### Close
-12. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
+13. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
    plan (`doc/KNOWLEDGE.md#K-6`).
 
 ## Knowledge homes this plan will update
@@ -207,6 +216,7 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 - Step 10 done (dashboard duplicate removed, labels). Orphan to delete after deploy.
 - Step 11 done 2026-11-14 (hot-water mask on the energy mode, `heating_dhw_active` dropped);
   second orphan to delete after deploy.
+- Step 12 done 2026-11-14 (Shelly clamp threshold sensor removed); third orphan to delete.
 - Next: deploy, add the bridge lines, then the 3-day comparison (step 8). Still to settle with
   live data: `hvac_action` reading `cooling` (first cooling period), where the hot-water run-on
   goes, `YieldTotal` misbooking at mode switches, and the `ehp/Comp` reporting lag vs the Shelly.

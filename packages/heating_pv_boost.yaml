@@ -354,8 +354,8 @@ mqtt:
 
     # ── Compressor demand (observation only) ──────────────────────────────────
     # ehp/CompDemand — "regulation wants to start the heat source" (enum 0=no 1=yes). Rises when
-    # the integral reaches the start point; compared with binary_sensor.heating_compressor_active
-    # it shows whether a run was requested by the regulation or forced by the hysteresis.
+    # the integral reaches the start point; compared with the ehp/Comp run
+    # (binary_sensor.geotherm_heating_compressor_running) it shows whether a run was requested by the regulation or forced by the hysteresis.
     - name: "Heating Compressor Demand"
       unique_id: heating_compressor_demand
       default_entity_id: binary_sensor.geotherm_heating_compressor_demand
@@ -846,21 +846,6 @@ template:
              or is_state('binary_sensor.geotherm_heating_cooling_request', 'on')
              or is_state('sensor.geotherm_heating_hvac_action', 'cooling') }}
 
-      # ── Compressor activity (Shelly clamp) ────────────────────────────────
-      # Electrical view of a run: NOT a duplicate of ehp/Comp (different source; one observation:
-      # 2026-11-14 it fell 66 s before ehp/Comp; it can drop out). No decision reads it yet (the surplus sensor reads the clamp power
-      # directly); Phase 2 is meant to consume it, and it is the reference for the ehp/Comp
-      # reporting lag. Measured idle circulation ~83 W
-      # (standby ~9 W), a heating run ~1.8 kW, hot water ~3.5 kW; 500 W sits well clear of both
-      # ends. Covers ANY compressor run. The run statistics read ehp/Comp
-      # (binary_sensor.geotherm_heating_compressor_running) instead.
-      - name: "Heating Compressor Active"
-        unique_id: heating_compressor_active
-        device_class: running
-        icon: mdi:heat-pump
-        availability: "{{ has_value('sensor.technikraum_heizung_heizung_power') }}"
-        state: "{{ (states('sensor.technikraum_heizung_heizung_power') | float) > 500 }}"
-
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
       # and avoids putting expire_after on registers whose publish cadence is not yet known.
@@ -1247,7 +1232,6 @@ group:
       # Decision and gates
       - binary_sensor.heating_season_active
       - binary_sensor.heating_cooling_active
-      - binary_sensor.heating_compressor_active
       - binary_sensor.heating_ebusd_online
       - binary_sensor.heating_loxone_online
       - binary_sensor.heating_slab_mode_wanted
