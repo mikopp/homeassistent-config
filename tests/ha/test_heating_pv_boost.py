@@ -758,8 +758,8 @@ async def test_return_temp_mask_follows_energy_mode(
     """The valid return temperature is unavailable exactly while the energy mode is water_heating.
 
     Hot-water charging (compressor on or the pump run-on, hcmode `water`) is masked at once and
-    released at once when the mode flips (measured 2026-11-13/14: no tail); heating, passive
-    heating and a run without the DHW mode show the raw return. An unavailable energy mode (raw
+    released 5 min after the mode flips (`heating_return_temp_masked`, delay_off); heating,
+    passive heating and a run without the DHW mode show the raw return. An unavailable energy mode (raw
     hcmode 7, unmapped) also masks: we cannot tell whether hot water runs. Replaces the
     `heating_dhw_active` mask (25 min delay_off, `hwc/Status` input), which was dropped.
     """
@@ -773,8 +773,15 @@ async def test_return_temp_mask_follows_energy_mode(
         failures.extend(check_states(ha, {"mode": mode, "valid": valid},
                                      {"mode": is_state(want_mode), "valid": want_valid}, where))
 
-    # Pump circulating, compressor off, hcmode heat: passive heating, the return is shown.
+    async def refresh() -> None:
+        """Republish the return temperature (MQTT `expire_after`)."""
+        await _send(ha, broker, (_RETURN, 26.1))
+
+    # Pump circulating, compressor off, hcmode heat: passive heating, the return is shown. The
+    # mask starts on (no energy mode at boot) and releases 5 min after the mode appears.
     await _send(ha, broker, (_RETURN, 24.9), (_HVAC, "heat"), (_COMP, "off"), (_PUMP, "on"))
+    await clock.hold(5 * 60 + 1, refresh)
+    await _send(ha, broker, (_RETURN, 24.9))
     check("passive heating", "passive_heating", near(24.9))
     # A heating run: shown.
     await _send(ha, broker, (_COMP, "on"))
@@ -787,9 +794,13 @@ async def test_return_temp_mask_follows_energy_mode(
     # Hot-water run-on (compressor off, pump on, hcmode still water): still masked.
     await _send(ha, broker, (_COMP, "off"))
     check("hot-water run-on", "water_heating", _UNAV)
-    # The mode flips back to heating: released at once, no tail, shows the current return.
+    # The mode flips back to heating: still masked for the 5 min delay_off, then the current return.
     await _send(ha, broker, (_HVAC, "heat"), (_RETURN, 26.1))
-    check("released at the flip", "passive_heating", near(26.1))
+    check("held right after the flip", "passive_heating", _UNAV)
+    await clock.hold(4 * 60, refresh)
+    check("held 4 min after the flip", "passive_heating", _UNAV)
+    await clock.hold(61, refresh)
+    check("released 5 min after the flip", "passive_heating", near(26.1))
     # An unmapped hcmode leaves the energy mode unavailable (an input has no value): masked.
     await _send(ha, broker, (_HVAC, "7"))
     check("unavailable energy mode", "unavailable", _UNAV)

@@ -755,14 +755,14 @@ template:
       # ── Return temperature, masked during hot-water charging ──────────────
       # While the heat pump is making hot water, its water temperatures reflect the DHW circuit
       # rather than the heating circuit, so the return reading says nothing about the slab.
-      # The mask is the energy mode water_heating (compressor or pump run-on with hvac_action
-      # water): in 7 of 7 runs checked (2026-11-04..14) the raw return climbs 25 → 50-55 °C only
-      # while hot water runs and is back to normal within the 5 min bucket where it ends, so no
-      # tail is held.
-      # No energy mode (unavailable/unknown) also masks: we cannot tell whether DHW runs.
-      # This sensor goes UNAVAILABLE instead of publishing a misleading number, which means every
-      # numeric threshold downstream simply never fires — no sentinel value to remember, and it
-      # matches the repo rule on propagating unavailable.
+      # The mask is binary_sensor.heating_return_temp_masked: the energy mode water_heating
+      # (compressor or pump run-on with hvac_action water), held 5 min after it ends (owner: the
+      # return needs time to settle; in 7 of 7 runs checked 2026-11-04..14 the raw return climbs
+      # 25 → 50-55 °C only while hot water runs and was back to normal within the 5 min bucket
+      # where it ends, so 5 min is a safe margin).
+      # While masked this sensor goes UNAVAILABLE instead of publishing a misleading number, which
+      # means every numeric threshold downstream simply never fires — no sentinel value to
+      # remember, and it matches the repo rule on propagating unavailable.
       # → plans/heating-cycling-from-ehp.md step 11
       - name: "Heating Circuit Return Temp Valid"
         unique_id: heating_circuit_return_temp_valid
@@ -772,8 +772,7 @@ template:
         icon: mdi:thermometer-water
         availability: >
           {{ has_value('sensor.geotherm_heating_circuit_return_temp')
-             and has_value('sensor.heating_energy_mode')
-             and not is_state('sensor.heating_energy_mode', 'water_heating') }}
+             and is_state('binary_sensor.heating_return_temp_masked', 'off') }}
         state: "{{ states('sensor.geotherm_heating_circuit_return_temp') | float | round(2) }}"
 
       # ── The setpoint HA will command (Phase 2) ────────────────────────────
@@ -989,6 +988,17 @@ template:
           {{ (heat / elec) | round(2) if elec >= 10 else none }}
 
   - binary_sensor:
+      # ── Hot-water mask for the return temperature ─────────────────────────
+      # On while the energy mode is water_heating, and for 5 min after it ends (delay_off). No
+      # energy mode (unavailable/unknown) also counts as on: we cannot tell whether DHW runs.
+      # delay_off is FIXED (settling time of the return sensor after the DHW circuit closes).
+      # Consumed by sensor.heating_circuit_return_temp_valid.
+      - name: "Heating Return Temp Masked"
+        unique_id: heating_return_temp_masked
+        icon: mdi:water-boiler
+        delay_off: "00:05:00"
+        state: "{{ states('sensor.heating_energy_mode') in ['water_heating', 'unavailable', 'unknown'] }}"
+
       # ── Season gate ───────────────────────────────────────────────────────
       # Reuses the repo's existing 48-hour outdoor-mean classifier rather than inventing a
       # date-based season. Both active_heating AND neutral permit COMFORT heating (target temp,

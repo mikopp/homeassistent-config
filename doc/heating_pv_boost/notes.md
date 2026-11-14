@@ -160,7 +160,7 @@ on the machine.
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
 | `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` is "compressor running for heating" (the binary_sensor `heating_compressor_heating_active` was removed as a pure function of it) |
-| `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, unavailable while the energy mode is `water_heating` or itself unavailable (the raw return reads the DHW circuit then); no tail is held |
+| `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, unavailable while `binary_sensor.heating_return_temp_masked` is on: energy mode `water_heating` or itself unavailable (the raw return reads the DHW circuit then), held 5 min after (`delay_off`, owner) |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
 | `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
