@@ -136,9 +136,9 @@ Write the exact counting rules into `doc/heating_pv_boost/notes.md` (new short s
 - **First full baseline day is 2026-10-31.** 2026-10-30 is partial (meters began ~16:06) and is
   excluded. A baseline = 3 consecutive full days with comparable weather (record the daily mean
   outdoor temperature next to each day).
-- **Starts per day:** use `sensor.heating_compressor_starts_daily` (machine counter, heating only).
-  `sensor.heating_compressor_runs_today` counts every Shelly run including hot water; use it only as a
-  cross-check, expect it to be higher.
+- **Starts per day:** use `sensor.heating_compressor_starts_daily` (machine counter, heating only);
+  hot water has `sensor.hot_water_compressor_starts_daily`, and the two add up to the compressor
+  starts. There is no run counter any more (`runs_today` was dropped 2026-11-14).
 - **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values in
   {`auto`, `on`, `low`, `off`}. Ignore any transition into or out of `unavailable`/`unknown` (HA or
   MQTT restart). Expected normal: 2 per day (the time program). A restart-free day with more than 2
@@ -164,8 +164,9 @@ ha-mcp) checks:
   amount as the raw counters since midnight.
 - `sensor.heating_electricity_daily` is non-zero, which also proves that
   `sensor.technikraum_heizung_heizung_energy` is the real Shelly entity id (cycling plan step 6).
-- `sensor.heating_compressor_last_run_minutes` and `sensor.heating_compressor_stop_temp` update after
-  the first full run; `sensor.heating_compressor_runs_today` matches the observed number of runs.
+- `sensor.heating_compressor_last_run` and `sensor.heating_compressor_stop_temp` update after
+  the first full run; `sensor.heating_compressor_average_run_today` = runtime today ÷ (heating +
+  hot water starts today).
 - The three settings sensors are not `unavailable`.
 
 Results go into the cycling plan's Observations, not recorded via the `record-learning` skill (not proven

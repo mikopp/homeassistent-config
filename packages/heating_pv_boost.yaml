@@ -309,11 +309,12 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
 
-    # ── DHW detection ─────────────────────────────────────────────────────────
+    # ── DHW circuit state (display only) ──────────────────────────────────────
     # hwc/Status fields: 0 desired °C | 1 on/off | 2 actual °C | 3 desired °C.
     # Field 1 is the DHW circuit state — an unnamed generic "onoff" subfield in the ebusd
     # definitions, so there is no register-given name to inherit. Named "active" rather than
-    # "running" to match the convention used for the cooling signals above.
+    # "running" to match the convention used for the cooling signals above. Only the dashboard
+    # reads it: what the machine runs is decided by the energy mode, not by this flag.
     - name: "Heating Hwc Active"
       unique_id: heating_hwc_active
       default_entity_id: binary_sensor.geotherm_heating_hwc_active
@@ -495,25 +496,17 @@ schedule:
         to: "16:00:00"
 
 # ── COMPRESSOR CYCLING STATISTICS ───────────────────────────────────────────────
-# Observation only (plans/heating-compressor-cycling.md). All built on
-# binary_sensor.heating_compressor_heating_active (energy mode = active_heating), so hot-water
-# runs are excluded. Run edges come from ehp/Comp, so these should match the machine's own
-# start counter (sensor.heating_compressor_starts_daily) except for a heating run that rolls
-# into hot water, which ends here at the mode flip. → doc/heating_pv_boost/notes.md "Energy modes"
+# Observation only (plans/heating-compressor-cycling.md). Everything is about the compressor
+# itself, whatever the mode: runtime, duty cycle and last run read ehp/Comp
+# (binary_sensor.geotherm_heating_compressor_running), so a run that rolls heating → hot water →
+# heating without the compressor stopping is one continuous run. Starts are the machine's
+# counters (sensor.heating_compressor_starts_daily + sensor.hot_water_compressor_starts_daily,
+# which add up to the Comp starts). → doc/heating_pv_boost/notes.md "Energy modes"
 sensor:
-  - platform: history_stats
-    name: "Heating Compressor Runs Today"
-    unique_id: heating_compressor_runs_today
-    entity_id: binary_sensor.heating_compressor_heating_active
-    state: "on"
-    type: count
-    start: "{{ today_at() }}"
-    end: "{{ now() }}"
-
   - platform: history_stats
     name: "Heating Compressor Runtime Today"
     unique_id: heating_compressor_runtime_today
-    entity_id: binary_sensor.heating_compressor_heating_active
+    entity_id: binary_sensor.geotherm_heating_compressor_running
     state: "on"
     type: time
     start: "{{ today_at() }}"
@@ -524,7 +517,7 @@ sensor:
   - platform: history_stats
     name: "Heating Compressor Duty Cycle 24h"
     unique_id: heating_compressor_duty_cycle_24h
-    entity_id: binary_sensor.heating_compressor_heating_active
+    entity_id: binary_sensor.geotherm_heating_compressor_running
     state: "on"
     type: ratio
     end: "{{ now() }}"
@@ -636,9 +629,15 @@ template:
       # ── Return temperature, masked during hot-water charging ──────────────
       # While the heat pump is making hot water, its water temperatures reflect the DHW circuit
       # rather than the heating circuit, so the return reading says nothing about the slab.
-      # This sensor goes UNAVAILABLE for the duration instead of publishing a misleading number,
-      # which means every numeric threshold downstream simply never fires during DHW — no
-      # sentinel value to remember, and it matches the repo rule on propagating unavailable.
+      # The mask is the energy mode water_heating (compressor or pump run-on with hvac_action
+      # water): in 7 of 7 runs checked (2026-11-04..14) the raw return climbs 25 → 50-55 °C only
+      # while hot water runs and is back to normal within the 5 min bucket where it ends, so no
+      # tail is held.
+      # No energy mode (unavailable/unknown) also masks: we cannot tell whether DHW runs.
+      # This sensor goes UNAVAILABLE instead of publishing a misleading number, which means every
+      # numeric threshold downstream simply never fires — no sentinel value to remember, and it
+      # matches the repo rule on propagating unavailable.
+      # → plans/heating-cycling-from-ehp.md step 11
       - name: "Heating Circuit Return Temp Valid"
         unique_id: heating_circuit_return_temp_valid
         unit_of_measurement: "°C"
@@ -647,7 +646,8 @@ template:
         icon: mdi:thermometer-water
         availability: >
           {{ has_value('sensor.geotherm_heating_circuit_return_temp')
-             and is_state('binary_sensor.heating_dhw_active', 'off') }}
+             and has_value('sensor.heating_energy_mode')
+             and not is_state('sensor.heating_energy_mode', 'water_heating') }}
         state: "{{ states('sensor.geotherm_heating_circuit_return_temp') | float | round(2) }}"
 
       # ── The setpoint HA will command (Phase 2) ────────────────────────────
@@ -696,13 +696,14 @@ template:
           {% elif is_state('binary_sensor.heating_cooling_active', 'on') %}cooling
           {% elif not is_state('binary_sensor.heating_season_active', 'on') %}off_season
           {% elif is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}slab_charging
-          {% elif is_state('binary_sensor.heating_dhw_active', 'on') %}hot_water
+          {% elif is_state('sensor.heating_energy_mode', 'water_heating') %}hot_water
           {% elif is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on') %}warm_enough
           {% else %}heating{% endif %}
 
       # ── Compressor cycling: average run length today ──────────────────────
-      # Runtime ÷ runs from the two history_stats sensors above. 0 before the first run of the
-      # day (no runs yet, not "unknown"). Target: ≥ 20–30 min; ~5 min means short-cycling.
+      # Compressor on-time today ÷ compressor starts today (heating + hot-water counters). 0
+      # before the first start of the day (no starts yet, not "unknown"). Target: ≥ 20–30 min;
+      # ~5 min means short-cycling.
       - name: "Heating Compressor Average Run Today"
         unique_id: heating_compressor_average_run_today
         unit_of_measurement: "min"
@@ -710,12 +711,14 @@ template:
         state_class: measurement
         icon: mdi:timer-outline
         availability: >
-          {{ has_value('sensor.heating_compressor_runs_today')
+          {{ has_value('sensor.heating_compressor_starts_daily')
+             and has_value('sensor.hot_water_compressor_starts_daily')
              and has_value('sensor.heating_compressor_runtime_today') }}
         state: >
-          {% set runs = states('sensor.heating_compressor_runs_today') | int %}
+          {% set starts = (states('sensor.heating_compressor_starts_daily') | int)
+                          + (states('sensor.hot_water_compressor_starts_daily') | int) %}
           {% set hours = states('sensor.heating_compressor_runtime_today') | float %}
-          {{ (hours * 60 / runs) | round(1) if runs > 0 else 0 }}
+          {{ (hours * 60 / starts) | round(1) if starts > 0 else 0 }}
 
       # ── Compressor stop temperature (flow setpoint + hysteresis) ──────────
       # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
@@ -843,42 +846,20 @@ template:
              or is_state('binary_sensor.geotherm_heating_cooling_request', 'on')
              or is_state('sensor.geotherm_heating_hvac_action', 'cooling') }}
 
-      # ── Hot-water masking ─────────────────────────────────────────────────
-      # delay_off holds the mask through the thermal tail after a charge ends: the heating-circuit
-      # return does not recover the instant the DHW valve closes.
-      # A DHW charge does NOT cancel a slab charge — the heat pump arbitrates internally via its
-      # own hot-water priority. This only suppresses the return-temperature reading.
-      - name: "Heating DHW Active"
-        unique_id: heating_dhw_active
-        icon: mdi:water-boiler
-        delay_off: "00:25:00"
-        state: >
-          {{ is_state('sensor.geotherm_heating_hvac_action', 'water')
-             or is_state('binary_sensor.geotherm_heating_hwc_active', 'on') }}
-
       # ── Compressor activity (Shelly clamp) ────────────────────────────────
-      # Electrical view of a run for the PV surplus logic: measured idle circulation ~83 W
+      # Electrical view of a run: NOT a duplicate of ehp/Comp (different source; one observation:
+      # 2026-11-14 it fell 66 s before ehp/Comp; it can drop out). No decision reads it yet (the surplus sensor reads the clamp power
+      # directly); Phase 2 is meant to consume it, and it is the reference for the ehp/Comp
+      # reporting lag. Measured idle circulation ~83 W
       # (standby ~9 W), a heating run ~1.8 kW, hot water ~3.5 kW; 500 W sits well clear of both
-      # ends. Covers ANY compressor run. The run statistics use ehp/Comp through
-      # binary_sensor.heating_compressor_heating_active below instead.
+      # ends. Covers ANY compressor run. The run statistics read ehp/Comp
+      # (binary_sensor.geotherm_heating_compressor_running) instead.
       - name: "Heating Compressor Active"
         unique_id: heating_compressor_active
         device_class: running
         icon: mdi:heat-pump
         availability: "{{ has_value('sensor.technikraum_heizung_heizung_power') }}"
         state: "{{ (states('sensor.technikraum_heizung_heizung_power') | float) > 500 }}"
-
-      # Compressor running for SPACE HEATING only: energy mode active_heating (ehp/Comp on, not
-      # hot water). Feeds the run statistics (runs/runtime/duty cycle/last run).
-      # A run that rolls from heating into hot water without the compressor stopping ends its
-      # heating segment at the mode flip; one that turns from hot water to heating starts a new
-      # segment there. Accepted: that is the heating-only view wanted.
-      - name: "Heating Compressor Heating Active"
-        unique_id: heating_compressor_heating_active
-        device_class: running
-        icon: mdi:radiator
-        availability: "{{ has_value('sensor.heating_energy_mode') }}"
-        state: "{{ is_state('sensor.heating_energy_mode', 'active_heating') }}"
 
       # ── Liveness ──────────────────────────────────────────────────────────
       # ebusd publishes ehp/Status every few seconds, so value age is a reliable liveness proxy
@@ -946,11 +927,11 @@ template:
 
   # ── Compressor cycling: length of the last run ─────────────────────────────
   # Fires when a run ends and measures it from the on→off transition itself, so it needs no
-  # stored start time. Space-heating runs only (binary_sensor.heating_compressor_heating_active).
-  # Keeps its value until the next heating run ends.
+  # stored start time. Any compressor run, whatever the mode (ehp/Comp). Keeps its value until
+  # the next run ends.
   - trigger:
       - trigger: state
-        entity_id: binary_sensor.heating_compressor_heating_active
+        entity_id: binary_sensor.geotherm_heating_compressor_running
         from: "on"
         to: "off"
     sensor:
@@ -1230,7 +1211,6 @@ group:
       - sensor.geotherm_heating_compressor_hours
       - sensor.geotherm_heating_yield_total
       # Compressor cycling statistics
-      - sensor.heating_compressor_runs_today
       - sensor.heating_compressor_runtime_today
       - sensor.heating_compressor_duty_cycle_24h
       - sensor.heating_compressor_average_run_today
@@ -1267,9 +1247,7 @@ group:
       # Decision and gates
       - binary_sensor.heating_season_active
       - binary_sensor.heating_cooling_active
-      - binary_sensor.heating_dhw_active
       - binary_sensor.heating_compressor_active
-      - binary_sensor.heating_compressor_heating_active
       - binary_sensor.heating_ebusd_online
       - binary_sensor.heating_loxone_online
       - binary_sensor.heating_slab_mode_wanted

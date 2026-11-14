@@ -13,23 +13,23 @@ views:
           - entity: sensor.heating_control_state
             name: Controller state
           - entity: binary_sensor.heating_season_active
+            name: Heating season (indicator is active_heating or neutral)
           - entity: binary_sensor.loxone_heating_heating_loxone_warm_enough
             name: Loxone says warm enough
-          - entity: binary_sensor.heating_dhw_active
-            name: Hot water active (masks return temp)
           - entity: binary_sensor.heating_compressor_active
-            name: Compressor running (Shelly > 500 W)
+            name: Compressor drawing > 500 W (Shelly clamp, electrical)
           - entity: binary_sensor.geotherm_heating_compressor_running
-            name: Compressor running (ehp)
+            name: Compressor running (ehp/Comp, the machine itself)
           - entity: binary_sensor.geotherm_heating_circuit_pump
-            name: Heating circuit pump running (ehp)
+            name: Heating circuit pump running (ehp/Hc1Pump)
           - entity: sensor.heating_energy_mode
-            name: Energy mode
-          - entity: binary_sensor.heating_compressor_heating_active
-            name: Compressor running for heating (excl. hot water)
+            name: Energy mode (active_heating = compressor running for heating)
           - entity: binary_sensor.heating_cooling_active
+            name: Cooling interlock (UIH flag, demand, request or hvac action)
           - entity: binary_sensor.heating_ebusd_online
+            name: ebusd online (data younger than 15 min)
           - entity: binary_sensor.heating_loxone_online
+            name: Loxone online (signal younger than 24 h)
 
       - type: entities
         title: Temperatures
@@ -54,15 +54,15 @@ views:
 
       # ── 1b. Compressor cycling (plans/heating-compressor-cycling.md) ────────
       # Goal: fewer, longer runs. Short-cycling looks like many runs of ~5 min.
-      # Starts = the machine's own counters. Runs = HA's count of heating runs from ehp/Comp; it
-      # can be one higher than the starts when a run turns from hot water into heating.
+      # Starts = the machine's own counters (heating + hot water = compressor starts). The average
+      # run is the compressor's on-time over those starts, so a heating → hot water → heating run
+      # without a stop is one run.
       # The rows carry no name override, so a row and its popup show the same name.
       - type: entities
         title: Compressor Cycling
         entities:
           - entity: sensor.heating_compressor_starts_daily
           - entity: sensor.hot_water_compressor_starts_daily
-          - entity: sensor.heating_compressor_runs_today
           - entity: sensor.heating_compressor_average_run_today
             name: Average run today (target ≥ 20 min)
           - entity: sensor.heating_compressor_last_run
@@ -133,7 +133,7 @@ views:
           - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
           - entity: sensor.geotherm_heating_energy_integral
-          - entity: binary_sensor.heating_compressor_heating_active
+          - entity: sensor.heating_energy_mode
           - entity: sensor.wheatherstation_outdoor_temperature
           - entity: sensor.geotherm_heating_hvac_mode
 
@@ -216,8 +216,8 @@ views:
           - entity: sensor.heating_control_state
           - entity: binary_sensor.heating_season_active
           - entity: binary_sensor.heating_cooling_active
-          - entity: binary_sensor.heating_dhw_active
           - entity: binary_sensor.heating_compressor_active
+            name: Compressor drawing > 500 W (Shelly clamp)
           - entity: binary_sensor.heating_slab_mode_wanted
 
       - type: tile
@@ -236,9 +236,7 @@ views:
           - sensor.geotherm_heating_hvac_action
           - sensor.heating_control_state
           - binary_sensor.heating_slab_mode_wanted
-          - binary_sensor.heating_dhw_active
           - binary_sensor.heating_compressor_active
-          - binary_sensor.heating_compressor_heating_active
           - binary_sensor.heating_cooling_active
           - sensor.heating_energy_mode
           - binary_sensor.heating_ebusd_online
