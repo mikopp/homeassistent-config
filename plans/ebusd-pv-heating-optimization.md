@@ -38,8 +38,9 @@ geoTHERM.
   setback, only as the base the setpoint is derived from.
 - **Warm enough = `off`** in `active_heating` and `neutral`, unless a slab boost overrides it
   (boost only in `active_heating`).
-- **Not warm enough = `on`.** Loxone silent for 24 h (`binary_sensor.heating_loxone_online` off)
-  counts as not warm enough, as do `unknown`/`unavailable`: a lost signal heats, never stops.
+- **Not warm enough = `on`.** Loxone publishes `warm_enough` retained and re-sends it every hour
+  (owner); 24 h without a message makes it `unavailable` (`expire_after`), which counts as not warm
+  enough, as does `unknown`: a lost signal heats, never stops.
 - **At most one mode change every 30 min** (compressor minimum between starts is 20 min). A change
   that falls inside the hold is applied when the hold ends, not dropped.
 - **Cooling season → heating `off`** (unchanged from 10-30). `mc/OperatingMode` is the *heating*

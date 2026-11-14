@@ -367,17 +367,15 @@ mqtt:
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
 
     # ── Loxone: the single comfort signal ─────────────────────────────────────
-    # Loxone owns human comfort and publishes one boolean. No expire_after: Loxone publishes only
-    # on change and sends no heartbeat, so an unchanging value must not decay to unavailable —
-    # the same reason documented for the Loxone appliance meters in packages/energy.yaml.
-    # Staleness is instead detected on value age (binary_sensor.heating_loxone_online).
-    # force_update: an identical payload (a heartbeat) otherwise never reaches the state machine
-    # (mqtt/entity.py _attrs_have_changed), so last_reported would not move.
+    # Loxone owns human comfort and publishes one boolean, retained and re-sent every hour.
+    # expire_after 24 h: a silent Loxone goes unavailable, which the comfort control reads as
+    # "not warm enough" (heat). It also restores the last value across an HA restart.
+    # → doc/heating_pv_boost/notes.md "Owner-side configuration"
     - name: "Heating Loxone Warm Enough"
       unique_id: heating_loxone_warm_enough
       default_entity_id: binary_sensor.loxone_heating_heating_loxone_warm_enough
       state_topic: "loxone/heating/warm_enough"
-      force_update: true
+      expire_after: 86400
       icon: mdi:home-thermometer
       device:
         identifiers:
@@ -843,8 +841,7 @@ template:
         availability: "{{ has_value('sensor.heating_cooling_indicator') }}"
         state: >
           {% set indicator = states('sensor.heating_cooling_indicator') %}
-          {% set warm = is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on')
-             and is_state('binary_sensor.heating_loxone_online', 'on') %}
+          {% set warm = is_state('binary_sensor.loxone_heating_heating_loxone_warm_enough', 'on') %}
           {% if indicator in ['passive_cooling', 'active_cooling'] %}off
           {% elif indicator == 'active_heating' and is_state('binary_sensor.heating_slab_mode_wanted', 'on') %}on
           {% elif indicator in ['active_heating', 'neutral'] %}{{ 'off' if warm else 'on' }}
@@ -1085,17 +1082,12 @@ template:
           {{ s is not none and s.last_updated is not none
              and (now() - s.last_updated).total_seconds() < 900 }}
 
-      # Loxone silent for 24 h: last_reported moves on an identical payload, last_updated does not.
-      # Silence detection works only if Loxone re-sends warm_enough periodically (heartbeat,
-      # owner decision pending); without one a >24 h unchanged stretch reads as silent (→ heat).
-      # → doc/heating_pv_boost/notes.md "Decisions in force"
+      # Loxone online = warm_enough has a value; it expires after 24 h without a message.
       - name: "Heating Loxone Online"
         unique_id: heating_loxone_online
         device_class: connectivity
         state: >
-          {% set s = states.binary_sensor.loxone_heating_heating_loxone_warm_enough %}
-          {{ s is not none and s.last_reported is not none
-             and (now() - s.last_reported).total_seconds() < 86400 }}
+          {{ has_value('binary_sensor.loxone_heating_heating_loxone_warm_enough') }}
 
       # ── THE DECISION ──────────────────────────────────────────────────────
       # Read by sensor.heating_wanted_operating_mode and sensor.heating_target_temp (control-law

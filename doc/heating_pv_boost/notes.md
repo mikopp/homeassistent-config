@@ -139,7 +139,9 @@ on the machine.
 ## Owner-side configuration
 
 - Loxone **no longer writes** `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
-  (on change only, no heartbeat). Loxone does not control room valves.
+  **retained**, on change and re-sent **every hour** (owner, 2026-11-14). HA gives the entity
+  `expire_after` 24 h: silent Loxone → `unavailable` → "not warm enough" (heat); the retained
+  message and the restored state cover an HA restart. Loxone does not control room valves.
 - **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
 - `mc/OperatingMode` = **`on`**, set by hand (owner, 2026-11-14; was `auto` with the time program
@@ -205,13 +207,8 @@ on the machine.
 - **Setpoint re-send guard:** `input_datetime.heating_temp_desired_last_written` (stamped before
   the publish). Against a stale read-back the same setpoint is not re-published within 5 min; a
   change of the wanted setpoint itself (`sensor.heating_target_temp`) bypasses the guard.
-- **Loxone silence** (`binary_sensor.heating_loxone_online`, 24 h) reads `last_reported`, and the
-  `warm_enough` MQTT entity has `force_update: true`: without it an identical payload never reaches
-  the state machine (`mqtt/entity.py` `_attrs_have_changed`; tested), so neither timestamp moves.
-  Known bias: Loxone publishes on change only, so silence detection works only if it also re-sends
-  `warm_enough` periodically (heartbeat; owner decision pending). Without one, an unchanged stretch
-  of more than 24 h, and an HA restart (no `expire_after`, no restore: `unknown` until the next
-  publish), force wanted mode `on`.
+- **Loxone silence:** `warm_enough` has `expire_after` 24 h; an identical hourly re-send restarts
+  the expiry (tested). `binary_sensor.heating_loxone_online` = the flag has a value.
 - **Compressor tuning (cycling plan):**
   - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts): short runs are a
     mild-weather effect.
@@ -330,8 +327,8 @@ production ids on a fresh registry; other MQTT ids may not (#146).
 and variants (enum names and raw numbers, case, unmapped, short, empty, garbage) and fails on any
 mqtt WARNING (`ehp/Integral`, the harness sync channel, has its own test). Its poll test asserts
 that every trigger of `heating_ebusd_poll_registration` sends exactly the 20 `/get` priorities
-seen on the live broker, and nothing while the scan reads `running`. The ebusd registers and the
-Loxone flag have no `expire_after`: `tests/ha/test_energy_expire_after.py` holds their value for a
+seen on the live broker, and nothing while the scan reads `running`. The ebusd registers have
+no `expire_after`: `tests/ha/test_energy_expire_after.py` holds their value for a
 week (`ebusd/global/running` is `true`/`false`, `scan` is `finished` when done: owner). `loxone/heating/warm_enough`
 is fed by `tests/ha/test_energy_loxone.py`: an empty or garbage payload renders OFF ("not warm
 enough"), by design (owner): the template has no empty guard. A payload without
@@ -351,7 +348,8 @@ armed last so one evaluation is asserted; HA's own `test/fence` message proves "
 tests: master switch off, TDL unknown, idempotence (raw enum read-back), ebusd offline then back,
 the 30 min hold (deferred mode, immediate setpoint, new hold after the write), a hold that ends
 while disarmed (arming applies it), a never-echoing read-back (no mode re-send inside the hold, no
-setpoint re-send inside 5 min), Loxone silent 24 h (an identical re-sent payload keeps it online),
+setpoint re-send inside 5 min), Loxone silent 24 h (expires to `unavailable`; an identical re-sent
+payload restarts the expiry),
 and `warm_enough` unknown / unavailable (heats).
 
 CONFIRMED: `heating_slab_mode_wanted` (delay_off 20 min) is `unknown` after boot until the delay

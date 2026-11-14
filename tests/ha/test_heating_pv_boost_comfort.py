@@ -270,9 +270,9 @@ async def test_mode_hold_defers_change_but_not_setpoint(
 async def test_loxone_silent_24h_counts_as_not_warm_enough(
     ha: HomeAssistant, broker: Broker, clock: Clock
 ) -> None:
-    """Warm enough sets `off`; 24 h without any Loxone message (even identical) gives `on`.
+    """Warm enough sets `off`; 24 h without any Loxone message gives `on` (expire_after).
 
-    An identical re-sent payload moves `last_reported` only; it must keep Loxone online.
+    Loxone re-sends the same payload every hour; an identical message must restart the expiry.
     """
     await _helpers(ha)
     await wait_subscribed(ha, broker, *_INPUT_TOPICS)
@@ -284,7 +284,7 @@ async def test_loxone_silent_24h_counts_as_not_warm_enough(
     assert ha.states.get(_WANTED).state == "off"
     await clock.advance(timedelta(hours=23, minutes=58))
     assert ha.states.get(online).state == "on"
-    # The same payload again (a heartbeat): the state does not change, the report does.
+    # The same payload again (the hourly re-send): the state does not change, the expiry restarts.
     await _inputs(ha, broker, warm="ON", status=False)
     await clock.advance(timedelta(minutes=3))
     assert ha.states.get(online).state == "on", "an identical re-sent payload must keep Loxone online"
@@ -293,6 +293,7 @@ async def test_loxone_silent_24h_counts_as_not_warm_enough(
     await clock.advance(timedelta(hours=23, minutes=56))
     assert ha.states.get(online).state == "on"
     await clock.advance(timedelta(minutes=3))
+    assert ha.states.get(_WARM).state == "unavailable"
     assert ha.states.get(online).state == "off"
     assert ha.states.get(_WANTED).state == "on"
     # Loxone speaks again with a different payload: warm enough is honoured again.
