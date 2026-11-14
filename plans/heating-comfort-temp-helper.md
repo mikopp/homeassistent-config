@@ -165,7 +165,7 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ### Phase C — docs
 
-6. [TODO] `doc/heating_pv_boost/notes.md` (current facts; one home per fact):
+6. [DONE] `doc/heating_pv_boost/notes.md` (current facts; one home per fact):
    - Invariant "`mc/TempDesiredLow` is the only human knob" → "`input_number.heating_comfort_temp`
      is the only comfort knob; every setpoint HA writes derives from it; `mc/TempDesired` set at
      the wall is overwritten. `mc/TempDesiredLow` has no HA logic and is not read: it is the
@@ -191,7 +191,7 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
    - Tests section: drop the "TDL unknown" test mention; the poll test's 20 → 19 `/get`
      priorities.
    - Size stays ≤ 24 KB.
-7. [TODO] Dashboard, README and cross-references:
+7. [DONE] Dashboard, README and cross-references:
    - `dashboards/heating-dashboard.yaml`: add `input_number.heating_comfort_temp` to the Settings
      card (first row) and to the Temperatures card above the target; rename the target row to
      "Target Temp (derived from comfort, written by Phase 2)"; remove both TDL rows.
@@ -254,8 +254,14 @@ gates on, writes nor reads TDL: the TDL sensor is removed (Q3).
 
 ## Status
 
-Phases A and B done; Phase C (docs, dashboard, README, cross-refs) not started. All owner
-questions answered.
+Phases A–C done; next: owner deploy (step 8). Open: the note is 27.2 KB, over the 24 KB limit
+(26.4 KB before this plan); a split (e.g. its Tests section into `doc/heating_pv_boost/tests.md`,
+K-3) is a separate decision.
+
+Phase C result: notes (comfort invariant, TDL without logic, "Frost protection" section,
+Raumaufschaltung C5 options with `Keine` set, entity map, writer, tests), dashboard (helper in
+Temperatures and Settings, TDL rows removed), README (setpoint, mode law, room influence off),
+cross-refs in the slab and cycling plans. Full `ci-local.sh` green.
 
 Phase B result: helper seeded at 21 (`tests/baseline.py`, comfort tests' `_HELPERS`); target table
 seeds the helper (comfort 21 → 22.0 in season, 21.0 out of season, 20 → 21.0; reset 18 → 19.0);
@@ -268,6 +274,6 @@ run: no Docker).
 
 - [DONE] 1–4 Phase A (code)
 - [DONE] 5 Phase B (tests)
-- [TODO] 6–7 Phase C (docs, dashboard, cross-refs)
+- [DONE] 6–7 Phase C (docs, dashboard, cross-refs)
 - [TODO] 8–9 Phase D (owner deploy, verification)
 - [TODO] 10 Close

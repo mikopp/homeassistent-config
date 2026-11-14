@@ -336,7 +336,8 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       (SW ≥ 407) do not exist. Tuning table #1 has no software path.
 - [ ] 10. (2026-11-14: superseded by the revised mode law, slab plan "Control law": the geoTHERM
       runs `on`, so there is no night setback any more; Loxone's `warm_enough` switches it `off`.
-      Re-judge run lengths and starts under that law.) **Next (owner, manual):** night setback test, tuning table #0. Set `TempDesiredLow` 21 → 22 °C,
+      Re-judge run lengths and starts under that law. The `TempDesiredLow` test is obsolete:
+      it is now only the frost floor, `plans/heating-comfort-temp-helper.md`.) **Next (owner, manual):** night setback test, tuning table #0. Set `TempDesiredLow` 21 → 22 °C,
       leave `CompHysteresis` at 7 K, run 3 nights, log night starts / run length / integral at the
       stop / daily yield and electricity under Observations. Then tuning table #2 (`CompHysteresis`
       8 K) as a separate step for mild middays. A buffer tank is assessed and parked (Observations).

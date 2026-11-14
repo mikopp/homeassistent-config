@@ -43,9 +43,12 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   the catalog may be mid-discovery. `automation.heating_ebusd_poll_registration` gates every
   trigger on `scan != 'running'` (not an allowlist of resting values: whether the steady state is
   `finished` or `OK` is undocumented).
-- **`mc/TempDesiredLow` is the only human knob.** Every setpoint HA writes is derived from it,
-  so `mc/TempDesired` set at the wall will be overwritten. The target is always absolute, never
-  "current + offset".
+- **`input_number.heating_comfort_temp` is the only comfort knob.** Every setpoint HA writes is
+  derived from it, so `mc/TempDesired` set at the wall will be overwritten. The target is always
+  absolute, never "current + offset".
+- **`mc/TempDesiredLow` gets no HA logic** (not read, derived from or written): it is the
+  machine's frost floor (see "Frost protection"), set by hand at the panel. Deriving comfort from
+  it would force it to comfort level and make `off` ineffective below 3 °C.
 - **No hysteresis or toggle faster than 20 min** (`ehp/TimeBetweenTwoCompStartsMin` = 1200 s).
 
 ## Hardware and integration quirks
@@ -83,7 +86,7 @@ bridged: keep it that way rather than widening to `ebusd/#`.
   compressor idles).
 - ebusd process status is retained under `ebusd/global/*`: `running` (`true`/`false`, `false` as
   MQTT last-will), `scan` (`OK`/`running`/`finished`), `version`, `uptime`, `signal`.
-- Unchanged registers are not re-reported, so the poll rate of slow registers (`TempDesiredLow`
+- Unchanged registers are not re-reported, so the poll rate of slow registers (`TempDesired`
   etc.) cannot be read back from HA.
 
 ### Compressor and measurements
@@ -119,21 +122,29 @@ maintained seasonally). Cooling is released on **outdoor** temperature (15 + 2 =
 writing `mc/TempDesired` does not move the threshold. Heating/cooling changeover delays are 6 h
 on the machine.
 
+### Frost protection: `off` still heats below 3 °C
+
+Below 3 °C outdoor (the geoTHERM's own sensor) with no time window active (`off`, or `eco`
+outside a window), after a default 1 h delay, the controller requests flow temperature for the
+room setpoint `mc/TempDesiredLow`; it ends above 4 °C (VWS 82/3 installation manual
+0020132514_00; user manual 0020087973_02 "Regelfrostschutz Heizung", §3.4.2). The floor pump
+runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
+`off`, hcmode `heat`, `Hc1Pump` on, energy mode `passive_heating`/`active_heating`: correct, not
+a bug. HA cannot stop it; only a lower `TempDesiredLow` limits it (owner: accepted). Whether the
+room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Keine`).
+
 ### Room influence
 
+- **Raumaufschaltung is `Keine`** (owner-confirmed): controller menu C5 (shown only with a VR 90)
+  or the VR 90; not a cataloged ebusd register. Options (installation manual 0020132514_00):
+  - `Keine`: the VR 90 room temperature is not used for heating.
+  - `Aufschaltung`: the curve's flow setpoint shifts by (room desired − actual); a warm room
+    lowers it, so a slab boost is weakened (factor undocumented).
+  - `Thermostat`: heating stops at room desired + 1 K; would block a slab boost (the charge warms
+    the room). Vaillant: not for energy-balance control (this unit).
+  Keep `Keine`: Loxone's `warm_enough` is the only comfort input.
 - `mc/RoomTempOffset` (`b505 2d`) is write-only, so unusable as a lever. Do not confuse it with
   `rcc/RoomTempOffset` (`1f00`, VR 90 sensor calibration): two registers sharing a name.
-- A "Raumaufschaltung: off/thermostat" toggle exists and is ebus-communicated (owner switches it
-  at the VR 90 and the geoTHERM panel), but it is **not a cataloged register**; its literal ebus
-  write is unknown. Whether it only gates the VR 90 writing `mc/RoomTempOffset` is UNPROVEN.
-- **Owner action (open):** set Raumaufschaltung to **off** (current value unconfirmed); this
-  design does not use room trim (Loxone's `warm_enough` is the only comfort input), and in
-  "thermostat" it may undercut a boost. Raising `mc/TempDesired` overcomes the additive offset by
-  construction, so a boost is never blocked, only possibly less effective; no declared max
-  magnitude for the offset exists.
-- To settle the mechanism: watch `ebusd/mc/RoomTempOffset` (or
-  `ebusctl read -f -c mc RoomTempOffset`) while toggling at the VR 90. HA driving the toggle
-  would need its literal write, found only by a live capture during a toggle.
 - Holiday mode and `mc/Party` are unused (no Party button on the VR 90; holiday dates are 2015).
 
 ## Owner-side configuration
@@ -145,7 +156,7 @@ on the machine.
 - **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
 - `mc/OperatingMode` = **`on`**, set by hand (owner, 2026-11-14; was `auto` with the time program
-  from 10-30); `TempDesiredLow` 21.
+  from 10-30).
 - Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150); `ehp/CompHysteresis` 7 K at last
   read (forced stop at setpoint + 7, e.g. 31 °C at a 24 °C setpoint; the 8–9 K cap below is
   relative to this). Check `sensor.geotherm_heating_compressor_hysteresis` before relying on it.
@@ -161,7 +172,6 @@ on the machine.
 | `sensor.geotherm_heating_hvac_mode` | `mc/OperatingMode` (configured setting) |
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
-| `sensor.geotherm_heating_temp_desired_low` | `mc/TempDesiredLow` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
 | `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` is "compressor running for heating" (the binary_sensor `heating_compressor_heating_active` was removed as a pure function of it) |
@@ -175,7 +185,8 @@ on the machine.
 | `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics; ids from `name:`, verify after deploy |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.heating_wanted_operating_mode` | Phase 2 wanted mode: `on` / `off` / `none` (unknown season: write nothing); reads no actual register |
-| `sensor.heating_target_temp` | Phase 2 wanted `mc/TempDesired` (TDL, TDL + 1, TDL + 1 + offset; boost only in `active_heating`) |
+| `input_number.heating_comfort_temp` | the comfort knob (no `initial:`; set in the UI) |
+| `sensor.heating_target_temp` | Phase 2 wanted `mc/TempDesired` (comfort out of season, comfort + 1 in season, comfort + 1 + offset while boosting; boost only in `active_heating`) |
 | `automation.heating_comfort_control` | the only writer: `ebusd/mc/OperatingMode/set`, `ebusd/mc/TempDesired/set` |
 | `input_boolean.heating_comfort_control_enabled` | master switch of the writer (no `initial:`; off = no write at all) |
 | `input_datetime.heating_mode_last_written` | when HA last wrote the mode: start of the 30 min hold |
@@ -190,12 +201,12 @@ on the machine.
   Loxone warm enough → `off`, otherwise (incl. unknown or silent 24 h) → `on`; a slab boost
   (`active_heating` only) overrides to `on`. Cooling season → `off` (cooling unaffected); unknown
   indicator → no write. At most one mode change per 30 min. Full table: the slab plan's
-  "Control law".
+  "Control law". Below 3 °C outdoor `off` still heats to `TempDesiredLow` ("Frost protection").
 - **Writer mechanics.** One decision per output (`heating_wanted_operating_mode`,
   `heating_target_temp`); the automation writes only when the read-back differs (mode compared by
   normalised name, setpoint within 0.05 K), so an agreeing or not-yet-read (`unknown`) register
-  gets no message. No write with the master switch off, ebusd offline, wanted `none` or
-  `TempDesiredLow` unknown. Payloads: mode name, setpoint with one decimal (`22.0`); the decimal
+  gets no message. No write with the master switch off, ebusd offline, wanted `none` or the
+  target not yet rendered. Payloads: mode name, setpoint with one decimal (`22.0`); the decimal
   form is UNVERIFIED against ebusd (prove it with the idempotent write of the current value).
 - **Hold = `input_datetime.heating_mode_last_written`**, stamped by the automation BEFORE it
   publishes the mode (a missed write beats a repeated one). A helper survives restarts and ignores
@@ -308,7 +319,6 @@ Counting rules so two baselines are comparable (plans/heating-baseline-and-phase
   `1=cooling`, so cooling would arrive as raw `1`; the published CSVs do not have this. Keep the
   dual name/number parsing (incl. raw `1` → `cooling`) as cheap insurance.
 - `ehp/Status01` times out on this unit; re-check occasionally (second return-temp reading).
-- Raumaufschaltung: see "Room influence" (owner action open, mechanism unproven).
 
 ## Tests
 
@@ -320,13 +330,13 @@ recorded history) and the daily meters' midnight reset.
 MQTT-fed inputs (ebusd strings by name and raw enum number, Shelly Pro 3EM JSON, Venus values) go
 only over the real broker; "unavailable" is a real `expire_after`. The daily meters are the real
 `utility_meter`s; the 48h mean (which drives the real season indicator) and the η accumulators'
-inputs outside the clock tests are seeded. `tests/e2e/test_restart.py` checks that the
+inputs outside the clock tests are seeded, and so is the comfort helper in the setpoint table. `tests/e2e/test_restart.py` checks that the
 `heating_electricity_daily` meter survives a real restart. The Shelly Pro 3EM entities get their
 production ids on a fresh registry; other MQTT ids may not (#146).
 `tests/ha/test_heating_pv_boost_ebusd_registers.py` feeds every ebusd-fed entity its live payload
 and variants (enum names and raw numbers, case, unmapped, short, empty, garbage) and fails on any
 mqtt WARNING (`ehp/Integral`, the harness sync channel, has its own test). Its poll test asserts
-that every trigger of `heating_ebusd_poll_registration` sends exactly the 20 `/get` priorities
+that every trigger of `heating_ebusd_poll_registration` sends exactly the 19 `/get` priorities
 seen on the live broker, and nothing while the scan reads `running`. The ebusd registers have
 no `expire_after`: `tests/ha/test_energy_expire_after.py` holds their value for a
 week (`ebusd/global/running` is `true`/`false`, `scan` is `finished` when done: owner). `loxone/heating/warm_enough`
@@ -345,7 +355,7 @@ long-term statistics (owner).
 `tests/ha/test_heating_pv_boost_comfort.py` (Phase 2): the control-law rows 1-7 as a table (real
 indicator via the seeded 48h mean, slab seeded, read-backs, ehp/Status and Loxone over the broker),
 armed last so one evaluation is asserted; HA's own `test/fence` message proves "no write". Own
-tests: master switch off, TDL unknown, idempotence (raw enum read-back), ebusd offline then back,
+tests: master switch off, idempotence (raw enum read-back), ebusd offline then back,
 the 30 min hold (deferred mode, immediate setpoint, new hold after the write), a hold that ends
 while disarmed (arming applies it), a never-echoing read-back (no mode re-send inside the hold, no
 setpoint re-send inside 5 min), Loxone silent 24 h (expires to `unavailable`; an identical re-sent
