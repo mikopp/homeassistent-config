@@ -48,9 +48,11 @@ Rules:
 - A wrong ID fails silently as "entity not available".
 - MQTT specifics (`default_entity_id` vs UI rename): `ha-mqtt` skill.
 
-## Template `device:` key
-- The `device:` key is NOT supported in template YAML — it causes a config error. Assign template
-  entities to a device via the UI instead.
+## Template `device:` / `device_id:`
+- Neither key is in the YAML template entity schema (CONFIRMED, source 2026.11.1
+  `components/template/schemas.py`: `device_id` exists only for UI-created template helpers): config error.
+- A YAML template entity cannot be assigned to a device in the UI either (OBSERVED, pergola).
+  Group related entities with a `group:` and the package's dashboard card instead.
 
 ## Comments and findings while you edit
 - Comment style: `doc/KNOWLEDGE.md#K-5`. Jinja comments follow it too; do not repeat the

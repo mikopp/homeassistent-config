@@ -33,8 +33,15 @@ stack trace, or deterministic repro. Never promote a grade without new evidence.
   - bare `| float` on an empty payload RAISES (WARNING per message).
 - Guard: `{{ '' if value | trim == '' else value | float | round(3) }}`. Why: keeps the last value, no log spam.
 - Use `none` only when `unknown` is actually wanted. Why: wrong for idle appliances.
+- Text sensor (no `device_class`, `unit_of_measurement`, `state_class`, `suggested_display_precision`):
+  rendered `''` is STORED as the value, not ignored (CONFIRMED 2026.11.1, same function +
+  `components/sensor/entity.py::_numeric_state_expected`). Map empty to a real value in the template.
 - Applied to the Loxone appliance sensors in `packages/energy.yaml` and `packages/heating_pv_boost.yaml`.
 
 ## `expire_after`
 - Idle appliances without `expire_after` must keep their last value, so their `value_template` returns `''`, not `none`. Why: `none` would flip them to `unknown` on every empty message.
-- No further `expire_after` facts are verified here yet; check the sensor.mqtt docs at the pinned version before relying on its semantics.
+- Restart restore (CONFIRMED 2026.11.1, `components/mqtt/sensor.py::mqtt_async_added_to_hass`, identical
+  at 2026.10.1): an MQTT sensor restores its last value only if `expire_after > 0`, the last state was not
+  `unknown`/`unavailable` and `last_changed + expire_after` is still in the future; the remaining time is
+  then the new expiry. Otherwise it starts expired (`unavailable`) or, without `expire_after`, `unknown`
+  until a message arrives. Restore on a YAML reload: same code path, UNVERIFIED.
