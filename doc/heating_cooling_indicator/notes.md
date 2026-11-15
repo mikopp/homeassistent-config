@@ -6,75 +6,53 @@ paths:
 # heating_cooling_indicator.yaml — outdoor-temperature mode indicator
 
 Notes for `packages/heating_cooling_indicator.yaml`. Classifies the 48 h mean outdoor temperature
-into four modes for ventilation automations. No design doc.
+into four modes for ventilation automations. No design doc. Thresholds, clamp, hysteresis, cold
+start and history loading are in the YAML comments.
 
 ## Invariants
-- States of `sensor.heating_cooling_indicator`: `active_heating`, `neutral`, `passive_cooling`,
-  `active_cooling`.
-- Input is `sensor.wheatherstation_outdoor_temperature_48h_mean` (statistics, mean of the 15 min
-  filtered weatherstation temperature). The indicator is unavailable while that mean or either
-  effective-threshold sensor has no value (avoids cascade jumps during reload).
-- Three thresholds are `input_number` helpers: heating below, passive cooling above, active cooling
-  above. No `initial:`; chosen values 12 / 16 / 20, set once in the UI after deploy.
-- Order heating < passive < active is enforced by the `*_effective` sensors: passive is at least
-  heating + 2, active at least effective passive + 2. The template reads only the effective sensors
-  for passive/active and the helper for heating.
-- Hysteresis is not a setting: fixed 1 °C relative to each threshold. The template reads its own
-  previous state (`this.state`):
-  - `active_heating` → `neutral` at mean >= heat + 1
-  - `neutral` → `active_heating` at mean <= heat; → `passive_cooling` at mean >= passive
-  - `passive_cooling` → `neutral` at mean <= passive - 1; → `active_cooling` at mean >= active
-  - `active_cooling` → `passive_cooling` at mean <= active - 1
-- Cold start (no previous state): classified at the midpoint of each band (heat + 0.5,
-  passive - 0.5, active - 0.5).
+- The 15min filter and the 48h statistics mean are named "Weatherstation ..." but referenced as
+  `sensor.wheatherstation_...` (the misspelled prefix of the source). A fresh registry derives
+  `sensor.weatherstation_...` (CONFIRMED: `tests/ha/conftest.py`, every fresh test HA), so the live
+  ids exist only in `.storage`. Any re-registration breaks the chain silently: the 48h mean reads a
+  missing `..._15min` and the indicator goes unavailable for all consumers. Fix = `default_entity_id`
+  (same class as #146, which covers only MQTT sensors).
 
 ## Hardware / integration quirks
-- The source sensor is `sensor.wheatherstation_outdoor_temperature` (spelled so; referenced by
-  `pergola`, `airflow_cooling`, `heating_pv_boost` and the heating dashboard).
-- The statistics sensor needs `max_age: 48:00:00` to pre-load history from the recorder on restart;
-  `sampling_size` alone does not load history. `sampling_size: 192` (4/h x 48 h) is only a cap.
-- The 15 min sensor is a `filter` (`time_simple_moving_average` then `time_throttle`, 15 min) so the
-  statistics sensor sees one sample per 15 min.
-- The forecast mean uses `weather.get_forecasts` (hourly, `weather.home`); the forecast is no longer
-  an attribute, so it is a trigger-based template (every hour and on HA start).
+- None beyond the YAML comments.
 
 ## Entity map
-The package sets no `default_entity_id`, so IDs of named sensors are derived by HA from the name.
-CONFIRMED = referenced by working config outside this package (grep over `packages/`, `dashboards/`).
-- Source `sensor.wheatherstation_outdoor_temperature` (confirmed; defined elsewhere)
-- `sensor.wheatherstation_outdoor_temperature_48h_mean` (confirmed: heating dashboard)
-- `sensor.wheatherstation_outdoor_temperature_15min`: unverified (derived from name; confirm via
-  ha-mcp lookup)
-- `sensor.wheatherstation_outdoor_temperature_48h_forecast_mean`: unverified (derived from name;
-  confirm via ha-mcp lookup); mean of forecast hours from now - 1 h to now + 48 h, `unknown` with
-  fewer than 48 usable hours
-- `sensor.heating_cooling_indicator` (confirmed: pergola, airflow_cooling, heating_pv_boost,
-  dashboards), `sensor.heating_indicator_passive_cooling_effective`,
-  `sensor.heating_indicator_active_cooling_effective` (confirmed: heating dashboard)
+No `default_entity_id` in this package. "live" = found via ha-mcp search; "used by" = read by config
+outside this package.
+- Source `sensor.wheatherstation_outdoor_temperature` (live; defined elsewhere, friendly name
+  carries the misspelling)
+- `sensor.wheatherstation_outdoor_temperature_15min` (live; registry-dependent, see Invariants)
+- `sensor.wheatherstation_outdoor_temperature_48h_mean` (live; used by heating dashboard;
+  registry-dependent, see Invariants)
+- `sensor.weatherstation_outdoor_temperature_48h_forecast_mean` (live; correct spelling although its
+  `unique_id` is `wheatherstation_...`; only consumer is the group)
+- `group.heating_cooling_indicator` (no consumer in config or live automations; state `unknown`
+  because all members are sensors/input_numbers)
+- `sensor.heating_cooling_indicator` (used by pergola, airflow_cooling, airflow_decision.jinja,
+  heating_pv_boost, dashboards), `sensor.heating_indicator_passive_cooling_effective`,
+  `sensor.heating_indicator_active_cooling_effective` (used by heating dashboard)
 - `input_number.heating_indicator_heating_below`, `input_number.heating_indicator_passive_cooling_above`,
-  `input_number.heating_indicator_active_cooling_above` (confirmed: heating dashboard; 5-25 °C,
-  step 0.5, box mode)
-- Group `group.heating_cooling_indicator` lists all of the above.
+  `input_number.heating_indicator_active_cooling_above` (used by heating dashboard)
 
 ## Decisions in force
-- Effective sensors are shown on the dashboard so a clamp is visible next to the typed value.
-- The forecast mean is not wired into the indicator yet.
+- None beyond the YAML comments.
 
 ## Known biases / open issues
-- None recorded.
+- The `wheatherstation_` prefix comes from the Ecowitt device, user-named "Wheatherstation" (live
+  `name_by_user`); all its ~50 entities carry it. The 15min/48h-mean ids copy it only via `.storage`
+  (see Invariants). Renaming them needs a live UI rename plus a matching YAML/test change in one
+  deploy; not done.
 
 ## Tests (`tests/ha/test_heating_cooling_indicator.py`, in-process)
-- One looping test over a case table: every case resets the helpers and the mean (and checks the
-  reset), then sets the mean across the boundary under test and checks both `*_effective` sensors.
-- The template re-renders on any dependency change and reads its own state: the indicator's
-  previous state is pinned only AFTER the mean is set to a value that holds it, and the test checks
-  the pin held (pinning a state the mean does not support logs "Template loop detected").
-- Covered: each threshold taken from its helper, the +1 °C heating hysteresis, the order clamp
-  (passive typed below heating; passive/active typed low). The forecast sensor and the
-  passive/active hysteresis exits are not tested.
+- The forecast sensor and the passive/active hysteresis exits are not tested.
 
 ## Related
-- `doc/KNOWLEDGE.md` (K-3 template); skills `ha-templates`, `ha-test-harness`.
-- Consumers of `sensor.heating_cooling_indicator`: `packages/pergola.yaml` (heating season sync),
-  `packages/airflow_cooling.yaml` (season input), `packages/heating_pv_boost.yaml` (heating-season
-  gate), `dashboards/heating-dashboard.yaml`.
+- Skills `ha-templates`, `ha-test-harness`.
+- Consumers of `sensor.heating_cooling_indicator` (check before renaming a state):
+  `packages/pergola.yaml` (heating season sync), `packages/airflow_cooling.yaml` +
+  `custom_templates/airflow_decision.jinja` (season input), `packages/heating_pv_boost.yaml`
+  (heating-season gate), `dashboards/heating-dashboard.yaml`, `dashboards/airflow-dashboard.yaml`.
