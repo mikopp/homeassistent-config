@@ -452,6 +452,11 @@ restart (there is deliberately no `homeassistant: start` trigger), a reload, and
 A boost turned off by hand stays off until the next edge. Residual risk (accepted): if the single
 re-arm run is dropped, the boost lapses and restarts only at the next edge.
 
+Known gap (#153, CONFIRMED by strict-xfail `test_drying_boost_unavailable_to_boost_does_not_fire`):
+a briefly unavailable flush input makes the decision pass `unavailable → medium → boost`, a real
+edge, so a running boost is restarted. The `from:` list only blocks the direct `unavailable → boost`
+transition.
+
 ---
 
 ## AF-8 `hvac_mode` / `hvac_action` (climate display)
@@ -502,9 +507,9 @@ flip it.
 | stateless decision | `sensor.airflow_cooling_state` | every reason maps to one profile — no stuck-profile traps |
 
 > **Trigger-based vs state-based (restart-stale guardrail).** The decision sensors are
-> *trigger-based* and restore on restart to preserve the delay + Schmitt hysteresis; each is driven
-> by a continuously-drifting numeric filter (outdoor temp/dew, weather-station temp), so it recomputes
-> within ~1 debounce after a restart. `ventilation_low_needed` and `airflow_cooling_state` are
+> *trigger-based* and restore on restart and on `template.reload` to preserve the delay + Schmitt
+> hysteresis; each is driven by a continuously-drifting numeric filter (outdoor temp/dew,
+> weather-station temp), so it recomputes within ~1 debounce after a restart or reload. `ventilation_low_needed` and `airflow_cooling_state` are
 > **state-based on purpose**: they derive from *slow binary* sensors (`moisture_low`, `heat_low`, the
 > indicators), so trigger-based + restore could leave them stale for hours. Rule: a template binary_sensor whose inputs are only other binary sensors
 > must be state-based. See `doc/airflow/notes.md`.
