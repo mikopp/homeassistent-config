@@ -77,3 +77,13 @@ The original (pre-verification) reference plan's Task 3.1 reacted to the concern
 room warms during a boost. Resolution folded into the plan: set Raumaufschaltung to off as a
 one-time manual change; if room trim were ever wanted outside boosts only, HA would have to toggle
 it itself, which needs its literal ebus write (not found; needs a live capture during a toggle).
+
+## Comfort helper replaces `mc/TempDesiredLow` as the comfort knob (2026-11)
+
+Phase 2 derived the written setpoint from `mc/TempDesiredLow` (TDL). The owner found frost protection
+active on the geoTHERM: below 3 °C outdoor, mode `off` still heats towards TDL, and the compressor
+does start (owner-verified). With TDL at 21 (= comfort) `off` was therefore ineffective. TDL became a
+hand-set frost floor (20) with no HA logic, and `input_number.heating_comfort_temp` (18-24 °C, step
+0.5, no `initial:`) became the only comfort knob; the TDL sensor was removed. Whether the controller
+ignores the room temperature during the frost request (H1) was never verified: the owner accepted
+frost heating either way, so the check was dropped.

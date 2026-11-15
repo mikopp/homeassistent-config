@@ -36,7 +36,7 @@ geoTHERM.
   program; the time program is ignored. Loxone owns the schedule through `warm_enough`. With `on`
   the setpoint is always `TempDesired` (= comfort + 1), so `TempDesiredLow` no longer acts as a
   night setback. It is the machine's frost floor with no HA logic: below 3 °C outdoor `off` still
-  heats to it (`plans/heating-comfort-temp-helper.md`).
+  heats to it (`doc/heating_pv_boost/notes.md`, "Frost protection").
 - **Warm enough = `off`** in `active_heating` and `neutral`, unless a slab boost overrides it
   (boost only in `active_heating`).
 - **Not warm enough = `on`.** Loxone publishes `warm_enough` retained and re-sends it every hour
