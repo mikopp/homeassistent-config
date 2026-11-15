@@ -7,8 +7,7 @@ paths:
 ---
 # Victron package notes (`packages/victron.yaml`)
 
-Current facts of the Victron package. Loads with `packages/victron.yaml`,
-`tests/ha/test_victron.py` and `doc/victron/design.md`. Accounting model, formulas, sign table and identities:
+Current facts of the Victron package. Design (accounting model, formulas, sign table, identities):
 `doc/victron/design.md` (`VIC-n`).
 
 ## Invariants
@@ -16,17 +15,14 @@ Current facts of the Victron package. Loads with `packages/victron.yaml`,
   per minute for the battery residual (VIC-6). η only moves the Solar/Battery split.
 - Power and energy domains are each exact and deliberately NOT reconciled with each other (VIC-6).
 - `victron_multiplus_ac_net_power` (+ = inverting) and `victron_multiplus_dc_power`
-  (+ = charging) have opposite signs; conversion loss = `max(-(ac_net + dc), 0)` (VIC-8). The
-  Multi current's sign was observed only while inverting (negative); positive while charging is
-  test-covered, not yet seen live.
-- `victron_multiplus_conversion_efficiency` always renders a number (no `availability:`;
-  100 % bootstrap until `dc_in_energy` ≥ 1 kWh, clamp 50-100) (VIC-7).
+  (+ = charging) have opposite signs; conversion loss = `max(-(ac_net + dc), 0)` (VIC-8).
+- `victron_multiplus_conversion_efficiency` always renders a number: never add `availability:` to it,
+  it already returns the 100 % bootstrap when an input is missing (VIC-7).
 - Expired PV sensors and an expired Multi current mean 0, not an outage; the "GX alive" signals
   are AC load and grid (VIC-10).
 
 ## Hardware / integration quirks
-Hardware: GX `c0619ab4c19e`, MPPT 279 (DC solar), pvinverter 20 (AC-coupled PV), vebus 276
-(MultiPlus-II, 3-phase, 3 devices), BMS battery. No separate grid meter (grid = Multi AC-in).
+Topology: YAML header and VIC-1.
 
 ### `Dc/Vebus/Power` is NOT the Multi's DC power
 Observed 2026-10-17 (MQTT listen + VRM, snapshots not perfectly synced):
@@ -40,11 +36,8 @@ Observed 2026-10-17 (MQTT listen + VRM, snapshots not perfectly synced):
 
 Over 26 h of hourly means `Dc/Vebus/Power` equalled the AC net (`ac_load − grid − ac_pv`) within
 ~1 W at 2.5 kW inverting and 1.9 kW charging, i.e. it behaves like an AC-side value. Why Victron
-publishes it that way is **not established**, only the observation is.
-
-Use `sensor.victron_multiplus_dc_power` (= battery voltage × `system/0/Dc/Vebus/Current`) for any
-"DC side of the Multi" figure. `Dc/Battery/Power` also includes other DC loads (~10 W in the
-snapshot), so it is not the Multi's own DC power.
+publishes it that way is **not established**, only the observation is. Any "DC side of the Multi"
+figure: `sensor.victron_multiplus_dc_power` (V × `Dc/Vebus/Current`, VIC-8).
 
 ### Efficiency is load dependent
 At ~350 W the Multi loses ~15 % (≈ 80 % efficient; three devices idle-draw), measured from one
@@ -64,26 +57,21 @@ can stay constant" WILL expire it. Size `expire_after` per topic and read an exp
 dbus-flashmq `src/state.cpp`; every key line dates from 2014-2024 (`git log -S`), so any current
 Venus OS has it. Only Python/vedbus producers were checked; C services (vecan, mk2) were not.
 
-Checking it live: ha-mcp only offers long-term statistics (no raw state history), so an expiry shows
-only as missing 5-min rows. MQTT sensors do not expose `expire_after` as an attribute. For exact
-timing use the HA History panel or `mosquitto_sub -v -t 'N/c0619ab4c19e/<path>'`.
+Checking it live: ha-mcp `history__get_history` returns long-term statistics only (CSV, mean/min/max
+per period; 5-min rows kept ~10 days), no raw states. An expiry shows at best as missing 5-min rows;
+a shorter one does not show (inference, not tested). MQTT sensors do not expose `expire_after` as an
+attribute. For exact timing use the HA History panel or `mosquitto_sub -v -t 'N/c0619ab4c19e/<path>'`.
 
 ### Keep-alive (dbus-flashmq, Venus OS 3.x+)
-The GX publishes `N/<portal>/…` only while it gets `R/<portal>/keepalive` at least every 60 s.
-A keep-alive without `{"keepalive-options":["suppress-republish"]}` (and any topic-list payload,
-which flashmq ignores) forces a full dump of ALL topics. So: `suppress-republish` every 30 s, and one
-empty-payload keep-alive on HA `start` for the initial snapshot. A YAML reload does not fire `start`;
-to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19e/keepalive`.
+Mechanics (60 s window, `suppress-republish` every 30 s, full dump on HA `start`): the automation
+comments in the YAML. A YAML reload does not fire `start`; to force one snapshot after a reload,
+publish an empty payload to `R/c0619ab4c19e/keepalive`.
 
 ### expire_after policy
-- MQTT sensors restore their last value after a restart only when `expire_after > 0` and
-  `last_changed + expire_after` is still in the future (source, `components/mqtt/sensor.py` at
-  2026.10.1; restore on a *reload* not verified). A missing `expire_after` is NOT harmless: the
-  sensor is `unknown` until the GX publishes a changed value.
-- Fluctuating power sensors (grid / AC load phases, DC PV, AC PV, MPPT W): 120 s. They never
-  falsely expire, and an outage makes them unavailable.
-- Slow values: SOC and battery voltage 24 h, MPPT and AC PV lifetime counters 7 d (constant
-  overnight). Long enough not to falsely expire, present so the value survives a restart.
+- Every sensor has `expire_after` (restart restore needs it: `ha-mqtt` skill), sized per topic
+  longer than the value can stay constant (values and reasons in the YAML comments). Without it a
+  sensor stays `unknown` until the GX publishes it: the `start` snapshot fills it, but not after a
+  YAML reload (and restore on a reload is unverified).
 - `sensor.victron_vebus_dc_current`: 600 s. `victron_multiplus_dc_power` reads an expired current
   as 0 A, which would book the whole AC load as conversion loss while charging. A non-zero current
   changes about every second (no constant non-zero reading for 2+ min in ~5 days of history), so it
@@ -91,14 +79,12 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
   real 0 A (idle). That is harmless: `ac_net_power` is then about -40..-50 W (Multi idle draw from
   AC), `dc_power` reads 0 W, `conversion_loss_power` shows the idle draw (same as a published
   0 A), and the η gate is closed.
-- Every `value_template` checks `value_json is defined`: the GX publishes an EMPTY (non-JSON)
-  payload when a service disappears, and then `value_json.value` alone raises.
 
 ## Entity map (IDs from YAML `default_entity_id` / as consumed)
 | Entity | What |
 |---|---|
 | `sensor.victron_solar_yield_dc_watts`, `_dc_total_kwh` | raw MPPT W / lifetime kWh (pergola reads the W) |
-| `sensor.victron_ac_inverter_power`, `_energy_total_kwh` | AC-coupled PV W / lifetime kWh (Energy Dashboard PV source 2) |
+| `sensor.victron_ac_inverter_power`, `_energy_total_kwh` | AC-coupled PV W / lifetime kWh (Energy Dashboard PV source 2; heating_pv_boost reads the W) |
 | `sensor.victron_vebus_dc_current`, `sensor.victron_battery_voltage` | inputs of `victron_multiplus_dc_power` |
 | `sensor.victron_dc_pv_total_power` | MPPT DC W feeding `solar_yield_watts` |
 | `sensor.victron_battery_soc` | SOC (Energy Dashboard, heating_pv_boost, heating dashboard) |
@@ -108,7 +94,7 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
 | `sensor.victron_ac_load_total_power` | AC load sum (also pergola availability guard) |
 | `sensor.victron_multiplus_ac_net_power`, `_dc_power`, `_conversion_loss_power`, `_conversion_loss_energy` | conversion stage |
 | `sensor.victron_multiplus_ac_out_energy`, `_dc_in_energy`, `_conversion_efficiency` | η |
-| `sensor.solar_yield_watts` | AC-referenced MPPT W (Energy Dashboard solar power) |
+| `sensor.solar_yield_watts` | AC-referenced MPPT W (Energy Dashboard solar power; heating_pv_boost surplus cap) |
 | `sensor.victron_solar_yield_total_kwh` | AC-referenced MPPT kWh accumulator (Energy Dashboard solar energy) |
 | `sensor.victron_battery_ac_power` | power-domain battery residual (live / power graph; the dashboard's battery energy slot uses `battery_energy_in/out`) |
 | `sensor.victron_battery_energy_in`, `_out` | energy-domain battery residual (Energy Dashboard battery) |
@@ -122,13 +108,13 @@ to force one snapshot after a reload, publish an empty payload to `R/c0619ab4c19
   consumers read the previous tick's value. UNPROVEN: render order within one trigger pass was
   never demonstrated, so whether the order matters is unknown; reordering ⇒ re-run the
   counter-delta tests (VIC-9).
-- η accumulators share one gate, duplicated inline; keep both copies identical (VIC-7).
-- No `utility_meter:`; monthly figures, if wanted, go back as YAML (VIC-12).
+- After a fix to the η inputs, reset both η accumulators to 0 together, else old data only dilutes
+  η (VIC-7).
 
 ## `sensor.victron_solar_yield_total_kwh` is not the MPPT counter
-Template accumulator since #121: MPPT counter delta × η, starting from `this.state | float(0)`. It
-did not inherit the old MQTT sensor's value (5644.65 kWh → 0.61 kWh on 2026-10-16); the statistics `sum`
-stayed continuous, so the Energy Dashboard is fine. Never compare its state with the raw counter.
+Template accumulator since #121 (MPPT counter delta × η from `this.state`); its state is far below
+the raw counter by design. The Energy Dashboard uses the statistics `sum`, which stayed continuous
+across the switch: never compare the state with the counter, never seed it from the counter.
 
 ## Known small biases (documented, not fixed)
 - Conversion loss is clamped per sample (`max(-(ac_net+dc), 0)`), so negative excursions are
@@ -136,42 +122,33 @@ stayed continuous, so the Energy Dashboard is fine. Never compare its state with
   unclamped, the `total_increasing` loss energy would not be monotonic.
 - `conversion_efficiency` can render twice per minute tick (two accumulator entities) and briefly
   show a value from one fresh and one stale accumulator; cosmetic.
-- UNPROVEN: η may lag its accumulators by one tick (a former comment attributed this to in-pass
-  render order; never demonstrated). Do not rely on same-tick consistency between η and the
-  accumulators.
-- η is about 85 % in normal operation (85.1 % in 2026-11); use that as the sanity value.
-- Existing η accumulator totals are not re-seeded; old data only dilutes.
+- UNPROVEN: η may lag its accumulators by one tick. Do not rely on same-tick consistency between η
+  and the accumulators.
+- η is about 85 % in normal operation; use that as the sanity value.
 - Battery is the residual in both domains, so all measurement error lands there.
 
-## Open issue (not fixed)
-`battery_energy_in` / `battery_energy_out` read grid/load with `float(0)` and no availability guard,
-so an unavailable grid or load is booked as 0 W for that tick. A "hold the tick" fix is NOT a small
-change: both sensors share a long template with counter-delta branches, and the solar/AC-PV baseline
-sensors advance on their own, so a held tick would drop that tick's delta. Needs its own tests
-(none cover an unavailable grid today).
-
-- The MQTT sensors have no `default_entity_id`: on a fresh registry they get other ids than the
-  templates read (`sensor.victron_grid_l1_power` …) and the whole chain breaks (#146).
+## Open issues (not fixed)
+- `battery_energy_in` / `battery_energy_out` read grid/load with `float(0)` and no availability
+  guard, so an unavailable grid or load is booked as 0 W for that tick. A "hold the tick" fix is NOT
+  a small change: both sensors share a long template with counter-delta branches, and the
+  solar/AC-PV baseline sensors advance on their own, so a held tick would drop that tick's delta.
+  Needs its own tests (none cover an unavailable grid today). No GitHub issue yet.
+- #146: 10 MQTT sensors still lack `default_entity_id` (grid L1-L3, AC load L1-L3, AC inverter power
+  and energy total, DC PV total, SOC), against the VIC-12 rule. On a fresh registry they get
+  `sensor.electrical_victron_energy_system_…` ids and the template chain and Energy Dashboard go
+  unavailable; production works only because `.storage` holds the short ids.
 - `victron_solar_yield_dc_baseline_kwh` / `victron_ac_pv_energy_baseline_kwh` render the string
   `unknown` into a numeric energy sensor on each `time_pattern` tick before the Venus counters
   arrive: ERROR in the log (#147; production impact UNPROVEN).
-- `template.reload` logs a TemplateError for `sensor.solar_yield_watts`: during the reload the η
-  sensor is briefly unavailable and `| float` has no default; VIC-10 assumes η is always numeric (#155).
+- #155: on `template.reload` η is briefly unavailable; `sensor.solar_yield_watts` reads it with
+  `| float(100)`. UNVERIFIED on the host that no TemplateError remains: once a restart and a
+  `template.reload` log none, drop this line (and the `allow_log` in `test_reload_recovery`).
 
 ## Tests
-In-process (`tests/ha/test_victron.py`, real broker): `test_instant_power_table` covers every
-instant-power template, fed with Venus OS payloads; "unavailable" is a real `expire_after` (Clock)
-or a sensor that never got a message. The η accumulators are seeded in that table only. The
-accumulator tests run real minute ticks on a frozen clock (one fresh HA each, nothing seeded):
-battery, η gate, conversion loss, solar-yield counter delta and battery residual chains, grid
-`integration` import/export (exact 60 s steps), and the keep-alive publish. Each tick publishes every
-input, syncs MQTT and advances 60 s from half past the minute (`Clock.align`); expectations are
-computed with the template's own arithmetic from the state read just before the tick.
-`tests/e2e/test_restart.py` checks that the `victron_grid_energy_import` total survives a real
-restart.
+Package test facts: module docstrings and the tick comment of `tests/ha/test_victron.py`, and the
+docstring of `tests/e2e/test_restart.py` (grid import total survives a real restart).
 
 ## Related
-- `doc/victron/design.md` (current design).
 - `ha-energy-metering` skill (platform moves, registry reclaim), `ha-mqtt` skill.
 - Consumers: `packages/pergola.yaml` (DC W, load total), `packages/heating_pv_boost.yaml`
-  (PV net, AC PV, SOC), `dashboards/heating-dashboard.yaml`.
+  (PV net, solar_yield_watts + AC PV, SOC), `dashboards/heating-dashboard.yaml`.
