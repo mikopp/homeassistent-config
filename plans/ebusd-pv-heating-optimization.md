@@ -57,37 +57,8 @@ Loxone payload already renders "not warm enough"; Loxone's own comfort logic dec
 
 ### Control law
 
-First matching row wins (owner, 2026-11-14):
-
-| # | Indicator | Slab mode wanted | Loxone `warm_enough` | `mc/OperatingMode` | `mc/TempDesired` |
-|---|---|---|---|---|---|
-| 1 | `unknown` / `unavailable` | — | — | unchanged | unchanged |
-| 2 | `passive_cooling` / `active_cooling` | — (never) | — | **`off`** | `C` |
-| 3 | `active_heating` | **on** | any (overridden) | **`on`** | `C + 1 + offset` |
-| 4 | `active_heating` | off / `unknown` | on | **`off`** | `C + 1` |
-| 5 | `active_heating` | off / `unknown` | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `C + 1` |
-| 6 | `neutral` | — (never) | on | **`off`** | `C + 1` |
-| 7 | `neutral` | — (never) | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `C + 1` |
-
-`C` = `input_number.heating_comfort_temp`, the only comfort knob. **Slab boosting happens only in
-`active_heating`** (owner, 2026-10-30) — implemented in `binary_sensor.heating_slab_mode_wanted`;
-`unknown` (20 min after every restart) counts as off. `binary_sensor.heating_season_active`
-(`active_heating` or `neutral`) gates rows 3–7.
-
-- Edges: a boost ending while Loxone says warm enough → row 4, `off`; a boost starting while the
-  mode is `off` → row 3, `on`.
-- Every mode change respects the 30 min hold. A `TempDesired`-only change (row 3 ↔ row 5, mode stays
-  `on`) does not start or stop the compressor and is not held.
-- Rows 4 and 6 still write `C + 1` so nothing has to be saved or restored across a mode change.
-- The order matches `sensor.heating_control_state` (cooling → off-season → slab → … → warm enough →
-  heating).
-
-### Why the setpoint is derived, not captured
-
-`TempDesired` is computed from the comfort helper every time, so there is nothing to save and restore
-across a boost or an HA restart. Always compute the **absolute** target — never apply a relative
-`current + offset`, which is not idempotent and would compound to `+2×offset` on a retry or a
-restart mid-boost.
+Moved to `doc/heating_pv_boost/design.md#HPB-1` (table, edges, hold, why the setpoint is derived
+and absolute).
 
 ### Why grid export is not the surplus signal
 
@@ -235,15 +206,10 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
    its condition can block a triggered run while `sensor.ebusd_heating_ebusd_scan_status` reads
    `"running"`), fall back to a manual check: `mosquitto_pub -h <broker> -t
    ebusd/<circuit>/<name>/get -m '?5'` (or `ebusctl -p 5 read -c <circuit> <name>`). If a topic
-   never appears at all, the sensor stays `unavailable` — that is the signal; the documented
-   fallback for `TempDesiredLow` specifically is `mc/Params` field 1.
+   never appears at all, the sensor stays `unavailable`: that is the signal.
 3. Leave `--mqttjson` **off**.
-4. Set VR 90 **Raumaufschaltung to "off"** (currently unconfirmed which value is live). This
-   design does not use room-sensor trim — see `doc/heating_pv_boost/notes.md` "Room influence" — so leaving it on "thermostat"
-   only risks the VR 90 quietly undercutting a boost's `TempDesired` increase via
-   `mc/RoomTempOffset`, never anything worse. Optional to confirm first with a live watch of
-   `ebusd/mc/RoomTempOffset` while toggling the setting, if the mechanism is worth nailing down
-   exactly rather than just switched off.
+4. DONE: Raumaufschaltung is `Keine` (owner-confirmed; `doc/heating_pv_boost/notes.md` "Room
+   influence").
 
 ## Status
 
@@ -294,7 +260,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Loxone still publishes `warm_enough`, no longer writes the mode, and never controlled room
       valves. The geoTHERM now runs `auto` on its own time program; HA will switch to `on` only
       for "not warm enough" or a boost (decided 2026-10-30; superseded 2026-11-14 by the
-      `on`/`off` law, see "Control law").
+      `on`/`off` law, see `doc/heating_pv_boost/design.md#HPB-1`).
 - [x] 10. Vaillant: set a real `mc/TempDesiredLow` below the intended day temperature
       (live 2026-10-30: TDL 21, TempDesired 22)
 - [x] 11. Phase 2 — comfort control IMPLEMENTED (not yet deployed): `sensor.heating_wanted_operating_mode`,
@@ -302,7 +268,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       (writes only on a read-back difference, 30 min mode hold via
       `input_datetime.heating_mode_last_written`, no write with the master switch off / ebusd offline /
       unknown season), tests in `tests/ha/test_heating_pv_boost_comfort.py`. Control law revised by
-      the owner 2026-11-14, see "Control law". Post-deploy steps (owner, in this order):
+      the owner 2026-11-14, see `doc/heating_pv_boost/design.md#HPB-1`. Post-deploy steps (owner, in this order):
       1. Add `topic ebusd/mc/OperatingMode/set out 0` and `topic ebusd/mc/TempDesired/set out 0` to the
          Mosquitto bridge (`plans/heating-baseline-and-phase2-prerequisites.md` step 2), restart Mosquitto.
       2. Prove each line with an idempotent write of the CURRENT value (e.g. publish the current
@@ -379,3 +345,6 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
 
 ## Close
 - [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`)
+  Route the step 11 open answers (one-decimal setpoint payload; whether ebusd echoes a written
+  value on the read topic, which the 5 min re-send guard is built around) to
+  `doc/heating_pv_boost/notes.md`.
