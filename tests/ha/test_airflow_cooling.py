@@ -979,8 +979,8 @@ BOOSTS = [
 ]
 
 # The decision goes unavailable (an input missing) and comes back as boost: by design not an
-# edge, so a running boost's timer is not reset (packages/notes/airflow_cooling.md, boost
-# model). CONFIRMED CONFIG BUG (#153): with the REAL indicators it IS an edge. flush_needed goes unavailable, drying_needed (no availability
+# edge, so a running boost's timer is not reset (doc/airflow/design.md#AF-7.2). CONFIRMED
+# CONFIG BUG (#153): with the REAL indicators it IS an edge. flush_needed goes unavailable, drying_needed (no availability
 # template, reads flush with is_state) drops to off at once; when the input returns, flush is
 # back first, the decision passes moisture_flush_cooling/medium, then drying → boost: a real
 # medium → boost edge, and the boost is restarted. Seeding the indicators hides it.
@@ -1462,8 +1462,8 @@ async def test_reload_recovery(airflow_ha: HomeAssistant, clock: Clock) -> None:
     Replaces the Docker `flush_needed_recomputes_after_reload_unknown` and
     `low_needed_recomputes_after_reload_unknown`, which simulated the reload by writing
     `unknown` over the entity. Here (1) a REAL `template.reload`: at the pin the entities come
-    back RESTORED at once (CONFIRMED here; the YAML comments say a reload brings them back
-    `unknown`), and (2) the Docker simulation: an `unknown` state fires the self-trigger,
+    back RESTORED at once (CONFIRMED here), and (2) the Docker simulation: an `unknown` state
+    fires the self-trigger,
     which recomputes the value from the inputs at once (the internal state still holds it).
     """
     ha = airflow_ha

@@ -261,8 +261,8 @@ template:
           {% else %}mdi:fan{% endif %}
         # Every input must hold a value: an unavailable decision makes the automations no-op
         # (they require has_value on this sensor) instead of acting on a fail-safe 'off' reading.
-        # A reload brings the trigger-based indicators back as 'unknown' only until their own
-        # self-trigger / next input change, so this is brief.
+        # A template.reload restores the trigger-based indicators' last state, so they hold a
+        # value at once (#155).
         availability: >
           {{ has_value('sensor.heating_cooling_indicator') and
              has_value('binary_sensor.airflow_free_cooling_available') and
@@ -380,9 +380,8 @@ template:
           - sensor.airflow_dew_point_max
           - binary_sensor.airflow_humidity_flush_needed
           - binary_sensor.airflow_humidity_drying_needed
-      # Self-trigger on unknown: a YAML reload re-creates this entity as 'unknown' (unlike a full
-      # restart, reload does not restore state). This re-evaluates the template the moment that
-      # happens, instead of waiting for the next input trigger. Use to: "unknown" (not to: ~, which
+      # Self-trigger on unknown: recomputes at once if the entity is set 'unknown'. A
+      # template.reload restores the last state instead (#155). Use to: "unknown" (not to: ~, which
       # HA treats as a match-any wildcard); the recomputed result still passes through delay_on/off.
       - trigger: state
         entity_id: binary_sensor.airflow_moisture_ventilation_low_needed
@@ -454,8 +453,8 @@ template:
           - input_number.airflow_min_temp_diff
           - binary_sensor.airflow_humidity_flush_needed
           - binary_sensor.airflow_humidity_drying_needed
-      # Self-trigger on unknown so a YAML reload re-evaluates immediately (same reasoning as the
-      # moisture guard above); the recomputed result still passes through delay_on/off.
+      # Self-trigger on unknown: recomputes at once if the entity is set 'unknown' (as the moisture
+      # guard above); the recomputed result still passes through delay_on/off.
       - trigger: state
         entity_id: binary_sensor.airflow_heat_ventilation_low_needed
         to: "unknown"
@@ -530,9 +529,8 @@ template:
           - input_number.airflow_cooling_target_temperature
           - input_number.airflow_min_dew_diff
           - input_number.airflow_min_temp_diff
-      # Self-trigger on unknown: a YAML reload re-creates this entity as 'unknown' (unlike a full
-      # restart, reload does not restore state). This re-evaluates the template the moment that
-      # happens, instead of waiting for the next input trigger. Use to: "unknown" (not to: ~, which
+      # Self-trigger on unknown: recomputes at once if the entity is set 'unknown'. A
+      # template.reload restores the last state instead (#155). Use to: "unknown" (not to: ~, which
       # HA treats as a match-any wildcard); the recomputed result still passes through delay_on/off.
       - trigger: state
         entity_id: binary_sensor.airflow_humidity_flush_needed
@@ -1070,8 +1068,8 @@ automation:
               # while one is decided/running only keep auto_mode ON and write NO preset. Detected by
               # the decision OR the switch (a manual boost too), never by preset==high.
               # CRUCIAL: this is the FIRST branch, so the `choose` EXITS here for the whole boost
-              # window (incl. the brief switch-off during a re-arm) and the Low/Medium branches
-              # below can never cancel a boost. → doc/airflow/notes.md (boost/preset hardware model)
+              # window (decided or switch on) and the Low/Medium branches below can never cancel a
+              # boost. → doc/airflow/notes.md (boost/preset hardware model)
               - conditions:
                   - condition: or
                     conditions:

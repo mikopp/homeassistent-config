@@ -16,7 +16,7 @@ you must not break.
 
 ## Invariants
 ### Single decision (`sensor.airflow_cooling_state`) — the rule for every consumer
-CONFIRMED by `tests/ha/test_airflow_cooling.py::test_decision_table` at 2026.10.1.
+Decision table: `tests/ha/test_airflow_cooling.py::test_decision_table`. Inputs, outputs, macro: design `AF-6`.
 - **Indicators feed only the decision; consumers read only the decision.** The indicators
   (`free_cooling_available`, `humidity_flush_needed`, `humidity_drying_needed`, moisture/heat low,
   `heating_cooling_indicator`, indoor dew vs `dew_point_min`) are inputs of
@@ -24,13 +24,16 @@ CONFIRMED by `tests/ha/test_airflow_cooling.py::test_decision_table` at 2026.10.
   boost and `climate.airflow_climate`'s hvac_action read its state / `profile` / `ventilation`
   attributes. Never wire an indicator straight into an automation — why: consumers that each
   re-implement the season rules disagree.
-- The decision **never reads an output** (profile, preset, auto_mode, boost switch, climate), so
-  applying it cannot change it. Priority/season rules live in one place:
-  `custom_templates/airflow_decision.jinja`, rendered for the state and both attributes (state-based
-  template entities cannot share variables between state and attributes at 2026.10.1 — entity
-  `variables` render once at setup).
-- It is **state-based** (derives from slow binaries; see the trigger-vs-state rule below) and
-  unavailable unless every indicator has a value — the automations then no-op.
+
+### Trigger-based vs state-based template sensors
+- A derived template sensor whose inputs are **only other (slow) binary sensors** (the decision,
+  `ventilation_low_needed`) MUST be **state-based** (plain `state:`, no `trigger:`). A trigger-based
+  one restores its last state on HA restart and on `template.reload` and recomputes only when an
+  input **changes**, so it can come back **stale** and never resync (fails silently; OBSERVED: a stale
+  `ventilation_low_needed` once held the preset at medium all day). Trigger-based + restore only for
+  sensors driven by continuously-drifting numeric filters (outdoor temp/dew, weather-station temp):
+  drift forces a recompute within ~1 debounce, and restoring keeps the 10-min delay + `this.state`
+  hysteresis. The `to: "unknown"` self-triggers do not protect against this. → design `AF-10`.
 
 ## Hardware / integration quirks
 ### Boost/preset hardware model
@@ -47,14 +50,8 @@ Hardware behaviour of the ComfoConnect unit, relied on by the airflow automation
 - **Re-sending boost ON (Modbus coil 6 = 1) while a boost runs RESTARTS the timer at the full
   duration** — verified on the device. This is the seamless re-arm: `switch.turn_on` on the
   already-on boost, no off→on, no notification.
-- **A boost-off never restarts the boost.** The drying automation has no `boost_expired` path. A boost
-  is started only on an *edge into boost*: the decision's `ventilation` going from a real non-boost
-  value (`medium`/`low`/`auto`/`off`) to `boost` (also adopting a running manual boost), or Away ending
-  (`away_ended`) while boost is decided and the boost switch is off. A HA restart / reload / the
-  decision going `unavailable -> boost` is NOT an edge and starts nothing (so it cannot reset a running
-  timer). The countdown re-arms a running boost while boost is still decided. A manual off therefore
-  sticks until the next edge. Away counts only when explicitly `on` (`unknown`/`unavailable` = not away).
-  Edge table: design `AF-7.2`.
+- Boost start/stop rules (edge only, no restart trigger, manual off sticks, accepted re-arm risk):
+  design `AF-7.2`; known gap #153 below.
 
 ### climate_template (upstream litinoveweedle/hass-template-climate, pinned in `tests/custom_components.yaml`)
 - Humidity control needs `dry` in `hvac_modes`: without it the component drops `set_humidity` /
@@ -69,32 +66,14 @@ Full inventory with roles: design `AF-2` (inputs, thresholds, indicators, actuat
 `AF-9` (helpers). Season thresholds: `input_number.heating_indicator_*` (design `AF-4`).
 
 ## Decisions in force
-### Template sensor pattern — trigger-based vs state-based
-A derived template `binary_sensor` whose inputs are **only other (slow) binary sensors** MUST be
-**state-based** (plain `state:`, no `trigger:`). Trigger-based template sensors restore their last
-state on HA **restart** and recompute only when an input **changes** — so a derived-from-binaries
-sensor can restore **stale** and never resync.
-Reserve trigger-based + restore for **primary** decision sensors driven by continuously-drifting
-numeric filters (outdoor temp/dew, weather-station temp): there the drift guarantees a recompute
-within ~1 debounce after restart, and restoring preserves the 10-min delay + `this.state` Schmitt
-hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unknown`), **not**
-*restart* (comes up with a restored value), so it does not protect against restart-stale.
-
 ### Ventilation controller (`automation.airflow_ventilation_controller`, Section 2) rules
-- Gate preset/auto ownership on the **decision** (`ventilation` attribute — boost ⊂ flush intent),
-  NOT the boost/auto switches, which flap during boost expiry/re-enable races.
-- While a boost is intended/running: write **no preset** and only ever turn `auto_mode` **ON** (or do
-  nothing). The boost-owner branch is first in the `choose` and matches on the intent, so the `choose`
-  EXITS there and the Low/Medium branches (which turn auto off / write a preset) can never cancel the
-  boost. Boost gives HIGH meanwhile, so the underlying preset is moot until boost ends.
-- Force `preset=medium, auto=off` only when medium is decided and the schedule is holding
-  `preset=low`; `auto=on, preset=medium` is the preferred state and must not be re-forced.
+- Boost ownership (first `choose` branch) = decision `ventilation == 'boost'` OR boost switch `on`
+  (adopts a manual boost); never the boost/auto switches alone, which flap during boost
+  expiry/re-enable races, and never `preset == high`. Branch logic: design `AF-7.1`.
 - Prefer minimal, surgical controller edits over restructures; retain existing branch behaviour unless
   a change is required to fix a specific defect.
 
 ## Known biases / open issues
-- Boost residual risk (accepted): a single dropped re-arm lets the boost lapse; it restarts at the
-  next edge.
 - `drying_needed` reads `input_number.airflow_cooling_target_temperature | float(21.5)`, a fallback
   default on a helper that the repo rule forbids (code, not fixed in a docs step). → GitHub issue #142
 
@@ -110,15 +89,15 @@ hysteresis. Note the `to: "unknown"` self-trigger covers *reload* (comes up `unk
   follow-up runs repeat their write. Only the two airflow automations are on (`airflow_ha`): the
   pergola cover response waits on timers longer than a clock move and hangs the test.
 - After a real `template.reload` the trigger-based indicators come back with their previous state
-  at once (not `unknown`, as some YAML comments say; #155); the `to: "unknown"` self-triggers
+  at once (#155); the `to: "unknown"` self-triggers
   still recompute. `template.reload` logs a TemplateError for `sensor.solar_yield_watts` (allowed
   by name in `test_reload_recovery`, #155).
 - The 5-min filter sensors and the 48h statistics sensor get other ids on a fresh registry than
   the templates read (#146).
 - CONFIRMED config bug, `test_drying_boost_unavailable_to_boost_does_not_fire` (strict xfail,
   #153): a flush input going briefly unavailable restarts a running boost (decision unavailable →
-  medium → boost is a real edge, boost time and ON re-sent). Contradicts the rule "decision
-  unavailable → boost is NOT an edge".
+  medium → boost is a real edge, boost time and ON re-sent). So AF-7.2's "`unavailable → boost` is
+  not an edge" holds only for the direct transition, not for an input flap.
 - `climate_template` echoes every `hvac_mode_template` change into the `set_hvac_mode` action
   (e.g. automatic control off writes the device's current profile back, #154); effect on the
   device UNPROVEN.
