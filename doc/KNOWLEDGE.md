@@ -73,11 +73,17 @@ One home per kind of fact. Ask the question of each home in order; the first "ye
   | invariant and the mechanism that keeps it | per-block behaviour already commented in the YAML |
   | how to verify a change (identities that must hold) | test lists, restated test cases |
 
-  Refer to a component by its role. An entity id appears at most as the label where a component
-  or interface is introduced, never as a list or map. A number appears only when the design
+  Refer to a component by its role. Never write an entity id: HA derives ids from device, area and
+  name (`.claude/rules/ha-yaml.md`), so an id is registry state, not design. Name a concept, an
+  entity by its name, or the source attribute where it originates (an ebusd register, a Somfy
+  property, a Venus OS path). Never a list or map of entities. A number appears only when the design
   depends on it (a derived constant, an oracle table a test asserts against). Point, never copy:
   `(note: Entity map)`, `(note: <section>)`, `(YAML: <automation alias or sensor name>)`,
   `(test: <test name>)`, `→ doc/<pkg>/design.md#ID` between design docs.
+
+  Existing design docs are not rewritten for this alone. Whoever edits a design doc for another
+  reason, or finds a mistake in it, also replaces any entity id, entity list or map in the part
+  they touch with a role, name or source attribute.
 
 ## K-2 Current vs background
 
