@@ -15,125 +15,59 @@ formulas, rain/frost protection). Design (state machine, formulas, deadband, ver
 `doc/pergola/design.md` (`PG-1` … `PG-8`). This note holds what you must not break.
 
 ## Invariants
-- **Group + card sync.** Every new or removed pergola entity (`input_*`, `sensor`,
-  `binary_sensor`, `script`) is added to or removed from `group.pergola_dach` (bottom of the YAML)
-  AND `dashboards/elements/pergola_card.yaml` in the same change. Card sections: *On/Off Toggles*,
-  *State of Automation*, *States and Sensors*, *Parameters*. Exceptions today: the internal
-  helpers `input_number.pergola_last_set_slat_angle` and `pergola_rain_recovery_step` are in
-  neither (their sensors are).
-- **No `device_id:` / `device:` on template entities**, and no UI device assignment: both fail.
-  Grouping is only via the group + card.
+- **Group + card sync.** Every new or removed pergola `input_*`, `sensor` or `binary_sensor` is
+  added to or removed from `group.pergola_dach` (bottom of the YAML) AND
+  `dashboards/elements/pergola_card.yaml` in the same change. Explicitly in neither (internal):
+  `input_number.pergola_last_set_slat_angle`, `input_number.pergola_rain_recovery_step`.
+- **No `device_id:` / `device:` on template entities**, and no UI device assignment: both fail
+  (the YAML schema has neither key, source 2026.11.1; UI assignment OBSERVED to fail). Grouping
+  is only via the group + card.
 - **No template wrappers** around `input_*` helpers. Automations and templates use the
   `input_*` entity IDs directly.
-- **One state writer set.** Only `pergola_state_manager`, `script.pergola_evaluate_state`,
-  `script.pergola_exit_to_normal` and the two `pergola_not_enough_sun_*` automations write
-  `input_select.pergola_automation_state` (plus the user, to break a deadlock).
-- **State priority:** frost > rain > rain_stopped > user_override > sun_down >
-  no_sun_behind_house > not_enough_sun > sun_automatik_heating > sun_automatik_cooling
-  (`PG-2.2`). Protected states (frost, rain, rain_stopped, user_override) leave only via their
-  own exit rule; only the recovery script exits `rain_stopped` (frost/rain entry may abort it).
+- **State writers:** only those listed in `PG-2` (and on `input_select.pergola_automation_state`)
+  write the state; a new writer is added to both.
+- **Protected states** (frost, rain, rain_stopped, user_override) leave only via their own exit
+  rule; only the recovery script leaves `rain_stopped` (frost/rain entry may abort it). Priority
+  order: `PG-2.2`.
 - **One cover mover.** `script.pergola_set_slat_angle` is the only place that converts slat
   angle → tilt and sends `cover.set_cover_tilt_position` (always both covers). Never inline the
-  formula; `sensor.pergola_tilt_position` only mirrors it. Correction is **6** below 20°, 5.5
-  below 69°, 0.5 above (`PG-4.6`); any copy that says 7 is stale.
-- **Master switch semantics.** `input_boolean.pergola_automatic_enabled` off only stops cover
-  movement (the script's first condition), including the post-rain drain. The state machine and
-  all template sensors keep computing; never gate a sensor on it.
-- **`pergola_heating` comes from the indicator.** `automation.pergola_sync_heating_from_indicator`
-  sets it from `sensor.heating_cooling_indicator` (on: `active_heating`, `neutral`; off:
-  `passive_cooling`, `active_cooling`; untouched while unavailable). Manual toggles are
-  overwritten at the next indicator change or HA start. It changes only the formula, not the
-  state priority.
-- **Watchdogs stay suppressed while moving** (states cooling, heating, rain_stopped), or their
-  `stop_cover_tilt` aborts a movement mid-travel (`PG-2.4`).
-- **Deadband compares tilt units**, max deviation of both covers (`PG-5`).
+  formula; `sensor.pergola_tilt_position` only mirrors it (`PG-4.6`).
+- Master switch only stops cover movement, never gate a sensor on it (`PG-6.3`); watchdogs stay
+  suppressed in the moving states (`PG-2.4`); the deadband compares tilt units (`PG-5.1`).
 
 ## Hardware / integration quirks
-- The Somfy never pushes lock/timer changes; HA only sees them after a forced state report
-  (watchdog every 5 min, lock-originator responders, or any movement command). Lock clear is seen
-  ≤ 5 min after the 900 s countdown ends. Tilt reported while locked is unreliable.
-- `sensor.victron_solar_yield_dc_watts` goes unavailable at night (MPPT stops publishing,
-  `expire_after: 120`). `sensor.pergola_pv_power` then reports 0 while
-  `sensor.victron_ac_load_total_power` is available, so `sun_down` works. Use the raw DC sensor,
-  not the AC-referenced `sensor.solar_yield_watts` (factor is calibrated on panel output).
+- Somfy: lock/timer changes are never pushed, HA sees them only after a forced state report
+  (`PG-2.4`). Tilt reported while locked is unreliable: never base a decision on it.
 - Weather station prefix is spelled `sensor.wheatherstation_` (sic).
 
-## Entity map (short)
-| Entity | Role |
+## Entity map
+Full map: `doc/pergola/design.md#PG-7`. Automation entity IDs (looked up live; neither `id:` nor
+alias is a reliable source):
+
+| Automation | Entity ID |
 |---|---|
-| `input_select.pergola_automation_state` | state machine, 9 options |
-| `input_boolean.pergola_automatic_enabled` / `_heating` / `_cooling_optimized` | master / season / cooling sub-mode |
-| `input_number.pergola_deadband_angle` | deadband and optimized-morning buffer |
-| `input_number.pergola_max_tilt_angle`, `_wall_azimuth`, `_slat_width`, `_slat_pivot_spacing`, `_slat_thickness` | geometry |
-| `input_number.pergola_pv_conversion_factor`, `_shading_sensitivity`, `_min_sun_elevation` | sun detection |
-| `sensor.pergola_effective_sun_angle` | A_eff, main debug value |
-| `sensor.pergola_slat_angle` / `_tilt_position` | target for the current state |
-| `sensor.pergola_effective_slat_angle` | last angle actually commanded |
-| `sensor.pergola_max_open_east_morning_cooling_angle` / `_max_open_west_cooling_angle` | moe / mow |
-| `sensor.pergola_cooling_lower_bound` / `_min_heating_slat_angle` | derived floors (15° / 33.5°) |
-| `binary_sensor.pergola_sun_shining` | shading needed |
-| `sensor.dach_{links,rechts}_priority_lock_originator` / `_lock_timer` | Somfy lock |
-
-### Recommended UI values
-Former defaults; set them in the UI after deploy (no `initial:`). The template `float(...)`
-fallbacks that mirror them go away with #142.
-
-| Helper | Value |
-|---|---|
-| `input_number.pergola_shading_sensitivity` | 0.9 (= 90 % of the baseline) |
-| `input_number.pergola_min_sun_elevation` | 10° |
-| `input_number.pergola_pv_conversion_factor` | 3.2 |
-
-The other helpers' values are on each helper in the YAML (baselines: `doc/pergola/design.md#PG-3.2`,
-`PG-1`). Automation entity IDs come from their `id:` (e.g.
-`automation.pergola_cover_response`); the watchdogs and lock responders have numeric ids.
+| Inactivity watchdogs | `automation.inactivity_watchdog_dach_links` / `_dach_rechts` |
+| Lock responder links | `automation.update_cover_state_when_lock_originator_changes` (old name, fixed at registration) |
+| Lock responder rechts | `automation.dach_rechts_update_state_when_lock_originator_changes` |
+| Others | `automation.pergola_state_manager`, `_cover_response`, `_not_enough_sun_entry` / `_exit`, `_sync_heating_from_indicator` |
 
 ## Decisions in force
-- Season from the indicator only; room temperature is not used.
-- Standard cooling is the default formula; optimized (safe-zone max-open) is opt-in via
-  `pergola_cooling_optimized`. Flip range/afternoon use `mow − 5`, morning `moe + DB`
-  (`PG-4.3`).
 - `/5` time pattern instead of triggers on `sun.sun` attributes (they change every minute).
-- Frost conditions are value-based with fail-safe defaults (entry `float(99)`, exit `float(0)`)
-  so a dropped `numeric_state` trigger cannot strand the state (`PG-2.2`).
-- `no_sun_behind_house` always sends 90°; `not_enough_sun` only moves if > 30° off; `sun_down`
-  never moves (slats stay at night).
-- Post-rain drain 8° → 15° (8° only if hourly rain > 0); calibration still open.
+- Other decisions and their why: `PG-1` (season), `PG-2.1` / `PG-5.2` (per-state moves),
+  `PG-4.3` (cooling sub-modes), `PG-6.1` (drain).
 
 ## Known biases / open issues
-- **Helper fallback defaults contradict the repo rule (open, user decides).**
-  The `sensor.pergola_slat_angle` template (and most other templates in the file) read helpers
-  and guarded sensors with `| float(122)`, `| float(5)`, `| float(15.3)` etc.
-  `.claude/rules/ha-yaml.md` forbids fallback defaults on `input_*` helpers and on guarded sensor
-  reads. This is code, not a comment: fixing it needs a test run. → GitHub issue #142
+- Helper reads use fallback defaults (`| float(122)` …), against `.claude/rules/ha-yaml.md`:
+  GitHub issue #142 (helper reads only). The sensor-read fail-safes are deliberate and stay:
+  frost entry `float(99)` / exit `float(0)` (`PG-2.2`), sun_down `float(-1)`.
 - Field calibration (PV factor, shading sensitivity, wall azimuth, drain angles, rain lock):
   `plans/pergola-field-calibration.md`.
-- Flaky Docker-era test `test_sun_down_state` (effective angle 90 instead of 45, once in CI): GitHub issue #143 (cause UNPROVEN); the Docker test is gone, `test_sun_rules` covers the rule in-process.
 
-## Tests (`tests/ha/test_pergola.py`, in-process; 14 tests)
-- Real `sun` integration at the configured location on the moved clock (`sun.sun` is not seeded);
-  all automations run through real triggers and conditions, never `automation.trigger`. Weather
-  station, Somfy covers and lock sensors are seeded; Victron PV/load go over the real broker; the
-  season is the real indicator driven through its 48h mean. Effects are the recorded cover/Loxone
-  calls, attributed to the automation by its `automation_triggered` context.
-- Formula tests pick real sun positions per branch of the slat formulas and compare HA's sensors
-  AND the sent tilt with an independent port (`_Ref`, anchored to the PG-4.8 table by
-  `test_reference_model`); `test_automation_set_is_complete` fails when an automation has no test.
-- The cover response's `delay: 500 ms` never comes due on a frozen clock; `_settle` moves the
-  clock to a pending script delay only when it is at most 0.6 s away (1.0 s was wrong: a drain
-  delay with 1 s left was reached one step too early).
-- The post-rain drain script must not be running at the end of a test, else HA's shutdown hangs
-  on the frozen clock (`pergola_env` stops it at teardown; a scenario never ends with a step that
-  starts it).
-- Watchdog test race, fixed: before `not_enough_sun` the cover response may or may not move the
-  covers (the 12:05/12:10 ticks race the state change), and a move at 12:10:30 makes the 12:15:30
-  watchdog tick see a fresh update. The test reports the covers at 12:11:30 and counts the window
-  from there.
-- Rule 2 → user_override: with `rain_rate > 0` and both locks `unknown` the state goes
-  user_override → rain in the same run (rain entry comes before the exit rule); CONFIRMED by state
-  trace, the test asserts it, and the YAML comment now says so.
+## Tests (`tests/ha/test_pergola.py`)
+- How the package is driven (real sun, seeded Somfy/weather, `_Ref`): module docstring.
+- The cover response's 500 ms delay never comes due on the frozen clock: `_settle` reaches only
+  delays ≤ `_SHORT_DELAY` (0.6 s); never raise it to 1 s (see its comment).
 
 ## Related
-- `doc/pergola/design.md`: current design.
 - `packages/heating_cooling_indicator.yaml`: source of the season.
 - `packages/victron.yaml`: PV source sensor.
