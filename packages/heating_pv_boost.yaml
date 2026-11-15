@@ -390,7 +390,8 @@ mqtt:
 # No initial: values anywhere — HA resets to initial on every restart and would overwrite a tuned
 # value. Set these once in the UI after deploy.
 input_boolean:
-  # Master switch for the whole slab-charging feature. Default off; Phase 1 does not act at all.
+  # Master switch of the slab decision. Default off. With heating_comfort_control_enabled also on,
+  # a slab decision is written to the heat pump (→ doc/heating_pv_boost/notes.md "Invariants").
   heating_pv_boost_enabled:
     name: "Heating PV Boost Enabled"
     icon: mdi:solar-power-variant
@@ -433,8 +434,8 @@ input_number:
 
   # How far above the normal heating-season setpoint a slab charge is allowed to push.
   # This cap bounds comfort during a boost: it shifts the weather curve by this much, and with
-  # Raumaufschaltung off no room feedback limits it. Keep it small — a crash mid-boost leaves the
-  # house held at this offset until the watchdog runs.
+  # Raumaufschaltung off no room feedback limits it. Keep it small: a setpoint written before an HA
+  # crash stays on the Vaillant until HA writes again. → doc/heating_pv_boost/design.md#HPB-1 row 3
   heating_boost_offset:
     name: "Heating Boost Offset"
     min: 0.5
@@ -829,7 +830,7 @@ template:
 
       # ── The mode HA wants (Phase 2 decision) ──────────────────────────────
       # Control-law rows 2-7 as on / off / none; reads no actual register, so a write cannot
-      # feed back into it. → plans/ebusd-pv-heating-optimization.md "Control law"
+      # feed back into it. → doc/heating_pv_boost/design.md#HPB-1
       - name: "Heating Wanted Operating Mode"
         unique_id: heating_wanted_operating_mode
         default_entity_id: sensor.heating_wanted_operating_mode
@@ -929,7 +930,7 @@ template:
       # First match wins: compressor (hot water / heating), then pump only (hot-water run-on /
       # passive cooling / passive heating), else off. Cooling uses hvac_action, i.e. what the
       # machine does now, not the cooling interlock (that one also fires on a mere request).
-      # → doc/heating_pv_boost/notes.md "Energy modes"
+      # → doc/heating_pv_boost/design.md#HPB-2
       - name: "Heating Energy Mode"
         unique_id: heating_energy_mode
         default_entity_id: sensor.heating_energy_mode
@@ -1088,7 +1089,7 @@ template:
       # ── THE DECISION ──────────────────────────────────────────────────────
       # Read by sensor.heating_wanted_operating_mode and sensor.heating_target_temp (control-law
       # row 3), which automation.heating_comfort_control writes while armed
-      # (plans/ebusd-pv-heating-optimization.md).
+      # (→ doc/heating_pv_boost/design.md#HPB-1).
       #
       # Two thresholds, not one: a single number would chatter around the boundary. The Schmitt
       # logic reads this.state, so once charging it holds until surplus falls below the lower
@@ -1274,12 +1275,13 @@ automation:
   # Driven off transitions of the reason-based state sensor and the liveness sensors, so a
   # persistent fault reports once rather than repeating.
   #
-  # Phase 1 deliberately does NOT notify on a mismatch between sensor.geotherm_heating_temp_desired and
-  # sensor.heating_target_temp: HA is not writing yet, so a difference is expected and would be
-  # pure noise. That alert belongs in Phase 2, where it means a genuine manual change.
+  # No notification on a mismatch between sensor.geotherm_heating_temp_desired and
+  # sensor.heating_target_temp: the comfort control corrects it itself while armed
+  # (→ doc/heating_pv_boost/notes.md "Invariants").
 
-  # Losing ebusd means HA can see nothing and (from Phase 3) could write nothing. The Vaillant
-  # carries on standalone, so this is a "you have lost visibility" alert, not an emergency.
+  # Losing ebusd means HA can see nothing and write nothing (the comfort control is gated on ebusd
+  # online). The Vaillant carries on standalone, so this is a "you have lost visibility" alert,
+  # not an emergency.
   - alias: "Heating: ebusd connectivity changed"
     id: heating_ebusd_connectivity_changed
     description: "Alert when the ebus bridge goes silent or comes back"
@@ -1439,9 +1441,10 @@ automation:
     mode: queued
     max: 10
 
-  # Phase 1 is an observation phase: this reports what the controller WOULD have done, so the
-  # thresholds can be judged against real days before any register is written. Retire or quieten
-  # this once Phase 3 makes the decision visible through actual behaviour.
+  # Reports each slab-decision flip, so the thresholds can be judged against real days. With
+  # input_boolean.heating_comfort_control_enabled also on, the decision IS written: the message's
+  # "nothing was written" line is then wrong
+  # (→ doc/heating_pv_boost/notes.md "Known biases / open issues").
   - alias: "Heating: slab charge decision changed"
     id: heating_slab_charge_decision_changed
     description: "Phase 1 observation — report when the slab-charge decision flips"

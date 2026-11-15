@@ -2,7 +2,7 @@
 
 `automation.heating_comfort_control` writes `ebusd/mc/OperatingMode/set` (names `on`/`off`) and
 `ebusd/mc/TempDesired/set` (absolute, one decimal) from `sensor.heating_wanted_operating_mode`
-and `sensor.heating_target_temp`; the plan's "Control law" rows 1-7 are the spec.
+and `sensor.heating_target_temp`; `doc/heating_pv_boost/design.md#HPB-1` rows 1-7 are the spec.
 
 How the inputs get in (real broker; the assertions read what HA published to it):
 - the read-backs (`mc/OperatingMode`, `mc/TempDesired`), `ehp/Status`
