@@ -143,12 +143,14 @@ energy_in  += max(−batt_inc, 0);   energy_out += max(batt_inc, 0)
   (mode transition, sampling skew, expired current) would advance one side and bias η; the shared
   gate drops such ticks from both.
 - `victron_multiplus_conversion_efficiency` (plain, `%`, no `device_class`: `power_factor` is the
-  only `%` class and would mislabel it) has **no `availability:`** and always returns a number, so
-  `solar_ac` / `batt_ac` never go unavailable because of it:
+  only `%` class and would mislabel it) has **no `availability:`** and always returns a number: it
+  returns the bootstrap itself (the value consumers fall back to), so a guard would only add
+  gaps to its history:
   - either accumulator `unknown`/`unavailable`, or `E_dc_in < 1.0 kWh` → `100.0` (the 1.0 guard is
     also the division-by-zero guard);
   - else `clamp(E_ac / E_dc × 100, 50, 100)`, rounded to 0.1.
-- Consumers read η with `| float(100)` in the trigger block, `| float` in `solar_yield_watts`.
+- Consumers read η with `| float(100)` (trigger block and `solar_yield_watts`), so a briefly
+  unavailable η at startup/reload falls back to the bootstrap value instead of raising (#155).
 - A clamp pinned at exactly 50 or 100 % for days means a sign or topology error; cross-check
   `mp_ac_net` against VRM "MultiPlus AC out".
 - Normal value ≈ 85 % (note). One ratio for all loads is a known simplification; load dependence

@@ -350,7 +350,7 @@ template:
       # ── Inverter efficiency (η) — long-run accumulated ratio ─────────────────
       # η = AC energy out / DC energy in, both accumulated while inverting (trigger block below);
       # energy ratios average out AC/DC sampling skew.
-      # NO availability: always a number so solar/battery never go unavailable because of it.
+      # NO availability: it returns the 100 % bootstrap itself, the value consumers fall back to.
       # 100 % bootstrap while an accumulator is missing or dc_in < 1.0 kWh (also the divide-by-
       # zero guard); otherwise clamped to 50..100 %. → doc/victron/design.md#VIC-7
       - name: "Victron MultiPlus Conversion Efficiency"
