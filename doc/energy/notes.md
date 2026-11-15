@@ -1,9 +1,8 @@
 ---
 paths:
   - "packages/energy.yaml"
-  - "tests/ha/test_energy_wallbox.py"
-  - "tests/ha/test_energy_pool_pump.py"
-  - "plans/energy-live-entity-ids.md"
+  - "tests/ha/test_energy_*.py"
+  - "plans/energy-*.md"
 ---
 # energy package notes (`packages/energy.yaml`)
 
@@ -28,39 +27,32 @@ wrapper, a swap is a one-line change to `state:`/`availability:` and nothing dow
 Corollaries:
 - **Normalise units in the wrapper** from the source's own `unit_of_measurement`
   (`state_attr(src, 'unit_of_measurement')`), rather than hard-assuming the source's scale. Vendor
-  firmware picks its own units and a replacement source will differ (go-e API v2 is natively W / Wh,
-  but its discovery payload may declare kW / kWh).
-- **Declare `device_class` / `state_class` on the wrapper.** Some discovery payloads omit
-  `state_class` (go-e's `total_energy_charged` does), which alone makes an entity unselectable in the
-  Energy Dashboard. The wrapper is where that is fixed.
-- **Lifetime counters use `state_class: total_increasing`**, so HA absorbs a counter reset (e.g. a charger factory reset) and
-  baselines on the first observed value instead of booking the pre-existing total as consumption.
+  firmware picks its own units and a replacement source will differ.
+- **Declare `device_class` / `state_class` on the wrapper.** A source without `state_class` is
+  unselectable in the Energy Dashboard, and discovery payloads do not always carry it. The wrapper is
+  where that is fixed.
 - **Never merge two sources into one statistic id.** Two chargers' lifetime counters have different
   absolute baselines; if the new one reads higher, `total_increasing` books the difference as real
-  consumption — a phantom spike of potentially thousands of kWh. Start a new series instead.
+  consumption — a phantom spike of potentially thousands of kWh. Start a new series instead (it
+  baselines on its first value).
 - Wrappers propagate `unavailable` rather than substituting `0`. A gap in the dashboard is honest;
-  a fabricated 0 on a counter is not. (`packages/pergola.yaml`'s PV wrapper maps stale→0 only because
-  a downstream rule requires `pv == 0` at night.)
+  a fabricated 0 on a counter is not.
 
 ### Loxone appliance sensors: no `expire_after`
 Loxone publishes only on change, has no heartbeat (an idle appliance is silent for hours or days),
 publishes a 0 when a draw ends and retains its last value for new subscribers. So the Loxone sensors
 have **no `expire_after`**: it would turn them unavailable while idle and break the Energy
 Dashboard; the held last value is the true draw (running) or 0 (idle). Loxone sometimes publishes
-an empty payload; their `value_template` passes it through as `''` (kept last value, no warning) — rule and source evidence in
-the `ha-mqtt` skill.
+an empty payload; the `value_template` keeps the last value (`ha-mqtt` skill).
 
 ## Hardware / integration quirks
 
 | Device | Integration / topics | Payload and units |
 |---|---|---|
-| Pool Pump, Rain Water Pump (Shelly Plus Plug S: `shellyplusplugs-pool-pump`, `shellyplusplugs-rainwaterpump`) | MQTT `shelly/<device>/status/switch:0` (JSON) | `apower` W; `aenergy.total` lifetime **Wh** → ÷1000 kWh; `voltage`, `current`, `output` (switch) |
-| Heizung (Shelly Pro 3EM `shellypro3em-heizung`) | bridged from a separate mosquitto broker under the `shelly/` prefix; `em:0`, `emdata:0` | Gen2/3 EM schema differs from Plug S: `em:0.total_act_power` already W; `emdata:0.total_act` cumulative all-phase **Wh** → ÷1000 kWh |
-| Washer, Tumble Dryer, Dishwasher (Loxone) | MQTT `loxone/<device>/power`, `loxone/<device>/energy`; `<device>` ∈ `washer`, `tumble-dry` (hyphen in the topic, underscores in HA ids), `dishwasher` | plain numeric (not JSON), 3 decimals; power natively **kW** (no scaling); energy lifetime kWh, updated at least every 5 min while it changes, silent when idle |
-| Wallbox (go-e Charger, serial `291401`) | the charger firmware's own MQTT auto-discovery: `homeassistant/<domain>/go-e_291401/*`, data `go-eCharger/<key>` | power from `nrg` (`nrg[11]`, all phases); energy from `eto` (lifetime, natively Wh); `total_energy_charged` ships without `state_class` |
+| Heizung (Shelly Pro 3EM `shellypro3em-heizung`) | bridged from a separate mosquitto broker under the `shelly/` prefix; `em:0`, `emdata:0` | Gen2/3 EM schema differs from the Plug S `switch:0` schema: `em:0.total_act_power` already W; `emdata:0.total_act` cumulative all-phase **Wh** → ÷1000 kWh |
+| Washer, Tumble Dryer, Dishwasher (Loxone) | MQTT `loxone/<device>/power`, `loxone/<device>/energy` | plain numbers; publish on change only (invariant above) |
+| Wallbox (go-e Charger, serial `291401`) | the charger firmware's own MQTT auto-discovery: `homeassistant/<domain>/go-e_291401/*`, data `go-eCharger/<key>` | power from `nrg` (`nrg[11]`, all phases); energy from `eto` (lifetime, natively Wh) |
 
-- Shelly lifetime counters reset only on a factory reset; `total_increasing` absorbs a reboot dip.
-- All Shelly entities use `expire_after: 120`; the Loxone ones have none (invariant above).
 - The go-e source entities are owned by the MQTT integration; their ids can change if the device is
   re-paired. In YAML only the wallbox wrapper's `state:`/`availability:` reference them; the seeds
   in `tests/baseline.py` and `tests/ha/test_energy_wallbox.py` must change with them.
@@ -83,35 +75,17 @@ is open: `plans/energy-live-entity-ids.md`.
 ## Decisions in force
 - The wallbox comes from the go-e firmware's own MQTT discovery, not evcc: the previous evcc
   loadpoint 1 sensors republished far too slowly to track a live charge session.
-- Wallbox power is display-only and goes unavailable when the charger drops off MQTT, rather than
-  reporting a misleading 0.
 
 ## Known biases / open issues
-- MQTT sensors without `default_entity_id`: ids depend on the old registry (#146).
+- None beyond #146 (Entity map).
 
 ## Tests
-- `tests/ha/test_energy_wallbox.py`: one looping test over the go-e SOURCE entities (explicit units, energy
-  without `state_class`), asserting on the WRAPPER, so the template incl. unit normalisation (W/kW,
-  Wh/kWh) and availability run. Source entities have no real path in CI and are seeded.
-- `tests/ha/test_energy_pool_pump.py`: Shelly Plus Plug S payloads go over the real broker through
-  the real `value_template`s; every case checks all five entities (power, energy, voltage,
-  current, switch).
-- New source entities need a seed in `tests/baseline.py`; `tests/ha/test_templates.py` renders every
-  `state:` template strictly and fails on a sentinel output.
-- `tests/ha/test_energy_expire_after.py` (frozen clock): the pool pump, rain water pump and Pro 3EM
-  entities go `unavailable` after 120 s and come back with a message; the Loxone meters and every
-  ebusd register keep their value for a week (an `expire_after` added to one fails). The Loxone
-  comfort flag expires after 24 h (`doc/heating_pv_boost/notes.md`).
-- `tests/ha/test_energy_shelly.py`: the rain water pump (all five entities) and the Heizung Pro 3EM
-  power/energy get the live payloads verbatim (odd spacing, `null` fields, unused phase data) plus
-  variants (running pump, rounding, relay on/off, null energy block, export). A null `aenergy` block
-  on the plug is ignored silently (HA swallows the undefined-attribute render), a null `total_act`
-  on the Pro 3EM would log a warning without the template's `is not none` branch.
-- `tests/ha/test_energy_loxone.py`: the six Loxone washer/tumble-dry/dishwasher power and energy
-  sensors (and `loxone/heating/warm_enough`) get the live broker payloads over the real broker, plus
-  non-zero power sequences (representative kW values, not captured), rounding, whitespace and empty
-  payloads (ignored, last value kept), and their units are asserted. A non-numeric payload on these
-  six is not tested: their template guards only the empty payload (it would raise).
+- The Plug S energy template's `aenergy is not none` guard is not testable: a null block is silent
+  with or without it (an undefined attribute logs nothing, `ha-test-harness`). The Pro 3EM's
+  `total_act is not none` guard is tested: without it a null `total_act` logs a warning
+  (`tests/ha/test_energy_shelly.py`).
+- A non-numeric payload on the six Loxone meters is not tested, accepted by the owner: their template
+  guards only the empty payload, so it would raise (warning, last value kept).
 
 ## Related
 - `doc/heating_pv_boost/notes.md` — consumer of the Heizung Pro 3EM power/energy.

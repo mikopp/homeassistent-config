@@ -11,8 +11,8 @@ One looping test on ONE fresh HA (stateless templates, no clock); each topic's p
 WITHOUT a reset, so "null keeps the last value" is checked against the previous step's value.
 Failures are collected; one assert names every failing step; any mqtt WARNING fails it too (a
 template that raises keeps the last state and only logs). The pool pump's own cases are in
-test_energy_pool_pump.py; the Pro 3EM's expiry and its use in the heating package are in
-test_heating_pv_boost.py.
+test_energy_pool_pump.py; the Pro 3EM's expiry is in test_energy_expire_after.py, its use in the
+heating package in test_heating_pv_boost.py.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Wallbox wrapper sensors (packages/energy.yaml), in-process.
 
 sensor.wallbox_power / sensor.wallbox_energy are source-independent wrappers: the Energy
-Dashboard references them, never the go-e MQTT entities. The go-e firmware's discovery payload
-may declare either W/Wh or kW/kWh, so the wrappers normalise the unit.
+Dashboard references them, never the go-e MQTT entities. The wrappers read the source's
+unit_of_measurement instead of assuming one, so W/Wh and kW/kWh sources are both covered.
 
 The go-e entities come from
 MQTT discovery in production (not from this repo's YAML), so there is no real path for them in
@@ -32,8 +32,8 @@ def _power(value: str, unit: str = "W") -> tuple[str, dict]:
 
 
 def _energy(value: str, unit: str = "Wh") -> tuple[str, dict]:
-    """A go-e lifetime-energy state. No state_class: the go-e payload omits it, which is why the
-    wrapper supplies total_increasing itself."""
+    """A go-e lifetime-energy state, seeded WITHOUT state_class: the wrapper must supply
+    total_increasing itself whatever the source declares."""
     return value, {"unit_of_measurement": unit, "device_class": "energy"}
 
 
