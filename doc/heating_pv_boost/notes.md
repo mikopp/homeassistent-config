@@ -3,8 +3,11 @@ paths:
   - "packages/heating_pv_boost.yaml"
   - "tests/ha/test_heating_pv_boost.py"
   - "tests/ha/test_heating_pv_boost_comfort.py"
+  - "tests/ha/test_heating_pv_boost_ebusd_registers.py"
+  - "tests/ha/test_heating_pv_boost_rolling.py"
   - "tests/e2e/test_restart.py"
   - "dashboards/heating-dashboard.yaml"
+  - "doc/heating_pv_boost/design.md"
   - "plans/heating-*.md"
   - "plans/ebusd-*.md"
 ---
@@ -12,7 +15,10 @@ paths:
 
 Current facts for `packages/heating_pv_boost.yaml` (PV slab charging; Phase 1 = read-only decision
 layer, Phase 2 = comfort control, the only writer, off until armed; rollout in
-`plans/ebusd-pv-heating-optimization.md`). No design doc yet.
+`plans/ebusd-pv-heating-optimization.md`).
+**Design** (on demand): `doc/heating_pv_boost/design.md`: HPB-1 control law (read it before
+changing `sensor.heating_wanted_operating_mode`, `sensor.heating_target_temp` or
+`automation.heating_comfort_control`), HPB-2 energy-mode table.
 **Register decodes** (field lists, enums, unusable registers, tuning and cooling registers):
 `doc/heating_pv_boost/registers.md`, not auto-loaded; read it before adding or parsing
 a register.
@@ -31,6 +37,9 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   `in` the sensor stays `unavailable`; without `/get out` the `?N` poll silently never arrives;
   without `/set out` a write fails silently. List the exact lines in the PR's post-deploy steps.
   Prove a new `/set` line with an idempotent write of the CURRENT value only.
+- **Every register HA reads gets a `?N` in `automation.heating_ebusd_poll_registration`** (and in
+  the `_POLLS` literal of `tests/ha/test_heating_pv_boost_ebusd_registers.py`), or it is never
+  polled (or no longer after the next ebusd restart, see "Polling").
 - **Do NOT enable `--mqttjson`.** The Loxone integration consumes the same topics as plain
   `;`-separated values. Multi-field messages are parsed positionally; document the field list
   inline at every such sensor. Field *position* is stable across config generations even where
@@ -40,15 +49,22 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   `mc/OperatingMode` reads `low`, `mc/CoolingRequestHc2` reads `0`). **Writes take names**
   (`on`, `off`); never echo a normalised read back on a write.
 - **Never register a poll priority while `ebusd/global/scan` reads `running`** (owner-confirmed):
-  the catalog may be mid-discovery. `automation.heating_ebusd_poll_registration` gates every
-  trigger on `scan != 'running'` (not an allowlist of resting values: whether the steady state is
-  `finished` or `OK` is undocumented).
+  the catalog may be mid-discovery. Gate on `scan != 'running'`, never on an allowlist of resting
+  values: ebusd does not document which one it settles on (owner sees `finished`; the YAML also
+  accepts `OK`).
 - **`input_number.heating_comfort_temp` is the only comfort knob.** Every setpoint HA writes is
-  derived from it, so `mc/TempDesired` set at the wall will be overwritten. The target is always
-  absolute, never "current + offset".
+  derived from it. While the writer is armed, `mc/TempDesired` or `mc/OperatingMode` set at the
+  wall is overwritten when its read-back reaches HA: the mode once the 30 min hold allows (the
+  hold's end re-triggers), the setpoint unless HA published one in the last 5 min (then only at
+  the next input change: there is no periodic re-check). The target is always absolute, never
+  "current + offset" (a relative write compounds on a retry or a restart mid-boost).
 - **`mc/TempDesiredLow` gets no HA logic** (not read, derived from or written): it is the
   machine's frost floor (see "Frost protection"), set by hand at the panel. Deriving comfort from
   it would force it to comfort level and make `off` ineffective below 3 °C.
+- **Two switches arm hardware writes.** `input_boolean.heating_comfort_control_enabled` arms the
+  writer; with `input_boolean.heating_pv_boost_enabled` also on, a slab decision writes mode `on`
+  and comfort + 1 + offset (HPB-1 row 3), so the slab boost acts through the Phase 2 writer
+  without a Phase 3 automation.
 - **No hysteresis or toggle faster than 20 min** (`ehp/TimeBetweenTwoCompStartsMin` = 1200 s).
 
 ## Hardware and integration quirks
@@ -80,32 +96,31 @@ bridged: keep it that way rather than widening to `ebusd/#`.
 - `?N` (N = 1-9) to `ebusd/<circuit>/<name>/get` reads now AND enables ongoing polling at
   priority N; an empty payload is a one-time read only. Priority is a relative weight ("every Nth
   poll cycle"), not seconds.
-- **A runtime-set priority does not survive an ebusd restart** (owner-confirmed), so the
-  registration automation re-asserts all of them on HA start, ebusd running, bus data back, and
-  scan finished/OK. Every register is registered, including `ehp/Status` (it goes quiet while the
-  compressor idles).
+- **A runtime-set priority does not survive an ebusd restart** (owner-confirmed); the
+  registration automation re-asserts every one (triggers: its YAML).
 - ebusd process status is retained under `ebusd/global/*`: `running` (`true`/`false`, `false` as
-  MQTT last-will), `scan` (`OK`/`running`/`finished`), `version`, `uptime`, `signal`.
+  MQTT last-will), `scan` (`running` during discovery, see "Invariants"), `version`, `uptime`,
+  `signal`.
 - Unchanged registers are not re-reported, so the poll rate of slow registers (`TempDesired`
   etc.) cannot be read back from HA.
 
 ### Compressor and measurements
 
-- **Two views of a compressor run.** `hcmode` stays `heat` while the circulation pump idles
-  between runs, so it never says whether the compressor runs. The run statistics and the energy
-  mode read `ehp/Comp` (on/off, no `expire_after`, so a dropout cannot split a run). The Shelly
-  clamp `sensor.technikraum_heizung_heizung_power` (Pro 3EM) stays the electrical view for the PV
+- **`hcmode` is not the compressor.** It stays `heat` while the circulation pump idles between
+  runs; run statistics and the energy mode read `ehp/Comp`. The Shelly clamp
+  `sensor.technikraum_heizung_heizung_power` (Pro 3EM) is the electrical view, used for the PV
   surplus: idle circulation ~83 W, standby ~9 W, heating ~1.8 kW, hot water ~3.5 kW
-  (owner-confirmed / measured); threshold 500 W. Pump state is `ehp/Hc1Pump`, as in the owner's
-  Loxone logic (which also uses `ehp/ActualEnvironmentPower` > 1; HA does not).
+  (owner-confirmed / measured). Pump state is `ehp/Hc1Pump`, as in the owner's Loxone logic
+  (which also uses `ehp/ActualEnvironmentPower` > 1; HA does not).
 - **No electrical-power or modulation register.** `ehp/Comp` is on/off and
   `ActualEnvironmentPower` is thermal display data, so the Shelly is the only electrical
   measurement.
 - **No buffer tank.** `uih/EhpHeatBufferAvailable` is `off`, both storage sensors read `cutoff`.
   The slab is the only thermal store, which is why `ehp/HcReturnTemp` reads its charge state.
-- **Resistive backup exists:** `ehp/BackupType` = `internalheatandwater`, `no_backup` on both
-  circuits. Never used in this house (owner), so HA reads no backup register and has no
-  backup gate.
+- **Resistive backup exists, disabled for heating:** `ehp/BackupType` = `internalheatandwater`,
+  `ehp/BackupModeHc` = `no_backup`, `ehp/BackupIntegral` −600. Never used in this house (owner),
+  so HA reads no backup register and has no backup gate. It must stay `no_backup` while
+  `CompIntegral` is deepened (start point = BackupIntegral + CompIntegral, registers.md).
 - Compressor timing: `TimeBetweenTwoCompStartsMin` 1200 s, `TimeCompOffMin` 300 s,
   `TimeCompOnMin` 240 s.
 - Thermal ceilings are hardware protections, not tuning targets: `mc/FlowTempMax` 35 °C,
@@ -113,22 +128,21 @@ bridged: keep it that way rather than widening to `ebusd/#`.
 
 ### Heating and cooling are separate mode axes
 
-`mc/OperatingMode` is heating only ("Betriebsmodus Heizen"); cooling is
-`mc/CoolingOperatingModeHc2`, so writing the heating mode cannot disturb cooling. Cooling has
-three stages: the setting `mc/CoolingOperatingModeHc2` (reads `On` all summer), the raw need
-`uih/CoolingDemand`, and the gated request `mc/CoolingRequestHc2`. Use the activity signals as
-interlocks, **never block on the setting** (it would disable heating permanently if not
-maintained seasonally). Cooling is released on **outdoor** temperature (15 + 2 = 17 °C), so
-writing `mc/TempDesired` does not move the threshold. Heating/cooling changeover delays are 6 h
-on the machine.
+`mc/OperatingMode` is heating only, so writing it cannot disturb cooling
+(`mc/CoolingOperatingModeHc2`). Interlock on the cooling activity signals (`uih/CoolingDemand`,
+`mc/CoolingRequestHc2`, `uih/CoolingActive`), **never on the setting**
+`mc/CoolingOperatingModeHc2`: it reads `On` all summer and would disable heating permanently if
+not maintained seasonally. Cooling is released on **outdoor** temperature, so writing
+`mc/TempDesired` does not move the threshold. Thresholds and changeover delays: registers.md.
 
 ### Frost protection: `off` still heats below 3 °C
 
 Below 3 °C outdoor (the geoTHERM's own sensor) with no time window active (`off`, or `eco`
-outside a window), after a default 1 h delay, the controller requests flow temperature for the
-room setpoint `mc/TempDesiredLow`; it ends above 4 °C (VWS 82/3 installation manual
-0020132514_00; user manual 0020087973_02 "Regelfrostschutz Heizung", §3.4.2). The floor pump
-runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
+outside a window), after a delay (default 1 h; register `uih/FrostOverRideTime`, catalog
+`15.uih.csv` "Frostschutzverzögerung", hours, installer write; set on the unit only, HA does not
+read it), the controller requests flow temperature for the room setpoint `mc/TempDesiredLow`; it
+ends above 4 °C (VWS 82/3 installation manual 0020132514_00; user manual 0020087973_02
+"Regelfrostschutz Heizung", §3.4.2). The floor pump runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
 `off`, hcmode `heat`, `Hc1Pump` on, energy mode `passive_heating`/`active_heating`: correct, not
 a bug. HA cannot stop it; only a lower `TempDesiredLow` limits it (owner: accepted). Whether the
 room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Keine`).
@@ -137,32 +151,25 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 
 - **Raumaufschaltung is `Keine`** (owner-confirmed): controller menu C5 (shown only with a VR 90)
   or the VR 90; not a cataloged ebusd register. Options (installation manual 0020132514_00):
-  - `Keine`: the VR 90 room temperature is not used for heating.
-  - `Aufschaltung`: the curve's flow setpoint shifts by (room desired − actual); a warm room
-    lowers it, so a slab boost is weakened (factor undocumented).
-  - `Thermostat`: heating stops at room desired + 1 K; would block a slab boost (the charge warms
-    the room). Vaillant: not for energy-balance control (this unit).
-  Keep `Keine`: Loxone's `warm_enough` is the only comfort input.
-- `mc/RoomTempOffset` (`b505 2d`) is write-only, so unusable as a lever. Do not confuse it with
-  `rcc/RoomTempOffset` (`1f00`, VR 90 sensor calibration): two registers sharing a name.
-- Holiday mode and `mc/Party` are unused (no Party button on the VR 90; holiday dates are 2015).
+  `Keine` ignores the VR 90 room temperature for heating; `Aufschaltung` shifts the curve's flow
+  setpoint by (room desired − actual), so a warm room weakens a slab boost (factor undocumented);
+  `Thermostat` stops heating at room desired + 1 K, which would block a boost (Vaillant: not for
+  energy-balance control). Keep `Keine`: Loxone's `warm_enough` is the only comfort input.
+- `mc/RoomTempOffset` is write-only (registers.md), so unusable as a lever.
 
 ## Owner-side configuration
 
-- Loxone **no longer writes** `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
-  **retained**, on change and re-sent **every hour** (owner, 2026-11-14). HA gives the entity
-  `expire_after` 24 h: silent Loxone → `unavailable` → "not warm enough" (heat); the retained
-  message and the restored state cover an HA restart. Loxone does not control room valves.
+- Loxone does **not** write `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
+  **retained**, on change and re-sent **every hour** (owner). Loxone does not control room valves.
 - **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
   is a pump matter, not a closed valve.
-- `mc/OperatingMode` = **`on`**, set by hand (owner, 2026-11-14; was `auto` with the time program
-  from 10-30).
-- Heating curve 0.15; `ehp/CompIntegral` −180 °min (was −150); `ehp/CompHysteresis` 7 K at last
-  read (forced stop at setpoint + 7, e.g. 31 °C at a 24 °C setpoint; the 8–9 K cap below is
-  relative to this). Check `sensor.geotherm_heating_compressor_hysteresis` before relying on it.
-- **Backup heater disabled for heating:** `ehp/BackupModeHc` = `no_backup`,
-  `ehp/BackupIntegral` = −600 (plain `-600`). While `no_backup`, deepening `CompIntegral` cannot
-  start it (if enabled, it would start at −600 + CompIntegral, now −780).
+- `mc/OperatingMode` = **`on`**, set by hand until Phase 2 is armed.
+- Frost protection kept small (owner-stated, set at the unit): `uih/FrostOverRideTime` 3 h,
+  `mc/TempDesiredLow` 20 °C (TDL read 20 live before HA stopped reading it). The owner's reading
+  "it then kicks in only every 3 h while `off`" is UNPROVEN: catalog and manual call it a delay
+  and say nothing about a repeat cycle.
+- Heating curve 0.15; `ehp/CompIntegral` −180 °min and `ehp/CompHysteresis` 7 K at last read:
+  check `sensor.geotherm_heating_compressor_{start_integral,hysteresis}` before relying on them.
 
 ## Entity map (key entities)
 
@@ -174,15 +181,15 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
-| `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` is "compressor running for heating" (the binary_sensor `heating_compressor_heating_active` was removed as a pure function of it) |
-| `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, unavailable while `binary_sensor.heating_return_temp_masked` is on: energy mode `water_heating` or itself unavailable (the raw return reads the DHW circuit then), held 5 min after (`delay_off`, owner) |
+| `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` = compressor running for heating |
+| `sensor.heating_circuit_return_temp_valid` | `ehp/HcReturnTemp`, masked during hot water and 5 min after |
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
 | `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
 | `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
 | `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
 | `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day efficiency (see "Energy modes") |
-| `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics; ids from `name:`, verify after deploy |
+| `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.heating_wanted_operating_mode` | Phase 2 wanted mode: `on` / `off` / `none` (unknown season: write nothing); reads no actual register |
 | `input_number.heating_comfort_temp` | the comfort knob (no `initial:`; set in the UI) |
@@ -195,130 +202,54 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 
 ## Decisions in force
 
-- **Mode law (Phase 2, implemented in `automation.heating_comfort_control`; inert until the owner
-  adds the two `/set` bridge lines and arms `input_boolean.heating_comfort_control_enabled`):** HA writes only `on` or `off`,
-  never `auto`/`low` (the geoTHERM time program is ignored). In `active_heating` and `neutral`:
-  Loxone warm enough → `off`, otherwise (incl. unknown or silent 24 h) → `on`; a slab boost
-  (`active_heating` only) overrides to `on`. Cooling season → `off` (cooling unaffected); unknown
-  indicator → no write. At most one mode change per 30 min. Full table: the slab plan's
-  "Control law". Below 3 °C outdoor `off` still heats to `TempDesiredLow` ("Frost protection").
-- **Writer mechanics.** One decision per output (`heating_wanted_operating_mode`,
-  `heating_target_temp`); the automation writes only when the read-back differs (mode compared by
-  normalised name, setpoint within 0.05 K), so an agreeing or not-yet-read (`unknown`) register
-  gets no message. No write with the master switch off, ebusd offline, wanted `none` or the
-  target not yet rendered. Payloads: mode name, setpoint with one decimal (`22.0`); the decimal
-  form is UNVERIFIED against ebusd (prove it with the idempotent write of the current value).
-- **Hold = `input_datetime.heating_mode_last_written`**, stamped by the automation BEFORE it
-  publishes the mode (a missed write beats a repeated one). A helper survives restarts and ignores
-  hand changes at the wall; the mode sensor's `last_changed` would restart the hold on every HA
-  restart. A fresh helper (no `initial:`) reads today 00:00 local (source: `input_datetime`
-  `entity.py`). A change inside the hold is applied
-  by a template trigger (`now()` >= stamp + 30 min, re-evaluated each minute, so up to a minute
-  late) or by the next input change; setpoint changes are never held.
-- **Setpoint re-send guard:** `input_datetime.heating_temp_desired_last_written` (stamped before
-  the publish). Against a stale read-back the same setpoint is not re-published within 5 min; a
-  change of the wanted setpoint itself (`sensor.heating_target_temp`) bypasses the guard.
-- **Loxone silence:** `warm_enough` has `expire_after` 24 h; an identical hourly re-send restarts
-  the expiry (tested). `binary_sensor.heating_loxone_online` = the flag has a value.
-- **Compressor tuning (cycling plan):**
-  - Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts): short runs are a
-    mild-weather effect.
-  - Hysteresis headroom is small: at a 24 °C setpoint and `FlowTempMax` 35 °C the hysteresis can
-    usefully grow to about 11 K, less when colder weather raises the setpoint.
-  - **Cold weather** (reasoned, not measured): `CompHysteresis` is fixed, the Vaillant does not
-    adapt it. Cold-weather runs most likely end by integral payback; the hysteresis mainly shapes
-    mild-weather runs. Setpoint + hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C);
-    the floor stays protected by 44 °C / 46 °C. **Unknown** whether `FlowTempMax` also stops the
-    compressor or only caps the setpoint. Rule: raise the hysteresis only moderately (8–9 K) and
-    on the first cold days step it back 1 K if run-end flow temperatures approach 35 °C;
-    `sensor.heating_compressor_stop_temp` plots that stop point on the "Why runs end" graph.
-  - **Start vs stop (HYPOTHESIS, not measured):** `CompIntegral` only sets when a run starts; a
-    run ends at integral payback or flow > setpoint + `CompHysteresis`. At the flat curve the
-    mild-weather setpoint is only a few K above room temperature, so the fixed-output compressor
-    overshoots within minutes and the hysteresis ends the run: deepening `CompIntegral` lengthens
-    the pause, not the run. Confirm with the integral and flow-vs-setpoint at run end.
+- **Mode law (Phase 2, `automation.heating_comfort_control`):** HA writes only `on` or `off`,
+  never `auto`/`low` (the geoTHERM time program is ignored; Loxone owns the schedule). Heating
+  season (`active_heating`, `neutral`): Loxone warm enough → `off`, otherwise → `on`; unknown,
+  unavailable or a 24 h silent Loxone heats. A slab boost overrides to `on`, in `active_heating`
+  only. Cooling season → `off` (cooling unaffected). Unknown season indicator → no write. At most
+  one mode change per 30 min; setpoint changes are not held. Full table: design HPB-1. Below
+  3 °C outdoor `off` still heats to `TempDesiredLow` ("Frost protection").
+- **Hold = `input_datetime.heating_mode_last_written`**, never the mode sensor's `last_changed`
+  (that restarts the hold on every HA restart); a hand change at the wall does not touch it. A
+  fresh helper (no `initial:`) reads today 00:00 local (CONFIRMED, `input_datetime/entity.py` at
+  2026.11.1): on a fresh helper the first mode write is held only before 00:30.
+- **Compressor tuning (cycling plan):** lifetime average heating run ≈ 60 min (13277 h ÷ 13385
+  starts, owner read), so short runs are a mild-weather effect.
+- **Cold weather:** `CompHysteresis` does not adapt to the weather (UNPROVEN); setpoint +
+  hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while the floor stays protected by
+  44 °C / 46 °C. Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days
+  step it back 1 K if run-end flow temperatures approach 35 °C;
+  `sensor.heating_compressor_stop_temp` plots that stop point on the "Why runs end" graph.
 
 ## Energy modes
 
-`sensor.heating_energy_mode` (owner-defined, first match wins):
+`sensor.heating_energy_mode` is owner-defined, first match wins: table in design HPB-2 (tested as
+a case table in `test_energy_mode`).
 
-| Condition | Mode | Counts as |
-|---|---|---|
-| `ehp/Comp` on, `hvac_action` = `water` | `water_heating` | hot water |
-| `ehp/Comp` on | `active_heating` | heating |
-| `ehp/Hc1Pump` on, `hvac_action` = `water` | `water_heating` (hot-water run-on) | hot water |
-| `ehp/Hc1Pump` on, `hvac_action` = `cooling` | `cooling` | cooling: no yield, no efficiency |
-| `ehp/Hc1Pump` on | `passive_heating` | heating |
-| otherwise | `off` | standby |
-
-- Cooling is `hvac_action` (what the machine does now), not `binary_sensor.heating_cooling_active`,
-  which also fires on a cooling need or request. The interlock keeps the wider OR.
-- The geoTHERM cools passively only (owner): the compressor never runs for cooling, so checking
-  the compressor first is safe.
-- `ehp/YieldTotal` is the only yield register, so the split is done in HA: two per-mode
-  `utility_meter`s; `automation.heating_energy_meters_follow_mode` sets their mode selects on
-  every mode change and on HA start. An unavailable mode leaves both selects unchanged.
-- After a mode-select change the next source change is counted entirely to the new mode
-  (CONFIRMED, `utility_meter` `sensor.py` at 2026.10.1).
-- The electricity meter keeps all five modes (Shelly Wh about every 60 s; the passive heating
-  cycle's circulation-pump draw stays visible). The yield meter has one `space_heating` bucket
-  for the active and passive heating cycle (owner): `YieldTotal` steps in whole kWh at the
-  slowest poll, so an active cycle's last kWh often arrives after the switch to the passive
-  cycle. Re-selecting the current option changes nothing, so that switch cannot misbook.
-  `cooling`/`off` should stay at 0; growth there shows misbooking at other mode boundaries
-  (active → hot water, hot water → passive, → off: accepted).
-- Space heating efficiency = `space_heating` yield ÷ (active + passive electricity); hot water
-  = water yield ÷ water electricity. The combined `sensor.heating_efficiency_today` stays
-  (owner). All three render `unknown` (not 0) below 1 kWh electricity (owner).
-- **Rolling 30 days** (owner): `sql:` sensors sum `MAX(sum) − MIN(sum)` per statistic over the
-  last 30 days + 1 h of long-term statistics (raw history is only 14 days; pattern and pitfalls in
-  the `ha-energy-metering` skill). Attribute `days` = window covered. The space-heating yield
-  also lists the pre-merge `heating_yield_by_mode_active_heating`/`_passive_heating` statistics,
-  so keep those statistics until ~30 days after the merge. Efficiency = ratio of the 30-day sums
-  (not a mean of daily ratios), `unknown` below 10 kWh electricity (a whole-kWh yield step then
-  moves it ≤ 2.5 %). Up to ~1 h behind (owner: fine).
-- Runtime today, duty cycle, last run and the average run read `ehp/Comp` (the compressor, any
-  mode), so they are continuous across mode changes. `active_heating` is NOT a run: a heating run
-  that rolls into hot water ends its segment at the flip and one that turns from hot water into
-  heating starts a new one (2026-11-14: one compressor run 05:30–06:52 with hot water 05:50–06:30
-  gave two segments, and the machine counted one start, in heating).
-
-## Baseline method (compressor-cycling comparison)
-
-Counting rules so two baselines are comparable (plans/heating-baseline-and-phase2-prerequisites.md):
-
-- **First full baseline day is 2026-10-31**; 2026-10-30 is partial (meters began ~16:06), exclude it.
-  A baseline is 3 consecutive full days with comparable weather; note the daily mean outdoor
-  temperature next to each day.
-- **Starts per day:** `sensor.heating_compressor_starts_daily` (machine counter, heating only);
-  hot water: `sensor.hot_water_compressor_starts_daily`; the two add up to the compressor starts
-  (owner). There is no run counter (`heating_compressor_runs_today` was dropped 2026-11-14: it
-  counted `active_heating` segments, 5 against 4 starts that day). Runtime today, duty cycle and
-  last run are the `ehp/Comp` on-time and run edges, all modes, hot water included; average run =
-  runtime ÷ (heating + hot water starts). `sensor.heating_efficiency_today` includes hot water too,
-  the per-mode efficiencies split it. Baselines logged before 2026-11-14 excluded hot-water runs
-  from runtime, duty cycle and last run; before 2026-11-06 they counted them (Shelly clamp, which
-  could split one run in two).
-- **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values
-  in {`auto`, `on`, `low`, `off`}. Ignore transitions into/out of `unavailable`/`unknown` (HA or
-  MQTT restart). Under the 10-30 setup (`auto`) normal was 2 per day (time program). With the
-  geoTHERM on `on` (2026-11-14) the time program causes none; once Phase 2 runs, flips follow
-  Loxone's `warm_enough` and are capped at one per 30 min.
-- **Settings:** log `CompHysteresis` and `CompIntegral` at the start of each baseline day and every
-  change (date, time, old, new). They have no long-term statistics.
-- **Retention:** raw history is kept 14 days; read every number inside that window or copy it into
-  the cycling plan's Observations.
-- **Compressor vs circulation:** the compressor is `ehp/Comp` (the Shelly clamp power only feeds
-  `sensor.heating_pv_surplus`; the threshold sensor on it was removed 2026-11-14, nothing read it).
-  Circulation alone stays below the clamp's ~500 W: an inference, not a measurement.
+- `active_heating` is NOT a run: a run rolling heating → hot water → heating gives two
+  `active_heating` segments but one machine start, counted in heating (OBSERVED, one run). Run
+  statistics therefore read `ehp/Comp`, starts the machine counters.
+- The electricity meter keeps all five modes (Shelly Wh about every 60 s keeps the passive
+  cycle's circulation-pump draw visible); the yield meter has one `space_heating` bucket (owner).
+  Misbooking at active → hot water, hot water → passive and → off is accepted (owner).
+- The combined `sensor.heating_efficiency_today` (includes hot water) stays next to the per-mode
+  ones (owner); all daily efficiencies render `unknown`, not 0, below 1 kWh electricity (owner).
+- **Rolling 30 days** (owner): `space_heating_yield_30d` also sums the pre-merge statistics
+  `sensor.heating_yield_by_mode_active_heating`/`_passive_heating`. Do not delete them from
+  long-term statistics until 30 days after #164 is deployed, or the window shrinks.
 
 ## Known biases / open issues
 
-- Which ebusd config generation this instance runs is unconfirmed. An older generation (the
-  `archived/` tree) leaves `ehp/Status` field 3 unnamed (`hcmode2`) with an enum lacking
-  `1=cooling`, so cooling would arrive as raw `1`; the published CSVs do not have this. Keep the
-  dual name/number parsing (incl. raw `1` → `cooling`) as cheap insurance.
-- `ehp/Status01` times out on this unit; re-check occasionally (second return-temp reading).
+- Which ebusd config generation this instance runs is unconfirmed; an older one sends `ehp/Status`
+  field 3 as raw `1` for cooling (registers.md). Keep the dual name/number parsing (incl. raw
+  `1` → `cooling`) as cheap insurance.
+- The setpoint payload with one decimal (`22.0`) is UNPROVEN against ebusd: prove it with the
+  idempotent write of the current value before arming.
+- **Unknown** whether `mc/FlowTempMax` also stops the compressor or only caps the setpoint.
+- `automation.heating_slab_charge_decision_changed` still says "Phase 1 — observation only,
+  nothing was written" (message and `description:`), but with both switches on the decision IS
+  written (Invariants "Two switches"). Fixing it changes the automation's output: do it with a
+  test of the message.
 
 ## Tests
 
@@ -326,7 +257,8 @@ Package-specific test facts: `doc/heating_pv_boost/tests.md` (loads with the tes
 
 ## Related
 
-- `doc/heating_pv_boost/registers.md`: register decodes.
-- `plans/ebusd-pv-heating-optimization.md` (rollout, control law), `plans/heating-compressor-cycling.md`,
-  `plans/heating-baseline-and-phase2-prerequisites.md`.
+- `doc/heating_pv_boost/design.md` (control law, energy modes), `doc/heating_pv_boost/registers.md`
+  (register decodes).
+- `plans/ebusd-pv-heating-optimization.md` (rollout), `plans/heating-compressor-cycling.md`
+  (tuning, baseline counting rules), `plans/heating-baseline-and-phase2-prerequisites.md`.
 - Victron surplus inputs: `doc/victron/notes.md`.

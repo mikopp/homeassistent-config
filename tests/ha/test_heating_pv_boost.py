@@ -511,7 +511,7 @@ _MODE_TABLE = Table(
 _MODE = {m: is_state(m) for m in
          ("active_heating", "passive_heating", "water_heating", "cooling", "off")}
 # One case per row of the mode table (first match wins), the row order, raw enum numbers and
-# ebusd's raw on/off numbers. → doc/heating_pv_boost/notes.md "Energy modes"
+# ebusd's raw on/off numbers. → doc/heating_pv_boost/design.md#HPB-2
 MODE_CASES = [
     Case(name="compressor_heating_is_active_heating", inputs={"comp": "on", "pump": "on"},
          expect={"mode": _MODE["active_heating"]}),

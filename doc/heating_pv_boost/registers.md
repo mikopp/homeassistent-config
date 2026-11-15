@@ -39,7 +39,6 @@ field 0 (heating-circuit flow T6). Not read.
 - `mc/Party` ("Quick - Party", `b505 05`, write-only) exists on `mc`, `hwc` and `cc`, but the VR 90
   has no Party button, so nothing triggers it on this hardware.
 - `rcc/HolidayPeriod`, `rcc/RoomTempHoliday` exist; the live dump shows 2015 dates (never set).
-- Fallback for `mc/TempDesiredLow` if it never arrives: `mc/Params` field 1 (9-field parse).
 
 ## Compressor tuning registers
 
