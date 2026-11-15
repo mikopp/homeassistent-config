@@ -26,6 +26,9 @@ Do NOT record:
 
 If unsure, ask the user before writing; skipping costs nothing, a useless entry stays.
 
+For a design doc, also apply its own gate `doc/KNOWLEDGE.md#K-4.1` (architecture only, no
+implementation detail, no history).
+
 ## 1. NEVER write an unconfirmed learning
 
 A learning is a claim future sessions will act on without re-deriving it. Only write one when the
@@ -62,8 +65,9 @@ its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replac
 
 | The learning is… | Write it to |
 |---|---|
-| a current fact about one package | `doc/<pkg>/notes.md` (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
-| architecture or a derivation result | `doc/<pkg>/design.md` (create at the K-4 threshold) |
+| a current fact about one package that an editor needs before touching its YAML/tests (invariant, quirk, measured value, entity, owner value), even one behind a design decision | `doc/<pkg>/notes.md`, graded; a design doc cites it, never copies it (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
+| how a component works, a state machine or decision table, a decision with its rejected alternative, an invariant's mechanism, a contract with another package, an extension rule | `doc/<pkg>/design.md` (K-4.1 gate; create at the K-4 threshold), plus a one-line `→ design.md#ID` in the note if breaking it fails silently |
+| a known architectural gap or accepted risk | a GitHub issue; link `#n` from the note AND the design doc's Known gaps |
 | a story, superseded design or investigation | `doc/<pkg>/background.md` |
 | a story about a cross-package topic (e.g. the test framework) | `doc/<topic>/background.md` |
 | a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |
@@ -71,10 +75,11 @@ its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replac
 | needed in every session | root `CLAUDE.md` (keep it < 100 lines) |
 | a hypothesis | the feature's `plans/` file, marked UNPROVEN |
 | a confirmed bug or flaky test not being fixed now | a GitHub issue (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts |
-| local to one YAML block | a YAML comment (`doc/KNOWLEDGE.md#K-5`) |
+| local to one YAML block | a YAML comment only, not also the note (`doc/KNOWLEDGE.md#K-1.1`, K-5) |
 | contradicted | delete or strike through where it lives |
 
-One home per fact: other places point to it, never copy it. Keep entries dense and actionable;
+One home per fact: other places point to it, never copy it (the only fact with pointers in two
+places is a gap: the issue is its home). Keep entries dense and actionable;
 skip trivial details.
 
 ## 4. No dated logs

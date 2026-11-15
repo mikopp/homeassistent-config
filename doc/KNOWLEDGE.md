@@ -9,12 +9,12 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 |---|---|---|---|
 | root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start | < 100 lines |
 | `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`; `plans.md` for plan format/status/close; `knowledge.md`, which sends to this file when knowledge files are touched) | lazily, when a file matching its `paths:` is read | ~4 KB |
-| `doc/<pkg>/notes.md` | current facts of one package (see K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
+| `doc/<pkg>/notes.md` | what an agent must know before editing the package (see K-1.1, K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
 | `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
-| `doc/<pkg>/design.md` | current architecture, decision tables, derivation results (see K-4) | on demand (read when needed) | ≤ 40k chars |
+| `doc/<pkg>/design.md` | current architecture: components, decision tables, interfaces, decisions and trade-offs, known gaps, extension points (see K-1.1, K-4) | on demand (read when needed) | aim ≤ 24k, cap 40k chars |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
 | `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. the test framework) | guarded like package background | none |
-| YAML comments | what a block does + one-line why + pointer (see K-5) | with the file | short |
+| YAML comments | what a block does + one-line why + pointer (see K-1.1, K-5) | with the file | short |
 | `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
 | GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
 | git history / PRs | the log: what changed when and why | `git log`, `gh pr view` | n/a |
@@ -39,6 +39,52 @@ Rules:
   (it printed the token), nor are other shell readers. The guard is a prompt, not a wall.
 - No dated logs anywhere. Git and PRs are the log.
 
+### K-1.1 Note, YAML comment or design doc?
+
+One home per kind of fact. Ask the question of each home in order; the first "yes" is the home.
+
+| Home | One-question test | Holds |
+|---|---|---|
+| YAML comment | Is it about this one block only? | what the block does, at most one line of why, a pointer (K-5) |
+| note | Must an agent know it **before editing** this package's YAML or tests? | invariants (one line each), hardware/integration quirks, entity map, decisions in force with a one-line why, owner-supplied values and their origin, open issues (`#n`) (K-3) |
+| design doc | Is it needed to **change the architecture**, or to check that an addition does not break it? | components and responsibilities, state machines and decision tables, interfaces/contracts, decisions with rejected alternatives and trade-offs, known gaps, extension points and what breaks them (K-4) |
+
+- **Note vs YAML comment: never both.** A fact local to one block lives in that block's comment;
+  the note does not restate it. A fact that spans blocks or is invisible in the YAML (a hardware
+  quirk, a cross-block invariant, the reason for an owner value) lives in the note; the blocks
+  point to it (`→ doc/<pkg>/notes.md`) instead of restating it.
+- **Note vs design doc.** The note auto-loads, the design doc does not. So for anything that
+  fails silently when broken, the note keeps the one-line imperative plus `→ design.md#ID`; the
+  design doc holds the mechanism, the table and the trade-off behind it, not that line again.
+  A decision's why is one line in the note, or chosen/rejected/trade-off in the design doc with
+  the note pointing to it: never both in full.
+- **Design doc vs implementation.** A design doc may repeat a fact from the note when it needs it
+  to be read on its own (a conclusion, not the evidence). It never copies implementation detail.
+  Test: *would the sentence need editing if someone renamed an entity, retuned a helper, or
+  restructured a template or automation without changing behaviour?* Yes = implementation:
+  point to it.
+
+  | Architecture (design doc) | Implementation detail (note or YAML; the design doc points) |
+  |---|---|
+  | which component decides and which single writer owns each actuator | entity ids, entity maps, helper lists, automation `id`s |
+  | the state set, the transitions and the priority order, with why that order | trigger lists, condition-by-condition template text, `float()` defaults |
+  | the formula's shape, the derived constant and why it matters | config values and thresholds as such (a helper's tuned number) |
+  | contract with another package: what is read/published, unit, sign, availability | register decodes, payload formats, MQTT topics |
+  | invariant and the mechanism that keeps it | per-block behaviour already commented in the YAML |
+  | how to verify a change (identities that must hold) | test lists, restated test cases |
+
+  Refer to a component by its role. Never write an entity id: HA derives ids from device, area and
+  name (`.claude/rules/ha-yaml.md`), so an id is registry state, not design. Name a concept, an
+  entity by its name, or the source attribute where it originates (an ebusd register, a Somfy
+  property, a Venus OS path). Never a list or map of entities. A number appears only when the design
+  depends on it (a derived constant, an oracle table a test asserts against). Point, never copy:
+  `(note: Entity map)`, `(note: <section>)`, `(YAML: <automation alias or sensor name>)`,
+  `(test: <test name>)`, `→ doc/<pkg>/design.md#ID` between design docs.
+
+  Existing design docs are not rewritten for this alone. Whoever edits a design doc for another
+  reason, or finds a mistake in it, also replaces any entity id, entity list or map in the part
+  they touch with a role, name or source attribute.
+
 ## K-2 Current vs background
 
 - **Current** = what an agent needs to understand or change the package as it runs today:
@@ -57,28 +103,92 @@ short why in the note or design doc, with no link to background (K-1).
 Frontmatter `paths:` lists the package YAML, its tests (`tests/ha/test_<pkg>.py`; `tests/e2e/` only when a real-HA test targets the package), and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
 
-1. Header: scope, rule paths, design-doc link
-2. Invariants
-3. Hardware / integration quirks
-4. Entity map (IDs from `default_entity_id` or ha-mcp lookup, never from `unique_id`)
+1. Header: scope, rule paths, design-doc link (`doc/<pkg>/design.md`, `<PKG>-*` IDs)
+2. Invariants: one line each; when a design ID holds the mechanism, end with `→ design.md#ID`
+   and do not restate it (K-1.1)
+3. Hardware / integration quirks (graded; a design doc cites them, never copies them)
+4. Entity map (IDs from `default_entity_id` or ha-mcp lookup, never from `unique_id`); the full
+   map lives here, never in the design doc
 5. Decisions in force (one-line why; no background link)
-6. Known biases / open issues
+6. Known biases / open issues (`#n`; the design doc's Known gaps lists the architectural ones by
+   `#n`, the note keeps the entry and its grade)
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
    skill). Above ~2 KB, split into `doc/<pkg>/tests.md` with its own symlink rule and
    `paths:` only `tests/ha/test_<pkg>.py` (plus the `tests/e2e/` files that cover the package, if any).
 8. Related
 
-Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and stories to background.
+Size: ≤ 24 KB (~6k tokens). Over that, move mechanisms and derivation results to `design.md`
+(K-4.1 gate) and stories to background.
 
 ## K-4 Design docs (`doc/<pkg>/design.md`)
 
-- Needed when the package has a state machine, a decision table, derived math, or more than ~800
-  YAML lines. Otherwise the note is enough.
-- ≤ 40k chars. Holds current results; the derivation story goes to `background.md`.
-- Stable, short, grep-able heading IDs (`PG-4`, `AF-7.2`, `VIC-N3`; background uses `<PKG>-B<n>`).
-  Never renumber; mark retired IDs as gone.
-- Never `@`-import it. Add `doc/<pkg>/design.md` to the note's `paths:` so editing the design doc
-  loads the note.
+A design doc holds the **current architecture** of one package (K-1.1): what an agent needs to
+change that architecture, or to check that an addition does not break it. Read on demand, never
+auto-loaded. No history, no noise. Gate before writing: K-4.1.
+
+- **When:** the package has a state machine, a decision table, derived math, or more than ~800
+  YAML lines. Otherwise the note is enough. A package over the threshold without one is a gap:
+  open an issue or put it in the next plan for that package.
+- **Belongs here:** components and their single responsibility; state machines and decision
+  tables in force (priority order and why); invariants with the mechanism that keeps them;
+  interfaces/contracts with other packages (read/published, unit, sign, availability); decisions
+  in force as chosen / rejected / trade-off accepted; formula shapes and derivation *results*;
+  known gaps and accepted risks (each with `#n` or a `plans/` file); extension points (how to add
+  X, and what breaks if done otherwise).
+- **Does not belong here:** implementation detail (K-1.1 table); history ("was", "no longer",
+  "since #n", "pre-#n", "originally"), stories, derivation work, step logs, dated values;
+  hardware quirks and measured values (the note: cite `(note: <section>)`, use the conclusion);
+  cross-package topic facts (a skill); another package's note or design (point to it);
+  procedures (resets, deploy steps: a skill or the PR).
+- **Grades:** a statement about this repo's config needs none: the YAML wins, fix the doc when
+  they disagree. Anything else (device behaviour, HA/upstream semantics, expected physical
+  results) carries a grade (`record-learning` section 2), preferably by citing the note or skill
+  that holds the graded fact. An owner-chosen rationale is marked `(owner decision)`. An UNPROVEN
+  claim stays in `plans/` unless the design works around it; then it goes under Known gaps,
+  graded UNPROVEN.
+- **IDs:** stable, short, grep-able heading IDs `<PKG>-<n>[.<m>]` (`PG-4`, `AF-7.2`; background
+  uses `<PKG>-B<n>`); one prefix per design doc. Never renumber; a new topic takes the next free
+  number. Before retiring an ID, grep `packages/ custom_templates/ tests/ dashboards/ doc/
+  .claude/` and repoint every hit, then list it on one final line: `Retired: <ID> → <ID>`.
+- **Size:** aim ≤ 24k chars, cap 40k (on-demand files are truncated above 40k, K-8). No section
+  over ~3k chars: split it or cut.
+- **Loading:** never `@`-import it. Add `doc/<pkg>/design.md` to the note's `paths:` so editing
+  the design doc loads the note.
+- **Template** (sections in this order; omit an empty one):
+  1. Header: scope (package files), "YAML wins: fix this doc", link to the note. No status line.
+  2. Purpose and boundaries: goals, out of scope, neighbour packages.
+  3. Components and data flow: responsibilities, the single writer per output; a diagram only if
+     it pays for itself (roles, not an entity list).
+  4. State machine / decision table(s) in force.
+  5. Formulas and derived constants (results only).
+  6. Invariants: mechanism and why it holds (the rule line stays in the note).
+  7. Interfaces: inputs consumed, outputs published, contract (sign, unit, availability).
+  8. Decisions and trade-offs: chosen / rejected / cost accepted.
+  9. Known gaps and accepted risks: `#n` or `plans/…`, grade if not CONFIRMED.
+  10. Extension points: how to add a state / input / consumer, and what breaks it.
+
+### K-4.1 Is it worth writing in a design doc?
+
+Write it only if ALL hold:
+- An agent making an architectural change, or checking that an addition fits, would decide
+  differently without it.
+- It is architecture, not implementation (K-1.1 test), and not readable in one place in the YAML
+  or tests. A formula stays when its why, its derived constant or its interaction with another
+  component is the point; a bare copy does not.
+- No note, skill or other design section already holds it (grep the design IDs and the note).
+  Point to it instead.
+- It is true *now* and needs no date. If the sentence needs "was", "since" or "changed", it is
+  history: the PR or background.
+
+Do NOT write:
+- Worked examples the tests already pin, unless a test cites the doc as its oracle.
+- Entity inventories or helper lists (the note's entity map).
+- Procedures (resets, reclaim or deploy steps): a skill or the PR.
+- Measured values: the note, graded.
+- A second copy of an invariant the note states: the note points `→ design.md#ID` instead.
+
+If unsure, leave it out. A missing paragraph costs one source read; a stale one misleads every
+architectural change.
 
 ## K-5 YAML comment style
 
@@ -105,11 +215,13 @@ Size: ≤ 24 KB (~6k tokens). Over that, move derivations to `design.md` and sto
 - **New package:** create `doc/<pkg>/notes.md` with `paths:` frontmatter (K-3), then
   `ln -s ../../../doc/<pkg>/notes.md .claude/rules/packages/<pkg>.md` and commit the symlink.
   `<pkg>` in the symlink name is the package YAML name; the folder is `doc/<topic>/` (airflow: `airflow_cooling.md` -> `doc/airflow/notes.md`).
-- **Complex package** (K-4 threshold): add `doc/<pkg>/design.md` and put it in the note's `paths:`.
+- **Complex package** (K-4 threshold): add `doc/<pkg>/design.md` from the K-4 template and put
+  it in the note's `paths:`.
 - **New cross-package topic:** a skill in `.claude/skills/<topic>/SKILL.md`; the first words of its
   description carry the trigger.
 - **One home per fact.** Every other place points to it; never copy.
-- **Every plan's last step:** distil the result into note / design / skill, move the story to
+- **Every plan's last step:** distil the result into note / design (K-4.1 gate: architecture,
+  decisions and gaps only) / skill, move the story to
   background (a package's `doc/<pkg>/background.md`, or `doc/<topic>/background.md` for a
   cross-package topic), update pointers, check the note is ≤ 24 KB, then DELETE the plan.
   `.claude/rules/plans.md` tells plan authors to include this step; the layout check (K-8)
@@ -156,7 +268,11 @@ alternative explanation still open (same meaning as in `record-learning`).
   check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.
 - `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow `.github/workflows/knowledge-layout.yml`) enforces the layout: every
   `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
-  `.claude/rules/packages/<name>.md` symlink to an existing note.
+  `.claude/rules/packages/<name>.md` symlink to an existing note, every `doc/<pkg>/design.md` is
+  ≤ 40k chars, is listed in its note's `paths:` and owns its ID prefix, and every design-ID
+  reference (`doc/<pkg>/design.md#ID` or a bare `<PKG>-<n>`) resolves to a heading. History
+  markers in a design doc are a warning only (until the existing docs are clean). Not yet
+  checked: the K-4 template sections (the existing docs lack Known gaps / Interfaces).
 - A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
   3 runs); naming "measured value, hardware quirk, user-supplied reason" gave 3/3. Word findings
   triggers by the concrete case, not the abstract category. (OBSERVED)
