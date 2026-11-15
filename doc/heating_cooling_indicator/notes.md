@@ -16,6 +16,7 @@ start and history loading are in the YAML comments.
   ids exist only in `.storage`. Any re-registration breaks the chain silently: the 48h mean reads a
   missing `..._15min` and the indicator goes unavailable for all consumers. Fix = `default_entity_id`
   (same class as #146, which covers only MQTT sensors).
+  The misspelling is accepted (owner decision): do not rename it; it is live in several packages.
 
 ## Hardware / integration quirks
 - None beyond the YAML comments.
