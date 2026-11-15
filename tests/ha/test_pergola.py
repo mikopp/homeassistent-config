@@ -246,7 +246,7 @@ def test_reference_model() -> None:
     ]:
         if got != want:
             failures.append(f"{what}: {got}, want {want}")
-    # The Docker suite's seeded anchor A_eff = 67.9° (optimized 13.0, standard 15.0, heating 67.9).
+    # Anchor A_eff = 67.9° (optimized 13.0, standard 15.0, heating 67.9).
     for mode, want in (("opt", 13.0), ("std", 15.0), ("heat", 67.9)):
         if (got := _Ref.slat(mode, 67.9)[0]) != want:
             failures.append(f"anchor 67.9 {mode}: {got}, want {want}")
@@ -790,33 +790,31 @@ _NO_SUN_STEADY = ["cover_response: tilt=74"]  # 90° re-sent on every tick, no d
 
 SUN_CASES = [
     # Night: radiation 0 and the MPPT topic quiet (expired) while the house load reports →
-    # pergola PV 0 → sun_down; the cover response never moves in sun_down. Docker:
-    # test_sun_down_state, test_pv_power_zero_at_night_when_mppt_stale (state part).
+    # pergola PV 0 → sun_down; the cover response never moves in sun_down.
     SunCase("sun_down_at_night_with_the_mppt_topic_quiet", (3, 2), (22, 2), 0, "sun_down",
             "off", pv=None, start="sun_automatik_cooling", steady=[]),
-    # Shading threshold 512 × sin(el) × 0.9, radiation 30 W/m² below / above it (new).
+    # Shading threshold 512 × sin(el) × 0.9, radiation 30 W/m² below / above it.
     SunCase("not_enough_sun_below_the_shading_threshold", (3, 3), (11, 2), "below",
             "not_enough_sun", "off", pv=0, start="sun_automatik_cooling", steady=[]),
     SunCase("shining_above_the_shading_threshold", (3, 4), (11, 2), "above",
             "sun_automatik_cooling", "on", pv=0),
-    # UV ≥ 3 alone, and PV / conversion factor alone, count as shining (new).
+    # UV ≥ 3 alone, and PV / conversion factor alone, count as shining.
     SunCase("uv_index_3_counts_as_shining", (3, 5), (11, 2), 20, "sun_automatik_cooling", "on",
             uv=3, pv=0),
     SunCase("pv_alone_counts_as_shining", (3, 6), (11, 2), 20, "sun_automatik_cooling", "on",
             pv="above"),
-    # Heating season (indicator active_heating → pergola_heating on) → heating state (new).
+    # Heating season (indicator active_heating → pergola_heating on) → heating state.
     SunCase("heating_season_gives_sun_automatik_heating", (3, 7), (11, 2), 800,
             "sun_automatik_heating", "on", mean=_HEATING_MEAN),
     # Azimuth window wall ± 90° = 114°-294°: a June morning just east of it (az ≈ 108°,
     # elevation ≈ 46°: bright sun) → no_sun_behind_house; an hour later (az ≈ 124°) inside.
-    # Docker: test_no_sun_behind_house (seeded sun.sun az 350).
     SunCase("no_sun_behind_house_east_of_the_azimuth_window", (6, 21), (10, 2), 800,
             "no_sun_behind_house", "on", start="sun_automatik_cooling", steady=_NO_SUN_STEADY),
     SunCase("sun_inside_the_azimuth_window", (6, 22), (11, 2), 800, "sun_automatik_cooling",
             "on"),
     # Min elevation 10°: a December morning at ≈ 8-9° (azimuth ≈ 140°, inside the window) →
     # no_sun_behind_house, and sun shining is off by its own elevation guard; an hour later
-    # (≈ 13°) the sun counts. Docker: test_not_enough_sun (June 04:00 UTC, elevation ≈ 3°).
+    # (≈ 13°) the sun counts.
     SunCase("no_sun_behind_house_below_min_elevation", (12, 21), (9, 2), 300,
             "no_sun_behind_house", "off", start="sun_automatik_cooling",
             steady=_NO_SUN_STEADY),
@@ -921,10 +919,7 @@ async def _far(env: _Env, mode: str = "opt") -> None:
 
 async def _frost(env: _Env, check: Check) -> None:
     """Frost entry below 2.5 °C (tested at 2.0, so a lower threshold fails), hold, 0.5 °C
-    hysteresis, exit above 3.0 °C to sun tracking.
-
-    Docker: test_frost_entry (state + slat 90), test_frost_recovery (state leaves frost).
-    """
+    hysteresis, exit above 3.0 °C to sun tracking."""
     env.clear()
     await env.seed({_TEMP: ("2.0", _T)})  # numeric_state below 2.5 fires at once
     check("frost entry", state="frost", slat=90, tilt_calls=[])
@@ -944,7 +939,7 @@ async def _frost_exit_drains(env: _Env, check: Check) -> None:
 
     Exact delays: 30 s settle, 8° (tilt 12) for 5 min, 15° (tilt 18) for 5 min, 30 min more
     while the hourly rain stays > 0, then evaluate_state. The watchdogs stay silent the whole
-    time (suppressed in rain_stopped). Docker: test_post_rain_recovery (step sensor only).
+    time (suppressed in rain_stopped).
     """
     await env.seed({_TEMP: ("-1.5", _T)})
     await env.seed({_HOURLY_RAIN: ("0.4", {"unit_of_measurement": "mm"})})
@@ -974,7 +969,7 @@ async def _frost_exit_drains(env: _Env, check: Check) -> None:
 
 async def _rain_rate(env: _Env, check: Check) -> None:
     """Weather-station rain: rain, hold, rain_stopped when it ends, the short drain (no hourly
-    rain: the 8° step and the 30 min drying are skipped). Docker: test_rain_starts."""
+    rain: the 8° step and the 30 min drying are skipped)."""
     env.clear()
     await env.seed({_RAIN_RATE: ("2.5", {"unit_of_measurement": "mm/h"})})
     check("rain rate 2.5", state="rain", slat=90, tilt_calls=[])
@@ -996,8 +991,7 @@ async def _rain_rate(env: _Env, check: Check) -> None:
 
 async def _cover_lock(env: _Env, check: Check) -> None:
     """Somfy rain lock → rain; the user operates a cover during rain → user_override; both
-    locks clear → sun tracking. The lock responders force a report on every originator change.
-    Docker: test_rain_lock_from_cover (both = rain), test_rain_with_user_originator."""
+    locks clear → sun tracking. The lock responders force a report on every originator change."""
     env.clear()
     await env.seed({_ORIGIN["links"]: "rain"})
     check("links rain lock", state="rain", slat=90, tilt_calls=[],
@@ -1023,11 +1017,8 @@ async def _cover_lock(env: _Env, check: Check) -> None:
 async def _user_override(env: _Env, check: Check) -> None:
     """User lock from sun tracking → user_override, which rain cannot take over (guard on the
     user lock); the lock clears while it still rains → the state manager's rain entry (rule 2,
-    ahead of the user_override exit rule) goes straight to rain, without a sun state in
-    between. (The YAML comment at rule 2 → user_override says the exit path runs first and rain
-    follows on the next trigger; the code does not do that: reported as a finding.)
-    Docker: test_user_override_left (user_override left, driven through dach_links: the first
-    two steps restore that side; the new scenario below uses dach_rechts)."""
+    listed ahead of the user_override exit rule) goes straight to rain in the same run, without a
+    sun state in between (as the YAML comment at rule 2 → user_override says)."""
     env.clear()
     # Rule 4 has one `or` over the two covers; each half needs its own entry check (a mutant
     # that drops the links half survived the rechts-only scenario).
@@ -1051,8 +1042,7 @@ async def _user_override(env: _Env, check: Check) -> None:
 
 async def _master_switch(env: _Env, check: Check) -> None:
     """Master switch off: the state machine and the sensors keep running, the covers do not
-    move and the last commanded angle stays (PG-6.3); on again, the next transition moves.
-    Docker: test_automation_disabled."""
+    move and the last commanded angle stays (PG-6.3); on again, the next transition moves."""
     before = env.state("effective")
     await env.turn(_AUTOMATIC, False)
     await _far(env, "heat")
@@ -1101,10 +1091,8 @@ async def test_protected_states(pergola_env: _Env, scenario: str) -> None:
 async def test_pv_power_wrapper(pergola_env: _Env) -> None:
     """sensor.pergola_pv_power (PG-8): MPPT value; 0 when the MPPT topic is quiet but the GX
     reports (house load); unavailable when both are quiet; sun shining stays available while
-    the weather station reports. Expiry is the real `expire_after: 120`.
-
-    Docker: test_pv_power_zero_at_night_when_mppt_stale (wrapper part; it seeded
-    `unavailable`). New: both quiet, the MPPT coming back alone, sun shining's availability.
+    the weather station reports. Expiry is the real `expire_after: 120`. Also covered: both
+    quiet, the MPPT coming back alone, sun shining's availability.
     """
     env = pergola_env
     failures: list[str] = []
@@ -1154,12 +1142,8 @@ _SYNC_STEPS = [  # (48h mean, indicator reached, pergola_heating)
 @pytest.mark.package("heating_cooling_indicator")
 async def test_season_sync(pergola_env: _Env) -> None:
     """The sync automation follows every real indicator change; an unavailable indicator
-    leaves pergola_heating as it is.
-
-    Docker: test_indicator_heating_season_turns_pergola_heating_on,
-    …_cooling_season_turns_pergola_heating_off, …_unavailable_keeps_pergola_heating_unchanged
-    (they fired the automation with automation.trigger; here only the indicator's own state
-    change triggers it).
+    leaves pergola_heating as it is. Only the indicator's own state change triggers it, never
+    automation.trigger.
     """
     env = pergola_env
     failures: list[str] = []
@@ -1178,7 +1162,7 @@ async def test_season_sync(pergola_env: _Env) -> None:
 
 # ── Watchdogs, lock responders and the Loxone mirror (blueprint mine/loxone_inputs.yaml) ───
 async def test_watchdogs_responders_loxone(pergola_env: _Env) -> None:
-    """New (no Docker test): the forced state reports (PG-2.4) and the Loxone mirror.
+    """The forced state reports (PG-2.4) and the Loxone mirror.
 
     - Watchdogs: on a /5 tick, `stop_cover_tilt` per cover when neither the cover nor its lock
       sensors updated in 5 min, unless the state is a moving one (suppressed in sun tracking).
