@@ -29,7 +29,7 @@ changes; if a formula turns out wrong, open a separate plan.
 ### Phase 2: rain
 4. [TODO] Post-rain drain angles (8° / 15°, `#PG-6.1`): after the first real rain confirm the
    slats drain; if not, change the angles in `script.pergola_post_rain_recovery` (code change,
-   run `tests/test_pergola.py`).
+   run `tests/ha/test_pergola.py`).
 5. [TODO] Rain lock originator: log `sensor.dach_links_priority_lock_originator` during rain and
    verify the covers move again after rain stops (`#PG-2.4`).
 

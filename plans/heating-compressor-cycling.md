@@ -20,14 +20,20 @@ flow temperature overshoots within minutes, and (b) cuts the run. Going −150 �
 about 20 % longer, but each run stays about 5 min.
 
 Causes outside the Vaillant, ruled out by the owner (2026-10-30):
-- **Loxone mode toggling:** ruled out. Loxone no longer writes `mc/OperatingMode`. The geoTHERM
-  runs `auto` on its own day/night time program.
+- **Loxone mode toggling:** ruled out. Loxone no longer writes `mc/OperatingMode`. (Then the
+  geoTHERM ran `auto` on its own day/night time program; since 2026-11-14 the owner set `on`, and
+  since Phase 2 HA writes `on`/`off` from Loxone's `warm_enough`, at most one change per 30 min:
+  `doc/heating_pv_boost/notes.md` "Decisions in force", design HPB-1.)
 - **Room valves closing:** ruled out. Loxone does not control the room valves.
 - **Throttling / closed loops:** ruled out (owner, 2026-11-06). The bedroom loops are **open**
   (no throttling) and **all valves are open**. Do not suggest opening throttling, loops or manifold
   valves again: the low water flow (≈ 8 K spread) is not caused by anything closed on the house side.
 
 So the cause is the Vaillant's own start/stop behaviour (integral + hysteresis) at a low setpoint.
+
+**Cold weather (UNPROVEN, reasoned, not measured):** cold-weather runs most likely end by integral
+payback; the hysteresis mainly shapes mild-weather runs. Check on the first cold days with the
+integral and flow vs setpoint at run end.
 
 ## Step 0b — record the owner's manual changes in the slab plan (docs only)
 
@@ -39,7 +45,8 @@ yet. Add them there:
 - New: geoTHERM `mc/OperatingMode` = `auto`, with the Vaillant's own time program (`on` by day,
   `low` at night). Add an Observations entry.
 - New: `ehp/CompIntegral` −150 → −180 °min (owner). Heating curve = 0.15.
-- **Phase 2 mode decision (owner, 2026-10-30, recorded in the slab plan's "Control law"):** `auto`
+- **Phase 2 mode decision (owner, 2026-10-30; superseded 2026-11-14 by the on/off law in
+  `doc/heating_pv_boost/design.md#HPB-1`: HA writes only `on`/`off`, never `auto`/`low`):** `auto`
   is normal operation. HA writes `on` only when Loxone says "not warm enough" or a boost is
   wanted, then returns to `auto`. HA never writes `low` any more. By day `auto` and `on` give the
   same setpoint, so there are no on/low setpoint flips. At night Loxone's schedule matches the
@@ -97,7 +104,7 @@ short runs.
 | Compressor demand | `ehp/CompDemand` | Who asked for the start |
 | Flow setpoint vs actual | `mc/Status0a` field 4 vs `ehp/Status` field 0 | Overshoot at the stop ≈ hysteresis → hysteresis is the cut-off |
 | Spread (flow − return) | existing sensors | Very large spread = little water moving (pump speed; valves are all open) |
-| Mode flips | `sensor.geotherm_heating_hvac_mode` changes | Should be near 0 once Loxone stops writing |
+| Mode flips | `sensor.geotherm_heating_hvac_mode` changes | Phase 2: follow Loxone `warm_enough`, at most one per 30 min (step 7) |
 | Daily efficiency | `ehp/YieldTotal` Δ / Shelly `Heizung Energy` Δ | Rises as runs get longer (coarse, kWh resolution) |
 
 ## Implementation (read-only; HA writes nothing)
@@ -334,7 +341,7 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       and outdoor temp to the "Why runs end" graph. Update the tests.
 - [x] 9a. (owner, 2026-11-06) `ebusctl info`: `EHP00 SW=0383 HW=7201`. The pump-speed registers
       (SW ≥ 407) do not exist. Tuning table #1 has no software path.
-- [ ] 10. (2026-11-14: superseded by the revised mode law, slab plan "Control law": the geoTHERM
+- [ ] 10. (2026-11-14: superseded by the revised mode law, `doc/heating_pv_boost/design.md#HPB-1`: the geoTHERM
       runs `on`, so there is no night setback any more; Loxone's `warm_enough` switches it `off`.
       Re-judge run lengths and starts under that law. The `TempDesiredLow` test is obsolete:
       it is now only the frost floor, `plans/heating-comfort-temp-helper.md`.) **Next (owner, manual):** night setback test, tuning table #0. Set `TempDesiredLow` 21 → 22 °C,
@@ -352,8 +359,22 @@ curve (the 27 → 29 °C step at 20:35 on 11-06 = outdoor drop to ≈ 0.5 °C pl
       at 24 + 7 = 31 °C; `FlowTempMax` 35 °C leaves about 4 K of hysteresis headroom at this setpoint.
 - [ ] 7. 3-day baseline (done, see 7-pre), then `CompHysteresis` +1 K — now **after** step 10's
       setback test; one change at a time, log under Observations.
-      First full baseline day is 2026-10-31. Recorder retention is raised to 14 d and the counting
-      rules are in `plans/heating-baseline-and-phase2-prerequisites.md` (steps 1 and 4).
+      Baseline counting rules:
+      - First full baseline day 2026-10-31 (2026-10-30 partial, meters from ~16:06: exclude). A
+        baseline = 3 consecutive full days with comparable weather; note each day's mean outdoor temp.
+      - Starts/day: `sensor.heating_compressor_starts_daily` (heating) + `sensor.hot_water_compressor_starts_daily`
+        (hot water) = compressor starts (owner). Runtime, duty cycle, last run: `ehp/Comp`, all modes;
+        average run = runtime ÷ both starts. `sensor.heating_efficiency_today` includes hot water.
+      - Comparability: baselines logged before 2026-11-14 excluded hot-water runs from runtime, duty
+        cycle and last run; before 2026-11-06 they included them (Shelly clamp, which could split one
+        run in two).
+      - Mode flips: only transitions of `sensor.geotherm_heating_hvac_mode` between two of
+        {`auto`,`on`,`low`,`off`}; ignore any into/out of `unavailable`/`unknown` (restarts). Under the
+        10-30 setup (`auto`) normal was 2/day (time program); on `on` (since 2026-11-14) none; with
+        Phase 2 they follow Loxone, max one per 30 min.
+      - Log `CompHysteresis` and `CompIntegral` at the start of each day and every change (date, time,
+        old, new): no long-term statistics. Read every number within the 14 d raw history or copy it
+        into Observations.
       Keep it moderate (8–9 K): the setting does not adapt to the weather. On the first cold days,
       check run-end flow temperatures on the "Why runs end" graph and step back 1 K if they approach
       35 °C (`FlowTempMax`). See `doc/heating_pv_boost/notes.md` "Cold weather".

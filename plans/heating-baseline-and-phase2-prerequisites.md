@@ -23,12 +23,12 @@ Each was re-checked against the code at base `0a4cab0` (master, includes #129-#1
 
 | # | Finding | Evidence |
 |---|---|---|
-| A | Raw history is purged after 5 days. The cycling plan's step 7 needs a 3-day baseline, then a `CompHysteresis` change, then a comparison "a week later" (about 10 days after the baseline starts), plus a cold-weather step-back. The baseline days will be gone by the comparison. | `configuration.yaml` l.7-8: `recorder: purge_keep_days: 5` (comment l.4-6 says LTS is separate and kept) |
-| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237), `..._backup_start_integral` (l.~249) have a unit but no `state_class`. The history_stats sensors, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
+| A | **Resolved in code (step 1):** `configuration.yaml` now has `recorder: purge_keep_days: 14`. Original finding: raw history was purged after 5 days. The cycling plan's step 7 needs a 3-day baseline, then a `CompHysteresis` change, then a comparison "a week later" (about 10 days after the baseline starts), plus a cold-weather step-back. With 5 days the baseline days would have been gone by the comparison. | was `configuration.yaml` `purge_keep_days: 5`; now 14 (comment above it says LTS is separate and kept) |
+| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237) have a unit but no `state_class` (the third one, `..._backup_start_integral`, no longer exists: HA reads no backup register, see the note's "Compressor and measurements"). The history_stats sensors, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
 | B | The Phase 2 write path is not documented. The Mosquitto bridge is an explicit allowlist. Phase 2 must publish to `ebusd/mc/OperatingMode/set` and `ebusd/mc/TempDesired/set`. The notes only describe `in` lines and `/get out` lines; "`/set`" appears in neither the slab plan nor the notes (grep of `plans/`, `doc/*/notes.md`, `packages/CLAUDE.md` finds no ebusd `/set`). | `doc/heating_pv_boost/notes.md` "Invariants" (now documents `/set`); slab plan l.150-160 |
 | C | `sensor.geotherm_heating_compressor_starts` (unique_id `heating_compressor_starts`) has `state_class: total_increasing` but no `unit_of_measurement`. Sibling counters have units (`h`, `kWh`). The daily `utility_meter` built on it inherits this. Owner reports a utility_meter warning and unitless LTS. | `packages/heating_pv_boost.yaml` l.258-266; utility_meter l.556-560 |
 | D | The daily meters and history_stats only exist since the 2026-10-30 ~16:06 deploy. The first complete baseline day is 2026-10-31. Today's partial day must not be counted. | deploy time reported by owner |
-| E | `sensor.geotherm_heating_hvac_mode` is an MQTT sensor with no availability handling, so an HA or MQTT restart produces `unavailable`/`unknown`. Counting "mode flips" as raw state changes would count restarts. Only changes between real values (`auto`, `on`, `low`, `off`) count. The two time-program switches per day (`on` by day, `low` at night) are expected and are not cycling (cycling plan step 0b). | `packages/heating_pv_boost.yaml` l.158-161; cycling plan l.66-67 |
+| E | `sensor.geotherm_heating_hvac_mode` is an MQTT sensor with no availability handling, so an HA or MQTT restart produces `unavailable`/`unknown`. Counting "mode flips" as raw state changes would count restarts. Only changes between real values (`auto`, `on`, `low`, `off`) count. Under the 10-30 setup (`auto`) the two time-program switches per day were expected; since Phase 2 HA writes only `on`/`off`, following Loxone, at most one change per 30 min (cycling plan step 7, `doc/heating_pv_boost/design.md#HPB-1`). | `packages/heating_pv_boost.yaml` l.158-161; cycling plan l.66-67 |
 | F | Owner/UI state that blocks later steps (checklist below). | see "Owner checklist" |
 | G | The new counters (`CompStartsHc`, `CompHoursHc`, `YieldTotal`) and the three derived meters have never been seen incrementing live: the compressor has not run since the deploy of the cycling work. All 9 registers answered `ebusctl read` (cycling plan 6b), but HA-side increments are unverified. | cycling plan Status 6 still unchecked |
 
@@ -60,7 +60,7 @@ Design (A1, decided):
 1. User-side, read-only first: check the current recorder DB size (`home-assistant_v2.db` on the HA
    host, or `sensor.database_size` if installed; ha-mcp `ha_get_system_health` may show it). Record
    the number in this plan.
-2. `configuration.yaml`: change `purge_keep_days: 5` to `14` and update the comment above it
+2. (done) `configuration.yaml`: change `purge_keep_days: 5` to `14` and update the comment above it
    (it currently says "purged after 5 days"). Keep the statement that LTS is separate.
 3. Do not add `purge_keep_days` per entity (not supported). Do not add `commit_interval` changes.
 4. After deploy (user, via `git pull` + HA restart; recorder config needs a restart): confirm the
@@ -129,28 +129,21 @@ Design:
    Add `"unit_of_measurement": "count"` to keep the seed realistic. No new test is needed for a unit
    on an MQTT sensor; the harness does not run a real broker.
 
-## Step 4 — Baseline method (findings D, E) — approval required (docs only)
+## Step 4 — Baseline method (findings D, E) — done (docs only)
 
-Write the exact counting rules into `doc/heating_pv_boost/notes.md` (new short section
-"Baseline method") and link it from cycling plan step 7 (on approval):
+The counting rules (first full baseline day 2026-10-31, starts per day, mode flips, settings log,
+retention, comparability across the 2026-11-06 and 2026-11-14 sensor changes) live in
+`plans/heating-compressor-cycling.md` step 7 ("Baseline counting rules"). Edit them there, not
+here.
 
-- **First full baseline day is 2026-10-31.** 2026-10-30 is partial (meters began ~16:06) and is
-  excluded. A baseline = 3 consecutive full days with comparable weather (record the daily mean
-  outdoor temperature next to each day).
-- **Starts per day:** use `sensor.heating_compressor_starts_daily` (machine counter, heating only);
-  hot water has `sensor.hot_water_compressor_starts_daily`, and the two add up to the compressor
-  starts. There is no run counter any more (`runs_today` was dropped 2026-11-14).
-- **Mode flips:** count only transitions of `sensor.geotherm_heating_hvac_mode` between two values in
-  {`auto`, `on`, `low`, `off`}. Ignore any transition into or out of `unavailable`/`unknown` (HA or
-  MQTT restart). Expected normal: 2 per day (the time program). A restart-free day with more than 2
-  is the signal, not the raw count.
-- **Settings:** log `CompHysteresis`, `CompIntegral` and `BackupIntegral` at the start of every
-  baseline day, and every change with date and time.
-- **Retention:** every number is read within the retention window, or copied into Observations
-  (decision 1).
-- **Compressor vs circulation:** the compressor is `ehp/Comp` (the Shelly > 500 W sensor was removed
-  2026-11-14). `ehp/Hc1Pump` is not read (slab plan Observations finding 4); a run of the circulation
-  pump alone should stay below 500 W, but that is an inference, not a measurement.
+Points superseded since this step was written:
+- Mode flips: the "2 per day" norm held only under the 10-30 `auto` time program. Since Phase 2
+  HA writes only `on`/`off` (design HPB-1), so flips follow Loxone, at most one per 30 min.
+- Settings: `BackupIntegral` is no longer read by HA (backup stays `no_backup`, note "Compressor
+  and measurements"); log `CompHysteresis` and `CompIntegral` only.
+- Compressor vs circulation: moot. The compressor is `ehp/Comp`, the circulation pump
+  `ehp/Hc1Pump` (`binary_sensor.geotherm_heating_circuit_pump`); the Shelly > 500 W sensor and
+  its inference are gone (removed 2026-11-14).
 
 Tests: none (docs).
 
@@ -182,7 +175,8 @@ mechanisms, just checks).
   - Transport "As deployed" note: add the `/set out` line kind.
   - 8c: leave unticked (live value is still 30; owner's UI change).
 - Cycling plan (`plans/heating-compressor-cycling.md`): step 7 gets a note that retention is 14 d
-  (this plan, step 1) and a link to the baseline method (step 4); first full baseline day 2026-10-31.
+  (this plan, step 1) and the baseline counting rules (step 4, now kept in cycling plan step 7);
+  first full baseline day 2026-10-31.
 - Do not change any other text in those plans.
 
 ## Owner checklist (finding F) — UI / hardware, no code
@@ -196,8 +190,8 @@ These are not implemented by Claude. Tick them in the Status section when done.
       changes it. Slab plan step 12 (boost) cannot produce decision data until the owner arms it.
 - [x] Slab plan step 10 (real `mc/TempDesiredLow`): live TDL 21, TempDesired 22; ticked in the slab
       plan by step 6 (docs edit).
-- [x] `ehp/Hc1Pump`: not needed by any step in either plan, so it is not added (owner decision rule:
-      only if needed). The Shelly > 500 W inference stays. Re-open only if a later step needs it.
+- [x] `ehp/Hc1Pump`: moot. It was not added for these plans, but is read since the energy mode
+      (`binary_sensor.geotherm_heating_circuit_pump`); the Shelly > 500 W sensor was removed 2026-11-14.
 
 ## Tests and the harness
 
@@ -241,8 +235,8 @@ These are not implemented by Claude. Tick them in the Status section when done.
       restarts Mosquitto; idempotent write test
 - [ ] 3. [x] `unit_of_measurement: "count"` + conftest seed done; USER still to
       handle the statistics repair (update stored unit)
-- [x] 4. Write the "Baseline method" section in `doc/heating_pv_boost/notes.md`; link from
-      cycling plan step 7
+- [x] 4. Baseline counting rules written; they live in `plans/heating-compressor-cycling.md`
+      step 7
 - [ ] 5. Post-deploy counter verification (after the first compressor run)
 - [x] 6. Cross-reference edits (done 2026-10-30, docs only): slab plan (Phase 2 bridge prerequisite, tick step 10) and cycling plan
       (step 7 retention + baseline method link); 8c stays open (owner)
