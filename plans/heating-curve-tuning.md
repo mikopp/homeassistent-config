@@ -170,6 +170,11 @@ This also explains why 0.13 gave 24 ↔ 26 jumps (never 25) at 7 °C in the inte
 Consequence: 0.14 / 22.5 ≈ 0.15 / 22 in mild weather (+0.4 K at 8 °C) and ≈ 0.5 K lower at 0 °C.
 So P3 will probably land near the P1 room temperatures in mild weather, above target in the
 bedroom and Kilian.
+Superseded as a model by the Kühne formula (next paragraph): it gives the same `TempDesired` step
+response (≈ 1.2 K flow per K) and the same "0.14 / 22.5 ≈ 0.15 / 22" (+0.2 K at 8 °C and at 0 °C),
+but only ≈ 0.5 K between 0.13 and 0.15 where this fit's b values imply ≈ 1.5 K. The b values come
+from whole-degree readings in two different weather periods; keep them only as a description of
+the data.
 
 **Manufacturer curve:** diagram, table, formula and sources in
 `doc/heating_pv_boost/heating-curve.md`. The diagram has no curve below 0.2; the low curves come
@@ -319,10 +324,15 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
 
 - Can: `TempDesired` 22.5 is in the machine. The setpoint is now ≈ 2 K higher than under 0.13/22 at
   the same mild outdoor temperature. 0.13/22 in mild weather gave rooms 0.8–0.9 K colder than
-  0.15/22 gave in colder weather (P1), and P1 itself was above the targets.
+  0.15/22 gave in colder weather (P1), and P1 itself was above the targets. The manufacturer curve
+  (Kühne formula, A.3) explains the machine to within 0–2 K, so the curve value means what the
+  diagram says; the rest of the gap is open (whole-degree readings, room setpoint resolution (e),
+  damping).
 - Cannot: where 0.14/22.5 settles (needs ≥ 4 days,
   the slab lags); how it behaves in cold weather (no frost day since); how much of the 11-21
-  overnight rise is the setting vs the normal night rise.
+  overnight rise is the setting vs the normal night rise; whether the controller uses half
+  degrees of `TempDesired` (step 0.6 (e)); how closely it follows the formula below 0.2
+  (step 0.6 (b), and the 0.5 K data from `sensor.geotherm_heating_circuit_flow_temp_desired_fine`).
 
 ## Steps
 
