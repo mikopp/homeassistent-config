@@ -25,7 +25,7 @@ https://kontakt.vaillant.de/documents/download/73792/
 
 flow = RS + 2.55 · (curve · (RS − T_out))^0.78 (RS = room setpoint, all °C; the bracket counts as 0 when T_out ≥ RS).
 Reverse-engineered by André Kühne for the current Vaillant sensoCOMFORT curves (OpenEnergyMonitor
-forum; constants as published at
+forum; form and constants as published, written T_flow − T_set = a·[curve × (T_set − T_out)]^b, at
 https://protonsforbreakfast.wpcomstaging.com/2024/10/18/vaillant-heat-pump-controls-part-3-formulas-and-spreadsheet/).
 Checked against the 83/2 diagram below (computed, 8 outdoor points per curve): within ±0.7 K for
 0.2, 0.4, 0.6, 0.8, 1.0 and 1.5 (the line read as 1.2 deviates up to −1.7 K; label not

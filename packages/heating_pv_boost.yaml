@@ -164,6 +164,20 @@ mqtt:
         {% set f = value.split(';') %}
         {{ f[4] | float | round(1) if f | count > 4 and f[4] | trim | float(none) is not none else '' }}
 
+    # mc/FlowTempDesired — the same circuit flow setpoint as mc/Status0a field 4, but in 0.5 K
+    # steps instead of whole °C. Read to check the curve against the formula in
+    # doc/heating_pv_boost/heating-curve.md (with the outdoor temp and the curve below).
+    - name: "Heating Circuit Flow Temp Desired Fine"
+      unique_id: heating_circuit_flow_temp_desired_fine
+      default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+      state_topic: "ebusd/mc/FlowTempDesired"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:thermometer-chevron-up
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(1) }}"
+
     # Broadcast/Outsidetemp — the geoTHERM's own outdoor sensor value (the weatherstation is a
     # different sensor). Read to compare the two against the flow setpoint
     # (plans/heating-curve-tuning.md). A broadcast: published unasked, never polled
@@ -1292,6 +1306,10 @@ automation:
       - action: mqtt.publish
         data:
           topic: "ebusd/mc/Status0a/get"
+          payload: "?5"
+      - action: mqtt.publish
+        data:
+          topic: "ebusd/mc/FlowTempDesired/get"
           payload: "?5"
       # Tier 5 (priority 9) — tuning settings (changed by hand, rarely) and lifetime counters
       # (only their daily delta matters). Slowest tier, lowest bus load.

@@ -53,6 +53,7 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
 | `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
+| `mc/FlowTempDesired` | the same setpoint, `D1C` (0.5 K; `b509 0d4600`, also passive update `2946`); `uih/FlowTempDesired` (`D2C`) read 26.00 when this read 26.5 (owner forced reads) |
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
 | `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |

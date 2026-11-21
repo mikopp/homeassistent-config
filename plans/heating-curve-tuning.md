@@ -296,8 +296,11 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   minute for 10 min after a change, once with the compressor off and once running; log time,
   values and `ehp/Comp`. Also read the HA history of
   `sensor.geotherm_heating_circuit_flow_temp_desired` around today's changes (that sensor is
-  polled, not cached). Result → "Observations". If confirmed that `mc/FlowTempDesired` is the
-  better copy: switch the HA sensor to it (2 bridge lines + `?5` poll, owner approval).
+  polled, not cached). Result → "Observations". Added (owner request, 2026-11-21):
+  `sensor.geotherm_heating_circuit_flow_temp_desired_fine` reads `mc/FlowTempDesired` (0.5 K,
+  `?5`, long-term statistics) next to the whole-degree sensor, and the dashboard's "Curve check"
+  graph shows it with `TempDesired`, the geoTHERM outdoor value and the curve: the data for the
+  formula check (A.3) and step 0.6. Deploy: step 0.4.
 
 ### A.5 What can and cannot be concluded yet
 
@@ -319,10 +322,20 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   bedroom sensor moved away from the sleepers (night warming by occupants is expected in the
   bedroom and Kilian's room); hydraulic balancing is part of this plan; the upper floor already
   gets more flow from last year's balancing; no dynamic target.
-- [TODO] **0.4** Deploy the HA additions (steps 4.3, 4.5): add the bridge lines
-  `topic ebusd/mc/HeatingCurve in 0` and `topic ebusd/mc/HeatingCurve/get out 0`, restart
-  Mosquitto, check that `sensor.geotherm_heating_curve` reads 0.14 and that
-  `number.geotherm_heating_temp_desired` shows 22.5.
+- [TODO] **0.4** Deploy the HA additions (steps 4.3, 4.5, 0.5, A.4b). Bridge lines on the HA
+  broker host:
+  ```
+  topic ebusd/mc/HeatingCurve in 0
+  topic ebusd/mc/HeatingCurve/get out 0
+  topic ebusd/mc/FlowTempDesired in 0
+  topic ebusd/mc/FlowTempDesired/get out 0
+  topic ebusd/Broadcast/Outsidetemp in 0
+  ```
+  (the broadcast has no `/get` line: it cannot be polled). Restart Mosquitto (a reload does not
+  load bridge changes), then check: `sensor.geotherm_heating_curve` 0.14,
+  `number.geotherm_heating_temp_desired` 22.5, `sensor.geotherm_heating_circuit_flow_temp_desired_fine`
+  shows the `ebusctl read -f -c mc FlowTempDesired` value, `sensor.geotherm_heating_outdoor_temp`
+  shows a value; the "Curve check" graph on the heating dashboard fills.
 - [IN_PROGRESS] **0.5** Compare the machine's outdoor value with the weatherstation (A.3
   discrepancy, hypothesis a). ebusd publishes the bus broadcast `ebusd/Broadcast/Outsidetemp`
   (owner MQTT view, 2026-11-21 evening: 3.75 °C vs 4.4 °C on the weatherstation, i.e. 0.65 K
@@ -527,7 +540,8 @@ read off Ref. 1, the low curves come from Ref. 3.
 - [DONE] 0.1 Part A analysis
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
-- [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
+- [TODO] 0.4 Deploy: bridge lines for `mc/HeatingCurve` (2), `mc/FlowTempDesired` (2),
+  `Broadcast/Outsidetemp` (1), restart Mosquitto, check the entities
 - [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (A.3 gap):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
 - [TODO] 0.6 Controller resolution tests: (e) `TempDesired` 0.5 K steps, (b) curve 0.14 → 0.20

@@ -49,6 +49,19 @@ views:
             name: "Setting: heating curve"
           - entity: sensor.geotherm_heating_outdoor_temp
             name: Outdoor Temp (ebusd broadcast)
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+            name: Flow Temp Desired (0.5 K steps)
+
+      # Curve check: the inputs and the result of the weather curve side by side, to compare with
+      # the formula in doc/heating_pv_boost/heating-curve.md (plans/heating-curve-tuning.md).
+      - type: history-graph
+        title: Curve check
+        hours_to_show: 48
+        entities:
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+          - entity: sensor.geotherm_heating_temp_desired
+          - entity: sensor.geotherm_heating_outdoor_temp
+          - entity: sensor.geotherm_heating_curve
 
       - type: history-graph
         title: Flow and Return
