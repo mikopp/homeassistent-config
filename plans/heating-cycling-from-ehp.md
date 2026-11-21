@@ -103,8 +103,8 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 2. [DONE] Remove the backup-heater indicators (owner: the backup heater is never used here).
    Scope (b): both MQTT sensors, the alert automation, the controller-state branch, the
    slab-decision gate, the poll registrations, dashboard rows and the notes invariant.
-   PR post-deploy steps: the bridge lines for `ebusd/ehp/Backup` and `ebusd/ehp/BackupIntegral`
-   can be removed; the two orphaned entities can be deleted in the UI.
+   Post-deploy done (owner, 2026-11-21): the `Backup`/`BackupIntegral` bridge lines are removed;
+   no backup entity is left in HA (step 16).
 
 ### Phase 2 — mode and run source
 3. [DONE] `sensor.heating_energy_mode` per the table above. Tests: every row, the row order
@@ -221,9 +221,12 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     and `_passive_heating` (unavailable) from the UI and statistics, but NOT before 30 days after
     #164 reached the system (the 30-day yield sum reads them; `space_heating_yield_30d` still
     reports `days` 8.9 on 2026-11-21, so earliest about 2026-12-12; check that attribute first).
-16. [TODO] Owner: bridge lines for `ebusd/ehp/Backup` and `ebusd/ehp/BackupIntegral` can be
-    removed (step 2); the other orphan entities (step 10, 11, 12) are not in HA's state machine
-    any more (checked 2026-11-21): confirm in Settings > Entities that no "not provided" row is left.
+16. [DONE] Bridge lines for `ebusd/ehp/Backup` and `ebusd/ehp/BackupIntegral` removed (owner,
+    2026-11-21). Orphan check (ha-mcp, 2026-11-21): no backup entity, and the removed
+    `binary_sensor.heating_compressor_heating_active`, `heating_dhw_active`,
+    `heating_compressor_active` and `sensor.heating_compressor_runs_today` have no state. The only
+    leftovers are the two step-15 yield meters, kept on purpose. ha-mcp cannot read the entity
+    registry: a "not provided" row in Settings > Entities would still be possible (owner glance).
 
 ### Close
 13. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
@@ -260,8 +263,7 @@ Done:
 Left, in order:
 1. Step 14 (cooling check): waits for cooling season.
 2. Step 15 (owner): delete the two pre-merge yield meters, earliest about 2026-12-12.
-3. Step 16 (owner): bridge lines for Backup/BackupIntegral, UI check for orphan rows.
-4. Step 13 Close (Claude): after 14 and 15 or after the owner agrees to close without the cooling
+3. Step 13 Close (Claude): after 14 and 15 or after the owner agrees to close without the cooling
    check (then note it as UNPROVEN in notes).
 
 Observation, not a bug: `sensor.heating_efficiency_30d` (2.48) is lower than space heating (3.29)
