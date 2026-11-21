@@ -186,7 +186,12 @@ above the weatherstation. The owner's first reading of `ebusd/Broadcast/Outsidet
 evening: 3.75 °C vs 4.4 °C) was 0.65 K **below** it. That would raise the setpoint by ≈ 0.2 K
 (diagram slope at 0.14), not lower it by 1.5–3.5 K: one reading weakens (a), step 0.5 settles it. (b) the panel value is not on the diagram's scale below 0.2 (the
 83/2 diagram draws nothing below 0.2). (c) `mc/Status0a` field 4 is not the plain curve setpoint
-(e.g. after an internal correction). Until this is resolved, the size column of the Phase 2 table
+(e.g. after an internal correction). (d) the VR 90 room sensor offset (`rcc/RoomTempOffset`
+0.5 K, owner): ruled out. It only calibrates the VR 90's own room reading, and with
+Raumaufschaltung `Keine` that reading does not reach the curve. The channel through which it
+would (`mc/RoomTempOffset`, written by the VR 90) was observed at 0.00 (registers.md). Even with
+room influence on, 0.5 K could not move the flow by 3 K, and the sign is wrong: a warmer room
+reading lowers the flow. Until this is resolved, the size column of the Phase 2 table
 is from our data, not from the diagram.
 
 ### A.4 Machine figures per period
