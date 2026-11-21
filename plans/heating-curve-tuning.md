@@ -208,6 +208,42 @@ is from our data, not from the diagram.
   (A.1 change log); the mode has been `on` since.
 - The Energy-mode `off` meter stayed 0 every day: the heating-circuit pump never stopped.
 
+### A.4b Which register is the flow setpoint, and when does it update
+
+Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp` 32.00,
+`uih FlowTemp` 32.00, `mc FlowTempDesired` 26.5, `uih FlowTempDesired` 26.00, `mc FlowTempMin` 15,
+`mc FlowTempMax` 35, offsets 0. Catalog (published CSVs):
+
+| Register | Catalog meaning | Type | Read by HA |
+|---|---|---|---|
+| `mc/FlowTempDesired` (`b509 0d4600`) | "flow temperature that is actually desired by circuit" | `D1C` (0.5 K), r/w + passive update (`2946`) | no |
+| `mc/Status0a` field 4 | "Vorlauf Soll" of the circuit | `UCH` (whole °C) | yes, `?5` (`sensor.geotherm_heating_circuit_flow_temp_desired`) |
+| `uih/FlowTempDesired` (`0d0500`) | "Vorlauftemp. SOLL" on the control interface (system) | `D2C` | no |
+| `ehp/HcFlowTemp` (`0d0900`) | flow actual, internal sensor T6 | `D2C` | yes, as `ehp/Status` field 0 |
+| `ehp/FlowTemp` (`0d0300`) | flow actual, VF2 (system flow sensor) | `D2C` | no |
+| `uih/FlowTemp` (`0d0200`) | "Anlagenvorlauftemperatur" (system flow) | `D2C` | no |
+
+- HA reads the right quantity, but the coarse copy: `Status0a` field 4 is the circuit setpoint
+  in whole °C (26.5 → 26, truncated or rounded: UNPROVEN), `mc/FlowTempDesired` has 0.5 K. With
+  one circuit and no buffer, `uih/FlowTempDesired` 26.00 is probably the same demand passed to the
+  generator (UNPROVEN).
+- **`ebusctl find` prints ebusd's cache, not a bus read.** `mc/FlowTempDesired` is not polled
+  (not in the poll list), so its cached value changes only when another bus master reads it or mc
+  pushes an update. "Did not change after a curve / `TempDesired` change" is therefore not yet
+  evidence about the controller.
+- Owner hypothesis (2026-11-21), UNPROVEN: the setpoint is only computed while the compressor
+  runs, and changes of the curve during a run are ignored. Against it so far: the manual describes
+  a setpoint computed continuously from the curve, the energy balance integrating actual − desired
+  every minute (Ref. 2 p. 61); the polled `Status0a` field 4 changed with `TempDesired` on
+  2026-11-14 23:05 and 2026-11-20 22:01 (A.1; compressor state at those moments not checked).
+- Test (owner, read-only on the bus): `ebusctl read -f -c mc FlowTempDesired` (`-f` forces a bus
+  read), likewise `mc Status0a`, `uih FlowTempDesired`, `mc HeatingCurve`, `mc TempDesired`, once a
+  minute for 10 min after a change, once with the compressor off and once running; log time,
+  values and `ehp/Comp`. Also read the HA history of
+  `sensor.geotherm_heating_circuit_flow_temp_desired` around today's changes (that sensor is
+  polled, not cached). Result → "Observations". If confirmed that `mc/FlowTempDesired` is the
+  better copy: switch the HA sensor to it (2 bridge lines + `?5` poll, owner approval).
+
 ### A.5 What can and cannot be concluded yet
 
 - Can: `TempDesired` 22.5 is in the machine. The setpoint is now ≈ 2 K higher than under 0.13/22 at
@@ -407,6 +443,7 @@ is read off the diagrams.
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
 - [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
+- [TODO] A.4b Setpoint register and update timing: forced `ebusctl read -f` test (owner)
 - [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days
