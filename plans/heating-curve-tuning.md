@@ -183,8 +183,8 @@ OBSERVED discrepancy, open: the machine runs **1.5–3.5 K below** the diagram (
 24 observed vs 27.4), and the diagram puts 0.13 vs 0.15 only ≈ 0.2–0.4 K apart, while the data show
 ≈ 2 K (24 vs 26 at 7–9 °C). HYPOTHESES, none tested: (a) the machine's outdoor value reads well
 above the weatherstation. The owner's first reading of `ebusd/Broadcast/Outsidetemp` (2026-11-21
-18:56, 3.75 °C) was ≈ 1 K **below** it, which would raise the setpoint, not lower it: one reading
-weakens (a), step 0.5 settles it. (b) the panel value is not on the diagram's scale below 0.2 (the
+evening: 3.75 °C vs 4.4 °C) was 0.65 K **below** it. That would raise the setpoint by ≈ 0.2 K
+(diagram slope at 0.14), not lower it by 1.5–3.5 K: one reading weakens (a), step 0.5 settles it. (b) the panel value is not on the diagram's scale below 0.2 (the
 83/2 diagram draws nothing below 0.2). (c) `mc/Status0a` field 4 is not the plain curve setpoint
 (e.g. after an internal correction). Until this is resolved, the size column of the Phase 2 table
 is from our data, not from the diagram.
@@ -234,7 +234,8 @@ is from our data, not from the diagram.
   `number.geotherm_heating_temp_desired` shows 22.5.
 - [IN_PROGRESS] **0.5** Compare the machine's outdoor value with the weatherstation (A.3
   discrepancy, hypothesis a). ebusd publishes the bus broadcast `ebusd/Broadcast/Outsidetemp`
-  (owner MQTT view, 2026-11-21: 3.750, ≈ 1 K below the weatherstation, one reading). Added
+  (owner MQTT view, 2026-11-21 evening: 3.75 °C vs 4.4 °C on the weatherstation, i.e. 0.65 K
+  colder, one reading). Added
   `sensor.geotherm_heating_outdoor_temp` (owner request, 2026-11-21) with long-term statistics, on
   the heating dashboard next to the weatherstation. Deploy: ONE bridge line
   `topic ebusd/Broadcast/Outsidetemp in 0` (a broadcast: no `/get` line, no poll), restart
