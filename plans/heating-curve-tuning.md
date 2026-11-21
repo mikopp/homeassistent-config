@@ -234,6 +234,24 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   generator. Forced reads (`ebusctl read -f`, owner, 2026-11-21 evening): `mc` 26.5, `uih` 26.00,
   0.5 K apart. HYPOTHESIS: `uih` passes on a whole-degree value (like `Status0a` field 4), so
   the machine works on 26 while the circuit asks 26.5.
+- `ebusctl read -f -c mc Params` (owner, 2026-11-21 evening): `22;20;0.14;mixer;15;0;15;35;0` =
+  tempdesired 22 · tempdesiredlow 20 · curve 0.14 · circuit type `mixer` · shutdowntemp 15 ·
+  pumpidleperiod 0 · flowtempmin 15 · flowtempmax 35 · maxpreheating 0. So the curve is active
+  (not `fixed` = Festwert), and the curve value and limits match the single registers.
+  - **Room setpoint reads 22 here, 22.5 in `mc/TempDesired`.** `Params` carries it as `UCH`
+    (whole degrees). HYPOTHESIS (e): the controller also calculates with whole degrees, so
+    `TempDesired` steps of 0.5 K do nothing (22.5 acts as 22). Not testable from the history: the
+    22 → 22.5 write (2026-11-20 22:01) came with the curve change 0.13 → 0.14. Until tested,
+    change `TempDesired` in whole degrees (Phase 2 table). Test: set 22.0 with the curve unchanged,
+    wait ≥ 10 min, force-read `mc FlowTempDesired`; unchanged = (e) confirmed.
+  - Circuit type `mixer` (catalog: `0=inactive 1=mixer 2=fixed …`; the catalog text lists
+    Brennerkreis = hydraulic plans 1/3, Mischerkreis = plans 2/4, Festwert). The note assumes
+    plans 1/3 (no buffer). Whether value 1 is shown as Brennerkreis or Mischerkreis on the panel
+    (menu C2 "Art") is open: owner to read the panel text. A mixer circuit regulates its own
+    mixed flow (`mc FlowTempDesired`) below the generator's flow (now 32 °C actual vs 26.5
+    desired; `Status0a` `mixer` = off).
+- `mc RoomTempOffset` = 0.00 (`ebusctl find -w`), `rcc RoomTempOffset` = 0.50 (the VR 90's own
+  sensor calibration), owner, 2026-11-21: confirms (d) in A.3.
 - **`ebusctl find` prints ebusd's cache, not a bus read.** `mc/FlowTempDesired` is not polled
   (not in the poll list), so its cached value changes only when another bus master reads it or mc
   pushes an update. "Did not change after a curve / `TempDesired` change" is therefore not yet
@@ -319,8 +337,8 @@ for the 22 °C rooms; the bedroom has its own issue, Phase 3):
 
 | Settled result | Change | Size |
 |---|---|---|
-| All rooms over target by about the same amount, mild and cold alike | `TempDesired` down | 0.5 K (≈ 0.65 K flow) |
-| All rooms under target by about the same amount | `TempDesired` up | 0.5 K |
+| All rooms over target by about the same amount, mild and cold alike | `TempDesired` down | 1 K until (e) in A.4b is tested, then 0.5 K |
+| All rooms under target by about the same amount | `TempDesired` up | 1 K until (e) in A.4b is tested, then 0.5 K |
 | Right on mild days, too cold on cold days | slope up | 0.01 |
 | Right on cold days, too warm on mild days | slope down | 0.01 |
 | Only some rooms off, others on target | no curve change: Phase 3 | — |
@@ -455,7 +473,8 @@ is read off the diagrams.
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
 - [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
-- [TODO] A.4b Setpoint register and update timing: forced `ebusctl read -f` test (owner)
+- [TODO] A.4b Setpoint register and update timing (forced `ebusctl read -f`), whole-degree
+  `TempDesired` test (e), panel text of C2 "Art" (owner)
 - [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days
