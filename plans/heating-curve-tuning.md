@@ -324,6 +324,31 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   than ≈ 1 K can be corrected with the outdoor offset (lever above), one change at a time like
   any other.
   Depends on: nothing (can run during Phase 1).
+- [TODO] **0.6** Controller resolution tests (owner, read-only on the bus except the one setting
+  changed and set back; background in A.4b). Each test changes ONE setting, at a steady outdoor
+  temperature (`sensor.geotherm_heating_outdoor_temp` within ±0.5 K during the test), and not
+  during hot water (`binary_sensor.geotherm_heating_hwc_active` off). Log every value with its time
+  under "Observations" and in the change log.
+  - **(e) Does `TempDesired` act in 0.5 K steps?**
+    1. Force-read the start values: `ebusctl read -f -c mc FlowTempDesired`, `ebusctl read -f -c mc
+       TempDesired` (expect 22.5), `ebusctl read -f -c mc HeatingCurve` (expect 0.14).
+    2. Set `number.geotherm_heating_temp_desired` to **22.0**. Curve unchanged.
+    3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min (the setpoint follows a change
+       after a few minutes, A.4b). Also force-read `mc Params`: its first field should stay 22.
+    4. Result: `FlowTempDesired` drops by 0.5 or 1.0 K (diagram: 1 + slope ≈ 1.3 K per K → ≈ 0.65 K, read in
+       0.5 K steps) → the
+       controller uses half degrees; unchanged → it uses whole degrees, (e) confirmed.
+    5. Set 22.5 back (or keep 22.0 if (e) is confirmed: it is the same for the controller), log it.
+  - **(b) Does the curve below 0.2 follow the diagram?** Only after (e), not on the same day.
+    1. Force-read `mc FlowTempDesired` and note the outdoor value.
+    2. Set the curve **0.14 → 0.20** at the panel (`TempDesired` unchanged).
+    3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min.
+    4. Compare the rise with the diagram (`doc/heating_pv_boost/heating-curve.md`, room setpoint
+       shift applied): at 3.75 °C / 22.5 it predicts +1.0 K; the history suggests ≈ +6 K.
+    5. Set **0.14** back at the panel and log both changes.
+  The tests run while the comfort control is off; a test change does not count as a Phase 2 tuning
+  step, and Phase 1's settle time is not restarted for a change set back within 1 h.
+  Depends on: nothing (can run during Phase 1).
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
 
@@ -482,8 +507,8 @@ is read off the diagrams.
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
 - [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
-- [TODO] A.4b Setpoint register and update timing (forced `ebusctl read -f`), whole-degree
-  `TempDesired` test (e), curve 0.14 → 0.20 test (b) (owner); C2 "Art" = Brennerkreis [DONE]
+- [TODO] 0.6 Controller resolution tests: (e) `TempDesired` 0.5 K steps, (b) curve 0.14 → 0.20
+  (owner, procedure in step 0.6); A.4b: C2 "Art" = Brennerkreis [DONE]
 - [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days
