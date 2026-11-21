@@ -225,6 +225,7 @@ BASELINE_STATES: dict[str, tuple[str, dict]] = {
     "sensor.geotherm_heating_compressor_start_integral": ("-180", {"unit_of_measurement": "°min"}),
     "sensor.geotherm_heating_compressor_hysteresis": ("7", {"unit_of_measurement": "K"}),
     "sensor.geotherm_heating_curve": ("0.14", {"state_class": "measurement"}),
+    "sensor.geotherm_heating_flow_temp_vf2": ("25.1", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_circuit_flow_temp_desired_fine": ("26.5", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_outdoor_temp": ("17.5", {"unit_of_measurement": "°C", "device_class": "temperature"}),
     "sensor.geotherm_heating_compressor_starts": ("20000", {"state_class": "total_increasing", "unit_of_measurement": "count"}),

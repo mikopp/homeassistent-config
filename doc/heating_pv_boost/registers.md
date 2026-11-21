@@ -15,8 +15,9 @@ checked against a full `ebusctl` dump of this bus.
 | `mc/Status` | `flowtempdesired;onoff;flowtemp;tempdesired`: no modulation field; field 3 is a second setpoint, not a percentage |
 | `hwc/Status` | `desired;onoff;actual;desired` (field 1 = generic unnamed `onoff`, the DHW circuit state) |
 
-`ehp/FlowTemp` (VF2) is the system-wide flow sensor, a different register from `ehp/Status`
-field 0 (heating-circuit flow T6). Not read.
+`ehp/FlowTemp` (VF2, `temp;sensor`) is the external flow sensor the controller regulates on
+(energy integral, floor protection; Installationsanleitung 0020045204_01 p. 46, p. 59), a different
+register from `ehp/Status` field 0 (internal T6). Read as `sensor.geotherm_heating_flow_temp_vf2`.
 
 ## Enums
 
@@ -47,9 +48,9 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 
 | Register | Meaning |
 |---|---|
-| `ehp/Integral` | running energy integral, Σ(flow actual − flow desired) per minute, °min (`SIN`) |
+| `ehp/Integral` | running energy integral, Σ(flow VF2 − flow desired) per minute, °min (`SIN`; VF2 per p. 59) |
 | `ehp/CompIntegral` | "Komp. Start in": integral at which the compressor starts (installer setting) |
-| `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (hydraulic plans 1/3 = no buffer) |
+| `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (no buffer = hydraulic plan 6 on the exclusiv; *Installationsanleitung* 0020045204_01 p. 63, p. 69) |
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
 | `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
@@ -81,6 +82,6 @@ runs SW 0383, so it does not have them (see the note, "Hardware").
 | `uih/CoolingDemand` | raw cooling need |
 | `mc/CoolingRequestHc2` | gated, actually-triggered request ("abhängig von der Kühlungsbetriebsart, Zeitfenstern und Effizienzfunktionen") |
 | `uih/CoolingActive` | UIH "Kühlung aktiv" flag |
-| `mc/OtShutdownLimit` + `mc/CoolingStartOffsetHc2` | 15 + 2 = 17 °C **outdoor** cooling release |
+| `mc/OtShutdownLimit` + `mc/CoolingStartOffsetHc2` | 15 + 2 = 17 °C **outdoor** cooling release (catalog; the /2 manuals describe cooling only as a manual function, so this is newer software, UNPROVEN) |
 | `mc/EfficiencyHysteresisHc2Min` | 1.0: flow-to-room delta for releasing cooling, not a heating-band constraint |
 | `DWMOffToCoolingDelayHc2` / `DWMOffToHeatingDelayHc2` | both 6 h |

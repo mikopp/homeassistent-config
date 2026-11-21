@@ -57,8 +57,8 @@ p. 66) draws a 0.1 curve that lies 2–2.5 K above the formula while its 0.2–1
 
 `mc/FlowTempMax` (35 °C) caps the setpoint whatever the curve (note "Compressor and measurements").
 
-Outdoor sensor calibration (installer menu A8 "Kalibrierung" → "Aussentemperatur", ±5 K in 1 K
-steps; *Installationsanleitung* 0020087974_00 p. 82; ebusd `ehp/OutsideTempOffset`): 0 K (owner,
+Outdoor sensor calibration (installer menu "Kalibrierung" → "Aussentemperatur", ±5 K in 1 K
+steps; *Installationsanleitung* 0020045204_01 p. 65 (/2); ebusd `ehp/OutsideTempOffset`): 0 K (owner,
 2026-11-21). The manual calls it an adjustment of the displayed temperature; that the curve uses
 the corrected value, i.e. that it shifts the curve sideways (+1 K = read warmer = lower flow), is
 UNPROVEN. It would also move every other outdoor threshold (frost protection, summer cut-off,
