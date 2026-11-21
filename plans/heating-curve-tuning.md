@@ -53,7 +53,7 @@ automatically: the comfort control stays off.
   - **Outdoor sensor offset** (panel, menu A8 "Kalibrierung" → "Aussentemperatur"; ±5 K in
     1 K steps; Ref. 2 p. 82; ebusd `ehp/OutsideTempOffset`, installer write; owner: 0 now)
     adds to the measured outdoor value, so it moves the curve sideways: +1 K reads warmer and
-    lowers the flow by the curve's slope there (by the diagram ≈ 0.2–0.4 K at 0.13–0.15). It is a
+    lowers the flow by the curve's slope there (by the formula ≈ 0.2 K at 0.13–0.15 in mild weather). It is a
     calibration, not a comfort setting: it also shifts everything else the machine decides on the
     outdoor value: frost protection below 3 °C, the summer cut-off (`AT-Abschaltgrenze`), the
     cooling release (`mc/OtShutdownLimit` + offset, note "Heating and cooling"). HYPOTHESIS that
@@ -171,28 +171,44 @@ Consequence: 0.14 / 22.5 ≈ 0.15 / 22 in mild weather (+0.4 K at 8 °C) and ≈
 So P3 will probably land near the P1 room temperatures in mild weather, above target in the
 bedroom and Kilian.
 
-**Manufacturer curve:** diagram, full table, the 45° room-setpoint shift and sources in
-`doc/heating_pv_boost/heating-curve.md` (Ref. 1; the 0.1 curve from Ref. 2; 0.13–0.15 are a linear
-interpolation, not manufacturer values). flow(T, RS) = flow₂₀(T − (RS − 20)) + (RS − 20) has the
-same form as the fit above.
+**Manufacturer curve:** diagram, table, formula and sources in
+`doc/heating_pv_boost/heating-curve.md`. The diagram has no curve below 0.2; the low curves come
+from the Kühne formula flow = RS + 2.55 · (curve · (RS − T))^0.78, which reproduces the 83/2
+diagram within ±0.7 K for 0.2–1.5 (computed). The first comparison in this plan used a linear
+interpolation from the successor manual's 0.1 curve, which lies 2–2.5 K above the formula: that
+overstated 0.13–0.15 by ≈ 1.5 K and produced most of the "1.5–3.5 K below" gap reported earlier.
 
-Shifted to our room setpoints, the diagram predicts 0.15 / 22: 28.5 °C at 5 °C, 27.6 at 8 °C;
-0.13 / 22: 28.3 at 5 °C, 27.4 at 8 °C, 25.5 at 14 °C; 0.14 / 22.5: 29.0 at 5 °C, 28.2 at 8 °C.
+Against the formula (weatherstation outdoor, `Status0a` field 4 in whole °C):
 
-OBSERVED discrepancy, open: the machine runs **1.5–3.5 K below** the diagram (0.13 / 22 at 8 °C:
-24 observed vs 27.4), and the diagram puts 0.13 vs 0.15 only ≈ 0.2–0.4 K apart, while the data show
-≈ 2 K (24 vs 26 at 7–9 °C). HYPOTHESES, none tested: (a) the machine's outdoor value reads well
-above the weatherstation. The owner's first reading of `ebusd/Broadcast/Outsidetemp` (2026-11-21
-evening: 3.75 °C vs 4.4 °C) was 0.65 K **below** it. That would raise the setpoint by ≈ 0.2 K
-(diagram slope at 0.14), not lower it by 1.5–3.5 K: one reading weakens (a), step 0.5 settles it. (b) the panel value is not on the diagram's scale below 0.2 (the
-83/2 diagram draws nothing below 0.2). (c) `mc/Status0a` field 4 is not the plain curve setpoint
-(e.g. after an internal correction). (d) the VR 90 room sensor offset (`rcc/RoomTempOffset`
-0.5 K, owner): ruled out. It only calibrates the VR 90's own room reading, and with
-Raumaufschaltung `Keine` that reading does not reach the curve. The channel through which it
-would (`mc/RoomTempOffset`, written by the VR 90) was observed at 0.00 (registers.md). Even with
-room influence on, 0.5 K could not move the flow by 3 K, and the sign is wrong: a warmer room
-reading lowers the flow. Until this is resolved, the size column of the Phase 2 table
-is from our data, not from the diagram.
+| Setting | Outdoor | Observed | Formula | Formula if RS acts as 22 |
+|---|---|---|---|---|
+| 0.15 / 22 | −1.8 | 29 | 28.9 | — |
+| 0.15 / 22 | 2.5 | 27 | 27.9 | — |
+| 0.15 / 22 | 4.75 | 26 | 27.4 | — |
+| 0.15 / 22 | 7.75 | 26 | 26.6 | — |
+| 0.15 / 22 | 10.5 (day) | 24 | 25.9 | — |
+| 0.13 / 22 | −2 | 27 | 28.2 | — |
+| 0.13 / 22 | 4.75 | 26 | 26.8 | — |
+| 0.13 / 22 | 8 | 24 | 26.1 | — |
+| 0.13 / 22 | 14 | 23 | 24.6 | — |
+| 0.14 / 22.5 | 6.15 | 26 | 27.4 | 26.7 |
+| 0.14 / 22.5 | 8.7 | 26 | 26.8 | 26.1 |
+| 0.14 / 22.5 | 3.75 (geoTHERM sensor; `mc FlowTempDesired` 26.5) | 26.5 | 27.9 | 27.3 |
+
+OBSERVED: the machine runs 0–2 K below the formula, mostly 0.5–1.5 K. Remaining explanations,
+none tested: the whole-degree reading of `Status0a` field 4 (up to 1 K; truncation UNPROVEN);
+(e) whole-degree room setpoint (A.4b; with RS 22 the 0.14 rows fit within 0.2–0.8 K); a damped
+outdoor value (daytime rows lowest); the formula being off by ≈ 0.5 K at 0.2 (it reads 0.3–0.7 K
+below the diagram there). Ruled out: the outdoor sensor itself (0.65 K colder than the
+weatherstation, which would raise the setpoint) and the VR 90 offset ((d) below). The observed
+0.13 vs 0.15 gap (≈ 2 K at 8 °C) is still larger than the formula's 0.5 K: the 0.13 period had
+the slab still discharging the 11-14 spike, and two whole-degree readings can differ by up to
+1 K more than the true values. HYPOTHESES (b) and (c) from the first comparison are weaker now:
+(b) the panel value is not on the diagram's scale below 0.2; (c) `mc/Status0a` field 4 is not
+the plain curve setpoint (it matches `mc FlowTempDesired` 26.5 → 26 within its whole degree).
+(d) the VR 90 room sensor offset (`rcc/RoomTempOffset` 0.5 K, owner): ruled out. It only
+calibrates the VR 90's own room reading, and with Raumaufschaltung `Keine` that reading does not
+reach the curve; the channel that would carry it (`mc/RoomTempOffset`) reads 0.00 (A.4b).
 
 ### A.4 Machine figures per period
 
@@ -251,12 +267,12 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
     with the note (registers.md).
 - Still to confirm (owner, 2026-11-21):
   - (e) whether `TempDesired` acts in 0.5 K steps: test above.
-  - (b) whether the curve below 0.2 follows the diagram. The panel and the VR 90 both show 0.14,
+  - (b) whether the curve below 0.2 follows the formula (A.3). The panel and the VR 90 both show 0.14,
     so the setting is stored to 0.01 (CONFIRMED by display), but that says nothing about the
-    curve's shape. A 0.01 step is too small to test (diagram ≈ 0.1 K flow, below the 0.5 K
+    curve's shape. A 0.01 step is too small to test (formula ≈ 0.2 K flow, below the 0.5 K
     resolution of `mc FlowTempDesired`). Test: at steady outdoor temperature, curve 0.14 → 0.20,
-    wait ≥ 10 min, force-read `mc FlowTempDesired`, set 0.14 back. At 3.75 °C / 22.5 the diagram
-    predicts +1.0 K (29.4 → 30.4); the history suggests ≈ +6 K (≈ 1 K per 0.01, A.3). The owner's
+    wait ≥ 10 min, force-read `mc FlowTempDesired`, set 0.14 back. At 3.75 °C / 22.5 the formula
+    predicts +1.7 K (formula, 27.9 → 29.7); the history suggests ≈ +6 K (≈ 1 K per 0.01, A.3). The owner's
     curve change on 2026-11-21 evening (old/new curve and `FlowTempDesired`, with times) is a first
     data point: log it under "Observations".
 - `mc RoomTempOffset` = 0.00 (`ebusctl find -w`), `rcc RoomTempOffset` = 0.50 (the VR 90's own
@@ -315,7 +331,7 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   the heating dashboard next to the weatherstation. Deploy: ONE bridge line
   `topic ebusd/Broadcast/Outsidetemp in 0` (a broadcast: no `/get` line, no poll), restart
   Mosquitto, check the sensor shows a value. Then, after ≥ 2 days: compare the two outdoor values
-  by hour (night, 08–11 h, afternoon), and the flow setpoint with the A.3 diagram evaluated at
+  by hour (night, 08–11 h, afternoon), and the flow setpoint with the A.3 formula evaluated at
   the geoTHERM value. Result → "Observations".
   The broadcast is the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and
   the same), so hypothesis (a) is tested on the controller's own input. Open: whether the
@@ -335,16 +351,16 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
     2. Set `number.geotherm_heating_temp_desired` to **22.0**. Curve unchanged.
     3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min (the setpoint follows a change
        after a few minutes, A.4b). Also force-read `mc Params`: its first field should stay 22.
-    4. Result: `FlowTempDesired` drops by 0.5 or 1.0 K (diagram: 1 + slope ≈ 1.3 K per K → ≈ 0.65 K, read in
-       0.5 K steps) → the
+    4. Result: `FlowTempDesired` drops by 0.5 or 1.0 K (formula: ≈ 1.2 K flow per K → ≈ 0.6 K, read in 0.5 K
+       steps) → the
        controller uses half degrees; unchanged → it uses whole degrees, (e) confirmed.
     5. Set 22.5 back (or keep 22.0 if (e) is confirmed: it is the same for the controller), log it.
-  - **(b) Does the curve below 0.2 follow the diagram?** Only after (e), not on the same day.
+  - **(b) Does the curve below 0.2 follow the formula?** Only after (e), not on the same day.
     1. Force-read `mc FlowTempDesired` and note the outdoor value.
     2. Set the curve **0.14 → 0.20** at the panel (`TempDesired` unchanged).
     3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min.
-    4. Compare the rise with the diagram (`doc/heating_pv_boost/heating-curve.md`, room setpoint
-       shift applied): at 3.75 °C / 22.5 it predicts +1.0 K; the history suggests ≈ +6 K.
+    4. Compare the rise with the formula (`doc/heating_pv_boost/heating-curve.md`): at 3.75 °C / 22.5 the formula predicts +1.7 K (27.9 → 29.7); the history
+       suggests ≈ +6 K.
     5. Set **0.14** back at the panel and log both changes.
   The tests run while the comfort control is off; a test change does not count as a Phase 2 tuning
   step, and Phase 1's settle time is not restarted for a change set back within 1 h.
@@ -379,9 +395,10 @@ for the 22 °C rooms; the bedroom has its own issue, Phase 3):
 | A sunny day overshoots | no change: the PV exception (Phase 5) | — |
 | Step 0.5 shows the machine's outdoor value off from the real outdoor temperature | outdoor offset (correct the sensor) | the measured error, whole K |
 
-Sizes: by the manufacturer diagram (A.3), a slope step of 0.01 moves the flow only ≈ 0.1–0.2 K
-around 0.13–0.15; our data showed ≈ 1 K per 0.01. Until step 0.5 explains the gap, size steps on
-the data and log the flow setpoint before and after.
+Sizes: by the formula (A.3), a slope step of 0.01 moves the flow ≈ 0.2 K around 0.13–0.15 in mild
+weather (≈ 0.5 K at −10 °C); our data suggested ≈ 1 K per 0.01. Until step 0.6 (b) settles it,
+size steps on the data and log the flow setpoint (`mc FlowTempDesired`, forced read) before and
+after.
 
 - [TODO] **2.1** Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel), log it in the change log, then wait ≥ 4
@@ -478,11 +495,17 @@ Still optional: 4.1, 4.4.
    0.2). Spot checks against the A.3 values at −20 °C (0.2 ≈ 33, 0.6 ≈ 50, 1.0 ≈ 65) agree.
 2. Vaillant, *Installationsanleitung geoTHERM exclusiv* (installation manual, DE/AT/CH),
    0020087974_00, 04/2010. Valid only for VWS 63/3, 83/3, 103/3 (§1.4), the successor; used only
-   for the 0.1 curve that Ref. 1 lacks (same diagram otherwise). Diagram: p. 66, Tab. 9.6 menu C2.
+   to cross-check Ref. 1 (same curves 0.2–1.0); its extra 0.1 curve lies off the formula (Ref. 3) and
+   is not used. Diagram: p. 66, Tab. 9.6 menu C2.
    Download: https://kontakt.vaillant.de/documents/download/78824/
 
-Neither manual gives a formula for the curves: the table in `doc/heating_pv_boost/heating-curve.md`
-is read off the diagrams.
+3. Kühne formula for the Vaillant curves, flow = RS + 2.55 · (curve · (RS − T))^0.78, derived for
+   sensoCOMFORT (OpenEnergyMonitor forum), as published at
+   https://protonsforbreakfast.wpcomstaging.com/2024/10/18/vaillant-heat-pump-controls-part-3-formulas-and-spreadsheet/
+   Fits Ref. 1's curves 0.2–1.5 within ±0.7 K (computed); used for the curves below 0.2.
+
+Neither manual gives a formula: the diagram columns in `doc/heating_pv_boost/heating-curve.md` are
+read off Ref. 1, the low curves come from Ref. 3.
 
 ## Knowledge homes
 
@@ -505,7 +528,7 @@ is read off the diagrams.
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
-- [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
+- [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (A.3 gap):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
 - [TODO] 0.6 Controller resolution tests: (e) `TempDesired` 0.5 K steps, (b) curve 0.14 → 0.20
   (owner, procedure in step 0.6); A.4b: C2 "Art" = Brennerkreis [DONE]
