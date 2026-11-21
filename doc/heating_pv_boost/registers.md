@@ -26,7 +26,8 @@ field 0 (heating-circuit flow T6). Not read.
 ## Unusable or not answered on this unit
 
 - `mc/Mode` field 5 decodes `pool` while `mc/CfgHeatSinkType` and `mc/Params` say `mixer`: do
-  not use `mc/Mode` at all.
+  not use `mc/Mode` at all. `mixer` (raw 1) is a misleading catalog label: the panel's menu C2
+  "Art" shows Brennerkreis for this value (owner, 2026-11-21), a direct circuit without mixer.
 - `ehp/Status02` returns placeholder data (`disabled;0;100.0;0;100.0`).
 - `ehp/Status01` is fully defined (`temp` flow, `temp_1` **return**, `temp_2` outside, `temp_3`
   hot water, `temp_4` storage, `pumpstate`) but this unit answers `ERR: read timeout`. Worth an
@@ -52,10 +53,12 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
 | `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
+| `mc/FlowTempDesired` | the same setpoint, `D1C` (0.5 K; `b509 0d4600`, also passive update `2946`); `uih/FlowTempDesired` (`D2C`) read 26.00 when this read 26.5 (owner forced reads) |
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
 | `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |
 | `mc/HeatingCurve` | weather-curve slope, `UIN` ÷ 100 (payload e.g. `0.14`); same `cfgheatsinktype=1` condition as `TempDesired`, answers on this unit |
+| `Broadcast/Outsidetemp` | outdoor temperature broadcast (`u`, `fe b516 01`, `D2B` °C, payload e.g. `3.750`), from `broadcast.csv`; passive only, not pollable. Same value as `ehp/OutsideTemp` (`b509 0d0600`, temp + sensor status; owner), so that register is not read |
 | `ehp/Hc1Pump` | heating-circuit pump on/off now ("Status Heizkreispumpe: AN/AUS"), the signal the owner's Loxone logic uses |
 
 `ehp/YieldTotal` is the only yield register: there is no per-mode (heating / hot water) yield.

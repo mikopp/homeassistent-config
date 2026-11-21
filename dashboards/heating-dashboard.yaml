@@ -47,6 +47,21 @@ views:
             name: Set Temp Desired (by hand; comfort control overwrites it while on)
           - entity: sensor.geotherm_heating_curve
             name: "Setting: heating curve"
+          - entity: sensor.geotherm_heating_outdoor_temp
+            name: Outdoor Temp (ebusd broadcast)
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+            name: Flow Temp Desired (0.5 K steps)
+
+      # Curve check: the inputs and the result of the weather curve side by side, to compare with
+      # the formula in doc/heating_pv_boost/heating-curve.md (plans/heating-curve-tuning.md).
+      - type: history-graph
+        title: Curve check
+        hours_to_show: 48
+        entities:
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+          - entity: sensor.geotherm_heating_temp_desired
+          - entity: sensor.geotherm_heating_outdoor_temp
+          - entity: sensor.geotherm_heating_curve
 
       - type: history-graph
         title: Flow and Return
@@ -169,6 +184,8 @@ views:
           - entity: sensor.geotherm_heating_energy_integral
           - entity: sensor.heating_energy_mode
           - entity: sensor.wheatherstation_outdoor_temperature
+          # The outdoor value broadcast on the bus, next to the weatherstation.
+          - entity: sensor.geotherm_heating_outdoor_temp
           - entity: sensor.geotherm_heating_hvac_mode
 
       # ── 2. Slab boost status ───────────────────────────────────────────────
