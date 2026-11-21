@@ -146,8 +146,9 @@ bridged: keep it that way rather than widening to `ebusd/#`.
   measured at VF2: above it for > 15 min the heat pump stops with error 72 until reset
   (Installationsanleitung 0020045204_01 p. 46, p. 69). So a higher hysteresis also raises the floor
   limit. `ehp/ReturnTempMax` 46 °C blocks the compressor on return temperature (p. 69).
-  `mc/OtShutdownLimit` 15 °C is most likely the C2 "AT-Abschaltgrenze" (summer cut-off, p. 58;
-  name match and `mc/Params` field, UNPROVEN until read on the panel).
+  `mc/OtShutdownLimit` 15 °C = C2 "AT-Abschaltgrenze" (p. 58; name and `mc/Params` match): the
+  owner changes it seasonally; above it heating does not run, below it cooling does not (owner,
+  tests and experience).
 - **The controller regulates on VF2** (`ehp/FlowTemp`, `sensor.geotherm_heating_flow_temp_vf2`):
   the energy integral is VF2 − flow setpoint per minute (p. 59), floor protection reads VF2. The
   panel's "Vorlauftemp. IST" and `ehp/Status` field 0 are the internal T6.
@@ -188,8 +189,8 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 
 - Loxone does **not** write `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
   **retained**, on change and re-sent **every hour** (owner). Loxone does not control room valves.
-- **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
-  is a pump matter, not a closed valve.
+- **Loops: ground floor throttled a bit** from last year's balancing so the upper floor gets more
+  flow; no flow-meter readings available (owner, 2026-11-21).
 - `mc/OperatingMode` = **`on`**, set by hand until Phase 2 is armed.
 - Frost protection kept small (owner-stated, set at the unit): `uih/FrostOverRideTime` 3 h,
   `mc/TempDesiredLow` 20 °C (TDL read 20 live before HA stopped reading it). The owner's reading

@@ -82,6 +82,6 @@ runs SW 0383, so it does not have them (see the note, "Hardware").
 | `uih/CoolingDemand` | raw cooling need |
 | `mc/CoolingRequestHc2` | gated, actually-triggered request ("abhängig von der Kühlungsbetriebsart, Zeitfenstern und Effizienzfunktionen") |
 | `uih/CoolingActive` | UIH "Kühlung aktiv" flag |
-| `mc/OtShutdownLimit` + `mc/CoolingStartOffsetHc2` | 15 + 2 = 17 °C **outdoor** cooling release (catalog; the /2 manuals describe cooling only as a manual function, so this is newer software, UNPROVEN) |
+| `mc/OtShutdownLimit` + `mc/CoolingStartOffsetHc2` | 15 + 2 = 17 °C **outdoor** cooling release (catalog). `OtShutdownLimit` is the C2 "AT-Abschaltgrenze", set seasonally: above it no heating, below it no cooling (owner); the /2 manuals describe it for heating only and cooling as a manual function |
 | `mc/EfficiencyHysteresisHc2Min` | 1.0: flow-to-room delta for releasing cooling, not a heating-band constraint |
 | `DWMOffToCoolingDelayHc2` / `DWMOffToHeatingDelayHc2` | both 6 h |

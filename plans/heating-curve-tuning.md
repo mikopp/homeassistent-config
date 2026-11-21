@@ -58,7 +58,7 @@ control stays off.
     temperature; ebusd `ehp/OutsideTempOffset`; owner: 0 now). If the curve uses the corrected
     value (UNPROVEN, `heating-curve.md`), +1 K would lower the flow by ≈ 0.25 K at 0.14 in mild
     weather. It would also move every other outdoor decision: frost protection below 3 °C, the
-    summer cut-off, the cooling release. Only for correcting a measured sensor error (step 0.5),
+    AT-Abschaltgrenze (no heating above, no cooling below). Only for correcting a measured sensor error (step 0.5),
     never instead of `TempDesired` or the slope.
   - **Room-to-room differences** (upper floor colder than the living room) are hydraulics or room
     losses. Neither lever fixes them: Phase 3.
@@ -93,7 +93,7 @@ control stays off.
 | 2026-11-20 22:01:44 | `TempDesired` | 22 → 22.5 | Owner: written by HA (the writer was armed for ≈ 3 s; switched off at 22:01:47) |
 | 2026-11-20 22:01:47 | Comfort control | on → off | Owner: `warm_enough` does not update; stays off, `warm_enough` ignored |
 | 2026-11-21 or shortly before | Bedroom sensor | moved away from the bed to a neutral spot | Owner. Bedroom data before the move are not comparable |
-| 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 (?) | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes. Values, times and whether it was set back: OPEN (owner) |
+| 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes; set back to 0.14 (owner). Test values and times not recorded |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
 | unchanged | Outdoor sensor offset 0 K | — | Owner, 2026-11-21 |
 
@@ -278,8 +278,9 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   bedroom and Kilian's room); hydraulic balancing is part of this plan; the upper floor already
   gets more flow from last year's balancing; no dynamic target; office is the limiting room;
   balance before tuning.
-- [TODO] **0.4** Deploy the HA additions (steps 4.3, 4.5–4.8). Bridge lines on the HA broker host
-  (which are already live: OPEN, owner):
+- [IN_PROGRESS] **0.4** Deploy the HA additions (steps 4.3, 4.5–4.8). Bridge lines on the HA
+  broker host; the first five (`mc/HeatingCurve`, `mc/FlowTempDesired`, `Broadcast/Outsidetemp`)
+  are live (owner, 2026-11-21), `ehp/FlowTemp` comes with the deploy of #190:
   ```
   topic ebusd/mc/HeatingCurve in 0
   topic ebusd/mc/HeatingCurve/get out 0
@@ -298,9 +299,10 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
 - [TODO] **0.5** Machine outdoor value vs weatherstation (hypothesis (a)). After ≥ 2 days of data:
   compare `sensor.geotherm_heating_outdoor_temp` with the weatherstation by hour (night, 08–11 h,
   afternoon), and the fine setpoint with the formula evaluated at the geoTHERM value; a setpoint
-  that lags the geoTHERM value by hours = damping. Correct with the outdoor offset only if the mean
-  night-time difference is ≥ 1 K over ≥ 2 nights (weatherstation as reference; threshold: OPEN,
-  owner to confirm). Result → "Observations".
+  that lags the geoTHERM value by hours = damping. Correct with the outdoor offset only for a
+  roughly constant night-time difference over clearly more than 2 nights (owner; weatherstation as
+  reference). The offset moves in 1 K steps, so a constant difference well below 1 K stays as it
+  is. Result → "Observations".
   Depends on: 0.4.
 - [TODO] **0.6** Controller resolution tests (owner; background A.3 (e), (b)). Each test changes
   ONE setting, at a steady outdoor temperature (`sensor.geotherm_heating_outdoor_temp` within
@@ -357,7 +359,7 @@ on qualifying days:
 | Within ±0.3 K on cold days, above +0.3 K on mild days | slope down | 0.01 |
 | Within ±0.3 K, other rooms out of their band | no curve change: Phase 3 (living overshoot accepted until then) | — |
 | A sunny day overshoots | no change: the PV exception (Phase 5) | — |
-| Step 0.5 found an outdoor sensor error ≥ 1 K | outdoor offset (correct the sensor) | the measured error, whole K |
+| Step 0.5 found a constant night-time outdoor error (owner rule, step 0.5) | outdoor offset (correct the sensor) | the measured error, whole K |
 
 - [TODO] **2.1** Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel). Log it in the change log with the
@@ -380,17 +382,18 @@ Success metrics (readable in HA), on qualifying days:
 
 The four upper-floor rooms run 0.5–1.0 K below the ground-floor living room, and the gap grew by
 ≈ 0.25–0.3 K at the lower flow temperature of 0.13 (A.2). The curve shifts every room together, so
-it cannot fix it. The pump speed cannot be set (note "Bus participants"). The note says "all loops
-and valves are open", while last year's balancing gave the upper floor more flow: current manifold
-state and flow-meter readings per loop are OPEN (owner).
+it cannot fix it. The pump speed cannot be set (note "Bus participants"). The ground-floor loops
+are already throttled a bit from last year's balancing; no flow-meter readings are available
+(owner, 2026-11-21).
 
 - [TODO] **3.1** Hydraulic balancing (owner-approved as part of this plan). Start when 1.2 shows an
   office-to-living gap > 0.5 K.
   - **3.1a** Rule out room-side causes: doors (the bedroom and Kilian change ≈ 1 K over a day,
     typical of ventilation or closed doors), furniture or rugs over the floor loops, a towel
     radiator or ventilation settings in the bathroom.
-  - **3.1b** Record every loop's flow-meter reading (the current state).
-  - **3.1c** Reduce the living-room loop(s) by ≈ 10–20 % of their reading (owner's choice), one
+  - **3.1b** Record every loop's valve setting (turns or marks; no flow-meter readings), the
+    current state.
+  - **3.1c** Throttle the living-room loop(s) one small step further (owner's choice of step), one
     change. With the pump fixed this lowers the total flow and widens the flow-return spread
     (≈ 8 K now), which can shorten compressor runs: check the run lengths after it.
   - **3.1d** After the settle time, evaluate as 1.2: repeat 3.1c, or accept the remaining spread.
@@ -456,8 +459,8 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 ## Knowledge homes
 
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve and `TempDesired`
-  values with their origin, the room targets and limiting room, and the loop flow-meter settings
-  after 3.1 (replacing "all loops and valves are open").
+  values with their origin, the room targets and limiting room, and the loop valve settings
+  after 3.1.
 - `doc/heating_pv_boost/heating-curve.md` "Open": the outcome of A.3 / (a), (b), (e) once
   CONFIRMED, graded (not the note: it is at 23.6 KB of its 24 KB limit).
 - `doc/heating_pv_boost/registers.md`: the `mc/Params` field list and the A.4b test (1) result.
@@ -471,7 +474,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [DONE] 0.1 Part A analysis
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
-- [TODO] 0.4 Deploy: 7 bridge lines, restart Mosquitto, check the entities and graphs
+- [IN_PROGRESS] 0.4 Deploy: 5 of 7 bridge lines live; `ehp/FlowTemp` (2) with #190, then check
 - [TODO] 0.5 Machine outdoor value vs weatherstation, ≥ 2 days after 0.4
 - [TODO] 0.6 Controller resolution tests (e), (b)
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5 until ≥ 2026-11-25
