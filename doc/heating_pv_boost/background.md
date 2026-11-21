@@ -87,3 +87,40 @@ hand-set frost floor (20) with no HA logic, and `input_number.heating_comfort_te
 0.5, no `initial:`) became the only comfort knob; the TDL sensor was removed. Whether the controller
 ignores the room temperature during the frost request (H1) was never verified: the owner accepted
 frost heating either way, so the check was dropped.
+
+## Compressor short-cycling: observation and tuning (2026-10-30 to 2026-11-21)
+
+From the closed plan `heating-compressor-cycling`.
+
+- **Start (2026-10-30).** In mild weather the geoTHERM started about once an hour and ran about
+  5 min, close to `TimeCompOnMin` (240 s). The owner had raised `CompIntegral` −150 → −180 °min,
+  curve 0.15, mode `auto` with the unit's day `on` / night `low` time program. Loxone mode
+  toggling, room valves and throttled loops were ruled out by the owner (all loops and valves
+  open). The plan added nine read-only registers (`ehp/Integral`, `ehp/CompDemand`, `mc/Status0a`
+  flow setpoint, `CompIntegral`, `CompHysteresis`, `BackupIntegral`, `CompStartsHc`, `CompHoursHc`,
+  `YieldTotal`), the derived run statistics, the "Compressor cycling" dashboard card and the
+  "Why runs end" graph; later `sensor.heating_compressor_stop_temp`. `BackupModeHc` read
+  `no_backup`, `BackupIntegral` −600 (owner, 2026-10-30).
+- **Baseline week 2026-10-31…11-06:** 9–11 heating starts a day, 2–4 h, outdoor mean falling
+  7.4 → 2.2 °C. Run anatomy on 11-06: night run at setpoint 26 °C stopped at 33 °C after ≈ 10 min
+  with the return flat at 24.9 °C and flow = return + ≈ 8.3 K, integral only −180 → ≈ −125; a day
+  run at setpoint 27 °C lasted ≈ 30 min (return creeping ≈ 0.04 K/min) and repaid the integral.
+  This gave the headroom model now in the note (spread puts the flow at the stop point at once).
+- **Pump speed (2026-11-06):** the catalog's pump-speed registers (`HcPumpStatus`, `HcPumpPWM`,
+  `Hc1PumpSpeedControlDirectCircuit`…) need SW ≥ 407; `ebusctl info` showed `SW=0383`, so none
+  exist. Left on the flow side: a physical selector on the pump (unverified) or a dirt filter
+  check (installer).
+- **Night setback test (planned 2026-11-06, superseded 2026-11-14):** `TempDesiredLow` 21 → 22 °C
+  for 3 nights. Dropped when the mode law changed to `on`/`off` and TDL became the frost floor.
+- **Buffer tank (assessed 2026-11-06, parked):** a parallel buffer adds ≈ +6 min per run per 100 l
+  at a COP and cost penalty; a series buffer does not change the spread. Not pursued.
+- **Hot water:** runs the same compressor (1–2 starts a day), freezes the heating integral and
+  warms the slab afterwards. Since 2026-11-14 the run statistics follow `ehp/Comp` in every mode
+  (plan `heating-cycling-from-ehp`); earlier baselines excluded (11-06…11-14) or Shelly-counted
+  (before 11-06) hot-water runs, so they are not comparable with later ones.
+- **Result (2026-11-21, ha-mcp, OBSERVED):** 2026-11-14…20 had 34 heating starts (≈ 4.9 a day)
+  plus 2 hot-water starts a day, daily mean run 22–30 min, no run under 11 min since 11-15, runs of
+  25–42 min on 11-20; hysteresis 7 K, start integral −180. Confounded with the curve changes
+  0.15 → 0.13 (≈ 11-14) → 0.14 (11-20 evening, read-back confirmed), `TempDesired` 22.5 (HA) and
+  the mode change to `on`. Integral and flow at run stop were not extracted.
+- **Owner decision (2026-11-21):** no `CompHysteresis` +1 K for now; the plan was closed.

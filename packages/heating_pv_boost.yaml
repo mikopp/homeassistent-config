@@ -120,7 +120,8 @@ mqtt:
         {% else %}unknown{% endif %}
 
     # ── Compressor cycling: observation only ──────────────────────────────────
-    # Read-only views for diagnosing short compressor runs (plans/heating-compressor-cycling.md).
+    # Read-only views for diagnosing short compressor runs
+    # → doc/heating_pv_boost/notes.md "Decisions in force".
     # Register names and decodes are taken from the live catalog (08.ehp.csv / 50.ehp.mc.csv on
     # ebus.github.io). All nine answered a forced `ebusctl read` on this unit (owner),
     # in the payload shapes parsed below; MQTT delivery depends on the bridge lines.
@@ -520,7 +521,7 @@ schedule:
         to: "16:00:00"
 
 # ── COMPRESSOR CYCLING STATISTICS ───────────────────────────────────────────────
-# Observation only (plans/heating-compressor-cycling.md). Everything is about the compressor
+# Observation only (→ doc/heating_pv_boost/notes.md "Decisions in force"). Everything is about the compressor
 # itself, whatever the mode: runtime, duty cycle and last run read ehp/Comp
 # (binary_sensor.geotherm_heating_compressor_running), so a run that rolls heating → hot water →
 # heating without the compressor stopping is one continuous run. Starts are the machine's
@@ -1224,7 +1225,7 @@ automation:
         data:
           topic: "ebusd/mc/OperatingMode/get"
           payload: "?7"
-      # Tier 4 (priority 5) — compressor-cycling observation (plans/heating-compressor-cycling.md):
+      # Tier 4 (priority 5) — compressor-cycling observation:
       # the energy integral and demand move every minute, the flow setpoint with the weather curve.
       # Each topic here also needs its bridge lines (state `in`, `/get` `out`) on the HA broker.
       - action: mqtt.publish

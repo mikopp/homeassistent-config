@@ -213,13 +213,33 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   (that restarts the hold on every HA restart); a hand change at the wall does not touch it. A
   fresh helper (no `initial:`) reads today 00:00 local (CONFIRMED, `input_datetime/entity.py` at
   2026.11.1): on a fresh helper the first mode write is held only before 00:30.
-- **Compressor tuning (cycling plan):** lifetime average heating run ≈ 60 min (13277 h ÷ 13385
-  starts, owner read), so short runs are a mild-weather effect.
+- **Compressor cycling: no `CompHysteresis` change for now** (owner, 2026-11-21). Targets: < 8–10
+  heating starts a day, runs ≥ 20–30 min. Met in mild weather at hysteresis 7 K and start integral
+  −180 °min (2026-11-14…20: ≈ 5 heating + 2 hot-water starts a day, daily mean run 22–30 min;
+  baseline before: 9–11 heating starts). OBSERVED, confounded: the heating curve and `TempDesired`
+  changed in the same window. Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, owner
+  read), so short runs are a mild-weather effect.
+- **Tuning levers, in order** (if runs shorten again; one change at a time, ≥ 3 nights of similar
+  weather each): (1) the heating-circuit pump speed would be the main lever but has no software
+  path on SW 0383 ("Bus participants"); (2) `CompHysteresis` is the software lever for run length;
+  (3) a deeper `CompIntegral` (only with `BackupModeHc` = `no_backup`) moves the start, not the
+  stop. Model behind (2) and (3), HYPOTHESIS from one day of runs: at a mild setpoint the flow sits
+  at return + ≈ 8 K spread, so a run ends on flow > setpoint + hysteresis before the integral is
+  repaid, and the next start follows from the integral drain whatever the start threshold; a
+  deeper `CompIntegral` cuts starts only once runs end on the integral (≈ 0 at the stop).
 - **Cold weather:** `CompHysteresis` does not adapt to the weather (UNPROVEN); setpoint +
   hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while the floor stays protected by
   44 °C / 46 °C. Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days
   step it back 1 K if run-end flow temperatures approach 35 °C;
   `sensor.heating_compressor_stop_temp` plots that stop point on the "Why runs end" graph.
+- **Counting compressor cycling** (owner): starts = `sensor.heating_compressor_starts_daily` +
+  `sensor.hot_water_compressor_starts_daily`; runtime, 24 h duty cycle and last run read `ehp/Comp`
+  in every mode; average run = runtime ÷ both starts; `sensor.heating_efficiency_today` includes
+  hot water. A baseline = 3 consecutive full days of comparable weather, each day's mean outdoor
+  temperature noted. Mode flips count only changes between real modes, never into/out of
+  `unavailable`/`unknown` (restarts). The settings sensors have no long-term statistics: log
+  `CompHysteresis`/`CompIntegral` changes (date, time, old, new) and read every number within the
+  recorder's raw history (`purge_keep_days`, `configuration.yaml`).
 
 ## Energy modes
 
@@ -259,6 +279,6 @@ Package-specific test facts: `doc/heating_pv_boost/tests.md` (loads with the tes
 
 - `doc/heating_pv_boost/design.md` (control law, energy modes), `doc/heating_pv_boost/registers.md`
   (register decodes).
-- `plans/ebusd-pv-heating-optimization.md` (rollout), `plans/heating-compressor-cycling.md`
-  (tuning, baseline counting rules), `plans/heating-baseline-and-phase2-prerequisites.md`.
+- `plans/ebusd-pv-heating-optimization.md` (rollout),
+  `plans/heating-baseline-and-phase2-prerequisites.md`.
 - Victron surplus inputs: `doc/victron/notes.md`.

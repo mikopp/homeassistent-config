@@ -133,8 +133,33 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
    run, 3 starts, 65 min, duty 65 min / 24 h).
 
 ### Phase 5 — verification
-8. [IN_PROGRESS] `ci-local.sh --e2e` green (done). After deploy, compare for 3 days: starts vs the graph, run edges
-   vs the Shelly, `heating + hot_water + cooling` electricity vs the total, and the yield split.
+8. [DONE] `ci-local.sh --e2e` green. Deployed (checked live 2026-11-21, see Status). Three-day
+   comparison done on 2026-11-18, 19 and 20 (ha-mcp, statistics only):
+   - Starts vs the clamp: 2026-11-20 showed 7 runs above 500 W (02:25, 05:50, 09:25, 17:00,
+     18:05, 20:15, 23:05); the meters say 5 heating + 2 hot water = 7. OBSERVED: they match, the
+     hot-water run at 17:00 that rolls into a short heating tail (see below) is one start. Daily
+     meters 2026-11-18 / 19 / 20: heating 3 / 4 / 5, hot water 2 / 2 / 2.
+   - Electricity: per-mode meters add up to the Shelly daily total to the Wh on 2026-11-15 to 11-20
+     (e.g. 11-20: 5.304 + 1.747 + 2.322 = 9.373 kWh; 11-18: 2.864 + 1.850 + 2.060 = 6.774 kWh);
+     cooling and off read 0.
+   - Yield split (space heating / hot water kWh): 11-18 12 / 6, 11-19 18 / 6, 11-20 26 / 4.
+     Daily efficiency today reads 3.41 for space heating, `unknown` for hot water when no hot-water
+     run happened yet (as designed).
+   - `ehp/Comp` lag against the clamp (> ~500 W): OBSERVED on the 2026-11-20 18:05 run only,
+     at 5 min statistics resolution (error about 1 min): clamp on ~18:09, `ehp/Comp` on ~18:11 (+2 min);
+     clamp off ~18:50:50, `ehp/Comp` off ~18:51:50 (+1 min). The hot-water run ending ~17:27 shows the
+     same +1 min at the stop. `heating_compressor_last_run` 40.9 min against ~42 min on the clamp.
+     Not measured to the second: this needs raw state history (not available through ha-mcp).
+   - Hot-water run-on: OBSERVED, 2 runs. 2026-11-20 05:50-06:16: power falls straight from ~3.1 kW to
+     the ~81 W idle level, no separate run-on step. 2026-11-20 17:00 run: `hvac_action` flipped
+     `water` → `heat` at 17:24:32 and the clamp stayed at ~1.8 kW (heating power, not the
+     ~83 W pump) for about 2.5 min until `ehp/Comp` went off (~17:28). So the first minutes
+     after a hot-water run are either nothing (idle pump level) or a short real heating segment,
+     booked `active_heating`. The ~83 W pump run-on is not distinguishable from idle in the clamp.
+     No `HwcHcValve` or tank data checked. HYPOTHESIS: `HwcLaggingTime` run-on has no power of
+     its own at the clamp, so where it is booked does not matter (about 4 Wh per run).
+   - Cooling: `hvac_action` has not read `cooling` in the data checked (outdoor 5.7 °C now);
+     statistics cannot show enum history. Still UNPROVEN, see step 14.
 
 ### Phase 6 — dashboard duplicates
 10. [DONE] "Heating Status" card audit. Removed `binary_sensor.heating_compressor_heating_active`
@@ -146,10 +171,13 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     Tests: heating-only cases now assert `sensor.heating_energy_mode` (`COMPRESSOR_CASES`).
     Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_heating_active` in the
     UI (Settings > Entities). tests/ha not run on the dev Mac: CI must confirm.
+    Checked 2026-11-21: no state for it in HA (see Status).
     Proposal (owner decided: remove, step 12): `binary_sensor.heating_compressor_active` had no
     consumer.
-    HYPOTHESIS: the Shelly clamp leads `ehp/Comp` by about a minute (one observation, 2026-11-14:
-    07:45:03 vs 07:46:09); measure over several runs (open question above).
+    OBSERVED: the Shelly clamp leads `ehp/Comp` by about 1-2 min (2026-11-14: 07:45:03 vs
+    07:46:09; 2026-11-20 18:05 run: +2 min at the start, +1 min at the stop; two hot-water/heating
+    edges at 5 min resolution). Open question settled enough: run lengths from `ehp/Comp` are
+    ~1 min shorter than the clamp's.
 
 11. [DONE] Drop `binary_sensor.heating_dhw_active` ("Hot water active (masks return temp)"; owner:
     the energy mode says what runs). Consumers repointed to `sensor.heating_energy_mode`:
@@ -186,6 +214,17 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     leads `ehp/Comp` by about a minute) can still be measured on the power sensor directly.
     Post-deploy: delete the orphan entity `binary_sensor.heating_compressor_active` in the UI.
 
+### Phase 7 — after deploy
+14. [TODO] First cooling period: confirm `hvac_action` reads `cooling` (`ehp/Status` hcmode `1`);
+    if not, switch the cooling row to `uih/CoolingActive` (owner; not before cooling season).
+15. [TODO] Owner: delete the two restored entities `sensor.heating_yield_by_mode_active_heating`
+    and `_passive_heating` (unavailable) from the UI and statistics, but NOT before 30 days after
+    #164 reached the system (the 30-day yield sum reads them; `space_heating_yield_30d` still
+    reports `days` 8.9 on 2026-11-21, so earliest about 2026-12-12; check that attribute first).
+16. [TODO] Owner: bridge lines for `ebusd/ehp/Backup` and `ebusd/ehp/BackupIntegral` can be
+    removed (step 2); the other orphan entities (step 10, 11, 12) are not in HA's state machine
+    any more (checked 2026-11-21): confirm in Settings > Entities that no "not provided" row is left.
+
 ### Close
 13. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
    plan (`doc/KNOWLEDGE.md#K-6`).
@@ -200,17 +239,31 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 
 ## Status
 
-- Approved by the owner; steps 1-7 implemented, tests and notes updated.
-- Five modes defined by the owner (active/passive heating, water heating, cooling, off).
-- Owner answers: pump from `ehp/Hc1Pump`; passive cooling only; keep the combined efficiency;
-  no `CompHoursHwc`; remove the backup-heater indicators.
-- Backup removal: scope (b), everything.
-- Step 9 done 2026-11-14 (runs_today dropped; runtime, duty cycle, last run on `ehp/Comp`, average on machine starts);
-  `tests/ha` not run on the dev Mac (no Python 3.14/mosquitto): CI must confirm.
-- Step 10 done (dashboard duplicate removed, labels). Orphan to delete after deploy.
-- Step 11 done 2026-11-14 (hot-water mask on the energy mode, `heating_dhw_active` dropped);
-  second orphan to delete after deploy.
-- Step 12 done 2026-11-14 (Shelly clamp threshold sensor removed); third orphan to delete.
-- Next: deploy, add the bridge lines, then the 3-day comparison (step 8). Still to settle with
-  live data: `hvac_action` reading `cooling` (first cooling period), where the hot-water run-on
-  goes, and the `ehp/Comp` reporting lag vs the Shelly.
+Checked live with ha-mcp (read-only) on 2026-11-21. Merged: #161 (this plan), #163, #164, #168 and
+later; all deployed.
+
+Done:
+- Steps 1-7 and 9-12 implemented and deployed. OBSERVED live: `sensor.heating_energy_mode`
+  (`passive_heating` now), `binary_sensor.geotherm_heating_compressor_running`,
+  `binary_sensor.geotherm_heating_circuit_pump` (on), `sensor.hot_water_compressor_starts_daily`,
+  the five per-mode electricity meters and the yield meters, `select.heating_electricity_by_mode`,
+  `select.heating_yield_by_mode`, space-heating / hot-water / combined efficiency today and 30d all
+  report values. So the bridge lines for `Comp`, `Hc1Pump` and `CompStartsHwc` are in.
+- Orphans `binary_sensor.heating_compressor_heating_active`, `heating_dhw_active`,
+  `heating_compressor_active` and `sensor.heating_compressor_runs_today` have no state in HA
+  (checked with a template and search); no backup-heater binary sensors exist either.
+  HA cannot show whether a registry row is left: owner glance in the UI.
+- Step 8 comparison done (numbers in step 8): meters match the clamp runs, per-mode electricity
+  sums to the Shelly total, `ehp/Comp` lags the clamp by about 1-2 min, no hot-water run-on of its
+  own seen, no phantom runs under 1 min since 2026-11-15 (daily minimum of last run 11.1 min).
+
+Left, in order:
+1. Step 14 (cooling check): waits for cooling season.
+2. Step 15 (owner): delete the two pre-merge yield meters, earliest about 2026-12-12.
+3. Step 16 (owner): bridge lines for Backup/BackupIntegral, UI check for orphan rows.
+4. Step 13 Close (Claude): after 14 and 15 or after the owner agrees to close without the cooling
+   check (then note it as UNPROVEN in notes).
+
+Observation, not a bug: `sensor.heating_efficiency_30d` (2.48) is lower than space heating (3.29)
+and equal to hot water (2.47) because its window is the full 30 d (674 kWh yield) while the per-mode
+30 d sensors hold only 8.9 days of data (202 + 48 kWh) until the window fills.
