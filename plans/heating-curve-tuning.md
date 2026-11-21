@@ -231,8 +231,9 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
 - HA reads the right quantity, but the coarse copy: `Status0a` field 4 is the circuit setpoint
   in whole °C (26.5 → 26, truncated or rounded: UNPROVEN), `mc/FlowTempDesired` has 0.5 K. With
   one circuit and no buffer, `uih/FlowTempDesired` 26.00 is probably the same demand passed to the
-  generator: forced reads (`ebusctl read -f`) of both agree, "0.05 K apart" (owner, 2026-11-21
-  evening; exact values and the time still to be logged), so OBSERVED as the same value.
+  generator. Forced reads (`ebusctl read -f`, owner, 2026-11-21 evening): `mc` 26.5, `uih` 26.00,
+  0.5 K apart. HYPOTHESIS: `uih` passes on a whole-degree value (like `Status0a` field 4), so
+  the machine works on 26 while the circuit asks 26.5.
 - **`ebusctl find` prints ebusd's cache, not a bus read.** `mc/FlowTempDesired` is not polled
   (not in the poll list), so its cached value changes only when another bus master reads it or mc
   pushes an update. "Did not change after a curve / `TempDesired` change" is therefore not yet
