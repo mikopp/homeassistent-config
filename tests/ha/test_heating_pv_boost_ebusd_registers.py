@@ -46,6 +46,7 @@ _ENTITIES = {
     "heating_temp_desired": "sensor",
     "heating_hvac_mode": "sensor",
     "heating_circuit_flow_temp_desired": "sensor",
+    "heating_outdoor_temp": "sensor",
     "heating_compressor_start_integral": "sensor",
     "heating_compressor_hysteresis": "sensor",
     "heating_curve": "sensor",
@@ -208,6 +209,14 @@ TOPICS = [
             "too few fields ignored"),
         Msg("", {"heating_circuit_flow_temp_desired": near(28.5)}, "empty ignored"),
     ]),
+    # Broadcast/Outsidetemp: D2B (1/256 K) in the catalog, ebusd sends 3 decimals. Live payload
+    # from the owner's MQTT view, 2026-11-21 (not the 2026-11-12 capture).
+    Topic("ebusd/Broadcast/Outsidetemp", [
+        Msg("3.750", {"heating_outdoor_temp": near(3.75)}, "live payload"),
+        Msg("-2.496", {"heating_outdoor_temp": near(-2.5)}, "below zero, rounded to 2 decimals"),
+        Msg("n/a", {"heating_outdoor_temp": near(-2.5)}, "garbage ignored"),
+        Msg("", {"heating_outdoor_temp": near(-2.5)}, "empty ignored"),
+    ]),
     # ── Installer tuning registers (single numbers) ───────────────────────────────────────────
     Topic("ebusd/ehp/CompIntegral", [
         Msg("-180", {"heating_compressor_start_integral": near(-180)}, "live payload"),
@@ -335,6 +344,7 @@ async def test_ebusd_integral(ha: HomeAssistant, broker: Broker) -> None:
 # Poll priorities as they sit on the live broker (MQTT Explorer, 2026-11-12): `?N` on
 # `<register>/get` reads now AND polls at priority N. A literal, not read from the YAML, so a
 # typo in a topic or priority there fails. Backup/BackupIntegral are gone from the YAML (#161).
+# Broadcast/Outsidetemp is absent on purpose: a broadcast cannot be polled.
 _POLLS = {
     "ebusd/ehp/Status/get": "?3", "ebusd/ehp/HcReturnTemp/get": "?3",
     "ebusd/hwc/Status/get": "?3", "ebusd/ehp/Comp/get": "?3", "ebusd/ehp/Hc1Pump/get": "?3",

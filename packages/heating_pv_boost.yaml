@@ -164,6 +164,21 @@ mqtt:
         {% set f = value.split(';') %}
         {{ f[4] | float | round(1) if f | count > 4 and f[4] | trim | float(none) is not none else '' }}
 
+    # Broadcast/Outsidetemp — the outdoor temperature broadcast on the bus, most likely the value
+    # the weather curve uses (UNPROVEN; the weatherstation is a different sensor). Read to compare
+    # the two against the flow setpoint (plans/heating-curve-tuning.md). A broadcast: published
+    # unasked, never polled (→ doc/heating_pv_boost/notes.md "Invariants").
+    - name: "Heating Outdoor Temp"
+      unique_id: heating_outdoor_temp
+      default_entity_id: sensor.geotherm_heating_outdoor_temp
+      state_topic: "ebusd/Broadcast/Outsidetemp"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:thermometer
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(2) }}"
+
     # ── Tuning settings (installer level, changed by hand at the Vaillant panel) ──
     # Read so every tuning step is visible in HA history next to its effect.
 

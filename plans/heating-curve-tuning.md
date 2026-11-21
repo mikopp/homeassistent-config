@@ -50,6 +50,16 @@ automatically: the comfort control stays off.
     weather: slope too flat.
   - **`TempDesired`** (panel, later the comfort knob) shifts the whole curve in parallel. All rooms
     too warm or too cold by the same amount, whatever the weather: change `TempDesired`.
+  - **Outdoor sensor offset** (panel, menu A8 "Kalibrierung" → "Aussentemperatur"; ±5 K in
+    1 K steps; Ref. 2 p. 82; ebusd `ehp/OutsideTempOffset`, installer write; owner: 0 now)
+    adds to the measured outdoor value, so it moves the curve sideways: +1 K reads warmer and
+    lowers the flow by the curve's slope there (by the diagram ≈ 0.2–0.4 K at 0.13–0.15). It is a
+    calibration, not a comfort setting: it also shifts everything else the machine decides on the
+    outdoor value: frost protection below 3 °C, the summer cut-off (`AT-Abschaltgrenze`), the
+    cooling release (`mc/OtShutdownLimit` + offset, note "Heating and cooling"). HYPOTHESIS that
+    the broadcast (`sensor.geotherm_heating_outdoor_temp`) carries the corrected value ("angezeigte
+    Temperaturen" = displayed temperatures, Ref. 2). Use it only to correct a measured sensor
+    error found in step 0.5, never instead of `TempDesired` or the slope.
   - **Room-to-room differences** (bathroom, office and Kilian colder than the living room,
     bedroom warmer than its target) are hydraulics or room losses. Neither lever fixes them (see
     Phase 3).
@@ -77,6 +87,7 @@ automatically: the comfort control stays off.
 | 2026-11-20 22:01:47 | Comfort control | on → off | Owner: `warm_enough` does not update; stays off, `warm_enough` ignored |
 | 2026-11-21 or shortly before | Bedroom sensor | moved away from the bed to a neutral spot | Owner. Bedroom data before the move are not comparable |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
+| unchanged | Outdoor sensor offset (A8 "Kalibrierung Aussentemperatur") 0 K | — | Owner, 2026-11-21 |
 
 ## Part A — baseline and current state (ha-mcp, long-term statistics, 2026-11-21)
 
@@ -160,39 +171,23 @@ Consequence: 0.14 / 22.5 ≈ 0.15 / 22 in mild weather (+0.4 K at 8 °C) and ≈
 So P3 will probably land near the P1 room temperatures in mild weather, above target in the
 bedroom and Kilian.
 
-**Manufacturer curve.** The VWS 83/2 operating manual (Ref. 1, p. 21, menu "HK2 Parameter") shows
-the "Heizkurven" diagram: flow setpoint over the outdoor temperature (+20 … −20 °C) for curves
-0.2 … 4.0 at room setpoint 20 °C. A different room setpoint moves the curve in parallel along a
-45° axis (Ref. 1, p. 18; the diagram marks the room-setpoint axis 15 / 20 / 22). So flow(T, RS) =
-flow₂₀(T − (RS − 20)) + (RS − 20), the same form as the fit above. Floor heating: curves < 0.4
-(Ref. 1, p. 21). Ref. 1 draws no curve below 0.2. The successor's installation manual (Ref. 2,
-p. 66, menu C2; written for the VWS 63/3–103/3, not the 83/2) has the same diagram plus a 0.1
-curve; its 0.2 and 0.4 curves match Ref. 1 to 0.1 K, so the 0.1 curve is taken from Ref. 2
-(HYPOTHESIS that the /2 controller uses the same 0.1 curve). Values were read from the diagrams'
-vector paths in the PDFs (not by eye, ±0.2 K). 0.13–0.15 are interpolated linearly between 0.1
-and 0.2, so **those columns are an interpolation, not manufacturer values.**
-
-| Outdoor | 0.1 | 0.2 | 0.4 | 0.13 (interp.) | 0.14 (interp.) | 0.15 (interp.) |
-|---|---|---|---|---|---|---|
-| +15 °C | 22.4 | 22.5 | 24.3 | 22.4 | 22.4 | 22.4 |
-| +10 °C | 24.1 | 24.5 | 27.6 | 24.2 | 24.3 | 24.3 |
-| +5 °C | 25.5 | 26.3 | 30.4 | 25.7 | 25.8 | 25.9 |
-| 0 °C | 26.7 | 28.0 | 33.0 | 27.1 | 27.2 | 27.3 |
-| −5 °C | 27.7 | 29.5 | 35.5 | 28.3 | 28.4 | 28.6 |
-| −10 °C | 28.6 | 31.0 | 37.7 | 29.3 | 29.5 | 29.8 |
-| −20 °C | 29.7 | 33.2 | 41.9 | 30.7 | 31.1 | 31.4 |
+**Manufacturer curve:** diagram, full table, the 45° room-setpoint shift and sources in
+`doc/heating_pv_boost/heating-curve.md` (Ref. 1; the 0.1 curve from Ref. 2; 0.13–0.15 are a linear
+interpolation, not manufacturer values). flow(T, RS) = flow₂₀(T − (RS − 20)) + (RS − 20) has the
+same form as the fit above.
 
 Shifted to our room setpoints, the diagram predicts 0.15 / 22: 28.5 °C at 5 °C, 27.6 at 8 °C;
 0.13 / 22: 28.3 at 5 °C, 27.4 at 8 °C, 25.5 at 14 °C; 0.14 / 22.5: 29.0 at 5 °C, 28.2 at 8 °C.
 
 OBSERVED discrepancy, open: the machine runs **1.5–3.5 K below** the diagram (0.13 / 22 at 8 °C:
 24 observed vs 27.4), and the diagram puts 0.13 vs 0.15 only ≈ 0.2–0.4 K apart, while the data show
-≈ 2 K (24 vs 26 at 7–9 °C). HYPOTHESES, none tested: (a) the machine's outdoor value (north side,
-damped) reads well above the weatherstation; (b) the panel value is not on the diagram's scale
-below 0.2 (the diagram draws nothing between 0.1 and 0.2); (c) `mc/Status0a` field 4 is not the
-plain curve setpoint (e.g. after an internal correction). (a) is checked first, see step 0.5.
-Until this is resolved, the size column of the Phase 2 table is from our data, not from the
-diagram.
+≈ 2 K (24 vs 26 at 7–9 °C). HYPOTHESES, none tested: (a) the machine's outdoor value reads well
+above the weatherstation. The owner's first reading of `ebusd/Broadcast/Outsidetemp` (2026-11-21
+18:56, 3.75 °C) was ≈ 1 K **below** it, which would raise the setpoint, not lower it: one reading
+weakens (a), step 0.5 settles it. (b) the panel value is not on the diagram's scale below 0.2 (the
+83/2 diagram draws nothing below 0.2). (c) `mc/Status0a` field 4 is not the plain curve setpoint
+(e.g. after an internal correction). Until this is resolved, the size column of the Phase 2 table
+is from our data, not from the diagram.
 
 ### A.4 Machine figures per period
 
@@ -237,13 +232,21 @@ diagram.
   `topic ebusd/mc/HeatingCurve in 0` and `topic ebusd/mc/HeatingCurve/get out 0`, restart
   Mosquitto, check that `sensor.geotherm_heating_curve` reads 0.14 and that
   `number.geotherm_heating_temp_desired` shows 22.5.
-- [TODO] **0.5** Compare the machine's outdoor value with the weatherstation (A.3 discrepancy,
-  hypothesis a). `ehp/Status01` field `temp_2` (outside) times out on this unit (registers.md), so
-  first look for another ebusd register with the geoTHERM outdoor temperature (read-only, no HA
-  change without approval). Without one, the owner reads the outdoor value at the panel or the
-  VR 90 a few times (night, 08–11 h, afternoon) and notes it with the time; compare with
-  `sensor.wheatherstation_outdoor_temperature` and with the flow setpoint the diagram predicts.
-  Result → "Observations".
+- [IN_PROGRESS] **0.5** Compare the machine's outdoor value with the weatherstation (A.3
+  discrepancy, hypothesis a). ebusd publishes the bus broadcast `ebusd/Broadcast/Outsidetemp`
+  (owner MQTT view, 2026-11-21: 3.750, ≈ 1 K below the weatherstation, one reading). Added
+  `sensor.geotherm_heating_outdoor_temp` (owner request, 2026-11-21) with long-term statistics, on
+  the heating dashboard next to the weatherstation. Deploy: ONE bridge line
+  `topic ebusd/Broadcast/Outsidetemp in 0` (a broadcast: no `/get` line, no poll), restart
+  Mosquitto, check the sensor shows a value. Then, after ≥ 2 days: compare the two outdoor values
+  by hour (night, 08–11 h, afternoon), and the flow setpoint with the A.3 diagram evaluated at
+  the geoTHERM value. Result → "Observations".
+  If the broadcast proves noisy or unclear: the catalog also has a readable `ehp/OutsideTemp`
+  (`b509 0d0600`, value + sensor status, "Meßwert des externen Außentemperaturfühlers") and
+  `ehp/OutsideTempOffset` (`0dc300`); whether this unit answers them is untested (`ehp/Status01`
+  does not). Reading them needs two bridge lines each and a `?N` poll: owner approval first.
+  A measured sensor error larger than ≈ 1 K can be corrected with the outdoor offset (lever
+  above), one change at a time like any other.
   Depends on: nothing (can run during Phase 1).
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
@@ -273,6 +276,7 @@ for the 22 °C rooms; the bedroom has its own issue, Phase 3):
 | Right on cold days, too warm on mild days | slope down | 0.01 |
 | Only some rooms off, others on target | no curve change: Phase 3 | — |
 | A sunny day overshoots | no change: the PV exception (Phase 5) | — |
+| Step 0.5 shows the machine's outdoor value off from the real outdoor temperature | outdoor offset (correct the sensor) | the measured error, whole K |
 
 Sizes: by the manufacturer diagram (A.3), a slope step of 0.01 moves the flow only ≈ 0.1–0.2 K
 around 0.13–0.15; our data showed ≈ 1 K per 0.01. Until step 0.5 explains the gap, size steps on
@@ -376,14 +380,16 @@ Still optional: 4.1, 4.4.
    for the 0.1 curve that Ref. 1 lacks (same diagram otherwise). Diagram: p. 66, Tab. 9.6 menu C2.
    Download: https://kontakt.vaillant.de/documents/download/78824/
 
-Neither manual gives a formula for the curves: the A.3 table is read off the diagrams.
+Neither manual gives a formula for the curves: the table in `doc/heating_pv_boost/heating-curve.md`
+is read off the diagrams.
 
 ## Knowledge homes
 
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve and `TempDesired`
   values with their origin, and the room targets (owner values).
-- `doc/heating_pv_boost/notes.md` "Hardware": the machine is a VWS 83/2; the manufacturer curve
-  (Ref. 1, A.3 table) and the outdoor sensor on the north side without sun. At Close check the
+- [DONE] `doc/heating_pv_boost/heating-curve.md` + `heating-curve.png` (manufacturer
+  curve, table, sources); note entity map: outdoor sensor north side, no sun. At Close: update the
+  file's "Open" section with the outcome of A.3 / step 0.5, and check the
   note's citations of "VWS 82/3 installation manual 0020132514_00" ("Frost protection", "Room
   influence") against the 83/2 documents.
 - `doc/heating_pv_boost/notes.md` "Hardware" or "Decisions in force": the curve relation (A.3)
@@ -398,7 +404,8 @@ Neither manual gives a formula for the curves: the A.3 table is read off the dia
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
-- [TODO] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3)
+- [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
+  `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
 - [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days

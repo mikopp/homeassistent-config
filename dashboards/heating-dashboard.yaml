@@ -47,6 +47,8 @@ views:
             name: Set Temp Desired (by hand; comfort control overwrites it while on)
           - entity: sensor.geotherm_heating_curve
             name: "Setting: heating curve"
+          - entity: sensor.geotherm_heating_outdoor_temp
+            name: Outdoor Temp (ebusd broadcast)
 
       - type: history-graph
         title: Flow and Return
@@ -169,6 +171,8 @@ views:
           - entity: sensor.geotherm_heating_energy_integral
           - entity: sensor.heating_energy_mode
           - entity: sensor.wheatherstation_outdoor_temperature
+          # The outdoor value broadcast on the bus, next to the weatherstation.
+          - entity: sensor.geotherm_heating_outdoor_temp
           - entity: sensor.geotherm_heating_hvac_mode
 
       # ── 2. Slab boost status ───────────────────────────────────────────────

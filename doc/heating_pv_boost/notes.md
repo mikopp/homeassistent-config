@@ -21,7 +21,8 @@ changing `sensor.heating_wanted_operating_mode`, `sensor.heating_target_temp` or
 `automation.heating_comfort_control`), HPB-2 energy-mode table.
 **Register decodes** (field lists, enums, unusable registers, tuning and cooling registers):
 `doc/heating_pv_boost/registers.md`, not auto-loaded; read it before adding or parsing
-a register.
+a register. **Heating curves** (manufacturer diagram and table, VWS 83/2):
+`doc/heating_pv_boost/heating-curve.md`; read it before reasoning about the flow setpoint.
 
 Source of truth for ebusd definitions: the **published** catalog
 `https://ebus.github.io/de/vaillant/*.csv` (what ebusd ≥ 24.1 downloads and runs), checked
@@ -37,6 +38,9 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   `in` the sensor stays `unavailable`; without `/get out` the `?N` poll silently never arrives;
   without `/set out` a write fails silently. List the exact lines in the PR's post-deploy steps.
   Prove a new `/set` line with an idempotent write of the CURRENT value only.
+  **Exception, broadcasts** (catalog type `u`, e.g. `Broadcast/Outsidetemp`): ebusd only decodes
+  them passively, they cannot be read on request, so only the `in` line and no `?N` poll. The
+  topic keeps the catalog's case (`ebusd/Broadcast/Outsidetemp`, owner MQTT view).
 - **Every register HA reads gets a `?N` in `automation.heating_ebusd_poll_registration`** (and in
   the `_POLLS` literal of `tests/ha/test_heating_pv_boost_ebusd_registers.py`), or it is never
   polled (or no longer after the next ebusd restart, see "Polling").
@@ -185,6 +189,7 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
+| `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp`; the geoTHERM's outdoor sensor sits on the north side without sun (owner); read ≈ 1 K below the weatherstation (owner, 2026-11-21, one reading) |
 | `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
