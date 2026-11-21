@@ -279,8 +279,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       the read topic (the writer waits for the read-back, polls refresh it otherwise).
 - [ ] 12. Phase 3 — slab boost
 - [ ] 13. Phase 4 — tests, dashboard
-- [ ] 14. Compressor short-cycling observation + tuning — separate plan,
-      `plans/heating-compressor-cycling.md`
+- [x] 14. Compressor short-cycling observation + tuning — separate plan, closed 2026-11-21
+      (no `CompHysteresis` change, owner); result in `doc/heating_pv_boost/notes.md` "Decisions in force"
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 
@@ -320,7 +320,7 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
 8. **Owner changes and short-cycling (2026-10-30, owner-reported).** Loxone stopped writing the
    mode; geoTHERM set to `auto` with a day `on` / night `low` time program; `CompIntegral`
    −150 → −180 °min; heating curve 0.15. In mild weather the compressor still starts about once an
-   hour and runs about 5 min. Analysis and observation sensors: `plans/heating-compressor-cycling.md`.
+   hour and runs about 5 min. Result: `doc/heating_pv_boost/notes.md` "Decisions in force".
 
 ### Checks run locally
 

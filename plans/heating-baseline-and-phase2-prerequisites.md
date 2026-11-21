@@ -9,7 +9,8 @@ A review of the two heating plans found gaps that neither covers. They are prere
 features. This plan only covers those gaps and does not change the intent of:
 
 - `plans/ebusd-pv-heating-optimization.md` (the "slab plan"): steps 8, 8c, 10, 11 (Phase 2), 12.
-- `plans/heating-compressor-cycling.md` (the "cycling plan"): steps 6, 7 (baseline, `CompHysteresis`
+- the "cycling plan" (closed 2026-11-21, no `CompHysteresis` change; result and counting rules in
+  `doc/heating_pv_boost/notes.md` "Decisions in force"): steps 6, 7 (baseline, `CompHysteresis`
   +1 K, cold-weather step-back).
 
 It is independent of the airflow and Victron plans. Nothing here edits those two plans' text except
@@ -132,9 +133,8 @@ Design:
 ## Step 4 — Baseline method (findings D, E) — done (docs only)
 
 The counting rules (first full baseline day 2026-10-31, starts per day, mode flips, settings log,
-retention, comparability across the 2026-11-06 and 2026-11-14 sensor changes) live in
-`plans/heating-compressor-cycling.md` step 7 ("Baseline counting rules"). Edit them there, not
-here.
+retention) live in `doc/heating_pv_boost/notes.md` "Decisions in force" ("Counting compressor
+cycling"). Edit them there, not here.
 
 Points superseded since this step was written:
 - Mode flips: the "2 per day" norm held only under the 10-30 `auto` time program. Since Phase 2
@@ -163,7 +163,7 @@ ha-mcp) checks:
   hot water starts today).
 - The three settings sensors are not `unavailable`.
 
-Results go into the cycling plan's Observations, not recorded via the `record-learning` skill (not proven
+Results go into this plan's Status, not recorded via the `record-learning` skill (not proven
 mechanisms, just checks).
 
 ## Step 6 — Cross-reference edits to the existing plans (docs only) — approved, run last
@@ -174,7 +174,7 @@ mechanisms, just checks).
     lines, ebusd writes already verified by the owner).
   - Transport "As deployed" note: add the `/set out` line kind.
   - 8c: leave unticked (live value is still 30; owner's UI change).
-- Cycling plan (`plans/heating-compressor-cycling.md`): step 7 gets a note that retention is 14 d
+- Cycling plan (closed 2026-11-21): step 7 gets a note that retention is 14 d
   (this plan, step 1) and the baseline counting rules (step 4, now kept in cycling plan step 7);
   first full baseline day 2026-10-31.
 - Do not change any other text in those plans.
@@ -235,12 +235,13 @@ These are not implemented by Claude. Tick them in the Status section when done.
       restarts Mosquitto; idempotent write test
 - [ ] 3. [x] `unit_of_measurement: "count"` + conftest seed done; USER still to
       handle the statistics repair (update stored unit)
-- [x] 4. Baseline counting rules written; they live in `plans/heating-compressor-cycling.md`
-      step 7
+- [x] 4. Baseline counting rules written; they live in `doc/heating_pv_boost/notes.md`
+      "Decisions in force"
 - [ ] 5. Post-deploy counter verification (after the first compressor run)
 - [x] 6. Cross-reference edits (done 2026-10-30, docs only): slab plan (Phase 2 bridge prerequisite, tick step 10) and cycling plan
       (step 7 retention + baseline method link); 8c stays open (owner)
-- [ ] 7. Follow-up: revert retention to 5 once the tuning is finished
+- [ ] 7. Follow-up: revert retention to 5 once the tuning is finished (cycling plan closed
+      2026-11-21 without a hysteresis change: owner to decide)
 - [ ] Owner: SOC to 50 (slab 8c); `heating_pv_boost_enabled` is the owner's switch
 
 ## Close

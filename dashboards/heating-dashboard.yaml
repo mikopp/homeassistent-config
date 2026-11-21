@@ -56,7 +56,7 @@ views:
           - entity: sensor.heating_circuit_return_temp_valid
           - entity: sensor.geotherm_heating_hvac_action
 
-      # ── 1b. Compressor cycling (plans/heating-compressor-cycling.md) ────────
+      # ── 1b. Compressor cycling (doc/heating_pv_boost/notes.md) ─────────────
       # Goal: fewer, longer runs. Short-cycling looks like many runs of ~5 min.
       # Starts = the machine's own counters (heating + hot water = compressor starts). The average
       # run is the compressor's on-time over those starts, so a heating → hot water → heating run
