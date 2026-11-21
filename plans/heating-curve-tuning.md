@@ -246,10 +246,19 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
     wait ≥ 10 min, force-read `mc FlowTempDesired`; unchanged = (e) confirmed.
   - Circuit type `mixer` (catalog: `0=inactive 1=mixer 2=fixed …`; the catalog text lists
     Brennerkreis = hydraulic plans 1/3, Mischerkreis = plans 2/4, Festwert). The note assumes
-    plans 1/3 (no buffer). Whether value 1 is shown as Brennerkreis or Mischerkreis on the panel
-    (menu C2 "Art") is open: owner to read the panel text. A mixer circuit regulates its own
-    mixed flow (`mc FlowTempDesired`) below the generator's flow (now 32 °C actual vs 26.5
-    desired; `Status0a` `mixer` = off).
+    plans 1/3 (no buffer). Panel menu C2 "Art" shows **Brennerkreis** (owner, 2026-11-21), so
+    the catalog label `mixer` for value 1 is misleading: a direct circuit, no mixer, consistent
+    with the note (registers.md).
+- Still to confirm (owner, 2026-11-21):
+  - (e) whether `TempDesired` acts in 0.5 K steps: test above.
+  - (b) whether the curve below 0.2 follows the diagram. The panel and the VR 90 both show 0.14,
+    so the setting is stored to 0.01 (CONFIRMED by display), but that says nothing about the
+    curve's shape. A 0.01 step is too small to test (diagram ≈ 0.1 K flow, below the 0.5 K
+    resolution of `mc FlowTempDesired`). Test: at steady outdoor temperature, curve 0.14 → 0.20,
+    wait ≥ 10 min, force-read `mc FlowTempDesired`, set 0.14 back. At 3.75 °C / 22.5 the diagram
+    predicts +1.0 K (29.4 → 30.4); the history suggests ≈ +6 K (≈ 1 K per 0.01, A.3). The owner's
+    curve change on 2026-11-21 evening (old/new curve and `FlowTempDesired`, with times) is a first
+    data point: log it under "Observations".
 - `mc RoomTempOffset` = 0.00 (`ebusctl find -w`), `rcc RoomTempOffset` = 0.50 (the VR 90's own
   sensor calibration), owner, 2026-11-21: confirms (d) in A.3.
 - **`ebusctl find` prints ebusd's cache, not a bus read.** `mc/FlowTempDesired` is not polled
@@ -474,7 +483,7 @@ is read off the diagrams.
 - [IN_PROGRESS] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3):
   `sensor.geotherm_heating_outdoor_temp` added; deploy 1 bridge line, then compare ≥ 2 days
 - [TODO] A.4b Setpoint register and update timing (forced `ebusctl read -f`), whole-degree
-  `TempDesired` test (e), panel text of C2 "Art" (owner)
+  `TempDesired` test (e), curve 0.14 → 0.20 test (b) (owner); C2 "Art" = Brennerkreis [DONE]
 - [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days
