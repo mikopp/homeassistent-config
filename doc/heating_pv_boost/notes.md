@@ -84,6 +84,18 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
 | 75 | VR 90/3 remote control, art. `0020040079` | `rcc` |
 | 05 | VR 920 internet module, art. `0020252922` | none: **dormant**, Vaillant discontinued the service |
 
+The geoTHERM is a **geoTHERM exclusiv VWS 83/2** (art. `0010002787`). Manuals:
+- *Bedienungsanleitung geoTHERM exclusiv VWS*, 0020025604_00 (02/2007), covers VWS 63/2, 83/2,
+  103/2: https://kontakt.vaillant.de/documents/download/73792/ (heating curves p. 21, room setpoint
+  shift p. 18; owner's printed copy matches).
+- *Installationsanleitung geoTHERM exclusiv VWS*, 0020045204_01 (07/2008; VWS 83/2 in the type
+  table p. 63): https://kontakt.vaillant.de/documents/download/73782/ (energy balance p. 48,
+  floor protection p. 46, menus C2 p. 58, C4/C5 p. 59, calibration p. 65, compressor/FlowTempMax
+  p. 69). Revision _00 (02/2007, …/73781/) still shows menu C9 (frost delay, Temp.überhöhung).
+- Successor /3 manual 0020087974_00 (…/78824/): only for what the /2 ones omit (frost end 4 °C,
+  0.1 curve), graded as sibling. The site refuses plain `curl`; a browser user agent works.
+- Heating curves, table and formula: `doc/heating_pv_boost/heating-curve.md`.
+
 There is **no VRC 700 and no `700` circuit**, so `Hc1RoomCircuitMode`, `Z1DayTemp` and friends do
 not exist. The VR 90 writes to the bus but accepts and keeps a value HA writes, so HA is the sole
 effective writer of the control registers. SW 0383 is below 407: any catalog entry gated
@@ -129,8 +141,17 @@ bridged: keep it that way rather than widening to `ebusd/#`.
   `CompIntegral` is deepened (start point = BackupIntegral + CompIntegral, registers.md).
 - Compressor timing: `TimeBetweenTwoCompStartsMin` 1200 s, `TimeCompOffMin` 300 s,
   `TimeCompOnMin` 240 s.
-- Thermal ceilings are hardware protections, not tuning targets: `mc/FlowTempMax` 35 °C,
-  `mc/FloorProtectionLimit` 44 °C, `ehp/ReturnTempMax` 46 °C, `mc/OtShutdownLimit` 15 °C.
+- Limits, not tuning targets: `mc/FlowTempMax` 35 °C caps the setpoint the circuit may request;
+  **floor protection** = FlowTempMax + `CompHysteresis` + 2 K (now 44 °C = `mc/FloorProtectionLimit`),
+  measured at VF2: above it for > 15 min the heat pump stops with error 72 until reset
+  (Installationsanleitung 0020045204_01 p. 46, p. 69). So a higher hysteresis also raises the floor
+  limit. `ehp/ReturnTempMax` 46 °C blocks the compressor on return temperature (p. 69).
+  `mc/OtShutdownLimit` 15 °C = C2 "AT-Abschaltgrenze" (p. 58; name and `mc/Params` match): the
+  owner changes it seasonally; above it heating does not run, below it cooling does not (owner,
+  tests and experience).
+- **The controller regulates on VF2** (`ehp/FlowTemp`, `sensor.geotherm_heating_flow_temp_vf2`):
+  the energy integral is VF2 − flow setpoint per minute (p. 59), floor protection reads VF2. The
+  panel's "Vorlauftemp. IST" and `ehp/Status` field 0 are the internal T6.
 
 ### Heating and cooling are separate mode axes
 
@@ -146,9 +167,10 @@ not maintained seasonally. Cooling is released on **outdoor** temperature, so wr
 Below 3 °C outdoor (the geoTHERM's own sensor) with no time window active (`off`, or `eco`
 outside a window), after a delay (default 1 h; register `uih/FrostOverRideTime`, catalog
 `15.uih.csv` "Frostschutzverzögerung", hours, installer write; set on the unit only, HA does not
-read it), the controller requests flow temperature for the room setpoint `mc/TempDesiredLow`; it
-ends above 4 °C (VWS 82/3 installation manual 0020132514_00; user manual 0020087973_02
-"Regelfrostschutz Heizung", §3.4.2). The floor pump runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
+read it), the controller requests flow temperature for the room setpoint `mc/TempDesiredLow`
+(Bedienungsanleitung 0020025604_00 p. 10; delay menu C9, 0–12 h, Installationsanleitung _00 p. 59).
+It ends above 4 °C per the /3 manual only (0020087974_00 p. 58; no /2 statement). The panel shows
+"Frostschutz Heizung" in menu 1 while active. The floor pump runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
 `off`, hcmode `heat`, `Hc1Pump` on, energy mode `passive_heating`/`active_heating`: correct, not
 a bug. HA cannot stop it; only a lower `TempDesiredLow` limits it (owner: accepted). Whether the
 room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Keine`).
@@ -156,19 +178,19 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 ### Room influence
 
 - **Raumaufschaltung is `Keine`** (owner-confirmed): controller menu C5 (shown only with a VR 90)
-  or the VR 90; not a cataloged ebusd register. Options (installation manual 0020132514_00):
-  `Keine` ignores the VR 90 room temperature for heating; `Aufschaltung` shifts the curve's flow
-  setpoint by (room desired − actual), so a warm room weakens a slab boost (factor undocumented);
-  `Thermostat` stops heating at room desired + 1 K, which would block a boost (Vaillant: not for
-  energy-balance control). Keep `Keine`: Loxone's `warm_enough` is the only comfort input.
+  or the VR 90; not a cataloged ebusd register. Options (Installationsanleitung 0020045204_01
+  p. 59): `Keine` ignores the VR 90 room temperature for heating; `Aufschaltung` shifts the curve's
+  flow setpoint by (room desired − actual), so a warm room weakens a slab boost (factor
+  undocumented); `Thermostat` stops heating at room desired + 1 K (/3 manual p. 68: not for
+  energy-balance control), which would block a boost. Keep `Keine`: Loxone's `warm_enough` is the only comfort input.
 - `mc/RoomTempOffset` is write-only (registers.md), so unusable as a lever.
 
 ## Owner-side configuration
 
 - Loxone does **not** write `mc/OperatingMode`; it publishes `loxone/heating/warm_enough`
   **retained**, on change and re-sent **every hour** (owner). Loxone does not control room valves.
-- **All loops and valves are open, bedrooms not throttled** (owner). Low water flow
-  is a pump matter, not a closed valve.
+- **Loops: ground floor throttled a bit** from last year's balancing so the upper floor gets more
+  flow; no flow-meter readings available (owner, 2026-11-21).
 - `mc/OperatingMode` = **`on`**, set by hand until Phase 2 is armed.
 - Frost protection kept small (owner-stated, set at the unit): `uih/FrostOverRideTime` 3 h,
   `mc/TempDesiredLow` 20 °C (TDL read 20 live before HA stopped reading it). The owner's reading
@@ -187,6 +209,7 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_hvac_action` | `ehp/Status` field 3 (what the generator does now) |
 | `sensor.geotherm_heating_hvac_mode` | `mc/OperatingMode` (configured setting) |
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
+| `sensor.geotherm_heating_flow_temp_vf2` | `ehp/FlowTemp`, VF2: the controller's flow input |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
 | `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp` = the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and the same, so `ehp/OutsideTemp` is not read separately); the sensor sits on the north side without sun (owner); read 0.65 K below the weatherstation (3.75 vs 4.4 °C; owner, 2026-11-21 evening, one reading) |
@@ -240,9 +263,9 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   at return + ≈ 8 K spread, so a run ends on flow > setpoint + hysteresis before the integral is
   repaid, and the next start follows from the integral drain whatever the start threshold; a
   deeper `CompIntegral` cuts starts only once runs end on the integral (≈ 0 at the stop).
-- **Cold weather:** `CompHysteresis` does not adapt to the weather (UNPROVEN); setpoint +
-  hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while the floor stays protected by
-  44 °C / 46 °C. Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days
+- **Cold weather:** `CompHysteresis` is one fixed value (p. 69; no weather dependency described);
+  setpoint + hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while floor protection sits
+  at FlowTempMax + hysteresis + 2 K (46 °C at 9 K). Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days
   step it back 1 K if run-end flow temperatures approach 35 °C;
   `sensor.heating_compressor_stop_temp` plots that stop point on the "Why runs end" graph.
 - **Counting compressor cycling** (owner): starts = `sensor.heating_compressor_starts_daily` +
@@ -278,7 +301,8 @@ a case table in `test_energy_mode`).
   `1` → `cooling`) as cheap insurance.
 - The setpoint payload with one decimal (`22.0`) is UNPROVEN against ebusd: prove it with the
   idempotent write of the current value before arming.
-- **Unknown** whether `mc/FlowTempMax` also stops the compressor or only caps the setpoint.
+- `mc/FlowTempMax` caps the setpoint (Installationsanleitung _01 p. 69); no compressor stop at it
+  is documented, the hard stop is floor protection ("Compressor and measurements").
 - `automation.heating_slab_charge_decision_changed` still says "Phase 1 — observation only,
   nothing was written" (message and `description:`), but with both switches on the decision IS
   written (Invariants "Two switches"). Fixing it changes the automation's output: do it with a

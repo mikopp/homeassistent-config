@@ -43,6 +43,7 @@ _ENTITIES = {
     "heating_hvac_action": "sensor",
     "heating_circuit_flow_temp": "sensor",
     "heating_circuit_return_temp": "sensor",
+    "heating_flow_temp_vf2": "sensor",
     "heating_temp_desired": "sensor",
     "heating_hvac_mode": "sensor",
     "heating_circuit_flow_temp_desired": "sensor",
@@ -168,6 +169,15 @@ TOPICS = [
         Msg("", {_FLOW: near(37.0), _ACTION: is_state("unknown")}, "empty payload"),
     ]),
     # ── ehp/HcReturnTemp: temp;sensor-status, only "ok" readings are used ─────────────────────
+    # ehp/FlowTemp (VF2): same fields and rule; live payload from the owner's `ebusctl find`
+    # (2026-11-21), not the 2026-11-12 capture.
+    Topic("ebusd/ehp/FlowTemp", [
+        Msg("31.94;ok", {"heating_flow_temp_vf2": near(31.94)}, "live payload"),
+        Msg("28.5;OK", {"heating_flow_temp_vf2": near(28.5)}, "status is case-insensitive"),
+        Msg("-50.0;cutoff", {"heating_flow_temp_vf2": near(28.5)}, "open-circuit probe"),
+        Msg("29.0", {"heating_flow_temp_vf2": near(28.5)}, "no status field → ignored"),
+        Msg("", {"heating_flow_temp_vf2": near(28.5)}, "empty ignored"),
+    ]),
     Topic("ebusd/ehp/HcReturnTemp", [
         Msg("24.12;ok", {"heating_circuit_return_temp": near(24.12)}, "live payload"),
         Msg("25.5;OK", {"heating_circuit_return_temp": near(25.5)}, "status is case-insensitive"),
@@ -356,6 +366,7 @@ async def test_ebusd_integral(ha: HomeAssistant, broker: Broker) -> None:
 # Broadcast/Outsidetemp is absent on purpose: a broadcast cannot be polled.
 _POLLS = {
     "ebusd/ehp/Status/get": "?3", "ebusd/ehp/HcReturnTemp/get": "?3",
+    "ebusd/ehp/FlowTemp/get": "?3",
     "ebusd/hwc/Status/get": "?3", "ebusd/ehp/Comp/get": "?3", "ebusd/ehp/Hc1Pump/get": "?3",
     "ebusd/mc/CoolingRequestHc2/get": "?5", "ebusd/uih/CoolingDemand/get": "?5",
     "ebusd/uih/CoolingActive/get": "?5", "ebusd/ehp/Integral/get": "?5",

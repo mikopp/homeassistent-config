@@ -33,6 +33,8 @@ views:
         title: Temperatures
         entities:
           - entity: sensor.geotherm_heating_circuit_flow_temp
+          - entity: sensor.geotherm_heating_flow_temp_vf2
+            name: Flow Temp VF2 (controller input)
           - entity: sensor.geotherm_heating_circuit_return_temp
             name: Circuit Return Temp (raw, includes hot water)
           - entity: sensor.heating_circuit_return_temp_valid
@@ -177,7 +179,8 @@ views:
         title: Why runs end
         hours_to_show: 12
         entities:
-          - entity: sensor.geotherm_heating_circuit_flow_temp
+          # VF2: the flow sensor the controller's integral and floor protection use.
+          - entity: sensor.geotherm_heating_flow_temp_vf2
           - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
           - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
