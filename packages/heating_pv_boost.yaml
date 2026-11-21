@@ -958,6 +958,7 @@ template:
 
       # ── Compressor stop temperature (flow setpoint + hysteresis) ──────────
       # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
+      # (setpoint from mc/FlowTempDesired, 0.5 K; mc/Status0a field 4 is whole °C only)
       # (hydraulic plans 1/3, no buffer — this house). Plotted next to the actual flow temp on the
       # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
       # cut the run short. In cold weather it also shows how close the stop point comes to
@@ -970,10 +971,10 @@ template:
         state_class: measurement
         icon: mdi:thermometer-alert
         availability: >
-          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired')
+          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired_fine')
              and has_value('sensor.geotherm_heating_compressor_hysteresis') }}
         state: >
-          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)
+          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired_fine') | float)
               + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
 
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
@@ -1578,6 +1579,8 @@ group:
       - sensor.geotherm_heating_energy_integral
       - binary_sensor.geotherm_heating_compressor_demand
       - sensor.geotherm_heating_circuit_flow_temp_desired
+      - sensor.geotherm_heating_circuit_flow_temp_desired_fine
+      - sensor.geotherm_heating_outdoor_temp
       - sensor.geotherm_heating_compressor_start_integral
       - sensor.geotherm_heating_compressor_hysteresis
       - sensor.geotherm_heating_curve

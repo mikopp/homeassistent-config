@@ -301,6 +301,19 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   `?5`, long-term statistics) next to the whole-degree sensor, and the dashboard's "Curve check"
   graph shows it with `TempDesired`, the geoTHERM outdoor value and the curve: the data for the
   formula check (A.3) and step 0.6. Deploy: step 0.4.
+  `sensor.heating_compressor_stop_temp` and the "Why runs end" graph use it too (owner,
+  2026-11-21); the whole-degree sensor stays for its history.
+- HYPOTHESIS (owner, 2026-11-21): composite status/display messages (`mc/Status0a`, `mc/Params`,
+  and the panel) carry whole degrees as a display simplification; the dedicated registers
+  (`mc/FlowTempDesired`, `mc/TempDesired`) hold the value the controller works with. Audit of
+  everything HA reads (catalog field types): only `mc/Status0a` field 4 (`UCH`) was whole-degree;
+  flow, return (`D2C`), room setpoint (`D1C`), curve (`UIN`/100) and hysteresis are full
+  resolution; integral (`SIN`) and the counters are whole numbers by nature. Test after deploy,
+  ≥ 3 days of data: (1) the two setpoint sensors always satisfy whole = floor(fine) or
+  round(fine) (which one: note it); (2) the fine setpoint moves in 0.5 K steps between the whole
+  ones, i.e. the controller resolves below 1 K; (3) step 0.6 (e) shows whether a 0.5 K room
+  setpoint step reaches the fine setpoint. (1) and (2) only show the display/register split;
+  only (3) shows what the controller computes with.
 
 ### A.5 What can and cannot be concluded yet
 

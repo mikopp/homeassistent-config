@@ -178,7 +178,7 @@ views:
         hours_to_show: 12
         entities:
           - entity: sensor.geotherm_heating_circuit_flow_temp
-          - entity: sensor.geotherm_heating_circuit_flow_temp_desired
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
           - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
           - entity: sensor.geotherm_heating_energy_integral
