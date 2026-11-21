@@ -1,8 +1,9 @@
 # --- EBUSD PV HEATING OPTIMISATION ---
 # Phase 1: read-only decision layer (telemetry, PV surplus, interlocks, slab decision).
-# Phase 2: comfort control, the ONLY writer: automation.heating_comfort_control sends
+# Phase 2: comfort control, the only automatic writer: automation.heating_comfort_control sends
 # mc/OperatingMode and mc/TempDesired, and only while input_boolean.heating_comfort_control_enabled
-# is on. Rollout: plans/ebusd-pv-heating-optimization.md.
+# is on. number.geotherm_heating_temp_desired writes mc/TempDesired only when the owner sets it.
+# Rollout: plans/ebusd-pv-heating-optimization.md.
 # → doc/heating_pv_boost/notes.md (facts, invariants); register decodes in
 #   doc/heating_pv_boost/registers.md.
 #
@@ -82,7 +83,8 @@ mqtt:
 
     # ── Current machine state, for observation and later write verification ───
     # Read-only views; the Phase 2 automation compares its wanted values against them and writes
-    # through mqtt.publish on the /set topics (no separate number/select entities).
+    # through mqtt.publish on the /set topics. The hand setter for mc/TempDesired is the MQTT
+    # number below (number.geotherm_heating_temp_desired).
     - name: "Heating Temp Desired"
       unique_id: heating_temp_desired
       default_entity_id: sensor.geotherm_heating_temp_desired
@@ -188,6 +190,19 @@ mqtt:
       icon: mdi:arrow-expand-vertical
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | float | round(1) }}"
+
+    # mc/HeatingCurve — slope of the weather curve (e.g. 0.14), set at the panel. Read so each
+    # curve change shows in history next to the room temperatures (plans/heating-curve-tuning.md).
+    # state_class keeps long-term statistics: the tuning compares settings over weeks.
+    - name: "Heating Curve"
+      unique_id: heating_curve
+      default_entity_id: sensor.geotherm_heating_curve
+      state_topic: "ebusd/mc/HeatingCurve"
+      state_class: measurement
+      entity_category: diagnostic
+      icon: mdi:chart-bell-curve-cumulative
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(2) }}"
 
     # ── Lifetime counters (machine-side, survive HA restarts) ─────────────────
     # ehp/CompStartsHc — compressor starts in HEATING mode only (DHW has its own counter), so
@@ -385,6 +400,29 @@ mqtt:
       device_class: connectivity
       device: *ebusd_bridge
       value_template: "{{ 'ON' if value | trim | lower in ['1', 'on', 'yes', 'true'] else 'OFF' }}"
+
+  number:
+    # ── Direct setpoint: set mc/TempDesired by hand from HA ────────────────────
+    # A hand write like the panel: shows the read-back, publishes only when the owner changes it.
+    # While input_boolean.heating_comfort_control_enabled is on, the comfort control overwrites it
+    # with sensor.heating_target_temp (→ doc/heating_pv_boost/notes.md "Invariants").
+    # 0.5 K steps: the register is D1C (half degrees).
+    - name: "Heating Temp Desired Set"
+      unique_id: heating_temp_desired_set
+      default_entity_id: number.geotherm_heating_temp_desired
+      state_topic: "ebusd/mc/TempDesired"
+      command_topic: "ebusd/mc/TempDesired/set"
+      # Same one-decimal payload the comfort control writes.
+      command_template: "{{ value | float | round(1) }}"
+      min: 18
+      max: 25
+      step: 0.5
+      mode: box
+      unit_of_measurement: "°C"
+      device_class: temperature
+      icon: mdi:thermometer-lines
+      device: *ebusd_geotherm
+      value_template: "{% if value | trim | float(none) is not none %}{{ value | float | round(1) }}{% endif %}"
 
 # ── HELPERS ─────────────────────────────────────────────────────────────────────
 # No initial: values anywhere — HA resets to initial on every restart and would overwrite a tuned
@@ -1251,6 +1289,10 @@ automation:
           payload: "?9"
       - action: mqtt.publish
         data:
+          topic: "ebusd/mc/HeatingCurve/get"
+          payload: "?9"
+      - action: mqtt.publish
+        data:
           topic: "ebusd/ehp/CompStartsHc/get"
           payload: "?9"
       - action: mqtt.publish
@@ -1504,6 +1546,8 @@ group:
       - sensor.geotherm_heating_circuit_flow_temp_desired
       - sensor.geotherm_heating_compressor_start_integral
       - sensor.geotherm_heating_compressor_hysteresis
+      - sensor.geotherm_heating_curve
+      - number.geotherm_heating_temp_desired
       - sensor.geotherm_heating_compressor_starts
       - sensor.geotherm_hot_water_compressor_starts
       - sensor.geotherm_heating_compressor_hours

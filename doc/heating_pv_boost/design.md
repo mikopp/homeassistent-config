@@ -19,7 +19,8 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
 | 6 | `neutral` | — (never) | on | **`off`** | `C + 1` |
 | 7 | `neutral` | — (never) | off / `unknown` / `unavailable` / silent 24 h | **`on`** | `C + 1` |
 
-- `C` = `input_number.heating_comfort_temp`, the only comfort knob; `offset` =
+- `C` = `input_number.heating_comfort_temp`, the only comfort knob while the writer is armed
+  (with it off, `number.geotherm_heating_temp_desired` sets `mc/TempDesired` by hand); `offset` =
   `input_number.heating_boost_offset`. `mc/TempDesiredLow` is not an input (frost floor, note
   "Frost protection"): below 3 °C outdoor, rows 4 and 6 (`off`) still heat towards it.
 - Slab boosting happens only in `active_heating` (owner: in the shoulder season the slab needs

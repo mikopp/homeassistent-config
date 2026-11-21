@@ -52,8 +52,10 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   the catalog may be mid-discovery. Gate on `scan != 'running'`, never on an allowlist of resting
   values: ebusd does not document which one it settles on (owner sees `finished`; the YAML also
   accepts `OK`).
-- **`input_number.heating_comfort_temp` is the only comfort knob.** Every setpoint HA writes is
-  derived from it. While the writer is armed, `mc/TempDesired` or `mc/OperatingMode` set at the
+- **`input_number.heating_comfort_temp` is the only comfort knob while the writer is armed.**
+  Every setpoint the writer writes is derived from it. With the writer off, the owner sets
+  `mc/TempDesired` by hand with `number.geotherm_heating_temp_desired`; it writes only on a
+  change by hand, never on a read-back. While the writer is armed, `mc/TempDesired` or `mc/OperatingMode` set at the
   wall is overwritten when its read-back reaches HA: the mode once the 30 min hold allows (the
   hold's end re-triggers), the setpoint unless HA published one in the last 5 min (then only at
   the next input change: there is no periodic re-check). The target is always absolute, never
@@ -168,7 +170,10 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   `mc/TempDesiredLow` 20 °C (TDL read 20 live before HA stopped reading it). The owner's reading
   "it then kicks in only every 3 h while `off`" is UNPROVEN: catalog and manual call it a delay
   and say nothing about a repeat cycle.
-- Heating curve 0.15; `ehp/CompIntegral` −180 °min and `ehp/CompHysteresis` 7 K at last read:
+- Heating curve 0.14 since 2026-11-20 (0.15 until about 2026-11-14, then 0.13; owner,
+  read-back confirmed), read by `sensor.geotherm_heating_curve`. `TempDesired` 22.5 (written by
+  HA, 2026-11-20); the comfort control is off (owner) and Loxone `warm_enough` is ignored for now.
+  Tuning: `plans/heating-curve-tuning.md`. `ehp/CompIntegral` −180 °min and `ehp/CompHysteresis` 7 K at last read:
   check `sensor.geotherm_heating_compressor_{start_integral,hysteresis}` before relying on them.
 
 ## Entity map (key entities)
@@ -179,6 +184,8 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_hvac_mode` | `mc/OperatingMode` (configured setting) |
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
+| `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
+| `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
 | `sensor.heating_energy_mode` | the energy mode (see "Energy modes"); `active_heating` = compressor running for heating |

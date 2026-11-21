@@ -55,11 +55,12 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
 | `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |
+| `mc/HeatingCurve` | weather-curve slope, `UIN` ÷ 100 (payload e.g. `0.14`); same `cfgheatsinktype=1` condition as `TempDesired`, answers on this unit |
 | `ehp/Hc1Pump` | heating-circuit pump on/off now ("Status Heizkreispumpe: AN/AUS"), the signal the owner's Loxone logic uses |
 
 `ehp/YieldTotal` is the only yield register: there is no per-mode (heating / hot water) yield.
 Also in the catalog, not read: `NumberCompStarts` (max starts/h, sets
-`TimeBetweenTwoCompStartsMin`), `mc/HeatingCurve` (conditional on `cfgheatsinktype`),
+`TimeBetweenTwoCompStartsMin`),
 `ehp/CompHoursHwc` (DHW hours, whole hours only), `ehp/Backup*` (backup heater, never used
 here), `HwcLaggingTime` ("WP Nachlaufzeit WW", owner read 3 min: pump run-on after a hot-water charge).
 

@@ -41,6 +41,12 @@ views:
           - entity: sensor.geotherm_heating_temp_desired
           - entity: sensor.heating_target_temp
             name: Target Temp (derived from comfort, written by Phase 2)
+          # Hand setter for mc/TempDesired while the comfort control is off; the curve is set at
+          # the panel only (plans/heating-curve-tuning.md).
+          - entity: number.geotherm_heating_temp_desired
+            name: Set Temp Desired (by hand; comfort control overwrites it while on)
+          - entity: sensor.geotherm_heating_curve
+            name: "Setting: heating curve"
 
       - type: history-graph
         title: Flow and Return

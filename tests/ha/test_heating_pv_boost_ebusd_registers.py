@@ -48,6 +48,8 @@ _ENTITIES = {
     "heating_circuit_flow_temp_desired": "sensor",
     "heating_compressor_start_integral": "sensor",
     "heating_compressor_hysteresis": "sensor",
+    "heating_curve": "sensor",
+    "heating_temp_desired_set": "number",
     "heating_compressor_starts": "sensor",
     "hot_water_compressor_starts": "sensor",
     "heating_compressor_hours": "sensor",
@@ -175,10 +177,14 @@ TOPICS = [
     ]),
     # ── mc/TempDesired: plain °C, one decimal ─────────────────────────────────────────────────
     Topic("ebusd/mc/TempDesired", [
-        Msg("22.0", {"heating_temp_desired": near(22.0)}, "live payload"),
-        Msg("24.5", {"heating_temp_desired": near(24.5)}),
-        Msg("-", {"heating_temp_desired": near(24.5)}, "ebusd '-' ignored"),
-        Msg("", {"heating_temp_desired": near(24.5)}, "empty ignored"),
+        # The hand setter number shows the same read-back.
+        Msg("22.0", {"heating_temp_desired": near(22.0), "heating_temp_desired_set": near(22.0)},
+            "live payload"),
+        Msg("24.5", {"heating_temp_desired": near(24.5), "heating_temp_desired_set": near(24.5)}),
+        Msg("-", {"heating_temp_desired": near(24.5), "heating_temp_desired_set": near(24.5)},
+            "ebusd '-' ignored"),
+        Msg("", {"heating_temp_desired": near(24.5), "heating_temp_desired_set": near(24.5)},
+            "empty ignored"),
     ]),
     # ── mc/OperatingMode → hvac_mode (the configured SETTING): 0..5 as name or number ────────
     Topic("ebusd/mc/OperatingMode", _mode_msgs(
@@ -215,6 +221,14 @@ TOPICS = [
         Msg("9.5", {"heating_compressor_hysteresis": near(9.5)}),
         Msg("n/a", {"heating_compressor_hysteresis": near(9.5)}, "garbage ignored"),
         Msg("", {"heating_compressor_hysteresis": near(9.5)}, "empty ignored"),
+    ]),
+    # mc/HeatingCurve: UIN/100 in the catalog, so ebusd sends the slope as a decimal.
+    Topic("ebusd/mc/HeatingCurve", [
+        Msg("0.14", {"heating_curve": near(0.14)}, "owner read-back 2026-11-20"),
+        Msg("0.15", {"heating_curve": near(0.15)}),
+        Msg("0.134", {"heating_curve": near(0.13)}, "rounded to 2 decimals"),
+        Msg("n/a", {"heating_curve": near(0.13)}, "garbage ignored"),
+        Msg("", {"heating_curve": near(0.13)}, "empty ignored"),
     ]),
     # ── Lifetime counters ─────────────────────────────────────────────────────────────────────
     Topic("ebusd/ehp/CompStartsHc",
@@ -329,6 +343,7 @@ _POLLS = {
     "ebusd/ehp/CompDemand/get": "?5", "ebusd/mc/Status0a/get": "?5",
     "ebusd/mc/TempDesired/get": "?7", "ebusd/mc/OperatingMode/get": "?7",
     "ebusd/ehp/CompIntegral/get": "?9", "ebusd/ehp/CompHysteresis/get": "?9",
+    "ebusd/mc/HeatingCurve/get": "?9",
     "ebusd/ehp/CompStartsHc/get": "?9", "ebusd/ehp/CompStartsHwc/get": "?9",
     "ebusd/ehp/CompHoursHc/get": "?9", "ebusd/ehp/YieldTotal/get": "?9",
 }
@@ -397,3 +412,26 @@ async def test_ebusd_poll_registration(ha: HomeAssistant, broker: Broker) -> Non
                             f"{f', unexpected {extra}' if extra else ''}"
                             f"{', duplicates' if len(sent) != len(set(sent)) else ''}")
     assert not failures, "\n".join(failures)
+
+
+async def test_temp_desired_hand_setter(ha: HomeAssistant, broker: Broker) -> None:
+    """number.geotherm_heating_temp_desired publishes to `mc/TempDesired/set` only when set.
+
+    A read-back change must not echo a `/set` (that would be a second automatic writer); a value
+    set by hand goes out as the one-decimal payload the comfort control also writes.
+    → doc/heating_pv_boost/notes.md "Invariants"
+    """
+    number = entity_id(ha, "number", "mqtt", "heating_temp_desired_set")
+    await wait_subscribed(ha, broker, "ebusd/mc/TempDesired")
+    mark = len(broker.received)
+    await publish(ha, broker, "ebusd/mc/TempDesired", "22.0")
+    await wait_state(ha, number, near(22.0))
+    await mqtt_sync(ha, broker)
+    sets = [m for m in broker.received[mark:] if m[0] == "ebusd/mc/TempDesired/set"]
+    assert not sets, f"read-back echoed a write: {sets}"
+    for value, payload in ((22.5, "22.5"), (21, "21.0")):
+        mark = len(broker.received)
+        await ha.services.async_call(
+            "number", "set_value", {"entity_id": number, "value": value}, blocking=True)
+        await ha.async_add_executor_job(
+            broker.wait_received, "ebusd/mc/TempDesired/set", payload, mark)
