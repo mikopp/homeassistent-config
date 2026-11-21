@@ -26,7 +26,11 @@ balanced the manifold so the upper floor gets more flow; without it the ground f
 warmer.
 
 Outdoor: `sensor.wheatherstation_outdoor_temperature` (HA has no geoTHERM outdoor sensor; see
-"Curve relation"). Sun: `sensor.wheatherstation_solar_radiation`, PV `sensor.victron_solar_yield_total_kwh`.
+"Curve relation"). The geoTHERM's own outdoor sensor (VRC DCF) sits on the north side of the
+house and gets no sun (owner, 2026-11-21). Sun: `sensor.wheatherstation_solar_radiation`, PV `sensor.victron_solar_yield_total_kwh`.
+
+Machine: geoTHERM exclusiv **VWS 83/2** (art. `0010002787`, matches the bus scan in the note
+"Bus participants"). The heating curves are the manufacturer's diagram, see "References" and A.3.
 
 The curve is a panel setting. `TempDesired` is set by hand, at the panel or with
 `number.geotherm_heating_temp_desired` (added on this plan's branch). HA writes nothing
@@ -133,9 +137,11 @@ means (bathroom and office under target). The spikes are a sun-after-cold-night 
 ### A.3 Curve relation (fit from the data)
 
 Flow setpoint = `mc/Status0a` field 4 (whole °C; 0 during hot water, excluded). The machine uses
-its own outdoor sensor, very likely damped and maybe warmed by the sun by day (the setpoint often
-drops 1–2 K between 08 and 11 h without a matching weatherstation change), so the fit uses the
-weatherstation and night/evening hours. Error ±1 K.
+its own outdoor sensor on the north side, without sun (owner), not the weatherstation. The setpoint
+often drops 1–2 K between 08 and 11 h without a matching weatherstation change; sun on the
+machine's sensor does not explain it. HYPOTHESIS: the controller damps its outdoor value, or the
+two sensors differ in the morning (a sunlit weatherstation would read warmer, not colder). The fit
+uses the weatherstation and night/evening hours. Error ±1 K.
 
 | Outdoor (weatherstation) | 0.15 / 22 (P1) | 0.13 / 22 (P2) | 0.14 / 22.5 (P3) |
 |---|---|---|---|
@@ -152,7 +158,41 @@ setpoint by about 1 + b (≈ 1.3 K per K), which matches 11-14 23:05 (TD −1 �
 This also explains why 0.13 gave 24 ↔ 26 jumps (never 25) at 7 °C in the integer setpoint.
 Consequence: 0.14 / 22.5 ≈ 0.15 / 22 in mild weather (+0.4 K at 8 °C) and ≈ 0.5 K lower at 0 °C.
 So P3 will probably land near the P1 room temperatures in mild weather, above target in the
-bedroom and Kilian. No Vaillant curve formula was used: none is sourced here.
+bedroom and Kilian.
+
+**Manufacturer curve.** The VWS 83/2 operating manual (Ref. 1, p. 21, menu "HK2 Parameter") shows
+the "Heizkurven" diagram: flow setpoint over the outdoor temperature (+20 … −20 °C) for curves
+0.2 … 4.0 at room setpoint 20 °C. A different room setpoint moves the curve in parallel along a
+45° axis (Ref. 1, p. 18; the diagram marks the room-setpoint axis 15 / 20 / 22). So flow(T, RS) =
+flow₂₀(T − (RS − 20)) + (RS − 20), the same form as the fit above. Floor heating: curves < 0.4
+(Ref. 1, p. 21). Ref. 1 draws no curve below 0.2. The successor's installation manual (Ref. 2,
+p. 66, menu C2; written for the VWS 63/3–103/3, not the 83/2) has the same diagram plus a 0.1
+curve; its 0.2 and 0.4 curves match Ref. 1 to 0.1 K, so the 0.1 curve is taken from Ref. 2
+(HYPOTHESIS that the /2 controller uses the same 0.1 curve). Values were read from the diagrams'
+vector paths in the PDFs (not by eye, ±0.2 K). 0.13–0.15 are interpolated linearly between 0.1
+and 0.2, so **those columns are an interpolation, not manufacturer values.**
+
+| Outdoor | 0.1 | 0.2 | 0.4 | 0.13 (interp.) | 0.14 (interp.) | 0.15 (interp.) |
+|---|---|---|---|---|---|---|
+| +15 °C | 22.4 | 22.5 | 24.3 | 22.4 | 22.4 | 22.4 |
+| +10 °C | 24.1 | 24.5 | 27.6 | 24.2 | 24.3 | 24.3 |
+| +5 °C | 25.5 | 26.3 | 30.4 | 25.7 | 25.8 | 25.9 |
+| 0 °C | 26.7 | 28.0 | 33.0 | 27.1 | 27.2 | 27.3 |
+| −5 °C | 27.7 | 29.5 | 35.5 | 28.3 | 28.4 | 28.6 |
+| −10 °C | 28.6 | 31.0 | 37.7 | 29.3 | 29.5 | 29.8 |
+| −20 °C | 29.7 | 33.2 | 41.9 | 30.7 | 31.1 | 31.4 |
+
+Shifted to our room setpoints, the diagram predicts 0.15 / 22: 28.5 °C at 5 °C, 27.6 at 8 °C;
+0.13 / 22: 28.3 at 5 °C, 27.4 at 8 °C, 25.5 at 14 °C; 0.14 / 22.5: 29.0 at 5 °C, 28.2 at 8 °C.
+
+OBSERVED discrepancy, open: the machine runs **1.5–3.5 K below** the diagram (0.13 / 22 at 8 °C:
+24 observed vs 27.4), and the diagram puts 0.13 vs 0.15 only ≈ 0.2–0.4 K apart, while the data show
+≈ 2 K (24 vs 26 at 7–9 °C). HYPOTHESES, none tested: (a) the machine's outdoor value (north side,
+damped) reads well above the weatherstation; (b) the panel value is not on the diagram's scale
+below 0.2 (the diagram draws nothing between 0.1 and 0.2); (c) `mc/Status0a` field 4 is not the
+plain curve setpoint (e.g. after an internal correction). (a) is checked first, see step 0.5.
+Until this is resolved, the size column of the Phase 2 table is from our data, not from the
+diagram.
 
 ### A.4 Machine figures per period
 
@@ -197,6 +237,14 @@ bedroom and Kilian. No Vaillant curve formula was used: none is sourced here.
   `topic ebusd/mc/HeatingCurve in 0` and `topic ebusd/mc/HeatingCurve/get out 0`, restart
   Mosquitto, check that `sensor.geotherm_heating_curve` reads 0.14 and that
   `number.geotherm_heating_temp_desired` shows 22.5.
+- [TODO] **0.5** Compare the machine's outdoor value with the weatherstation (A.3 discrepancy,
+  hypothesis a). `ehp/Status01` field `temp_2` (outside) times out on this unit (registers.md), so
+  first look for another ebusd register with the geoTHERM outdoor temperature (read-only, no HA
+  change without approval). Without one, the owner reads the outdoor value at the panel or the
+  VR 90 a few times (night, 08–11 h, afternoon) and notes it with the time; compare with
+  `sensor.wheatherstation_outdoor_temperature` and with the flow setpoint the diagram predicts.
+  Result → "Observations".
+  Depends on: nothing (can run during Phase 1).
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
 
@@ -225,6 +273,10 @@ for the 22 °C rooms; the bedroom has its own issue, Phase 3):
 | Right on cold days, too warm on mild days | slope down | 0.01 |
 | Only some rooms off, others on target | no curve change: Phase 3 | — |
 | A sunny day overshoots | no change: the PV exception (Phase 5) | — |
+
+Sizes: by the manufacturer diagram (A.3), a slope step of 0.01 moves the flow only ≈ 0.1–0.2 K
+around 0.13–0.15; our data showed ≈ 1 K per 0.01. Until step 0.5 explains the gap, size steps on
+the data and log the flow setpoint before and after.
 
 - [TODO] **2.1** Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel), log it in the change log, then wait ≥ 4
@@ -309,10 +361,28 @@ Still optional: 4.1, 4.4.
 
 (Log settled evaluations here: dates, outdoor and radiation mean, per-room deviation, starts/day.)
 
+## References
+
+1. Vaillant, *Bedienungsanleitung geoTHERM exclusiv VWS* (operating manual, DE/AT/CH),
+   0020025604_00, 02/2007. Covers VWS 63/2, **83/2** (art. 0010002787) and 103/2 (p. 3).
+   Heating-curve diagram ("Heizkurven", curves 0.2 … 4.0, room setpoint 20 °C) and floor-heating
+   advice (< 0.4): p. 21, menu "HK2 Parameter"; room setpoint as a 45° parallel shift: p. 18.
+   Download: https://kontakt.vaillant.de/documents/download/73792/
+2. Vaillant, *Installationsanleitung geoTHERM exclusiv* (installation manual, DE/AT/CH),
+   0020087974_00, 04/2010. Valid only for VWS 63/3, 83/3, 103/3 (§1.4), the successor; used only
+   for the 0.1 curve that Ref. 1 lacks (same diagram otherwise). Diagram: p. 66, Tab. 9.6 menu C2.
+   Download: https://kontakt.vaillant.de/documents/download/78824/
+
+Neither manual gives a formula for the curves: the A.3 table is read off the diagrams.
+
 ## Knowledge homes
 
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve and `TempDesired`
   values with their origin, and the room targets (owner values).
+- `doc/heating_pv_boost/notes.md` "Hardware": the machine is a VWS 83/2; the manufacturer curve
+  (Ref. 1, A.3 table) and the outdoor sensor on the north side without sun. At Close check the
+  note's citations of "VWS 82/3 installation manual 0020132514_00" ("Frost protection", "Room
+  influence") against the 83/2 documents.
 - `doc/heating_pv_boost/notes.md` "Hardware" or "Decisions in force": the curve relation (A.3)
   only once CONFIRMED, graded; the "TempDesired step ≈ (1 + b) K flow" rule as one line.
 - Design doc: no change expected (no architecture change; K-4.1 gate). Revisit only if Phase 4
@@ -325,6 +395,8 @@ Still optional: 4.1, 4.4.
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
 - [TODO] 0.4 Deploy: 2 bridge lines for `mc/HeatingCurve`, restart Mosquitto, check both entities
+- [TODO] 0.5 Machine outdoor value vs weatherstation (diagram discrepancy, A.3)
+- [DONE] Manufacturer heating curve sourced (References, A.3); outdoor sensor location recorded
 - [IN_PROGRESS] 1.1 Settle 0.14 / 22.5, no changes until ≥ 2026-11-25
 - [TODO] 1.2 Evaluate settled days
 - [TODO] 2.1–2.2 Tuning loop (`TempDesired` by hand, curve at the panel)
