@@ -368,6 +368,9 @@ Still optional: 4.1, 4.4.
    Heating-curve diagram ("Heizkurven", curves 0.2 … 4.0, room setpoint 20 °C) and floor-heating
    advice (< 0.4): p. 21, menu "HK2 Parameter"; room setpoint as a 45° parallel shift: p. 18.
    Download: https://kontakt.vaillant.de/documents/download/73792/
+   The owner's printed manual for this unit shows the same diagram (owner photo, 2026-11-21:
+   20–90 °C scale, curves 0.2 … 4.0, bold 1.5 with the dash-dot example at −15 °C; no curve below
+   0.2). Spot checks against the A.3 values at −20 °C (0.2 ≈ 33, 0.6 ≈ 50, 1.0 ≈ 65) agree.
 2. Vaillant, *Installationsanleitung geoTHERM exclusiv* (installation manual, DE/AT/CH),
    0020087974_00, 04/2010. Valid only for VWS 63/3, 83/3, 103/3 (§1.4), the successor; used only
    for the 0.1 curve that Ref. 1 lacks (same diagram otherwise). Diagram: p. 66, Tab. 9.6 menu C2.
