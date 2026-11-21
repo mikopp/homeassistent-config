@@ -54,7 +54,7 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
   not collapse the moment the boost starts drawing — grid export is unusable here because the
   battery absorbs surplus first
 - **Setpoint**: derived from the HA helper `input_number.heating_comfort_temp`, the only comfort
-  knob; `mc/TempDesiredLow` is the machine's frost floor and HA ignores it. Nothing is captured or
+  knob while the writer is armed (with it off, `number.geotherm_heating_temp_desired` sets it by hand); `mc/TempDesiredLow` is the machine's frost floor and HA ignores it. Nothing is captured or
   restored, and the target is always absolute so a retry or restart cannot compound it
 - **Interlocks**: cooling (the same hydraulics serve both), hot-water charging (which masks the
   return temperature), the resistive backup heater, battery state of charge, and the heat pump's
