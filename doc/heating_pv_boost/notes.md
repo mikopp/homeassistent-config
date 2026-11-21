@@ -189,7 +189,7 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_circuit_flow_temp` | `ehp/Status` field 0; liveness reference (`force_update`) |
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
-| `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp`; the geoTHERM's outdoor sensor sits on the north side without sun (owner); read ≈ 1 K below the weatherstation (owner, 2026-11-21, one reading) |
+| `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp` = the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and the same, so `ehp/OutsideTemp` is not read separately); the sensor sits on the north side without sun (owner); read ≈ 1 K below the weatherstation (owner, 2026-11-21, one reading) |
 | `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |

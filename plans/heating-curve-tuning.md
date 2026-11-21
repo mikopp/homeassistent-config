@@ -241,12 +241,12 @@ is from our data, not from the diagram.
   Mosquitto, check the sensor shows a value. Then, after ≥ 2 days: compare the two outdoor values
   by hour (night, 08–11 h, afternoon), and the flow setpoint with the A.3 diagram evaluated at
   the geoTHERM value. Result → "Observations".
-  If the broadcast proves noisy or unclear: the catalog also has a readable `ehp/OutsideTemp`
-  (`b509 0d0600`, value + sensor status, "Meßwert des externen Außentemperaturfühlers") and
-  `ehp/OutsideTempOffset` (`0dc300`); whether this unit answers them is untested (`ehp/Status01`
-  does not). Reading them needs two bridge lines each and a `?N` poll: owner approval first.
-  A measured sensor error larger than ≈ 1 K can be corrected with the outdoor offset (lever
-  above), one change at a time like any other.
+  The broadcast is the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and
+  the same), so hypothesis (a) is tested on the controller's own input. Open: whether the
+  controller damps it before the curve (the 08–11 h setpoint drops). `ehp/OutsideTempOffset`
+  (`0dc300`, readable) is not read: the owner reads 0 at the panel. A measured sensor error larger
+  than ≈ 1 K can be corrected with the outdoor offset (lever above), one change at a time like
+  any other.
   Depends on: nothing (can run during Phase 1).
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes

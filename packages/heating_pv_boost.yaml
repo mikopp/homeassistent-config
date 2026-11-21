@@ -164,10 +164,10 @@ mqtt:
         {% set f = value.split(';') %}
         {{ f[4] | float | round(1) if f | count > 4 and f[4] | trim | float(none) is not none else '' }}
 
-    # Broadcast/Outsidetemp — the outdoor temperature broadcast on the bus, most likely the value
-    # the weather curve uses (UNPROVEN; the weatherstation is a different sensor). Read to compare
-    # the two against the flow setpoint (plans/heating-curve-tuning.md). A broadcast: published
-    # unasked, never polled (→ doc/heating_pv_boost/notes.md "Invariants").
+    # Broadcast/Outsidetemp — the geoTHERM's own outdoor sensor value (the weatherstation is a
+    # different sensor). Read to compare the two against the flow setpoint
+    # (plans/heating-curve-tuning.md). A broadcast: published unasked, never polled
+    # (→ doc/heating_pv_boost/notes.md "Invariants", entity map).
     - name: "Heating Outdoor Temp"
       unique_id: heating_outdoor_temp
       default_entity_id: sensor.geotherm_heating_outdoor_temp

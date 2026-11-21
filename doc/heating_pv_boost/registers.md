@@ -56,7 +56,7 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
 | `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |
 | `mc/HeatingCurve` | weather-curve slope, `UIN` ÷ 100 (payload e.g. `0.14`); same `cfgheatsinktype=1` condition as `TempDesired`, answers on this unit |
-| `Broadcast/Outsidetemp` | outdoor temperature broadcast (`u`, `fe b516 01`, `D2B` °C, payload e.g. `3.750`), from `broadcast.csv`; passive only, not pollable |
+| `Broadcast/Outsidetemp` | outdoor temperature broadcast (`u`, `fe b516 01`, `D2B` °C, payload e.g. `3.750`), from `broadcast.csv`; passive only, not pollable. Same value as `ehp/OutsideTemp` (`b509 0d0600`, temp + sensor status; owner), so that register is not read |
 | `ehp/Hc1Pump` | heating-circuit pump on/off now ("Status Heizkreispumpe: AN/AUS"), the signal the owner's Loxone logic uses |
 
 `ehp/YieldTotal` is the only yield register: there is no per-mode (heating / hot water) yield.
