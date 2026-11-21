@@ -231,8 +231,13 @@ Owner `ebusctl find` (2026-11-21 evening): `ehp FlowTemp` 31.94, `ehp HcFlowTemp
   (not in the poll list), so its cached value changes only when another bus master reads it or mc
   pushes an update. "Did not change after a curve / `TempDesired` change" is therefore not yet
   evidence about the controller.
-- Owner hypothesis (2026-11-21), UNPROVEN: the setpoint is only computed while the compressor
-  runs, and changes of the curve during a run are ignored. Against it so far: the manual describes
+- Owner hypothesis (2026-11-21), split:
+  - "Curve changes during a run are ignored": **DISPROVED** (owner correction, same evening, one
+    test): with the compressor running, `mc/FlowTempDesired` followed a curve change after a few
+    minutes. The delay matters for every test: wait ≥ 10 min before reading.
+  - "The setpoint is only computed while the compressor runs": UNPROVEN, still open; the
+    unchanged value with the compressor off may be the cache (below) or the same delay. Against it
+    so far: the manual describes
   a setpoint computed continuously from the curve, the energy balance integrating actual − desired
   every minute (Ref. 2 p. 61); the polled `Status0a` field 4 changed with `TempDesired` on
   2026-11-14 23:05 and 2026-11-20 22:01 (A.1; compressor state at those moments not checked).
