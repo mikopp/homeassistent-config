@@ -84,6 +84,16 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
 | 75 | VR 90/3 remote control, art. `0020040079` | `rcc` |
 | 05 | VR 920 internet module, art. `0020252922` | none: **dormant**, Vaillant discontinued the service |
 
+The geoTHERM is a **geoTHERM exclusiv VWS 83/2** (art. `0010002787`). Manuals:
+- *Bedienungsanleitung geoTHERM exclusiv VWS*, 0020025604_00 (02/2007), covers VWS 63/2, 83/2,
+  103/2: https://kontakt.vaillant.de/documents/download/73792/ (heating curves p. 21, room setpoint
+  shift p. 18; owner's printed copy matches).
+- No /2 installation manual found. The successor's *Installationsanleitung geoTHERM exclusiv*,
+  0020087974_00 (04/2010), is valid for VWS 63/3–103/3 only, use it with care:
+  https://kontakt.vaillant.de/documents/download/78824/ (energy balance p. 61, curves menu C2 p. 66,
+  sensor calibration menu A8 p. 82). The site refuses plain `curl`; a browser user agent works.
+- Heating curves, table and formula: `doc/heating_pv_boost/heating-curve.md`.
+
 There is **no VRC 700 and no `700` circuit**, so `Hc1RoomCircuitMode`, `Z1DayTemp` and friends do
 not exist. The VR 90 writes to the bus but accepts and keeps a value HA writes, so HA is the sole
 effective writer of the control registers. SW 0383 is below 407: any catalog entry gated
@@ -148,7 +158,8 @@ outside a window), after a delay (default 1 h; register `uih/FrostOverRideTime`,
 `15.uih.csv` "Frostschutzverzögerung", hours, installer write; set on the unit only, HA does not
 read it), the controller requests flow temperature for the room setpoint `mc/TempDesiredLow`; it
 ends above 4 °C (VWS 82/3 installation manual 0020132514_00; user manual 0020087973_02
-"Regelfrostschutz Heizung", §3.4.2). The floor pump runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
+"Regelfrostschutz Heizung", §3.4.2; other-model documents, not yet checked against the 83/2
+manuals under "Bus participants"). The floor pump runs and the compressor starts (owner-verified). So with Phase 2's `off` the dashboard shows mode
 `off`, hcmode `heat`, `Hc1Pump` on, energy mode `passive_heating`/`active_heating`: correct, not
 a bug. HA cannot stop it; only a lower `TempDesiredLow` limits it (owner: accepted). Whether the
 room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Keine`).
