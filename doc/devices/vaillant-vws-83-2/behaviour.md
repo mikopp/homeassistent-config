@@ -86,7 +86,9 @@ change; their current values are kept by the package note named in `README.md` U
 ## Open questions
 
 - Electrical plan 3 (`README.md` Identity): is a network-operator block contact wired to terminal
-  13 "EVU", and does a block show on the bus (could explain `off` spells such as VWS-17)?
+  13 "EVU", when does it block, and does it explain `off` spells such as VWS-17 (`ehp/PowerCut`)?
+  Menu 1 also shows "Sperrzeit Warmwasser" / "Sperrzeit Bereitschaft" [IA p.54], which the
+  manual does not tie to the EVU contact:
   `plans/ebusd-pv-heating-optimization.md` step 15
 - Is the panel read-only, and for which menus? Without the installer code the code-level menus
   C1–C9, D1–D5, I1–I5 and A1–A9 show values but cannot be changed [IA p.49]:

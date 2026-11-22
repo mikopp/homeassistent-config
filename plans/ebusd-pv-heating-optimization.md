@@ -288,8 +288,13 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       read on while hcmode is `off` (now read, so the ~9 W in `off` can be checked); (d) frost
       protection with mode `off` below 3 °C: does heating follow the room temperature, and does it
       come on once after `FrostOverRideTime` or repeat every 3 h (owner reading); (e) electrical
-      plan 3: is a network-operator block contact wired to terminal 13 "EVU" (owner, at the
-      unit), and would a block explain (b)? Result → device `protections.md` (T rows).
+      plan 3 EVU block. Hypothesis (owner, unconfirmed): the block contact is wired; the panel
+      shows "Sperrzeit" at some times around lunch. Test: `ebusctl read -f PowerCut` (device
+      `registers-ehp.md`) during such a spell and outside it, or poll it for a few days; note the
+      menu 1 status text at the same time ("Sperrzeit" there may be compressor timing, not EVU).
+      `1` at lunch → wired, times → device; never `1` while the panel says Sperrzeit → the text
+      is compressor timing. Then check whether a block explains (b). Result → device
+      `protections.md` (T rows).
 - [TODO] 16. Confirm the ebusd catalog generation this setup runs (device VWS-32): `ebusctl find
       -e ehp Status` / the served `08.ehp.csv` field name (`hcmode` vs `hcmode2`) and ebusd's
       version topic. Result → device `interface.md` Path and config; then decide whether the raw
