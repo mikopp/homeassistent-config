@@ -96,7 +96,7 @@ control stays off.
 | 2026-11-21 or shortly before | Bedroom sensor | moved away from the bed to a neutral spot | Owner. Bedroom data before the move are not comparable |
 | 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes; set back to 0.14 (owner). Test values and times not recorded |
 | 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, with `number.geotherm_heating_temp_desired`: step 0.6 (e) and kept as the first Phase 2 change (2.1). Fine flow setpoint 27.5 → 27.0 (read 08:43:32) |
-| 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | By hand (no automation writes it), keeps knob = `TempDesired` − 1 (5.1). Writer still off |
+| 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, by hand, to keep the knob 1 K below `TempDesired` (5.1). Writer still off |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
 | unchanged | Outdoor sensor offset 0 K | — | Owner, 2026-11-21 |
 
@@ -324,10 +324,11 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   reference). The offset moves in 1 K steps, so a constant difference well below 1 K stays as it
   is. Result → "Observations".
   Depends on: 0.4.
-- [IN_PROGRESS] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). 22.0 is kept as
-  the first Phase 2 change instead of being set back (owner: too warm); this goes against item 5
-  below, which assumed a pure test. (b) still TODO; (f) gives a sharper version of it: let the
-  0.20 test start and end on the same side of an edge.
+- [IN_PROGRESS] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). Item 5's
+  set-back only covered the case where 0.5 K steps might not act. They do act, so 22.0 stays as
+  the first Phase 2 change. `TempDesired` is a lever, not a goal: the goal is the room
+  temperatures (owner). (b) still TODO; (f) sharpens it: let the 0.20 test start and end on the
+  same side of an edge.
   Controller resolution tests (owner; background A.3 (e), (b)). Each test changes
   ONE setting, at a steady outdoor temperature (`sensor.geotherm_heating_outdoor_temp` within
   ±0.5 K during the test), not during hot water (`binary_sensor.geotherm_heating_hwc_active` off).
