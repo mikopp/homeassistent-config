@@ -165,8 +165,8 @@ mqtt:
 
     # uih/FlowTempDesired — the flow setpoint the system controller hands to the generator: the
     # whole-degree floor of mc/FlowTempDesired, and the value ehp/Integral counts against
-    # (→ doc/heating_pv_boost/registers.md). Was mc/Status0a field 4 (same value, but lagging and
-    # 0 during hot water); same entity, so its history continues.
+    # (→ doc/heating_pv_boost/registers.md). 0 during hot water, like mc/FlowTempDesired. Was
+    # mc/Status0a field 4 (same value, lagging); same entity, so its history continues.
     - name: "Heating System Flow Temp Desired"
       unique_id: heating_circuit_flow_temp_desired
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired
@@ -974,9 +974,10 @@ template:
       # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
       # (setpoint from uih/FlowTempDesired, whole °C: the integral's reference; that the stop
       # line uses it too is UNPROVEN, → plans/heating-curve-tuning.md)
-      # (no buffer: hydraulic plan 6 on the exclusiv — this house). Plotted next to the actual flow temp on the
-      # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
-      # cut the run short. In cold weather it also shows how close the stop point comes to
+      # (no buffer: hydraulic plan 6 on the exclusiv — this house). Unavailable while the setpoint
+      # is 0 (hot water): there is no heating stop line then, and 0 + 7 would plot a false 7 °C.
+      # Plotted next to the actual flow temp on the "Why runs end" graph: if the flow reaches this
+      # line exactly when a run ends, the hysteresis cut the run short. In cold weather it also shows how close the stop point comes to
       # mc/FlowTempMax (35 °C): the cue to step the hysteresis back
       # (→ doc/heating_pv_boost/notes.md "Cold weather").
       - name: "Heating Compressor Stop Temp"
@@ -987,6 +988,7 @@ template:
         icon: mdi:thermometer-alert
         availability: >
           {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired')
+             and states('sensor.geotherm_heating_circuit_flow_temp_desired') | float > 0
              and has_value('sensor.geotherm_heating_compressor_hysteresis') }}
         state: >
           {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)

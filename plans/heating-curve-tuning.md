@@ -101,6 +101,8 @@ automatically.
 | 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, hand setter (2.1). Fine 27.5 → 27.0, W stayed 27 |
 | 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, keeps the knob 1 K below `TempDesired` (5.1) |
 | 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `uih` test; set back within 1 h, settle time not restarted |
+| 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Forced reads after it: `mc` 26.5, `uih` 26.00 (was 27.0 / 27): W −1 K |
+| 2026-11-22 17:07:57 | `input_number.heating_comfort_temp` | 21.0 → 20.5 | Owner, 1 K below `TempDesired` (5.1) |
 | before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20, outdoor offset 0 K | — | read live / owner, 2026-11-21 |
 
@@ -128,8 +130,10 @@ whole-degree W and the curve's jumps (f).
 - (b) Below 0.2 the curve does not follow the formula: answered passively by 0.7.
 - (f) The curve works in **2 K steps** over outdoor temperature. OBSERVED: one edge at ≈ −2.5 °C
   (geoTHERM value), 27.5 ↔ 29.5 at 0.14 / 22.5, crossed once each way on 2026-11-22 with no
-  hysteresis; flat in between. Fits the 0.13 period's 24 ↔ 26 jumps (never 25). Open: the other
-  edges, the step sizes, whether `TempDesired` or the offset moves the edges (0.7).
+  hysteresis; flat in between. Fits the 0.13 period's 24 ↔ 26 jumps (never 25). **Not always
+  2 K** (OBSERVED 2026-11-22, 0.14 / 22.0): 27 ↔ 26 at geoTHERM ≈ 1.9 °C (1.81 ↔ 2.06), up 11:10,
+  down 16:30, no hysteresis. Open: the other edges, the step sizes, whether `TempDesired` or the
+  offset moves the edges (0.7).
 
 ## Steps
 
@@ -195,21 +199,16 @@ test** (0.8): log the fine setpoint and the geoTHERM outdoor value at each jump;
 move, drop the offset rows. Log every offset change in the change log and the note's "Owner-side
 configuration".
 
-- [IN_PROGRESS] **2.1** First change: `TempDesired` 22.5 → 22.0 on 2026-11-22 08:43. It left W
-  unchanged at every outdoor value seen (OBSERVED on the flat parts), so it may not cool the house.
-  **Owner decision: one day at 22.0, re-evaluate on 2026-11-23, then 21.5 if the data support
-  it.** Checks:
-  1. Fine and W across the day's outdoor range; any x.5 fine value at 22.0 → measure the integral
-     rate there.
-  2. W at matching geoTHERM outdoor values: 11-21 20:15 … 11-22 08:43 (22.5) vs after the write.
-  3. Run and pause lengths vs 180 ÷ |VF2 − W|; Shelly kWh per degree-day.
-  4. [DONE] `uih` passes floor(`mc`) and the integral uses it (CONFIRMED).
-  5. Room temperatures, office first, shower hours left out.
-  Expected next step by the table: office d ≈ +0.9 → **21.5** (W −1 K). Apply at most one change;
-  log it with the forced-read `mc FlowTempDesired` before and after; check the cycling (daily
-  starts and mean run against the note's "Decisions in force"); settle; evaluate as 1.2.
-  Depends on: 1.2. Slope rows also depend on 0.7; offset rows on nothing (0.8 runs with them).
-- [TODO] **2.2** Repeat 2.1 until the success metrics hold across one cold-class and one
+- [DONE] **2.1** `TempDesired` 22.5 → 22.0 (11-22 08:43) left W unchanged all day (W 27, 26
+  above the 2 °C edge, identical at 22.5), so it did nothing. Office mean 11-22 ≈ 22.95 (d ≈ +0.95,
+  cold class, 22 W/m²; inflated by the 6 h at 29.5 overnight and noon sun), every room above its
+  band → **21.5** at 17:07 (owner, a day early). 21.5 rather than 21.0: same W (fine = `TempDesired`
+  + whole number), and from 21.5 one +0.5 step raises W again. Expected: W −1 K, office ≈ +0.3.
+  `uih` passes floor(`mc`) and the integral uses it (CONFIRMED).
+- [IN_PROGRESS] **2.2** Settle 21.5, then evaluate as 1.2 (≥ 4 qualifying days: earliest
+  2026-11-27). W moved 27 → 26 (forced reads after hot water, 11-22). Checks: the cold edge (was 29.5 at 22.5) now 28.5 or 29; run
+  length ≥ 20 min at the lower W (≈ 180 ÷ (VF2 − W) + ramp); daily starts. Then the table again,
+  one change per evaluation, until the success metrics hold across one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change waits until 2.2 is done.
   Depends on: 2.1.
 
@@ -239,17 +238,11 @@ together, the pump speed cannot be set (note "Bus participants"), no flow meters
   outdoor sensor, VF2 (#186, #188–#190). [DROPPED] 4.2, 4.4.
 - [TODO] **4.1** Optional: room deviation sensors (temperature − target, long-term statistics)
   and a "Room deviation" card. Depends on: owner approval.
-- [IN_PROGRESS] **4.9** W re-sourced from `uih/FlowTempDesired` (implemented in this PR): the
-  entity `sensor.geotherm_heating_circuit_flow_temp_desired` keeps its id and history,
-  `sensor.heating_compressor_stop_temp` uses it, the dashboard shows both setpoints. Left after
-  deploy (owner):
-  - Bridge lines on the broker host, then restart Mosquitto: `topic ebusd/uih/FlowTempDesired in
-    0`, `topic ebusd/uih/FlowTempDesired/get out 0`. The two `mc/Status0a` lines can go.
-  - Check: the sensor shows the `uih` value (≈ floor of the fine one) within a poll cycle.
-  - Open: what `uih` shows during hot water (0, hot-water setpoint, or heating value); a jump
-    there moves the stop line too.
-  - Open: whether the stop line uses W (UNPROVEN): a stop-line stop at W + 7 rather than
-    fine + 7 decides it.
+- [DONE] **4.9** W from `uih/FlowTempDesired` (#191), deployed: on 11-22 17:01 the stop line
+  followed W, not the fine value. `uih` reads **0 during hot water**, like `mc`
+  (`registers.md`); the stop line is unavailable while W is 0 (this PR, was 0 + 7 = 7 °C). Still
+  UNPROVEN: whether the stop line uses W; a stop-line stop at W + 7 rather than fine + 7 decides it
+  (passive).
 
 ### Phase 5 — writer and sunny-day exception
 
@@ -344,12 +337,11 @@ Links and the owner's printed copy: the note "Bus participants" and `heating-cur
 
 - [DONE] 0.1–0.4, 0.6; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8 (offset
   test at the first offset change)
-- [DONE] 1.1; [TODO] 1.2
-- [IN_PROGRESS] 2.1 `TempDesired` 22.0 since 2026-11-22 08:43; re-evaluate 2026-11-23, expected
-  next 21.5
-- [TODO] 2.2 tuning loop; 3.1–3.2 balancing
-- [DONE] 4.3, 4.5–4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional; [IN_PROGRESS] 4.9 bridge lines +
-  hot-water check after deploy
+- [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
+- [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
+  (W 27 → 26 confirmed by forced read), evaluate from 2026-11-27
+- [TODO] 3.1–3.2 balancing
+- [DONE] 4.3, 4.5–4.9; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
 - [DONE] 5.1; [TODO] 5.2 deferred
 - [TODO] 6.1 geoTHERM device docs, right after #192 merges
 - [TODO] Close
