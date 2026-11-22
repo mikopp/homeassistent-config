@@ -399,12 +399,30 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   Enough when edges are seen across the outdoor range of the season so far, about −5 to +10 °C.
   Result → "Observations"; once CONFIRMED, → `doc/heating_pv_boost/heating-curve.md` at Close.
   Depends on: 0.4.
-- [IN_PROGRESS] **0.8** Outdoor offset resolution: whole K, 0.5 K or finer? Does the curve use
-  the corrected value? A research subagent (2026-11-22) is checking the Vaillant /2 and /3
-  manuals, the ebusd catalog (`ehp/OutsideTempOffset` data type) and forums (weak evidence).
-  Until then the owner's working assumption is 0.5 K. A safe owner test follows from the
-  result: read the register, check what the panel offers, write the current value back. Result
-  → "Observations"; the step size goes into the Phase 2 table.
+- [TODO] **0.8** Outdoor offset: resolution, and does the curve use it? Research result
+  (subagent, 2026-11-22; manual quote and catalog rows checked):
+  - **Panel: ±5 K in 1.0 K steps. CONFIRMED** in three Vaillant manuals: /2 Installationsanleitung
+    0020045204_01 p. 65, "Kalibrier-Verstellbereich Außentemperatur: +/- 5 K, Schrittweite 1,0
+    K. alle anderen: +/- 3 K, Schrittweite 0,5 K"; the /3 manual 0020087974_00; and 0020202605_01
+    p. 59.
+  - **Bus: `ehp/OutsideTempOffset` is D2C (1/16 K), write needs installer level** (published
+    catalog `08.ehp.csv`: read `b509 0dc300`, write `0ec300`). The format can carry 0.5 K.
+    Whether the firmware keeps a non-integer value is UNKNOWN: no source reports such a write on
+    any model. `uih` and `mc` have no offset register.
+  - **Whether the curve uses the corrected value: UNKNOWN.** The manuals say only "Manuelle
+    Anpassung der angezeigten Temperaturen" (displayed temperatures). Forums: nothing for the
+    geoTHERM /2 (weak).
+  - Working assumption (owner) stays 0.5 K until the test. Owner test, in mild weather away from
+    3 °C and the cut-off:
+    1. Read `ehp OutsideTempOffset` (expect 0), `ehp OutsideTemp` (raw), `uih OutsideTemp`, the
+       broadcast and `mc FlowTempDesired`.
+    2. Set +1 K at the panel and read again. If the raw `ehp` value stays while the broadcast or
+       `uih` and the setpoint move, the offset reaches the curve; if only the display moves, it
+       does not. (This +1 K can also be the first Phase 2 offset change if the table calls for
+       it.)
+    3. Optional: `ebusctl write -c ehp OutsideTempOffset 0.5`, then read it back with `-f` and
+       look at the panel: 0.5 = accepted, 0 or 1 = rounded, error = rejected.
+  Result → "Observations"; the step size goes into the Phase 2 table.
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
 
@@ -778,7 +796,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
   integral uses the whole-degree setpoint, so 22.5 → 22.0 likely changed nothing for the
   compressor (2.1)
 - [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope change
-- [IN_PROGRESS] 0.8 Outdoor offset resolution (research running; working assumption 0.5 K)
+- [TODO] 0.8 Outdoor offset: panel 1 K (confirmed), bus 1/16 K; 0.5 K and curve effect need the owner test
 - Phase 2 table rewritten for whole-degree effects; the outdoor offset is a tuning lever (owner)
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
