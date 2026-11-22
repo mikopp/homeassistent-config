@@ -152,7 +152,7 @@ whole-degree W and the curve's jumps (f).
   `TempDesired`? Hysteresis? Why: with a stepped curve, a slope change of 0.01 may do nothing or
   shift a whole step, and an offset may move every edge. Is the whole curve stepped (2 K), or
   only the edge seen (device VWS-30)? Candidate causes of W 0–2 K below the formula (UNPROVEN):
-  W's floor, the steps, the colder outdoor value. Enough when edges span about −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (6.1).
+  W's floor, the steps, the colder outdoor value. Enough when edges span about −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (VWS-30).
 - [TODO] **0.8** Outdoor offset hypotheses (a) and (b). Tested when the Phase 2 table first calls
   for an offset change. Settles the open questions on VWS-36. Research: bus format and addresses
   are in device `registers-ehp.md`; a web search (2026-11) found no
@@ -268,17 +268,10 @@ together, the pump speed cannot be set (device VWS-23), no flow meters.
 
 ### Phase 6 — geoTHERM device knowledge
 
-- [TODO] **6.1** Build `doc/devices/` docs for the geoTHERM (VWS 83/2, SW 0383, circuits `ehp`,
-  `mc`, `uih`, `hwc`) with the framework of #192: how it can and cannot be steered, every fact
-  tagged by origin (manual page, test on this unit, `[ASSUMED]`), and what is known not to work
-  (`mc/Mode`, a `TempDesired` step that leaves W unchanged, registers that do not answer, the
-  panel as read-only). Sources: this plan, `plans/heating-cycling-from-ehp.md`, and the former
-  register and curve docs and unit sections of the note, now in `doc/devices/vaillant-vws-83-2/`
-  with anchored one-liners `(device <ID>)` left in the note.
-  **Timing (owner, 2026-11-22): right after #192 merges, alongside the tuning loop, not at the
-  end.** Hypotheses still open go in as `[ASSUMED]` with the plan step that settles them; facts
-  confirmed later in 0.7, 0.8, 2.x go straight into the device docs.
-  Depends on: #192 merged.
+- [DONE] **6.1** geoTHERM device docs built in #193: `doc/devices/vaillant-vws-83-2/`, every
+  fact tagged by origin, open hypotheses as `[ASSUMED]` with the plan step that settles them,
+  anchored one-liners `(device <ID>)` left in the note. Facts confirmed later in 0.7, 0.8, 2.x go
+  straight into the device docs.
 
 ## Observations
 
@@ -332,7 +325,7 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
   incl. what does not work; the curve-step and offset results of 0.7 and 0.8.
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve, `TempDesired`
   and offset values, the room targets and limiting room, the loop valve settings after 3.1. Unit
-  facts only as anchored one-liners (no new entries before 6.1: the note is at its cap).
+  facts only as anchored one-liners.
 - Design doc: HPB-1 already carries the hand-setter line; no further change expected (K-4.1).
 - Story (the 0.13 episode, the spike analysis) → `doc/heating_pv_boost/background.md` at Close,
   from commit `4956e8a` of this file.
@@ -349,7 +342,7 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 - [TODO] 3.1–3.2 balancing
 - [DONE] 4.3, 4.5–4.9; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
 - [DONE] 5.1; [TODO] 5.2 deferred
-- [TODO] 6.1 geoTHERM device docs, right after #192 merges
+- [DONE] 6.1 geoTHERM device docs (#193)
 - [TODO] Close
 
 ## Close

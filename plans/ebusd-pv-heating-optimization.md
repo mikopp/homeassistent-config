@@ -292,8 +292,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       shows "Sperrzeit" at some times around lunch. Test: `ebusctl read -f PowerCut` (device
       `registers-ehp.md`) during such a spell and outside it, or poll it for a few days; note the
       menu 1 status text at the same time ("Sperrzeit" there may be compressor timing, not EVU).
-      `1` at lunch → wired, times → device; never `1` while the panel says Sperrzeit → the text
-      is compressor timing. Then check whether a block explains (b). Result → device
+      `1` at lunch → wired, times → device; `0` during a panel Sperrzeit → compressor timing.
+      Then: does a block explain (b)? Result → device
       `protections.md` (T rows).
 - [TODO] 16. Confirm the ebusd catalog generation this setup runs (device VWS-32): `ebusctl find
       -e ehp Status` / the served `08.ehp.csv` field name (`hcmode` vs `hcmode2`) and ebusd's
