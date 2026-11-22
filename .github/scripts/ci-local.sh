@@ -13,7 +13,11 @@
 #     step fails with the fix (tests/ha/test_versions.py is the check).
 #
 # Usage (run from anywhere):
-#   ci-local.sh                      full run: all YAML checks + all of tests/ha (the pre-push check)
+#   ci-local.sh                      full run: all YAML checks + all of tests/ha (the pre-push check).
+#                                    tests/ha runs only if the branch changes a path in
+#                                    .github/test-paths (as GitHub CI does); a docs/rules/plans-only
+#                                    change runs the YAML + knowledge checks alone and still counts
+#   ci-local.sh --all                full run that always runs tests/ha
 #   ci-local.sh --e2e                full run plus tests/e2e (Docker)
 #   ci-local.sh --package NAME       targeted: tests/ha tests of packages/NAME.yaml (repeatable)
 #   ci-local.sh -- PYTEST_ARGS...    targeted: everything after -- goes verbatim to the tests/ha
@@ -39,10 +43,11 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 # Valid package names are the packages/*.yaml basenames; checked before any slow setup (fail fast).
 PACKAGES=()
 for f in packages/*.yaml; do f=${f#packages/}; PACKAGES+=("${f%.yaml}"); done
-E2E=0; YAML_ONLY=0; PKG_ARGS=(); PYTEST_EXTRA=(); SELECTED=0
+E2E=0; ALL=0; YAML_ONLY=0; PKG_ARGS=(); PYTEST_EXTRA=(); SELECTED=0
 while [ $# -gt 0 ]; do
   case $1 in
     --e2e) E2E=1 ;;
+    --all) ALL=1 ;;
     --yaml) YAML_ONLY=1; SELECTED=1 ;;
     --package)
       [ $# -ge 2 ] || usage_error "--package needs a NAME"
@@ -57,6 +62,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ "$E2E" = 1 ] && [ "$SELECTED" = 1 ] && usage_error "--e2e cannot be combined with --yaml, --package or -- (e2e has no per-package split)"
+[ "$ALL" = 1 ] && [ "$SELECTED" = 1 ] && usage_error "--all cannot be combined with --yaml, --package or --"
 
 # Which parts run: a full run does both; a targeted run runs the YAML checks only on --yaml and the
 # tests unless --yaml was the only selection.
@@ -64,6 +70,19 @@ RUN_YAML=1; RUN_TESTS=1
 if [ "$SELECTED" = 1 ]; then
   RUN_YAML=$YAML_ONLY
   if [ "$YAML_ONLY" = 1 ] && [ ${#PKG_ARGS[@]} -eq 0 ] && [ ${#PYTEST_EXTRA[@]} -eq 0 ]; then RUN_TESTS=0; fi
+fi
+
+# Docs-only full run: tests/ha is skipped when nothing the tests read changed. Same rule as GitHub
+# CI (tests.yaml, e2e.yaml): the branch diff against origin/master plus uncommitted and untracked
+# files, matched against .github/test-paths. No merge base (no origin/master) → test everything.
+DOCS_ONLY=0
+if [ "$SELECTED" = 0 ] && [ "$E2E" = 0 ] && [ "$ALL" = 0 ]; then
+  if BASE=$(git merge-base origin/master HEAD 2>/dev/null); then
+    if ! { git diff --name-only "$BASE"; git diff --name-only HEAD; git ls-files --others --exclude-standard; } \
+        | grep -qEf <(grep -v '^#' .github/test-paths); then
+      DOCS_ONLY=1; RUN_TESTS=0
+    fi
+  fi
 fi
 
 VENV=.venv
@@ -241,7 +260,7 @@ if [ "$E2E" = 1 ]; then
       -c tests/e2e/pytest.ini --confcutdir tests/e2e --rootdir . tests/e2e \
       -p no:pytest_homeassistant --timeout=300 --timeout-method=thread
   fi
-elif [ "$SELECTED" = 0 ]; then
+elif [ "$SELECTED" = 0 ] && [ "$DOCS_ONLY" = 0 ]; then
   SKIPPED+=("tests/e2e (needs Docker, run with --e2e)")
 fi
 
@@ -252,6 +271,9 @@ if [ ${#FAILED[@]} -gt 0 ]; then
 fi
 if [ "$SELECTED" = 1 ]; then
   echo; echo "TARGETED RUN – not a full verification; run .github/scripts/ci-local.sh without arguments before pushing"
+elif [ "$DOCS_ONLY" = 1 ]; then
+  echo; echo "All local checks passed (docs-only change: no path in .github/test-paths changed, so tests"
+  echo "were not needed; --all runs them anyway)."
 else
   echo; echo "All local checks passed."
 fi

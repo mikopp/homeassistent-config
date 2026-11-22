@@ -27,7 +27,8 @@ notes (`doc/<pkg>/notes.md`), not here. Pins: HA = `FROM` line of `.github/ha-ve
   ones, repeatable) or `.github/scripts/ci-local.sh -- tests/ha/test_x.py::test_y -k … -x` (anything after `--` goes to
   pytest); `--yaml` = YAML checks only. `-n` default: auto for `--package`, 0 for explicit ids (workers only add start-up; a whole package is ~3x faster with `-n auto`); a passed `-n` wins.
   A targeted run is never verification (YAML checks skipped; summary says so).
-- End of task / before pushing: `.github/scripts/ci-local.sh` (no arguments; `--e2e` adds Docker, full only: e2e has
+- End of task / before pushing: `.github/scripts/ci-local.sh` (no arguments; skips `tests/ha` when no path in
+  `.github/test-paths` changed, `--all` forces; `--e2e` adds Docker, full only: e2e has
   no per-package split). Needs python3.14 (`.github/ha-versions/ha-python.txt`) and mosquitto at the version of
   `.github/ha-versions/mosquitto/Dockerfile`. The script does the venv/custom-component/mosquitto setup (`.venv-test`:
   `requirements_test.txt`, which pins pytest-homeassistant and with it HA); do not call raw pytest for `tests/ha`. Each layer has
