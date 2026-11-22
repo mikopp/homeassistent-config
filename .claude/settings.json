@@ -4,9 +4,7 @@
       "Bash(python3)",
       "WebFetch",
       "Bash(.claude/skills/ebusd/scripts/ebusctl -- read *)",
-      "Bash(.claude/skills/ebusd/scripts/ebusctl -- find *)",
-      "Bash(.claude/skills/ebusd/scripts/ebusctl -s * -- read *)",
-      "Bash(.claude/skills/ebusd/scripts/ebusctl -s * -- find *)"
+      "Bash(.claude/skills/ebusd/scripts/ebusctl -- find *)"
     ],
     "ask": [
       "Read(/doc/**/background*.md)",

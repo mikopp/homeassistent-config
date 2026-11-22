@@ -5,8 +5,8 @@ description: Reading the eBUS live with ebusctl (ebusd TCP client) — the Vaill
 
 # Reading the eBUS with ebusctl
 
-`.claude/skills/ebusd/scripts/ebusctl` is the ebusd project's bash TCP client (unchanged upstream
-copy). It sends one command line to ebusd's TCP port and prints the answer. What the unit answers,
+`.claude/skills/ebusd/scripts/ebusctl` is the ebusd project's bash TCP client (upstream copy; one
+local change: the default host comes from a config file, see Reaching ebusd). It sends one command line to ebusd's TCP port and prints the answer. What the unit answers,
 register decodes and how HA reads it: `doc/devices/vaillant-vws-83-2/README.md` (file map) → its
 `interface.md`. Full command syntax: the `EBD` References row there (TCP client commands).
 
@@ -16,8 +16,8 @@ Allowed without asking (pre-approved in `.claude/settings.json`) — only these 
 repo root:
 
 ```
-.claude/skills/ebusd/scripts/ebusctl [-s HOST] -- read [-f] [-c CIRCUIT] [-v|-V] [-n|-N] NAME [FIELD]
-.claude/skills/ebusd/scripts/ebusctl [-s HOST] -- find [-v|-V] [-r|-w|-p|-a|-d|-e] [-c CIRCUIT] [NAME]
+.claude/skills/ebusd/scripts/ebusctl -- read [-f] [-c CIRCUIT] [-v|-V] [-n|-N] NAME [FIELD]
+.claude/skills/ebusd/scripts/ebusctl -- find [-v|-V] [-r|-w|-p|-a|-d|-e] [-c CIRCUIT] [NAME]
 ```
 
 Everything else needs the owner's explicit consent **in this conversation, for this exact command**,
@@ -37,7 +37,8 @@ shortcut letters like `r`/`w`).
 
 - **Always put `--` before the ebusd command.** The script parses its own options with `getopt` and
   rejects ebusd flags otherwise (`ebusctl read -f x` → `invalid option -- 'f'`). Script options
-  (`-s HOST`, `-p PORT`, `-t SECS`, `-e`) go before `--`.
+  (`-t SECS`, `-e`) go before `--`; `-s HOST` / `-p PORT` override the config file but are not
+  pre-approved, so leave them out.
 - `read` without `-f` returns ebusd's cached value (default up to 300 s old); `read -f` queries the
   unit. Test whether a register answers on this unit with `read -f`, not `find` (cache only).
 - `find -c ehp` lists a circuit's messages with cached values; `find -V NAME` adds address, last
@@ -53,8 +54,12 @@ shortcut letters like `r`/`w`).
 
 ebusd listens on TCP 8888 on its host, by default without authentication: anyone reaching the port
 can write, so never expose or tunnel it beyond the LAN. A cloud session is not on the LAN and cannot
-reach it. The script needs bash, `getopt` and `nc` (Windows: WSL, or Git Bash with netcat). If the
-host is unknown, ask the owner; do not scan the network. Connection refused or timeout: report it,
+reach it. The script needs bash, `getopt` and `nc` (Windows: WSL, or Git Bash with netcat).
+
+The host comes from `.claude/skills/ebusd/.ebusctl.conf` (`host=` / `port=` lines, git-ignored, the
+owner's local copy of `.ebusctl.conf.example`); without it the script tries `localhost:8888`. Never
+commit, create or edit that file, and never write its host into a tracked file. Missing or
+unreachable: ask the owner to fill it; do not scan the network. Connection refused or timeout: report it,
 do not retry in a loop.
 
 ## After reading

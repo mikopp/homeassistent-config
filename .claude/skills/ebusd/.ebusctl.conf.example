@@ -1,0 +1,4 @@
+# Local ebusd address for scripts/ebusctl. Copy to .ebusctl.conf (git-ignored) and set the host.
+# Format: key=value, one per line; # starts a comment. -s / -p on the command line override these.
+host=ebusd.example.lan
+port=8888

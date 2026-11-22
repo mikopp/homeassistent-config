@@ -27,3 +27,5 @@ custom_components/
 tests/e2e/.artifacts/
 # Local virtualenv for the real-HA test layer (tests/e2e, ci-local.sh --e2e)
 .venv-e2e/
+# Local ebusd host for .claude/skills/ebusd/scripts/ebusctl (template: .ebusctl.conf.example)
+.claude/skills/ebusd/.ebusctl.conf
