@@ -101,7 +101,7 @@ automatically.
 | 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, hand setter (2.1). Fine 27.5 → 27.0, W stayed 27 |
 | 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, keeps the knob 1 K below `TempDesired` (5.1) |
 | 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `uih` test; set back within 1 h, settle time not restarted |
-| 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Expected fine 26.5 / W 26 below the 2 °C edge: read back after hot water |
+| 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Forced reads after it: `mc` 26.5, `uih` 26.00 (was 27.0 / 27): W −1 K |
 | 2026-11-22 17:07:57 | `input_number.heating_comfort_temp` | 21.0 → 20.5 | Owner, 1 K below `TempDesired` (5.1) |
 | before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20, outdoor offset 0 K | — | read live / owner, 2026-11-21 |
@@ -206,8 +206,7 @@ configuration".
   + whole number), and from 21.5 one +0.5 step raises W again. Expected: W −1 K, office ≈ +0.3.
   `uih` passes floor(`mc`) and the integral uses it (CONFIRMED).
 - [IN_PROGRESS] **2.2** Settle 21.5, then evaluate as 1.2 (≥ 4 qualifying days: earliest
-  2026-11-27). Checks: after hot water fine 26.5 / W 26 below 2 °C (else the step did nothing;
-  log the forced-read `mc FlowTempDesired`); the cold edge (was 29.5 at 22.5) now 28.5 or 29; run
+  2026-11-27). W moved 27 → 26 (forced reads after hot water, 11-22). Checks: the cold edge (was 29.5 at 22.5) now 28.5 or 29; run
   length ≥ 20 min at the lower W (≈ 180 ÷ (VF2 − W) + ramp); daily starts. Then the table again,
   one change per evaluation, until the success metrics hold across one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change waits until 2.2 is done.
@@ -340,7 +339,7 @@ Links and the owner's printed copy: the note "Bus participants" and `heating-cur
   test at the first offset change)
 - [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
 - [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
-  read back fine/W after hot water, evaluate from 2026-11-27
+  (W 27 → 26 confirmed by forced read), evaluate from 2026-11-27
 - [TODO] 3.1–3.2 balancing
 - [DONE] 4.3, 4.5–4.9; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
 - [DONE] 5.1; [TODO] 5.2 deferred
