@@ -89,7 +89,7 @@ control stays off.
 |---|---|---|---|
 | 2026-11-14 ≈ 20:20 | Heating curve | 0.15 → 0.13 | OBSERVED, estimated from the data: the flow setpoint stepped 27 → 26 °C while it got colder outside (2.6 → 1.8 °C). No other input changed. Owner: "after the heat spike" |
 | 2026-11-14 23:05 – 11-15 00:45 | `TempDesired` | 22 → 21 → 19 (briefly) → 22 | OBSERVED: the HA target followed the comfort knob (21, 18), so these were writes by the armed Phase 2 writer |
-| 2026-11-15 ≈ 08:30 – 11-16 00:07 | `mc/OperatingMode` | `on` → `off` → `on` | HYPOTHESIS: the setpoint ran ≈ 2 K below the 0.13 relation all day (frost protection at `TempDesiredLow` 20); `heating_mode_last_written` = 11-16 00:07:52, and the setpoint jumped 25 → 27 at 00:08. Requires < 3 °C outdoor on 11-15 (the pump never stopped, A.4): check the weatherstation statistics for that day |
+| 2026-11-15 ≈ 08:30 – 11-16 00:07 | `mc/OperatingMode` | `on` → `off` → `on` | HYPOTHESIS: the setpoint ran ≈ 2 K below the 0.13 relation all day (frost protection at `TempDesiredLow` 20); `heating_mode_last_written` = 11-16 00:07:52, and the setpoint jumped 25 → 27 at 00:08. Requires < 3 °C outdoor on 11-15 (the pump never stopped, A.4). Checked 2026-11-22: the weatherstation read below 3 °C on 11-15 except 11–15 h (2.1–4.5 °C), down to −4.6 °C at night. The geoTHERM reads ≈ 1 K colder (0.5), so its value probably stayed below the 4 °C end most of the day. Consistent with the hypothesis, but not proof: the mode history cannot be read |
 | 2026-11-20 evening (read back 22:14) | Heating curve | 0.13 → 0.14 | Owner: read back at 22:14 and shown on the wall unit |
 | 2026-11-20 22:01:44 | `TempDesired` | 22 → 22.5 | Owner: written by HA (the writer was armed for ≈ 3 s; switched off at 22:01:47) |
 | 2026-11-20 22:01:47 | Comfort control | on → off | Owner: `warm_enough` does not update; stays off, `warm_enough` ignored |
@@ -161,11 +161,15 @@ means (bathroom and office under target). The spikes are a sun-after-cold-night 
 - (a) The machine's outdoor value differs from the real outdoor temperature or is damped before
   the curve. One reading (geoTHERM 3.75 °C vs weatherstation 4.4 °C, 2026-11-21 evening) points
   the wrong way (a colder reading raises the setpoint); step 0.5 tests it over ≥ 2 days, incl.
-  08–11 h. No Vaillant document mentions damping (/2 manuals checked).
+  08–11 h. No Vaillant document mentions damping (/2 manuals checked). **Damping part refuted**
+  (2026-11-22): both setpoint jumps of (f) fell in the same 5 min window as the geoTHERM value
+  crossing the edge, so the curve follows the broadcast value without lag. Still open: the
+  offset (first night ≈ 1 K colder than the weatherstation, step 0.5).
 - (b) Below 0.2 the curve does not follow the formula (the 83/2 diagram draws nothing below 0.2;
   no /2 document gives a range or step). Step 0.6 (b).
-- (c) `mc/Status0a` field 4 is not the plain curve setpoint. Weak: it equals `mc/FlowTempDesired`
-  within its whole degree (A.4b).
+- (c) `mc/Status0a` field 4 is not the plain curve setpoint. **Refuted** (2026-11-22, 13 h of
+  both sensors): field 4 = floor(`mc/FlowTempDesired`) at every value seen (27.0, 27.5, 29.5). It
+  followed each jump within ≈ 6 min (its own poll, `?5`).
 - (d) The VR 90 room sensor offset (`rcc/RoomTempOffset` 0.5 K) moves the curve. **Ruled out:** it
   only calibrates the VR 90's own reading, Raumaufschaltung is `Keine`, and `mc/RoomTempOffset`
   (the channel that would carry room influence) reads 0.00 (owner, `ebusctl find -w`).
@@ -265,9 +269,10 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
 - `ebusctl find` prints ebusd's cache, not a bus read: use `ebusctl read -f` for tests.
 - Owner hypothesis "curve changes during a run are ignored": **DISPROVED** (owner, one test: the
   setpoint followed a curve change after a few minutes with the compressor running). "The
-  setpoint is only computed while the compressor runs": UNPROVEN; against it, the /2 manual
-  describes a curve setpoint and an integral summed every minute (0020045204_01 p. 48). Tested in
-  step 0.6 (e).
+  setpoint is only computed while the compressor runs": **DISPROVED** (2026-11-22). The fine
+  setpoint jumped 27.5 → 29.5 at 02:11 with the compressor off; the compressor started 2–3 min
+  later (Shelly 82 W until the end of the 02:10 window). This matches the /2 manual's curve
+  setpoint and integral summed every minute (0020045204_01 p. 48).
 
 ### A.5 What can and cannot be concluded yet
 
@@ -519,14 +524,33 @@ OBSERVED:
 - Result: `mc/TempDesired` 22.5 → 22.0 at 08:43:17. The fine setpoint went 27.5 → 27.0 (read
   08:43:32), the whole-degree one stayed 27. So half degrees count, and (e) is refuted. The
   formula predicts −0.6 K; −0.5 K is observed, which fits at 0.5 K resolution.
-- Side effect: the compressor stopped at 08:43:18.7, 1 s after the write. VF2 was at 34.0 °C.
-  The stop line fell from 34.5 to 34.0 (fine setpoint + 7 K), so the run ended at once. That run
-  lasted 31.6 min; it would otherwise have gone on until VF2 reached 34.5. This supports
-  HYPOTHESIS: a run ends when VF2 ≥ fine setpoint + `CompHysteresis`, and lowering
-  `TempDesired` mid-run ends the run early. Not every run ends there: the 06:30–06:55 run ended
-  at VF2 33.7 against a stop line of 36.5.
-- A.4b test (1), first data: whole-degree = floor(fine) in three cases (29.5 → 29, 27.5 → 27,
-  27.0 → 27).
+- Side effect: the compressor stopped at 08:43:18.7, 1 s after the write. VF2 was at 34.0 °C,
+  and the stop line fell from 34.5 to 34.0 (fine setpoint + 7 K). A stop 1 s after a 0.5 K
+  change fits the stop line flipping, not the integral (the integral moves by at most 0.5 K·min
+  in that second). The run lasted 31.6 min. Lowering `TempDesired` mid-run can end a run early.
+- A.4b test (1): whole-degree = floor(fine) at every value seen over 13 h (see (c)). The plan
+  asks for ≥ 3 days: recheck on 2026-11-24, then 4.9.
+
+**Run ends, night of 11-21/22** (VF2 from 22:30 on; 5 min means; `CompIntegral` −180 °min,
+`CompHysteresis` 7 K):
+
+| Run | Fine setpoint | Stop line | VF2 max | Below the stop line | Σ(VF2 − setpoint) | Length |
+|---|---|---|---|---|---|---|
+| 23:40–00:16 | 27.5 | 34.5 | 33.0 | 1.5 K | ≈ 165 °min | ≈ 35 min |
+| 02:13–03:07 | 29.5 | 36.5 | 33.3 | 3.2 K | ≈ 135 °min | ≈ 52 min |
+| 04:12–05:01 | 29.5 | 36.5 | 33.7 | 2.8 K | ≈ 155 °min | ≈ 48 min |
+| 06:30–06:55 (after hot water) | 29.5 | 36.5 | 33.7 | 2.8 K | — | ≈ 25 min |
+| 08:12–08:43 | 29.5 → 27.5 → 27.0 | 34.0 after the write | 34.0 | 0 | ≈ 175 °min | 31.6 min |
+
+OBSERVED: in cold weather the runs did **not** end on the stop line. They ended 1.5–3.2 K below
+it, at VF2 33–34 °C, after a positive area of ≈ 135–175 °min, close to the 180 °min of the start
+integral. HYPOTHESIS: these runs ended on the energy integral (≈ 0 at the stop). That is the
+regime in which, by the note's run model ("Decisions in force", tuning levers), `CompIntegral`
+and not `CompHysteresis` sets the run length. A higher setpoint gives a smaller VF2 − setpoint
+excess and so a longer run (35 min at 27.5, ≈ 50 min at 29.5), through the integral, not
+through more headroom. Open: the start timing does not fit a simple −180 threshold on VF2 −
+fine setpoint. After the 00:16 stop that sum reached −180 at about 01:45, yet the start came at
+02:13, 2 min after the setpoint jump. So the integral's exact definition or reset is unknown.
 
 ## References
 
@@ -561,6 +585,8 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [DONE] 0.4 Deployed; all new entities report (ebusctl comparisons not run)
 - [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder)
 - [IN_PROGRESS] 0.6 (e) done: half degrees count; (b) TODO; new hypothesis (f) 2 K setpoint steps
+- Closed 2026-11-22 with the new data: (a) damping part, (c), "setpoint only computed while
+  running"; A.4b test (1) recheck 2026-11-24; cold-weather runs end on the integral (Observations)
 - [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope or offset change
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
