@@ -17,9 +17,8 @@ Deploy/migration docs come from `git diff origin/master...HEAD`, never the live 
 While developing, run the targeted form: `.github/scripts/ci-local.sh --package <pkg>` (that package's tests,
 incl. cross-package ones) or `.github/scripts/ci-local.sh -- <pytest test id / args>`; `--yaml` = YAML checks only.
 Before pushing / at the end of a task the full `.github/scripts/ci-local.sh` (no arguments) is mandatory: YAML
-checks, knowledge-layout check and all of `tests/ha` (no Docker); it skips `tests/ha` by itself when the branch
-changes no path in `.github/test-paths` (docs, rules, plans only; `--all` forces). `--e2e` adds `tests/e2e`
-(Docker). A targeted run never counts as verification. Usage: script header. CI runs both
+checks, knowledge-layout check and all of `tests/ha` (no Docker); it skips `tests/ha` when no path in
+`.github/test-paths` changed (docs-only; `--all` forces). `--e2e` adds `tests/e2e` (Docker). A targeted run never counts as verification. Usage: script header. CI runs both
 (`tests.yaml`, `e2e.yaml`). Prerequisites: python3.15 (tooling; yamllint goes into `.venv`), python3.14
 (what HA requires, pinned in `.github/ha-versions/ha-python.txt`) and mosquitto at the version pinned in
 `.github/ha-versions/mosquitto/Dockerfile` (the HA Mosquitto app's broker; Linux:
