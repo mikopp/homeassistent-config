@@ -22,8 +22,8 @@ values in `behaviour.md` `## Settings on this unit`.
 - **VWS-7** Floor protection on VF2: flow above max. heating-circuit temperature + compressor
   hysteresis + 2 K for > 15 min stops the heat pump with error 72 until the fault is reset and
   the flow has fallen [IA p.46] [IA p.69]. The manual gives it "bei allen Hydrauliken ohne
-  Pufferspeicher (bei Hydraulikplan 6)" [IA p.46]; this unit has no buffer [T38], plan number
-  open (`behaviour.md` Open questions); not tested on this unit. A higher `CompHysteresis`
+  Pufferspeicher (bei Hydraulikplan 6)" [IA p.46]; this unit runs plan 6 [T46]; not tested on
+  this unit. A higher `CompHysteresis`
   therefore raises the limit [IA p.69]. Factory limit 52 °C [IA p.46].
 - **VWS-8** `FlowTempMax` ("Maximaltemperatur", factory 43 °C) caps the flow setpoint the circuit
   may request; "Minimaltemperatur" (factory 15 °C) is a separate lower limit [IA p.69]. No

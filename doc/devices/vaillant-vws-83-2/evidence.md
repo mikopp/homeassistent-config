@@ -51,3 +51,4 @@ Rows no fact cites (T16): `evidence-archive.md`.
 | T43 | 2026-10-17 | HA history after HA restarts | `ebusd/global/scan` settles on `finished` (never `OK`); after it the polled `mc` and cooling registers publish within ≈ 1–2 s | OBSERVED |
 | T44 | 2026-10 | owner-supplied live Mosquitto bridge config (HA broker ← ebusd broker) | every ebusd topic listed individually, no `ebusd/#` in either direction; `ebusd/global/running` and `/scan` `in` only; broadcast topic `ebusd/Broadcast/Outsidetemp` in the catalog's case | OBSERVED |
 | T45 | 2026-10 | HA history of polled registers | `ehp/HcReturnTemp` updates every 30–85 s; registers whose value does not change (`mc/TempDesiredLow`) are not re-published, so their poll rate cannot be seen | OBSERVED |
+| T46 | 2026-11-22 | panel installer menu A2 read by the owner | Wärmepumpentyp 5, Hydraulikplan 6, Elektroplan 3 | CONFIRMED |

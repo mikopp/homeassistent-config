@@ -10,8 +10,7 @@ charges fit into runs; indexed by `behaviour.md`. Only the unit, never HA; regis
 - **VWS-2** Energy balance: the controller sums (flow actual − flow setpoint) per minute in °min;
   the compressor starts at a set heat deficit (`CompIntegral`) and stops once the delivered heat
   equals the deficit [IA p.48] [IA p.49]. The manual gives it "nur für Hydrauliken ohne
-  Pufferspeicher (Hydraulikplan 6)" [IA p.48]; this unit has no buffer [T38], plan number open
-  (`behaviour.md` Open questions). The flow in the sum is VF2: the menu C4 display that the manual
+  Pufferspeicher (Hydraulikplan 6)" [IA p.48]; this unit runs plan 6 [T46]. The flow in the sum is VF2: the menu C4 display that the manual
   gives "bei direktem Heizbetrieb (z. B. Hydraulikplan 6)" shows "Vorlauftemp. VF2" and the
   "Energie-Integral", the summed difference VF2 − "Vorlauftemp. SOLL" per minute [IA p.59]; on
   this unit the integral rate matches VF2 − W [T18] [T19]. This unit: runs start at integral
@@ -22,15 +21,14 @@ charges fit into runs; indexed by `behaviour.md`. Only the unit, never HA; regis
   to the heat pump, not the 0.5 K value [T18] [T19].
 - **VWS-18** The controller regulates on VF2 (`ehp/FlowTemp`, external flow sensor): the integral
   rate is VF2 − W [T18] [T19], and menu C4 shows VF2 next to the integral (direct-heating
-  display, qualifier as in VWS-2) [IA p.59]. The `ehp/Status` flow field `HcFlowTemp` is the
+  display "z. B. Hydraulikplan 6"; this unit runs plan 6 [T46]) [IA p.59]. The `ehp/Status` flow field `HcFlowTemp` is the
   internal sensor T6 [CAT]; menu 1 "Vorlauftemp. IST" is the flow "im Gerät" (inside the unit)
   [IA p.54], not VF2.
 - **VWS-4** Stop line: a run also ends when the flow exceeds the setpoint + `CompHysteresis`,
   whichever comes first; 4 such stops with the integral still negative, all at W 24–26 in mild
   weather [T28]. IA p.69 lists "Komp. Hysterese (nur bei Hydraulikplan 1 und 3)": forced start
-  below setpoint − hysteresis, forced stop above setpoint + hysteresis [IA p.69]; whether that
-  restriction covers this unit depends on the plan number (`behaviour.md` Open questions); the
-  unit stops on the line [T28]. Whether the line uses W or the fine setpoint: Open questions.
+  below setpoint − hysteresis, forced stop above setpoint + hysteresis [IA p.69]; this unit runs
+  plan 6 [T46], yet stops on the line [T28]: the unit beats the manual's restriction. Whether the line uses W or the fine setpoint: Open questions.
 - **VWS-5** The integral is not reset at a stop (+12 after a stop), not clamped (+88 seen with the
   compressor off) and holds its value during hot water [T27].
 - After hot water the compressor ran on into heating at integral −113 on one day (11-22), not on

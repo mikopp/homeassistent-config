@@ -287,8 +287,9 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       limit (like 10-16 at ≈ 13 °C): outdoor value, mode, time program; (c) does `ehp/Hc1Pump`
       read on while hcmode is `off` (now read, so the ~9 W in `off` can be checked); (d) frost
       protection with mode `off` below 3 °C: does heating follow the room temperature, and does it
-      come on once after `FrostOverRideTime` or repeat every 3 h (owner reading). Result → device
-      `protections.md` (T rows).
+      come on once after `FrostOverRideTime` or repeat every 3 h (owner reading); (e) electrical
+      plan 3: is a network-operator block contact wired to terminal 13 "EVU" (owner, at the
+      unit), and would a block explain (b)? Result → device `protections.md` (T rows).
 - [TODO] 16. Confirm the ebusd catalog generation this setup runs (device VWS-32): `ebusctl find
       -e ehp Status` / the served `08.ehp.csv` field name (`hcmode` vs `hcmode2`) and ebusd's
       version topic. Result → device `interface.md` Path and config; then decide whether the raw

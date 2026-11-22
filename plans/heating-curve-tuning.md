@@ -165,12 +165,11 @@ whole-degree W and the curve's jumps (f).
   3. Read step 1 again. Raw `ehp` unchanged while the broadcast or `uih` and the setpoint move →
      (a) holds. Nothing moves → no lever: set 0 back, drop the offset rows.
   Result → "Observations"; the step size goes into the Phase 2 table.
-- [TODO] **0.9** Owner: read the installed hydraulic plan number at the panel (installer menu A,
-  Hydraulikplan). Then settle which plan-qualified manual statements apply (device
-  `behaviour.md` Open questions lists them: VWS-2, -4, -7, -18). Depends on: owner at the panel.
+- [DONE] **0.9** Menu A2 (owner, 2026-11-22): hydraulic plan 6, electrical plan 3; plan-6
+  statements apply (device `README.md` Identity, VWS-2, -4, -7, -18).
 - [TODO] **0.10** Owner at the panel: which menus can be changed, with and without the installer
   code (the manual: code-level menus only with the code)? `TempDesiredLow`, curve and frost
-  settings were set at the unit. Result → device `behaviour.md` with a T row. With 0.9.
+  settings were set at the unit. Result → device `behaviour.md` with a T row.
 - [TODO] **0.11** Does a `TempDesired`-only write start or stop the compressor (device VWS-25,
   design HPB-1 Known gaps)? At the next 2.2 change, with the integral far from 0 and VF2 far
   from the stop line, log compressor state, integral, VF2, W and fine setpoint to the second,
@@ -301,8 +300,8 @@ charged the slab (return 24.3 → 26.2 °C).
 **How runs start and end** (`ehp/Integral`, 5 min statistics; `CompIntegral` −180,
 `CompHysteresis` 7 K):
 - Runs start just past `CompIntegral` and end on whichever comes first: the integral back at
-  ≈ 0, or the flow at W + `CompHysteresis` (device VWS-2, VWS-4). Whether the manual's plan
-  restriction on the hysteresis covers this unit: step 0.9.
+  ≈ 0, or the flow at W + `CompHysteresis` (device VWS-2, VWS-4), although the manual limits the
+  hysteresis to plans 1 and 3 and this unit runs plan 6 (device VWS-4).
 - The integral counts VF2 − W (device VWS-3); not reset, not clamped, held during hot water
   (device VWS-5). After hot water the compressor once ran on into heating at −113 (11-22), not on
   11-17 or 11-20 (cause open).
@@ -340,9 +339,9 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 
 ## Status
 
-- [DONE] 0.1–0.4, 0.6; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8 (offset
-  test at the first offset change), 0.9 (hydraulic plan number, owner), 0.10 (panel read-only,
-  owner), 0.11 (`TempDesired` write vs compressor, at the next 2.2 change), 0.12 (run-on after
+- [DONE] 0.1–0.4, 0.6, 0.9; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8
+  (offset test at the first offset change), 0.10 (panel read-only, owner), 0.11 (`TempDesired`
+  write vs compressor, at the next 2.2 change), 0.12 (run-on after
   hot water, passive)
 - [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
 - [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,

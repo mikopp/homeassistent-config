@@ -68,7 +68,7 @@ change; their current values are kept by the package note named in `README.md` U
 | VWS-27 | `mc/HeatingCurve` (slope) | the flow setpoint follows within minutes, also while the compressor runs [T15] | bus step 0.01 [CAT]; floor heating curves < 0.4 [BA p.21] | [T15] |
 | VWS-28 | `mc/OperatingMode` | heating mode only (`on`, `off`, `auto`, `eco`, `low`; meaning in States) [IA p.46] [CAT]; writes accepted [T7] | its own register, separate from the cooling setting (VWS-15); `off` below 3 °C still heats (VWS-6) | [CAT] [T7] |
 | | `ehp/CompIntegral` ("Komp. Start in", installer; panel C2 "Komp.Start ab", given "nur bei direkter Hydraulik" [IA p.58]) | start threshold of the energy balance; deeper = longer runs and pauses [IA p.49] | backup start moves with it (VWS-20) [IA p.60] | [IA p.49] [IA p.60] |
-| VWS-37 | `ehp/CompHysteresis` (installer) | stop line setpoint + hysteresis (VWS-4; W or fine setpoint: Open questions) [T28]; raises the floor-protection limit (VWS-7) [IA p.69] | one fixed value; the manual's entry (given "nur bei Hydraulikplan 1 und 3") describes no weather dependency [IA p.69] | [T28] [IA p.69] |
+| VWS-37 | `ehp/CompHysteresis` (installer) | stop line setpoint + hysteresis (VWS-4; W or fine setpoint: Open questions) [T28]; raises the floor-protection limit (VWS-7) [IA p.69] | one fixed value; the manual's entry (given "nur bei Hydraulikplan 1 und 3", this unit runs plan 6 [T46] and acts on it [T28]) describes no weather dependency [IA p.69] | [T28] [IA p.69] |
 | VWS-36 | `ehp/OutsideTempOffset` / panel "Kalibrierung" → "Aussentemperatur" | adjusts the displayed outdoor temperature ("Manuelle Anpassung der angezeigten Temperaturen") [IA p.65] | panel ±5 K in 1 K steps, factory 0 K [IA p.65]; bus format in `registers-ehp.md`; whether the curve uses the corrected value: Open questions | [IA p.65] |
 | VWS-24 | `mc/OperatingMode`, `mc/TempDesired` (the registers written so far) written over the bus | the written value stays until written again: the VR 90/3 writes only `mc/RoomTempOffset` [T5] | — | [T5] [T7] |
 
@@ -85,10 +85,9 @@ change; their current values are kept by the package note named in `README.md` U
 
 ## Open questions
 
-- Installed hydraulic plan number; settles which plan-qualified manual statements apply (IA p.46,
-  p.48, p.58, p.59 "Hydraulikplan 6" / direct hydraulics; p.69 hysteresis "only plans 1 and 3";
-  p.68 Art HK2 "Brennerkreis (Hydraulikplan 3)"); the manual is inconsistent (`README.md`
-  Identity): `plans/heating-curve-tuning.md` step 0.9
+- Electrical plan 3 (`README.md` Identity): is a network-operator block contact wired to terminal
+  13 "EVU", and does a block show on the bus (could explain `off` spells such as VWS-17)?
+  `plans/ebusd-pv-heating-optimization.md` step 15
 - Is the panel read-only, and for which menus? Without the installer code the code-level menus
   C1–C9, D1–D5, I1–I5 and A1–A9 show values but cannot be changed [IA p.49]:
   `plans/heating-curve-tuning.md` step 0.10
