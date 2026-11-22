@@ -20,12 +20,15 @@ Only the unit, independent of HA. Format and evidence tags: `.claude/rules/devic
 
 | ID | Kind | Document (title, doc no., edition, language) | Covers | Where |
 |---|---|---|---|---|
-| <REF> | manual | <title>, <doc no.>, <edition>, <lang> | <models, chapters> | <download URL> or `references/<file>` |
+| <REF> | manual | <title>, <doc no.>, <edition>, <lang> | <topic> p.<n>-<m>; <topic> p.<n> | <download URL> (<format>) or `references/<file>` |
 
 Kinds: `manual`, `datasheet`, `vendor` (maker's statement), `catalog` (register definitions),
 `forum` (third party, weak).
 
 ## Files
+
+<!-- Minimal device (README only, `.claude/rules/devices.md`): replace this table with
+`Minimal: no behaviour, interface or evidence files; the References rows are the doc.` -->
 
 | File | Answers |
 |---|---|

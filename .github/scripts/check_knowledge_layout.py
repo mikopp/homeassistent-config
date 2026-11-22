@@ -21,7 +21,9 @@ Fails (exit 1) when:
     and a bare `<PREFIX>-<n>[.<m>][a-z]` whose prefix a design doc defines. Lines starting
     `Retired:` in a design doc are skipped (they list gone IDs on purpose).
   * a doc/devices/<device>/ (K-9, format in .claude/rules/devices.md; `_`-prefixed folders such as
-    `_template` are skipped) lacks README.md, behaviour.md, interface.md or evidence.md, lacks a
+    `_template` are skipped) lacks README.md, behaviour.md, interface.md or evidence.md (a folder
+    whose only top-level .md is README.md is a minimal device: it needs `## References` with a row,
+    no prefix, and may cite no `[T<n>]`), lacks a
     required heading (README `## References`; behaviour `## Control`, `## Does not work`,
     `## Open questions`; interface `## Unusable on this unit`), cites `[T<n>]` without an
     evidence*.md row or `[<REF> ...]` without a References row, has a T row without a
@@ -322,7 +324,12 @@ def check_devices(errors, warnings, design_prefixes):
             continue
         rel = dev.relative_to(ROOT).as_posix()
         texts = {}
+        # Minimal device: README.md is the folder's only top-level markdown file (rule: Minimal
+        # device); it needs README + References rows only, no prefix, and cites only [<REF>] tags.
+        minimal = not [f for f in dev.glob("*.md") if f.name != "README.md"]
         for name, headings in DEVICE_HEADINGS.items():
+            if minimal and name != "README.md":
+                continue
             path = dev / name
             if not path.is_file():
                 errors.append(f"{rel}: missing {name} (doc/KNOWLEDGE.md#K-9)")
@@ -355,10 +362,12 @@ def check_devices(errors, warnings, design_prefixes):
                     )
         refs = set(REF_ROW_RE.findall(section(texts.get("README.md", ""), "References")))
         refs.discard("ID")
+        if minimal and "README.md" in texts and not refs:
+            errors.append(f"{rel}/README.md: minimal device without a References row")
         # Fact-ID prefix: declared once, unique across devices, never a design-doc prefix.
         m = PREFIX_ROW_RE.search(section(texts.get("README.md", ""), "Identity"))
         prefix = m.group(1) if m else None
-        if prefix is None:
+        if prefix is None and not minimal:
             errors.append(
                 f"{rel}/README.md: no Identity row '| Prefix | <PFX> |' (.claude/rules/devices.md)"
             )
@@ -406,7 +415,12 @@ def check_devices(errors, warnings, design_prefixes):
                     if tag == "ASSUMED":
                         continue
                     if re.fullmatch(r"T\d+", tag):
-                        if tag not in t_ids:
+                        if minimal:
+                            errors.append(
+                                f"{rel}/{path.name}:{n}: [{tag}] in a minimal device: add the "
+                                "other template files (.claude/rules/devices.md)"
+                            )
+                        elif tag not in t_ids:
                             errors.append(f"{rel}/{path.name}:{n}: [{tag}] has no evidence.md row")
                     elif tag not in refs:
                         errors.append(f"{rel}/{path.name}:{n}: [{tag}] not in README References")

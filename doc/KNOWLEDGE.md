@@ -334,6 +334,13 @@ Somfy, Shelly, Victron).
 - **Files, evidence tags, fact IDs, graduation:** `.claude/rules/devices.md`, the single home of the format
   (loads when a device doc is read). **Workflow** (add a device, record a finding, answer "can X
   steer it?"): the `device-knowledge` skill. **Skeleton:** `doc/devices/_template/` (never cited).
+- **Worth writing (gate, `device-knowledge` skill):** a device doc holds only what saves a later
+  agent from a miss, a misreading or a costly read: a source it would not check, one that is
+  ambiguous or easy to misread, or one too long to re-read. Never a copy of what a reference
+  answers plainly.
+- **Minimal device:** `README.md` alone (identity, References with per-topic page pointers, Used
+  by) when no fact passes the gate and every reference is stable and agent-readable (HTML, MD,
+  text; a text-layer PDF with page pointers). It becomes a full doc with its first gated fact.
 - **Grades:** the evidence tag is the grade (rule), mapped onto `record-learning` section 2
   (DOC = a manufacturer document). The record-learning gate (section 0) applies.
   An UNPROVEN fact stays in a device doc only tagged `[ASSUMED]` and only when something relies on
