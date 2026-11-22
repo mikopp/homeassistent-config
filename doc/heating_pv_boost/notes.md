@@ -38,6 +38,8 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   `in` the sensor stays `unavailable`; without `/get out` the `?N` poll silently never arrives;
   without `/set out` a write fails silently. List the exact lines in the PR's post-deploy steps.
   Prove a new `/set` line with an idempotent write of the CURRENT value only.
+  `mc/TempDesired/set` takes the one-decimal payload both writers send (`22.0`, `22.5`):
+  CONFIRMED by two writes, each read back from the bus and moving `mc/FlowTempDesired`.
   **Exception, broadcasts** (catalog type `u`, e.g. `Broadcast/Outsidetemp`): ebusd only decodes
   them passively, they cannot be read on request, so only the `in` line and no `?N` poll. The
   topic keeps the catalog's case (`ebusd/Broadcast/Outsidetemp`, owner MQTT view).
@@ -299,8 +301,6 @@ a case table in `test_energy_mode`).
 - Which ebusd config generation this instance runs is unconfirmed; an older one sends `ehp/Status`
   field 3 as raw `1` for cooling (registers.md). Keep the dual name/number parsing (incl. raw
   `1` → `cooling`) as cheap insurance.
-- The setpoint payload with one decimal (`22.0`) is UNPROVEN against ebusd: prove it with the
-  idempotent write of the current value before arming.
 - `mc/FlowTempMax` caps the setpoint (Installationsanleitung _01 p. 69); no compressor stop at it
   is documented, the hard stop is floor protection ("Compressor and measurements").
 - `automation.heating_slab_charge_decision_changed` still says "Phase 1 — observation only,

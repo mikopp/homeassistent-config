@@ -166,7 +166,8 @@ means (bathroom and office under target). The spikes are a sun-after-cold-night 
   crossing the edge, so the curve follows the broadcast value without lag. Still open: the
   offset (first night ≈ 1 K colder than the weatherstation, step 0.5).
 - (b) Below 0.2 the curve does not follow the formula (the 83/2 diagram draws nothing below 0.2;
-  no /2 document gives a range or step). Step 0.6 (b).
+  no /2 document gives a range or step). The 0.20 test (0.6 (b)) is dropped. Step 0.7 answers
+  the question directly at the setting in use, from passive data.
 - (c) `mc/Status0a` field 4 is not the plain curve setpoint. **Refuted** (2026-11-22, 13 h of
   both sensors): field 4 = floor(`mc/FlowTempDesired`) at every value seen (27.0, 27.5, 29.5). It
   followed each jump within ≈ 6 min (its own poll, `?5`).
@@ -175,8 +176,10 @@ means (bathroom and office under target). The spikes are a sun-after-cold-night 
   (the channel that would carry room influence) reads 0.00 (owner, `ebusctl find -w`).
 - (e) The controller computes with whole degrees of `TempDesired` (22.5 acts as 22). **Refuted**
   by step 0.6 (e) on 2026-11-22: 22.5 → 22.0 moved the fine setpoint 27.5 → 27.0 (Observations).
-- (f) NEW, OBSERVED at two transitions: at 0.14 / 22.5 the setpoint follows the outdoor
-  temperature in **2 K jumps**, with an edge at about −2.5 °C (geoTHERM value): 27.5 → 29.5 at
+- (f) NEW, **HYPOTHESIS** (not proven): the curve works in **2 K steps** over the outdoor
+  temperature. OBSERVED so far: one edge, crossed once in each direction, at one setting (0.14 /
+  22.5). Two crossings of one edge do not show the step size or spacing elsewhere; step 0.7
+  tests that. At that edge, about −2.5 °C (geoTHERM value), the setpoint went 27.5 → 29.5 at
   02:11 (−2.38 → −2.62) and back at 08:20 (−2.62 → −2.38), 2026-11-22, with no hysteresis
   between the two directions. In between it stayed flat: 27.5 from +1.06 to −2.38 °C (20–02 h)
   while the formula goes 28.5 → 29.2; 29.5 from −2.62 to −4.25 °C (formula 29.3 → 29.6). So the
@@ -328,11 +331,11 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   reference). The offset moves in 1 K steps, so a constant difference well below 1 K stays as it
   is. Result → "Observations".
   Depends on: 0.4.
-- [IN_PROGRESS] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). Item 5's
+- [DONE] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). Item 5's
   set-back only covered the case where 0.5 K steps might not act. They do act, so 22.0 stays as
   the first Phase 2 change. `TempDesired` is a lever, not a goal: the goal is the room
-  temperatures (owner). (b) still TODO; (f) sharpens it: let the 0.20 test start and end on the
-  same side of an edge.
+  temperatures (owner). (b) DROPPED (owner, 2026-11-22): 0.20 would never be used, and step
+  0.7 shows how the curve behaves at the setting actually in use, without touching it.
   Controller resolution tests (owner; background A.3 (e), (b)). Each test changes
   ONE setting, at a steady outdoor temperature (`sensor.geotherm_heating_outdoor_temp` within
   ±0.5 K during the test), not during hot water (`binary_sensor.geotherm_heating_hwc_active` off).
@@ -350,8 +353,8 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
        (e) confirmed.
     5. If (e) is confirmed: **keep 22.0** (owner decision) and use whole-degree `TempDesired`
        steps from then on; otherwise set 22.5 back. Log it.
-  - **(b) Does the curve below 0.2 follow the formula?** On a different day from (e), so the two
-    set-backs cannot overlap.
+  - **[DROPPED] (b) Does the curve below 0.2 follow the formula?** (see above; kept for the
+    record). On a different day from (e), so the two set-backs cannot overlap.
     1. Force-read `mc FlowTempDesired` and the geoTHERM outdoor value.
     2. Set the curve **0.14 → 0.20** at the panel (`TempDesired` unchanged).
     3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min.
@@ -416,7 +419,7 @@ on qualifying days:
   mean run against the note targets ("Decisions in force"). Then wait the settle time and
   evaluate again (as 1.2).
   Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so. The slope and outdoor-offset rows
-  also depend on 0.7 (and the slope rows on 0.6 (b)); the `TempDesired` rows do not.
+  also depend on 0.7; the `TempDesired` rows do not.
 - [TODO] **2.2** Repeat 2.1 until the success metrics hold across at least one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change (note "Decisions in force") waits
   until 2.2 is done.
@@ -584,7 +587,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [DONE] 0.3 Owner answers (2026-11-21)
 - [DONE] 0.4 Deployed; all new entities report (ebusctl comparisons not run)
 - [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder)
-- [IN_PROGRESS] 0.6 (e) done: half degrees count; (b) TODO; new hypothesis (f) 2 K setpoint steps
+- [DONE] 0.6 (e) half degrees count; (b) dropped (0.7 covers it); hypothesis (f) 2 K steps
 - Closed 2026-11-22 with the new data: (a) damping part, (c), "setpoint only computed while
   running"; A.4b test (1) recheck 2026-11-24; cold-weather runs end on the integral (Observations)
 - [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope or offset change
