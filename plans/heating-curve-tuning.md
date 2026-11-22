@@ -573,6 +573,12 @@ OBSERVED (9 of 9 runs, mild and cold):
   - running: 5.76 per minute, matching 5.75 (fine 5.25).
   This explains the 02:13 start: −170 at 02:10, and the 27 → 29 jump at 02:11 steepened the
   drain to −180 by 02:13. It also supports A.4b: the generator works on whole degrees.
+  Those four phases are all at 22.5, where whole = fine − 0.5 always. They cannot tell floor(fine)
+  from "fine minus a fixed 0.5 K". The phase after the write separates the two: 08:50–09:40,
+  fine 27.0, compressor off. Measured 12 → −10 = −0.45 per minute, VF2 mean 26.55: VF2 − 27 =
+  −0.45 fits, VF2 − 26.5 = +0.05 (rising) does not. So the integral used 27 at fine 27.5 and at
+  fine 27.0: of the three candidates (fine, fine − 0.5, floor) only floor fits both. OBSERVED in
+  one outdoor band (−2.4 … −1.4 °C) only; no manual states it.
 - The integral is not reset at a stop (it keeps summing, e.g. +12 after 08:43). It is not
   clamped (+88 seen on 11-17, compressor off). It freezes during hot water (−113, −75, −86).
   After hot water the compressor ran on into heating at −113 on 11-22, but not on 11-17 or
