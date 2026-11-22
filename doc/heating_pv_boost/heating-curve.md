@@ -69,4 +69,4 @@ cooling release).
 OBSERVED (Nov 2026, flow setpoint `mc/Status0a` field 4 in whole °C vs the formula, outdoor from the
 weatherstation): 0.15 / 22 matches within −1.4 … +0.1 K; 0.13 / 22 and 0.14 / 22.5 run 0.8–2.1 K
 below. Part of that is the whole-degree reading (up to 1 K) and possibly whole-degree room
-setpoints. Investigation: `plans/heating-curve-tuning.md` (A.3, A.4b, step 0.6).
+setpoints. Investigation: `plans/heating-curve-tuning.md` (Baseline, hypothesis (f), step 0.7).

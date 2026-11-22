@@ -52,7 +52,10 @@ views:
           - entity: sensor.geotherm_heating_outdoor_temp
             name: Outdoor Temp (ebusd broadcast)
           - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
-            name: Flow Temp Desired (0.5 K steps)
+            name: Flow Temp Desired, curve (mc, 0.5 K)
+          # What the compressor regulates on: the whole-degree setpoint uih passes on.
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired
+            name: Flow Temp Desired, compressor (uih, whole °C)
 
       # Curve check: the inputs and the result of the weather curve side by side, to compare with
       # the formula in doc/heating_pv_boost/heating-curve.md (plans/heating-curve-tuning.md).
@@ -61,6 +64,7 @@ views:
         hours_to_show: 48
         entities:
           - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired
           - entity: sensor.geotherm_heating_temp_desired
           - entity: sensor.geotherm_heating_outdoor_temp
           - entity: sensor.geotherm_heating_curve
@@ -181,7 +185,8 @@ views:
         entities:
           # VF2: the flow sensor the controller's integral and floor protection use.
           - entity: sensor.geotherm_heating_flow_temp_vf2
-          - entity: sensor.geotherm_heating_circuit_flow_temp_desired_fine
+          # The integral's reference: the whole-degree uih setpoint, not the 0.5 K curve value.
+          - entity: sensor.geotherm_heating_circuit_flow_temp_desired
           - entity: sensor.heating_compressor_stop_temp
           - entity: sensor.geotherm_heating_circuit_return_temp
           - entity: sensor.geotherm_heating_energy_integral

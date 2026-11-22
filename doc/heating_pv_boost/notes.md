@@ -38,6 +38,8 @@ against a full `ebusctl` dump of the live bus. **Never use the `archived/` CSVs*
   `in` the sensor stays `unavailable`; without `/get out` the `?N` poll silently never arrives;
   without `/set out` a write fails silently. List the exact lines in the PR's post-deploy steps.
   Prove a new `/set` line with an idempotent write of the CURRENT value only.
+  `mc/TempDesired/set` takes the one-decimal payload both writers send (`22.0`, `22.5`):
+  CONFIRMED by two writes, each read back from the bus and moving `mc/FlowTempDesired`.
   **Exception, broadcasts** (catalog type `u`, e.g. `Broadcast/Outsidetemp`): ebusd only decodes
   them passively, they cannot be read on request, so only the `in` line and no `?N` poll. The
   topic keeps the catalog's case (`ebusd/Broadcast/Outsidetemp`, owner MQTT view).
@@ -213,7 +215,8 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
 | `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp` = the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and the same, so `ehp/OutsideTemp` is not read separately); the sensor sits on the north side without sun (owner); read 0.65 K below the weatherstation (3.75 vs 4.4 °C; owner, 2026-11-21 evening, one reading) |
-| `sensor.geotherm_heating_circuit_flow_temp_desired_fine` | `mc/FlowTempDesired` (0.5 K steps; the same setpoint `Status0a` field 4 gives in whole °C, owner forced reads) |
+| `sensor.geotherm_heating_circuit_flow_temp_desired_fine` | `mc/FlowTempDesired`, the curve output (0.5 K steps) |
+| `sensor.geotherm_heating_circuit_flow_temp_desired` | `uih/FlowTempDesired`, its whole-degree floor: what the integral and `sensor.heating_compressor_stop_temp` use (`registers.md`) |
 | `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |
@@ -253,16 +256,17 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   heating starts a day, runs ≥ 20–30 min. Met in mild weather at hysteresis 7 K and start integral
   −180 °min (2026-11-14…20: ≈ 5 heating + 2 hot-water starts a day, daily mean run 22–30 min;
   baseline before: 9–11 heating starts). OBSERVED, confounded: the heating curve and `TempDesired`
-  changed in the same window. Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, owner
+  changed in the same window, and the owner raised `CompHysteresis` from (likely) 6 to 7 K during
+  the cycling tuning (date unknown; HA keeps no history of it). Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, owner
   read), so short runs are a mild-weather effect.
 - **Tuning levers, in order** (if runs shorten again; one change at a time, ≥ 3 nights of similar
   weather each): (1) the heating-circuit pump speed would be the main lever but has no software
-  path on SW 0383 ("Bus participants"); (2) `CompHysteresis` is the software lever for run length;
-  (3) a deeper `CompIntegral` (only with `BackupModeHc` = `no_backup`) moves the start, not the
-  stop. Model behind (2) and (3), HYPOTHESIS from one day of runs: at a mild setpoint the flow sits
-  at return + ≈ 8 K spread, so a run ends on flow > setpoint + hysteresis before the integral is
-  repaid, and the next start follows from the integral drain whatever the start threshold; a
-  deeper `CompIntegral` cuts starts only once runs end on the integral (≈ 0 at the stop).
+  path on SW 0383 ("Bus participants"); (2) a deeper `CompIntegral` (only with `BackupModeHc` =
+  `no_backup`): longer runs and pauses; (3) `CompHysteresis`, only where flow reaches the stop line
+  first. Basis, OBSERVED (9 of 9 runs 2026-11-17…22, mild and cold): `ehp/Integral` starts a run
+  at ≈ `CompIntegral` and the run ends at ≈ 0, below the stop line; it sums VF2 − the
+  **whole-degree** setpoint (`uih`, CONFIRMED), is not reset at a stop and freezes during hot water. The stop line
+  (setpoint + `CompHysteresis`) ended 4 runs first (11-06…19, setpoint ≤ 26, mild). Details: `plans/heating-curve-tuning.md` "Observations".
 - **Cold weather:** `CompHysteresis` is one fixed value (p. 69; no weather dependency described);
   setpoint + hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while floor protection sits
   at FlowTempMax + hysteresis + 2 K (46 °C at 9 K). Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days
@@ -299,8 +303,6 @@ a case table in `test_energy_mode`).
 - Which ebusd config generation this instance runs is unconfirmed; an older one sends `ehp/Status`
   field 3 as raw `1` for cooling (registers.md). Keep the dual name/number parsing (incl. raw
   `1` → `cooling`) as cheap insurance.
-- The setpoint payload with one decimal (`22.0`) is UNPROVEN against ebusd: prove it with the
-  idempotent write of the current value before arming.
 - `mc/FlowTempMax` caps the setpoint (Installationsanleitung _01 p. 69); no compressor stop at it
   is documented, the hard stop is floor protection ("Compressor and measurements").
 - `automation.heating_slab_charge_decision_changed` still says "Phase 1 — observation only,

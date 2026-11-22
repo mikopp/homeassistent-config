@@ -209,15 +209,13 @@ TOPICS = [
         Msg("", {"heating_hvac_mode": is_state("unknown")}, "empty payload is not a mode"),
         Msg("auto", {"heating_hvac_mode": is_state("auto")}),
     ]),
-    # ── mc/Status0a: flowtemp;mixer;pump;onoff;flowtempdesired → field 4 ──────────────────────
-    Topic("ebusd/mc/Status0a", [
-        Msg("24.19;off;on;off;24", {"heating_circuit_flow_temp_desired": near(24.0)},
-            "live payload"),
-        Msg("30.0;off;on;on;28.5", {"heating_circuit_flow_temp_desired": near(28.5)}),
-        Msg("30.0;off;on;on;n/a", {"heating_circuit_flow_temp_desired": near(28.5)},
-            "garbage field 4 ignored"),
-        Msg("30.0;off;on;on", {"heating_circuit_flow_temp_desired": near(28.5)},
-            "too few fields ignored"),
+    # uih/FlowTempDesired: D2C in the catalog; the whole-degree floor of mc/FlowTempDesired
+    # (owner forced reads 2026-11-22: 27.0 while mc read 27.5). A fraction is kept, not floored.
+    Topic("ebusd/uih/FlowTempDesired", [
+        Msg("27.0", {"heating_circuit_flow_temp_desired": near(27.0)}, "live payload"),
+        Msg("26.00", {"heating_circuit_flow_temp_desired": near(26.0)}),
+        Msg("28.5", {"heating_circuit_flow_temp_desired": near(28.5)}, "fraction kept"),
+        Msg("n/a", {"heating_circuit_flow_temp_desired": near(28.5)}, "garbage ignored"),
         Msg("", {"heating_circuit_flow_temp_desired": near(28.5)}, "empty ignored"),
     ]),
     # mc/FlowTempDesired: D1C (0.5 K) in the catalog. Live value from the owner's forced read
@@ -370,7 +368,7 @@ _POLLS = {
     "ebusd/hwc/Status/get": "?3", "ebusd/ehp/Comp/get": "?3", "ebusd/ehp/Hc1Pump/get": "?3",
     "ebusd/mc/CoolingRequestHc2/get": "?5", "ebusd/uih/CoolingDemand/get": "?5",
     "ebusd/uih/CoolingActive/get": "?5", "ebusd/ehp/Integral/get": "?5",
-    "ebusd/ehp/CompDemand/get": "?5", "ebusd/mc/Status0a/get": "?5",
+    "ebusd/ehp/CompDemand/get": "?5", "ebusd/uih/FlowTempDesired/get": "?5",
     "ebusd/mc/FlowTempDesired/get": "?5",
     "ebusd/mc/TempDesired/get": "?7", "ebusd/mc/OperatingMode/get": "?7",
     "ebusd/ehp/CompIntegral/get": "?9", "ebusd/ehp/CompHysteresis/get": "?9",

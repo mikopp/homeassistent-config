@@ -61,7 +61,7 @@ _HOLDING_TOPICS = {
     "loxone/dishwasher/power": "0.000", "loxone/dishwasher/energy": "603.574",
     "ebusd/ehp/Status": "23.88;1.540;1.513;heat;08", "ebusd/ehp/HcReturnTemp": "24.12;ok",
     "ebusd/mc/TempDesired": "22.0", "ebusd/mc/OperatingMode": "on",
-    "ebusd/mc/Status0a": "24.19;off;on;off;24", "ebusd/Broadcast/Outsidetemp": "3.750",
+    "ebusd/uih/FlowTempDesired": "26.00", "ebusd/Broadcast/Outsidetemp": "3.750",
     "ebusd/mc/FlowTempDesired": "26.5", "ebusd/ehp/FlowTemp": "31.94;ok",
     "ebusd/ehp/CompIntegral": "-180", "ebusd/ehp/CompHysteresis": "7.00",
     "ebusd/mc/HeatingCurve": "0.14",
