@@ -180,8 +180,7 @@ means (bathroom and office under target). The spikes are a sun-after-cold-night 
   0.13 period's 24 ↔ 26 jumps (never 25), the 0–2 K deficit in the table above, and the 08–11 h
   drops (a warming geoTHERM value crossing an edge, no damping needed). It would also explain (b).
   The jump came before the compressor started, so the run does not cause it. Open: the other
-  edges and step sizes (map them from the "Curve check" graph), and whether the outdoor offset
-  moves the edges.
+  edges and step sizes (step 0.7), and whether the outdoor offset moves the edges.
 
 Data: flow setpoint = `mc/Status0a` field 4 (whole °C; 0 during hot water, excluded), against the
 weatherstation (night/evening hours), error ±1 K. The setpoint often drops 1–2 K between 08 and
@@ -356,6 +355,21 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
        supports the old data.
     5. Set **0.14** back at the panel; log both changes.
   Depends on: 0.4.
+- [TODO] **0.7** Map the setpoint jumps (hypothesis (f)). Passive: no setting changes, only data
+  as the weather moves through them. From the "Curve check" graph (5 min statistics, kept ≈ 10
+  days): note every jump of the fine setpoint outside hot water, with its time, size and the
+  geoTHERM outdoor value before and after. Group the jumps by `TempDesired` (22.5 until 11-22
+  08:43, then 22.0). Per setting, the result is a table of edges (outdoor °C) and levels (flow
+  °C), next to the formula. Questions:
+  - Fixed step size (2 K at every edge)?
+  - Do the edges sit on fixed outdoor values, or does `TempDesired` move them? (So far 22.0 moved
+    the level by 0.5 K. Whether it moved the edge is unknown.)
+  - Hysteresis between rising and falling outdoor values? (Not at −2.5 °C on 11-22.)
+  Why: if the curve works in steps, a slope change of 0.01 may do nothing or shift a whole step,
+  and an outdoor offset of 1 K may move every edge. Neither can be predicted from the formula.
+  Enough when edges are seen across the outdoor range of the season so far, about −5 to +10 °C.
+  Result → "Observations"; once CONFIRMED, → `doc/heating_pv_boost/heating-curve.md` at Close.
+  Depends on: 0.4.
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
 
@@ -396,7 +410,8 @@ on qualifying days:
   forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
   mean run against the note targets ("Decisions in force"). Then wait the settle time and
   evaluate again (as 1.2).
-  Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so.
+  Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so. The slope and outdoor-offset rows
+  also depend on 0.7 (and the slope rows on 0.6 (b)); the `TempDesired` rows do not.
 - [TODO] **2.2** Repeat 2.1 until the success metrics hold across at least one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change (note "Decisions in force") waits
   until 2.2 is done.
@@ -546,6 +561,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [DONE] 0.4 Deployed; all new entities report (ebusctl comparisons not run)
 - [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder)
 - [IN_PROGRESS] 0.6 (e) done: half degrees count; (b) TODO; new hypothesis (f) 2 K setpoint steps
+- [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope or offset change
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
 - [IN_PROGRESS] 2.1 `TempDesired` 22.5 → 22.0 (2026-11-22 08:43); settle ≥ 4 qualifying days
