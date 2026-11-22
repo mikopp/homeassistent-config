@@ -21,7 +21,7 @@ charges fit into runs; indexed by `behaviour.md`. Only the unit, never HA; regis
   to the heat pump, not the 0.5 K value [T18] [T19].
 - **VWS-18** The controller regulates on VF2 (`ehp/FlowTemp`, external flow sensor): the integral
   rate is VF2 − W [T18] [T19], and menu C4 shows VF2 next to the integral (direct-heating
-  display "z. B. Hydraulikplan 6"; this unit runs plan 6 [T46]) [IA p.59]. The `ehp/Status` flow field `HcFlowTemp` is the
+  display "z. B. Hydraulikplan 6"; this unit runs plan 6 [T46]) [IA p.59]. The `ehp/Status` flow field (`temp`, = `ehp/HcFlowTemp`) is the
   internal sensor T6 [CAT]; menu 1 "Vorlauftemp. IST" is the flow "im Gerät" (inside the unit)
   [IA p.54], not VF2.
 - **VWS-4** Stop line: a run also ends when the flow exceeds the setpoint + `CompHysteresis`,

@@ -295,10 +295,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       `1` at lunch → wired, times → device; `0` during a panel Sperrzeit → compressor timing.
       Then: does a block explain (b)? Result → device
       `protections.md` (T rows).
-- [TODO] 16. Confirm the ebusd catalog generation this setup runs (device VWS-32): `ebusctl find
-      -e ehp Status` / the served `08.ehp.csv` field name (`hcmode` vs `hcmode2`) and ebusd's
-      version topic. Result → device `interface.md` Path and config; then decide whether the raw
-      `1` → cooling parsing can stay as mere insurance.
+- [DONE] 16. Catalog generation confirmed: ebusd 26.1, `hcmode` with `1=cooling` (device VWS-32,
+      T50). The numeric enum branch stays: some enums arrive as numbers (VWS-44).
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 

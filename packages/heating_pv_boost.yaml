@@ -20,8 +20,8 @@ mqtt:
     # never a setting anyone chooses. Do not confuse it with sensor.geotherm_heating_hvac_mode below,
     # which reads mc/OperatingMode, the configured setting (HVAC MODE).
     #
-    # ehp/Status fields: 0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
-    # hcmode enum: 0=off 1=cooling 3=heat 4=water; name and number both accepted.
+    # ehp/Status fields: 0 temp (T6) °C | 1 press bar | 2 press_1 bar | 3 hcmode | 4 raw hex
+    # hcmode enum: 0=off 1=cooling 3=heat 4=water; names arrive here, numbers accepted as insurance.
     # → doc/devices/vaillant-vws-83-2/registers-ehp.md
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
@@ -47,7 +47,7 @@ mqtt:
         {% else %}unknown{% endif %}
         {# A payload without field 3 renders unknown: a text sensor (no device_class) stores '' as its state. #}
 
-    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT's flow temperature ("circuit"
+    # ehp/Status field 0 = temp (T6, the value of ehp/HcFlowTemp), the heating CIRCUIT's flow temperature ("circuit"
     # because ehp/FlowTemp (VF2), the system-wide flow sensor, is a different register).
     # Freshness reference for binary_sensor.heating_ebusd_online: force_update keeps last_updated
     # moving while an idle system republishes the same value, or liveness would read "offline".

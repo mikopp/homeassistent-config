@@ -93,7 +93,7 @@ _ACTION, _FLOW = "heating_hvac_action", "heating_circuit_flow_temp"
 
 
 def _status(flow: str, mode: str, tail: str = "00") -> str:
-    """ehp/Status: HcFlowTemp;HcPress;SourcePress;hcmode;raw hex (device VWS-32)."""
+    """ehp/Status: temp;press;press_1;hcmode;raw hex (device VWS-32)."""
     return f"{flow};1.540;1.513;{mode};{tail}"
 
 

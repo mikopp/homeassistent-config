@@ -115,5 +115,5 @@ change; their current values are kept by the package note named in `README.md` U
   (VWS-17); whether the pump runs while hcmode is `off`; under frost protection with `off`,
   whether the room temperature is ignored and whether it repeats (VWS-6):
   `plans/ebusd-pv-heating-optimization.md` step 15
-- Which ebusd catalog generation this setup runs (VWS-32) and whether a `/set` write takes the
-  enum name (VWS-44): `plans/ebusd-pv-heating-optimization.md` steps 16 and 11
+- Whether a `/set` write takes the enum name (VWS-44): `plans/ebusd-pv-heating-optimization.md`
+  step 11
