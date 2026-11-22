@@ -18,8 +18,8 @@ catalog [CAT], checked against a full `ebusctl` dump of this bus [T2] [T3].
 
 | ID | Register / path | Decode (type, scale, unit) | Values / range | Access | Evidence |
 |---|---|---|---|---|---|
-| VWS-33 | `uih/FlowTempDesired` | system flow setpoint handed to the heat pump, `b509 0d0500`, `D2C` (1/16 K) | whole °C in practice: floor of `mc/FlowTempDesired` (26.00 at 26.5; 27.0 at 27.5 in every read for 26 min) | r | [CAT] [T13] [T18] |
-| | `mc/FlowTempDesired` | circuit flow setpoint (curve output), `b509 0d4600`, also passive update `2946`, `D1C` (0.5 K) | — | r | [CAT] [T13] |
+| VWS-33 | `uih/FlowTempDesired` | system flow setpoint handed to the heat pump, `b509 0d0500`, `D2C` (1/16 K) | whole °C in practice: floor of `mc/FlowTempDesired` (26.00 at 26.5; 27.0 at 27.5 in every read for 26 min); 0 during hot water [T47] | r | [CAT] [T13] [T18] [T47] |
+| | `mc/FlowTempDesired` | circuit flow setpoint (curve output), `b509 0d4600`, also passive update `2946`, `D1C` (0.5 K) | 0 during hot water | r | [CAT] [T13] [T47] |
 | | `mc/TempDesired` | room setpoint, `0e3200`, `D1C` (0.5 K) | answers only with `cfgheatsinktype=1` (true here); writes one decimal (VWS-25) | rw | [CAT] [T36] |
 | | `mc/TempDesiredLow` | setback room setpoint = frost floor (VWS-6) | — | rw | [CAT] [IA p.46] |
 | | `mc/HeatingCurve` | curve slope, `0e3500`, `UIN` ÷ 100 (payload e.g. `0.14`) | step 0.01; same `cfgheatsinktype=1` condition, answers here | rw | [CAT] [T15] |

@@ -52,3 +52,6 @@ Rows no fact cites (T16): `evidence-archive.md`.
 | T44 | 2026-10 | owner-supplied live Mosquitto bridge config (HA broker ← ebusd broker) | every ebusd topic listed individually, no `ebusd/#` in either direction; `ebusd/global/running` and `/scan` `in` only; broadcast topic `ebusd/Broadcast/Outsidetemp` in the catalog's case | OBSERVED |
 | T45 | 2026-10 | HA history of polled registers | `ehp/HcReturnTemp` updates every 30–85 s; registers whose value does not change (`mc/TempDesiredLow`) are not re-published, so their poll rate cannot be seen | OBSERVED |
 | T46 | 2026-11-22 | panel installer menu A2 read by the owner | Wärmepumpentyp 5, Hydraulikplan 6, Elektroplan 3 | CONFIRMED |
+| T47 | 2026-11-22 | HA history of one hot-water run (17:01) | `uih/FlowTempDesired` and `mc/FlowTempDesired` both read 0 during hot water, as does `mc/Status0a` field 4 | OBSERVED |
+| T48 | 2026-11-22 | owner write `mc/TempDesired` 22.0 → 21.5 (17:07, during hot water), forced reads after | `mc/FlowTempDesired` 27.0 → 26.5, `uih/FlowTempDesired` 27 → 26.00: W −1 K | OBSERVED |
+| T49 | 2026-11-22 | HA history, 0.14 / `TempDesired` 22.0 | W 27 ↔ 26 at unit outdoor ≈ 1.9 °C (1.81 ↔ 2.06), up 11:10, down 16:30, no hysteresis: a 1 K step | OBSERVED |

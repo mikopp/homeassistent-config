@@ -64,7 +64,7 @@ change; their current values are kept by the package note named in `README.md` U
 
 | ID | Lever (menu, register, input) | Effect | Limits | Evidence |
 |---|---|---|---|---|
-| VWS-25 | `mc/TempDesired` (room setpoint), bus writes in 0.5 K | shifts the curve in parallel along the 45° axis [BA p.18]; the fine setpoint moves 0.5 K per 0.5 K step on a flat part of the curve [T17] [T18]; every fine value seen so far (2026-11-21…22) is `TempDesired` + a whole number [T20], so from x.0 a −0.5 K step lowers W by 1 K and +0.5 K leaves it, from x.5 the reverse [T20] | 0.5 K values (`22.0`, `22.5`) accepted and kept [T36] [T7]; the integral uses W, not the fine setpoint (VWS-3) [T18]; whether `TempDesired` acts on the compressor by any other path: Open questions | [BA p.18] [T17] [T18] [T20] |
+| VWS-25 | `mc/TempDesired` (room setpoint), bus writes in 0.5 K | shifts the curve in parallel along the 45° axis [BA p.18]; the fine setpoint moves 0.5 K per 0.5 K step on a flat part of the curve [T17] [T18]; every fine value seen so far (2026-11-21…22) is `TempDesired` + a whole number [T20], so from x.0 a −0.5 K step lowers W by 1 K and +0.5 K leaves it, from x.5 the reverse [T20]; 22.0 → 21.5 lowered W 27 → 26 [T48] | 0.5 K values (`22.0`, `22.5`) accepted and kept [T36] [T7]; the integral uses W, not the fine setpoint (VWS-3) [T18]; whether `TempDesired` acts on the compressor by any other path: Open questions | [BA p.18] [T17] [T18] [T20] [T48] |
 | VWS-27 | `mc/HeatingCurve` (slope) | the flow setpoint follows within minutes, also while the compressor runs [T15] | bus step 0.01 [CAT]; floor heating curves < 0.4 [BA p.21] | [T15] |
 | VWS-28 | `mc/OperatingMode` | heating mode only (`on`, `off`, `auto`, `eco`, `low`; meaning in States) [IA p.46] [CAT]; writes accepted [T7] | its own register, separate from the cooling setting (VWS-15); `off` below 3 °C still heats (VWS-6) | [CAT] [T7] |
 | | `ehp/CompIntegral` ("Komp. Start in", installer; panel C2 "Komp.Start ab", given "nur bei direkter Hydraulik" [IA p.58]) | start threshold of the energy balance; deeper = longer runs and pauses [IA p.49] | backup start moves with it (VWS-20) [IA p.60] | [IA p.49] [IA p.60] |
@@ -96,9 +96,8 @@ change; their current values are kept by the package note named in `README.md` U
 - Can a `TempDesired`-only write start or stop the compressor (VWS-25)? The compressor stopped
   1 s after the 08:43 write, with the integral ≈ 0 and VF2 at the stop line [T17]:
   `plans/heating-curve-tuning.md` step 0.11
-- Does the stop line (VWS-4) use W or the fine setpoint? What does `uih/FlowTempDesired` show
-  during hot water? `plans/heating-curve-tuning.md` step 4.9
-- Curve steps: other edges, step sizes, whether the whole curve is stepped (2 K), whether
+- Does the stop line (VWS-4) use W or the fine setpoint? `plans/heating-curve-tuning.md` step 4.9
+- Curve steps: other edges, step sizes (2 K and 1 K seen), whether
   `TempDesired` or the outdoor offset moves the edges (VWS-30): `plans/heating-curve-tuning.md`
   step 0.7
 - Outdoor offset: does the curve use the corrected value (then +1 K reads warmer, lowers the

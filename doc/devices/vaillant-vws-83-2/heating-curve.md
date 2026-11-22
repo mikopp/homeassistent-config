@@ -59,8 +59,8 @@ The flow setpoint is capped by `FlowTempMax` whatever the curve (`protections.md
   edge at ≈ −2.5 °C (unit's outdoor value) was seen, crossed once each way, 27.5 ↔ 29.5 with no
   hysteresis, flat on both sides (27.5 from +1.06 to −2.38 °C where the formula goes
   28.5 → 29.2; 29.5 from −2.62 to −4.25 °C, formula 29.3 → 29.6) [T21]; at 0.13 / 22 the
-  setpoint jumped 24 ↔ 26, never 25 [T23]. Whether the whole curve is stepped (2 K), and its
-  edges elsewhere: `behaviour.md` Open questions.
+  setpoint jumped 24 ↔ 26, never 25 [T23]; at 0.14 / 22.0 W stepped 27 ↔ 26 at ≈ 1.9 °C, a
+  1 K step, no hysteresis [T49]. Step sizes and edges elsewhere: `behaviour.md` Open questions.
 - The unit's whole-degree setpoint runs 0–2 K below the formula, mostly 0.5–1.5 K: 0.15 / 22
   within −1.4 … +0.1 K; 0.13 / 22 and 0.14 / 22.5 0.8–2.1 K below; 0.13 / 22 ≈ 2 K below at 8 °C,
   more than whole-degree readings explain [T24]. Measured on `mc/Status0a` field 4 (= floor of
