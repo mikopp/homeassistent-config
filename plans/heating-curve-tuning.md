@@ -599,9 +599,9 @@ are already throttled a bit from last year's balancing; no flow-meter readings a
   ebusd catalog rows, the register decodes now in `doc/heating_pv_boost/registers.md` and
   `heating-curve.md`) go where the hardware-knowledge framework puts them.
   Uses the hardware-knowledge skill/rule built on a separate branch (owner: modelled on
-  `mikopp/homeassistant-innova-hrds` `doc/references`, PR linked in "References" once open), so
+  `mikopp/homeassistant-innova-hrds` `doc/references`; PR #192: `doc/devices/<device>/`, `device-knowledge` skill, `.claude/rules/devices.md`), so
   the same layout serves other devices in this repo later.
-  Depends on: that framework PR merged; 2.2 settled (so the steering findings are final);
+  Depends on: #192 merged; 2.2 settled (so the steering findings are final);
   hypotheses still open at that point go in as "assumed", graded.
 
 ## Observations
@@ -823,7 +823,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [TODO] 3.1–3.2 Hydraulic balancing
 - [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, [IN_PROGRESS] 4.9 setpoint from uih: implemented, bridge lines + hot-water check after deploy
 - [DONE] 5.1; [TODO] 5.2 deferred (`warm_enough`)
-- [TODO] 6.1 geoTHERM unit behaviour knowledge (needs the hardware-knowledge framework PR)
+- [TODO] 6.1 geoTHERM unit behaviour knowledge (needs #192)
 - [TODO] Close
 
 ## Close
