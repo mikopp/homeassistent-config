@@ -99,6 +99,7 @@ control stays off.
 | 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes; set back to 0.14 (owner). Test values and times not recorded |
 | 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, with `number.geotherm_heating_temp_desired`: step 0.6 (e) and kept as the first Phase 2 change (2.1). Fine flow setpoint 27.5 → 27.0 (read 08:43:32) |
 | 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, by hand, to keep the knob 1 K below `TempDesired` (5.1). Writer still off |
+| 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `ebusctl` write: `uih` resolution test (Observations). Set back within 1 h, so the 22.0 settle time does not restart |
 | before 2026-11-21 (date unknown) | `CompHysteresis` | likely 6 → 7 K | Owner (2026-11-22): +1 K during the cycling tuning. Not in HA: the hysteresis sensor keeps no long-term statistics, so only changed run behaviour would show it |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
 | unchanged | Outdoor sensor offset 0 K | — | Owner, 2026-11-21 |
@@ -633,9 +634,32 @@ OBSERVED (9 of 9 runs, mild and cold):
     setpoint.
   - Forums (energiesparhaus, buildhub, OpenEnergyMonitor, bauexpertenforum): definitions or
     other models (aroTHERM, flexoTHERM). Not evidence for this unit.
-- Grades: integral on whole degrees, OBSERVED, strong (≈ 13 phases, two bands, VF2 and T6;
-  mechanism open). Stop line on whole degrees: UNPROVEN. 22.0 without compressor effect: OBSERVED
-  for run timing at −2.4 … −0.2 °C, inferred elsewhere.
+- **`uih` resolution test, 2026-11-22 10:10–10:40** (owner; compressor off, no hot water,
+  geoTHERM outdoor 0.3 → 1.3 °C, no edge crossed). `TempDesired` 22.0 → 22.5 via `ebusctl`. `mc
+  FlowTempDesired` read 27.5. `uih FlowTempDesired` read **27.0** in many forced reads from 10:14
+  to 10:40. Back at 22.0, both read 27. Integral rate in HA: −0.91/min before (VF2 26.11, fine
+  27.0), **−1.01/min during** (VF2 26.0, fine 27.5). VF2 − 27 = −1.0 fits, VF2 − 27.5 = −1.5 does
+  not. **CONFIRMED (controlled A/B):** `uih` passes on floor(`mc/FlowTempDesired`), and the
+  integral counts against that whole-degree value. This settles the "truncated room setpoint"
+  alternative in favour of floor(fine) at `uih`. Not tested: the stop line (most likely the same
+  `uih` value, UNPROVEN).
+- What the half degree can still do (HYPOTHESIS): every fine value seen equals `TempDesired` +
+  a whole number (26.5, 27.5, 29.5 at 22.5; 27.0 at 22.0). On the flat parts of the curve a 0.5 K
+  `TempDesired` step therefore never changes floor(fine). It can matter only where the curve's
+  own part changes with `TempDesired`. By the 45° shift (manual p. 18) the room setpoint also
+  moves the curve along the outdoor axis, so 22.0 vs 22.5 would move each edge by ≈ 0.5 K
+  outdoor and give a different whole-degree setpoint in that narrow band. Average effect ≈ step
+  × 0.5 K ÷ edge spacing: unknown until 0.7 maps the edges per `TempDesired`.
+- Time-average flow = whole-degree setpoint (HYPOTHESIS, follows from runs ending at integral
+  ≈ 0): the integral balances VF2 − setpoint to zero over each cycle, so the setpoint sets the
+  mean flow, and with it the room level. Exception: stop-line stops end with the integral
+  negative, so the mean flow falls a little below the setpoint. `CompIntegral` and
+  `CompHysteresis` change cycle length (and room ripple), not the level.
+- Grades:
+  - Integral on whole degrees via `uih`: **CONFIRMED** (the A/B test above, plus ≈ 13 phases).
+  - Stop line on whole degrees: UNPROVEN.
+  - 22.0 without compressor effect: OBSERVED on the flat parts of the curve. Near the edges it
+    is open (0.7).
 
 Consequences (HYPOTHESIS, follow from the above):
 - **Run length** ≈ 180 °min ÷ (VF2 − whole setpoint), plus the ramp: ≈ 35 min at 27, ≈ 50 min at

@@ -48,13 +48,13 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 
 | Register | Meaning |
 |---|---|
-| `ehp/Integral` | running energy integral, Σ(flow VF2 − flow desired) per minute, °min (`SIN`; VF2 per p. 59). The setpoint is the whole-degree one: rates match VF2 − floor(`mc/FlowTempDesired`) within 0.05 K in 4 phases, not the 0.5 K value (OBSERVED 2026-11-22) |
+| `ehp/Integral` | running energy integral, Σ(flow VF2 − flow desired) per minute, °min (`SIN`; VF2 per p. 59). The setpoint is the whole-degree one, `uih/FlowTempDesired`, not the 0.5 K `mc` value: CONFIRMED 2026-11-22 by a controlled test (`TempDesired` 22.0 → 22.5 for 30 min: `mc` 27.5, `uih` 27.0 in every forced read, integral rate −1.01/min = VF2 − 27, not VF2 − 27.5 = −1.5), plus ≈ 13 matching phases |
 | `ehp/CompIntegral` | "Komp. Start in": integral at which the compressor starts (installer setting) |
 | `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (no buffer = hydraulic plan 6 on the exclusiv; *Installationsanleitung* 0020045204_01 p. 63, p. 69) |
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
 | `mc/Status0a` field 4 | current flow setpoint `flowtempdesired` (integer °C) |
-| `mc/FlowTempDesired` | the same setpoint, `D1C` (0.5 K; `b509 0d4600`, also passive update `2946`); `uih/FlowTempDesired` (`D2C`) read 26.00 when this read 26.5 (owner forced reads) |
+| `mc/FlowTempDesired` | the same setpoint, `D1C` (0.5 K; `b509 0d4600`, also passive update `2946`); `uih/FlowTempDesired` (`D2C`, 1/16 K) passes on floor of it (26.00 at 26.5; 27.0 at 27.5 for 26 min of forced reads, CONFIRMED 2026-11-22) |
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
 | `ehp/Comp` | compressor on/off now ("Status Kompressor: AN/AUS") |

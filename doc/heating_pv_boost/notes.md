@@ -264,7 +264,7 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   `no_backup`): longer runs and pauses; (3) `CompHysteresis`, only where flow reaches the stop line
   first. Basis, OBSERVED (9 of 9 runs 2026-11-17…22, mild and cold): `ehp/Integral` starts a run
   at ≈ `CompIntegral` and the run ends at ≈ 0, below the stop line; it sums VF2 − the
-  **whole-degree** setpoint, is not reset at a stop and freezes during hot water. The stop line
+  **whole-degree** setpoint (`uih`, CONFIRMED), is not reset at a stop and freezes during hot water. The stop line
   (setpoint + `CompHysteresis`) ended 4 runs first (11-06…19, setpoint ≤ 26, mild). Details: `plans/heating-curve-tuning.md` "Observations".
 - **Cold weather:** `CompHysteresis` is one fixed value (p. 69; no weather dependency described);
   setpoint + hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while floor protection sits
