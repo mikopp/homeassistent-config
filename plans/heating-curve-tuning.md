@@ -52,15 +52,34 @@ control stays off.
     weather and right in cold weather: slope too steep. Right in mild weather, too cold in cold
     weather: slope too flat. Smallest step 0.01 (panel); by the formula ≈ 0.25 K flow in mild
     weather, ≈ 0.45 K at −10 °C.
-  - **`TempDesired`** (panel or hand setter) shifts the whole curve in parallel: ≈ 1.2 K flow per K
-    (formula). Whether 0.5 K steps act is open (hypothesis (e), step 0.6).
-  - **Outdoor sensor offset** (menu "Kalibrierung" → "Aussentemperatur", ±5 K in 1 K steps;
-    Installationsanleitung 0020045204_01 p. 65, the manual calls it an adjustment of the displayed
-    temperature; ebusd `ehp/OutsideTempOffset`; owner: 0 now). If the curve uses the corrected
-    value (UNPROVEN, `heating-curve.md`), +1 K would lower the flow by ≈ 0.25 K at 0.14 in mild
-    weather. It would also move every other outdoor decision: frost protection below 3 °C, the
-    AT-Abschaltgrenze (no heating above, no cooling below). Only for correcting a measured sensor error (step 0.5),
-    never instead of `TempDesired` or the slope.
+  - **What the compressor acts on: the whole-degree setpoint** W = floor(`mc/FlowTempDesired`),
+    passed on by `uih` (CONFIRMED, Observations). Runs end at integral ≈ 0, so the mean flow ≈ W
+    (HYPOTHESIS). A lever changes the room level only when it changes W, at least for part of the
+    outdoor range.
+  - **`TempDesired`** (panel or hand setter) shifts the curve in parallel: the fine setpoint moves
+    ≈ 1.2 K per K (formula), and 0.5 K per 0.5 K step on a flat part of the curve (observed). At a
+    given outdoor temperature W changes only when floor(fine) changes. Every fine value seen is
+    `TempDesired` + a whole number, so from a `TempDesired` ending in .0 a −0.5 K step lowers W by 1
+    K and a +0.5 K step does nothing. From one ending in .5 it is the other way round. Near a jump of
+    the curve the half degree may also move the jump by ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
+    Effective step: 1 K of W ≈ 0.6–0.7 K room (rough estimate from P2 vs P3, HYPOTHESIS).
+  - **Outdoor sensor offset** (menu "Kalibrierung" → "Aussentemperatur", ±5 K; the /2
+    Installationsanleitung 0020045204_01 p. 65 reads as 1 K steps; ebusd `ehp/OutsideTempOffset`;
+    owner: 0 now). **A valid tuning lever (owner, 2026-11-22).** The goal is the room temperatures
+    measured by the indoor Ecowitt sensors, the owner reads outdoor temperature from the
+    weatherstation, and the geoTHERM outdoor sensor is used only by the geoTHERM. Which of the two
+    outdoor sensors is "right" therefore does not matter. **Working assumption (owner): 0.5 K
+    steps**; resolution research is running (step 0.8).
+    - Effect, if the curve uses the corrected value (UNPROVEN; the first offset change tests it,
+      see 2.1): a positive offset makes the geoTHERM read warmer and lowers the flow. It moves the
+      curve's jumps along the outdoor axis by the offset. At a fixed outdoor temperature W drops by
+      one step only within that distance of a jump. Averaged over the day ≈ curve slope × offset ≈
+      0.25 K flow per K at 0.14 in mild weather (formula), ≈ 0.12 K per 0.5 K. So it is a fine
+      trim, finer than `TempDesired`.
+    - Side effects (accepted as part of the lever): every other geoTHERM outdoor decision moves
+      with it. Frost protection ("below 3 °C") then starts at a real 3 °C − offset. The
+      AT-Abschaltgrenze (no heating above, no cooling below) and the cooling release move the
+      same way. Log the offset with every change, and re-check it before the cooling season.
   - **Room-to-room differences** (upper floor colder than the living room) are hydraulics or room
     losses. Neither lever fixes them: Phase 3.
   - **`warm_enough`** is ignored for now (see Overview). Later, sunny days only, never to
@@ -73,7 +92,8 @@ control stays off.
   followed by the settle time.
 - **Qualifying days** (used by 1.2, 2.1, 2.2): daily radiation mean < 25 W/m². Cold class: daily
   outdoor mean < 3 °C; mild class: > 7 °C. Comparable: same class and daily means within ±2 K.
-  With only one class available, only `TempDesired` may change; slope rows need both classes.
+  With only one class available, only `TempDesired` or the outdoor offset may change (both act
+  roughly in parallel); slope rows need both classes.
 - **Settle time:** the slab lags by a day or more. After a change, wait at least 4 full qualifying
   days before the next evaluation. Log every change in the change log (date, time, old, new).
 - **Interactions:** compressor cycling (HYPOTHESIS run model, note "Decisions in force": a higher
@@ -326,14 +346,11 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   "Curve check" and "Why runs end" graphs fill.
 - [TODO] **0.5** First night (11-21/22): geoTHERM ≈ 1 K colder than the weatherstation from 20 to
   06 h (20 h 0.38 vs 1.57; 22 h −1.17 vs −0.07; 06 h −4.01 vs −3.06), ≈ 0.5 K at 08:30. More
-  nights needed (owner rule).
-  Machine outdoor value vs weatherstation (hypothesis (a)). After ≥ 2 days of data:
-  compare `sensor.geotherm_heating_outdoor_temp` with the weatherstation by hour (night, 08–11 h,
-  afternoon), and the fine setpoint with the formula evaluated at the geoTHERM value; a setpoint
-  that lags the geoTHERM value by hours = damping. Correct with the outdoor offset only for a
-  roughly constant night-time difference over clearly more than 2 nights (owner; weatherstation as
-  reference). The offset moves in 1 K steps, so a constant difference well below 1 K stays as it
-  is. Result → "Observations".
+  More nights for the record.
+  Machine outdoor value vs weatherstation (hypothesis (a); damping part refuted). Informative
+  only: it is **no longer a precondition** for using the outdoor offset (owner, 2026-11-22: the
+  offset is a tuning lever, the indoor rooms are the reference). Use the difference to read edge
+  positions in weatherstation terms (the owner's outdoor reference). Result → "Observations".
   Depends on: 0.4.
 - [DONE] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). Item 5's
   set-back only covered the case where 0.5 K steps might not act. They do act, so 22.0 stays as
@@ -382,6 +399,12 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   Enough when edges are seen across the outdoor range of the season so far, about −5 to +10 °C.
   Result → "Observations"; once CONFIRMED, → `doc/heating_pv_boost/heating-curve.md` at Close.
   Depends on: 0.4.
+- [IN_PROGRESS] **0.8** Outdoor offset resolution: whole K, 0.5 K or finer? Does the curve use
+  the corrected value? A research subagent (2026-11-22) is checking the Vaillant /2 and /3
+  manuals, the ebusd catalog (`ehp/OutsideTempOffset` data type) and forums (weak evidence).
+  Until then the owner's working assumption is 0.5 K. A safe owner test follows from the
+  result: read the register, check what the panel offers, write the current value back. Result
+  → "Observations"; the step size goes into the Phase 2 table.
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
 
@@ -401,18 +424,36 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
 
 ### Phase 2 — tune, one change at a time
 
-Decision rule per evaluation, on the **office** (limiting room), using its daily mean minus 22 °C
-on qualifying days:
+Decision rule per evaluation, on the **office** (limiting room). d = its daily mean minus 22 °C
+on qualifying days. Target band d within ±0.3 K; swinging inside it is fine (owner).
 
-| Office result | Change | Size |
-|---|---|---|
-| Above +0.3 K in both classes (or in the only class available) | `TempDesired` down | 0.5 K, or 1 K if (e) is confirmed |
-| Below −0.3 K in both classes (or in the only class available) | `TempDesired` up | 0.5 K, or 1 K if (e) is confirmed |
-| Within ±0.3 K on mild days, below −0.3 K on cold days | slope up | 0.01 |
-| Within ±0.3 K on cold days, above +0.3 K on mild days | slope down | 0.01 |
-| Within ±0.3 K, other rooms out of their band | no curve change: Phase 3 (living overshoot accepted until then) | — |
-| A sunny day overshoots | no change: the PV exception (Phase 5) | — |
-| Step 0.5 found a constant night-time outdoor error (owner rule, step 0.5) | outdoor offset (correct the sensor) | the measured error, whole K |
+Everything acts through the whole-degree setpoint W = floor(fine) (Design approach). Before
+each change, read the fine setpoint (`sensor.geotherm_heating_circuit_flow_temp_desired_fine`)
+and W (`sensor.geotherm_heating_circuit_flow_temp_desired`). After a `TempDesired` change, check
+in HA within minutes that W moved as intended; if not, the step did nothing.
+
+| Office result | Change | Step | Expected effect (HYPOTHESIS) |
+|---|---|---|---|
+| d > +0.5 K (both classes, or the only one) | `TempDesired` down to the next value that **lowers W** | from x.0: −0.5 K; from x.5: −1.0 K | W −1 K on the flat parts ≈ room −0.6…−0.7 K |
+| d < −0.5 K (both classes, or the only one) | `TempDesired` up to the next value that **raises W** | from x.5: +0.5 K; from x.0: +1.0 K | W +1 K ≈ room +0.6…+0.7 K |
+| +0.3 < d ≤ +0.5 K (both classes, or the only one) | outdoor offset **up** (geoTHERM reads warmer) | +0.5 K (assumed resolution; 1 K if only whole K) | mean flow ≈ −0.12 K per 0.5 K, as full W steps within 0.5 K of each jump ≈ room −0.1 K |
+| −0.5 ≤ d < −0.3 K (both classes, or the only one) | outdoor offset **down** | −0.5 K (or 1 K) | the mirror of the row above |
+| Within ±0.3 K on mild days, below −0.3 K on cold days | slope up | 0.01 | ≈ +0.25 K flow mild, +0.45 K at −10 °C (formula), delivered as moved jumps |
+| Within ±0.3 K on cold days, above +0.3 K on mild days | slope down | 0.01 | mirror |
+| d within ±0.3 K, other rooms out of their band | no curve change: Phase 3 (living overshoot accepted until then) | — | — |
+| A sunny day overshoots | no change: the PV exception (Phase 5) | — | — |
+
+Rules for the table:
+- **Coarse, then fine.** `TempDesired` moves W by a whole degree (about one band width in the
+  rooms); the offset and the slope trim in between. When a `TempDesired` step would overshoot
+  (|d| barely above 0.5), use the offset instead.
+- **A 0.5 K `TempDesired` step that leaves W unchanged is not a change.** Example: 22.5 → 22.0 on
+  2026-11-22. Do not count its settle time.
+- **The first offset change is also a test.** Log the fine setpoint and the geoTHERM outdoor
+  value at each jump before and after (0.7). If the jumps do not move by the offset, the curve
+  uses the raw value and the offset is no lever: drop those rows.
+- The offset moves frost protection, the AT-Abschaltgrenze and the cooling release by the same
+  amount (Design approach); log it in the change log and the note's "Owner-side configuration".
 
 - [IN_PROGRESS] **2.1** First change made: `TempDesired` 22.5 → 22.0 on 2026-11-22 08:43 (row 1,
   0.5 K since (e) is refuted). Curve stays 0.14. Settle for ≥ 4 qualifying days, then evaluate
@@ -430,17 +471,19 @@ on qualifying days:
   2. Whole-degree setpoint at matching geoTHERM outdoor values: 11-21 20:15 … 11-22 08:43 (22.5)
      against after the write (22.0).
   3. Run and pause lengths against 180 ÷ |VF2 − whole setpoint|; Shelly kWh per degree-day.
-  4. Owner, cheapest direct test: `ebusctl read -f -c uih FlowTempDesired` next to
-     `ebusctl read -f -c mc FlowTempDesired`, a few times at different fine values. If `uih`
-     always shows floor(`mc`), the system setpoint is whole-degree.
+  4. DONE 2026-11-22 10:10–10:40: `uih` passes floor(`mc`), and the integral uses it
+     (CONFIRMED, Observations).
   5. Room temperatures (office first), shower hours left out.
+  Expected next step by the new table: office d ≈ +0.9 → `TempDesired` 22.0 → **21.5** (W −1 K
+  on the flat parts).
   Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel). Log it in the change log with the
   forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
   mean run against the note targets ("Decisions in force"). Then wait the settle time and
   evaluate again (as 1.2).
-  Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so. The slope and outdoor-offset rows
-  also depend on 0.7; the `TempDesired` rows do not.
+  Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so. The slope rows also depend on 0.7.
+  The offset rows do not: the first offset change maps its own effect (rules above), and 0.8
+  sets its step.
 - [TODO] **2.2** Repeat 2.1 until the success metrics hold across at least one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change (note "Decisions in force") waits
   until 2.2 is done.
@@ -711,14 +754,17 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
 - [DONE] 0.3 Owner answers (2026-11-21)
 - [DONE] 0.4 Deployed; all new entities report (ebusctl comparisons not run)
-- [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder)
+- [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder);
+  informative, no longer a precondition for the offset
 - [DONE] 0.6 (e) half degrees count; (b) dropped (0.7 covers it); hypothesis (f) 2 K steps
 - Closed 2026-11-22 with the new data: (a) damping part, (c), "setpoint only computed while
   running"; A.4b test (1) recheck 2026-11-24
 - OBSERVED (not closed): 9 of 9 runs since 11-17 ended on the integral (≈ 0), mild and cold; the
   integral uses the whole-degree setpoint, so 22.5 → 22.0 likely changed nothing for the
   compressor (2.1)
-- [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope or offset change
+- [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope change
+- [IN_PROGRESS] 0.8 Outdoor offset resolution (research running; working assumption 0.5 K)
+- Phase 2 table rewritten for whole-degree effects; the outdoor offset is a tuning lever (owner)
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
 - [IN_PROGRESS] 2.1 `TempDesired` 22.5 → 22.0 (2026-11-22 08:43); probably no whole-degree effect:
