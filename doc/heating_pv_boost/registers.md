@@ -48,7 +48,7 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 
 | Register | Meaning |
 |---|---|
-| `ehp/Integral` | running energy integral, Σ(flow VF2 − flow desired) per minute, °min (`SIN`; VF2 per p. 59) |
+| `ehp/Integral` | running energy integral, Σ(flow VF2 − flow desired) per minute, °min (`SIN`; VF2 per p. 59). The setpoint is the whole-degree one: rates match VF2 − floor(`mc/FlowTempDesired`) within 0.05 K in 4 phases, not the 0.5 K value (OBSERVED 2026-11-22) |
 | `ehp/CompIntegral` | "Komp. Start in": integral at which the compressor starts (installer setting) |
 | `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (no buffer = hydraulic plan 6 on the exclusiv; *Installationsanleitung* 0020045204_01 p. 63, p. 69) |
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |

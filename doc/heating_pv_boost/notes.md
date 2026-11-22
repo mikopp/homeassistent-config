@@ -259,12 +259,12 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
   read), so short runs are a mild-weather effect.
 - **Tuning levers, in order** (if runs shorten again; one change at a time, ≥ 3 nights of similar
   weather each): (1) the heating-circuit pump speed would be the main lever but has no software
-  path on SW 0383 ("Bus participants"); (2) `CompHysteresis` is the software lever for run length;
-  (3) a deeper `CompIntegral` (only with `BackupModeHc` = `no_backup`) moves the start, not the
-  stop. Model behind (2) and (3), HYPOTHESIS from one day of runs: at a mild setpoint the flow sits
-  at return + ≈ 8 K spread, so a run ends on flow > setpoint + hysteresis before the integral is
-  repaid, and the next start follows from the integral drain whatever the start threshold; a
-  deeper `CompIntegral` cuts starts only once runs end on the integral (≈ 0 at the stop).
+  path on SW 0383 ("Bus participants"); (2) a deeper `CompIntegral` (only with `BackupModeHc` =
+  `no_backup`): longer runs and pauses; (3) `CompHysteresis`, only where flow reaches the stop line
+  first. Basis, OBSERVED (9 of 9 runs 2026-11-17…22, mild and cold): `ehp/Integral` starts a run
+  at ≈ `CompIntegral` and the run ends at ≈ 0, below the stop line; it sums VF2 − the
+  **whole-degree** setpoint, is not reset at a stop and freezes during hot water. A stop line hit
+  first was seen once (11-06). Details: `plans/heating-curve-tuning.md` "Observations".
 - **Cold weather:** `CompHysteresis` is one fixed value (p. 69; no weather dependency described);
   setpoint + hysteresis can exceed `FlowTempMax` (e.g. 28 + 9 = 37 °C) while floor protection sits
   at FlowTempMax + hysteresis + 2 K (46 °C at 9 K). Rule: raise the hysteresis only moderately (8–9 K) and on the first cold days

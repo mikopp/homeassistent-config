@@ -77,7 +77,9 @@ control stays off.
 - **Settle time:** the slab lags by a day or more. After a change, wait at least 4 full qualifying
   days before the next evaluation. Log every change in the change log (date, time, old, new).
 - **Interactions:** compressor cycling (HYPOTHESIS run model, note "Decisions in force": a higher
-  flow setpoint gives more headroom up to setpoint + hysteresis and longer runs); floor protection
+  flow setpoint gives more headroom up to setpoint + hysteresis and longer runs; superseded by
+  the integral data under "Observations": the integral sets the run length, and a lower setpoint
+  shortens runs through a larger VF2 excess); floor protection
   = `FlowTempMax` + `CompHysteresis` + 2 K at VF2 (note "Compressor and measurements"); frost
   protection (`off` below 3 °C still heats to `TempDesiredLow` 20 °C, note "Frost protection").
 - Invariants checked: no automatic write and no change to the control law. Every register read
@@ -412,7 +414,13 @@ on qualifying days:
 
 - [IN_PROGRESS] **2.1** First change made: `TempDesired` 22.5 → 22.0 on 2026-11-22 08:43 (row 1,
   0.5 K since (e) is refuted). Curve stays 0.14. Settle for ≥ 4 qualifying days, then evaluate
-  as 1.2. The write cut one run short (Observations); judge the cycling on full days only.
+  as 1.2. Judge the cycling on full days only.
+  **Caveat (HYPOTHESIS, Observations "Run starts and ends"):** the compressor works on the
+  whole-degree setpoint, and 22.5 → 22.0 left it unchanged (27 stays 27, 29 stays 29). So this
+  change may not cool the house at all. Owner decision: confirm with ≈ 1 day of whole-degree
+  setpoint vs geoTHERM outdoor data, or go to 21.5 now (−1 K whole-degree where the 22.5 fine
+  values ended in .5). The size column of the table then reads "whole-degree effect": a step
+  counts only when floor(fine) changes.
   Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel). Log it in the change log with the
   forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
@@ -525,35 +533,72 @@ OBSERVED:
   **Deviation:** the compressor was running, not off. The question "computed only while
   running" is answered by (f) instead: the 02:11 jump came with the compressor off.
 - Result: `mc/TempDesired` 22.5 → 22.0 at 08:43:17. The fine setpoint went 27.5 → 27.0 (read
-  08:43:32), the whole-degree one stayed 27. So half degrees count, and (e) is refuted. The
-  formula predicts −0.6 K; −0.5 K is observed, which fits at 0.5 K resolution.
-- Side effect: the compressor stopped at 08:43:18.7, 1 s after the write. VF2 was at 34.0 °C,
-  and the stop line fell from 34.5 to 34.0 (fine setpoint + 7 K). A stop 1 s after a 0.5 K
-  change fits the stop line flipping, not the integral (the integral moves by at most 0.5 K·min
-  in that second). The run lasted 31.6 min. Lowering `TempDesired` mid-run can end a run early.
+  08:43:32), the whole-degree one stayed 27. So the circuit setpoint computes with half degrees,
+  and (e) is refuted for `mc/FlowTempDesired`. The formula predicts −0.6 K; −0.5 K is observed,
+  which fits at 0.5 K resolution. **But the compressor's energy integral runs on the
+  whole-degree setpoint** (run ends below), so this write changed nothing for the compressor (27
+  before and after).
+- Side effect: the compressor stopped at 08:43:18.7, 1 s after the write. **Ambiguous:** the
+  integral reached ≈ 0 in the same minutes (−2 at the end of the 08:40 bucket, rising ≈ 7 °min
+  per minute). VF2 34.0 had reached the whole-degree stop line (27 + 7), which had been at 34 since
+  08:22. Whether the write itself triggered the stop is unknown. (An earlier reading here,
+  "stop line flipping", assumed the fine setpoint and is withdrawn.)
 - A.4b test (1): whole-degree = floor(fine) at every value seen over 13 h (see (c)). The plan
   asks for ≥ 3 days: recheck on 2026-11-24, then 4.9.
 
-**Run ends, night of 11-21/22** (VF2 from 22:30 on; 5 min means; `CompIntegral` −180 °min,
-`CompHysteresis` 7 K):
+**Run starts and ends from `sensor.geotherm_heating_energy_integral`** (`ehp/Integral`, already
+recorded; 5 min statistics; checked 2026-11-22; `CompIntegral` −180 °min, `CompHysteresis` 7 K):
 
-| Run | Fine setpoint | Stop line | VF2 max | Below the stop line | Σ(VF2 − setpoint) | Length |
-|---|---|---|---|---|---|---|
-| 23:40–00:16 | 27.5 | 34.5 | 33.0 | 1.5 K | ≈ 165 °min | ≈ 35 min |
-| 02:13–03:07 | 29.5 | 36.5 | 33.3 | 3.2 K | ≈ 135 °min | ≈ 52 min |
-| 04:12–05:01 | 29.5 | 36.5 | 33.7 | 2.8 K | ≈ 155 °min | ≈ 48 min |
-| 06:30–06:55 (after hot water) | 29.5 | 36.5 | 33.7 | 2.8 K | — | ≈ 25 min |
-| 08:12–08:43 | 29.5 → 27.5 → 27.0 | 34.0 after the write | 34.0 | 0 | ≈ 175 °min | 31.6 min |
+| Run | Whole-degree setpoint / stop line | Flow max | Integral at start → at stop |
+|---|---|---|---|
+| 11-17 04:10–04:46 (mild) | 26 / 33 | T6 31.75 | −183 → +7 |
+| 11-17 07:24–07:57 (mild) | 26 / 33 | T6 32.44 | −183 → +8 |
+| 11-20 02:24–02:51 (mild) | 24 / 31 | T6 31.12 | −181 → ≈ −8 |
+| 11-20 09:25–09:51 (mild) | 24 / 31 | T6 31.31 | −181 → 0…+3 |
+| 11-21/22 23:40–00:16 (cold) | 27 / 34 | VF2 33.0 | −184 → +8 |
+| 11-22 02:13–03:07 (cold) | 29 / 36 | VF2 33.3 | −186 → +3 |
+| 11-22 04:12–05:01 (cold) | 29 / 36 | VF2 33.7 | −186 → +4 |
+| 11-22 06:30–06:55, after hot water | 29 / 36 | VF2 33.7 | −113 → +3 |
+| 11-22 08:12–08:43 | 27 / 34 | VF2 34.0 | −185 → ≈ 0 |
 
-OBSERVED: in cold weather the runs did **not** end on the stop line. They ended 1.5–3.2 K below
-it, at VF2 33–34 °C, after a positive area of ≈ 135–175 °min, close to the 180 °min of the start
-integral. HYPOTHESIS: these runs ended on the energy integral (≈ 0 at the stop). That is the
-regime in which, by the note's run model ("Decisions in force", tuning levers), `CompIntegral`
-and not `CompHysteresis` sets the run length. A higher setpoint gives a smaller VF2 − setpoint
-excess and so a longer run (35 min at 27.5, ≈ 50 min at 29.5), through the integral, not
-through more headroom. Open: the start timing does not fit a simple −180 threshold on VF2 −
-fine setpoint. After the 00:16 stop that sum reached −180 at about 01:45, yet the start came at
-02:13, 2 min after the setpoint jump. So the integral's exact definition or reset is unknown.
+OBSERVED (9 of 9 runs, mild and cold):
+- Every run ended with the integral back at ≈ 0 (−8 … +8). The mild runs at setpoint 26 ended
+  0.5–1.3 K below the stop line, the cold ones 1.5–3 K below. At setpoint 24 both limits
+  coincided. So "mild weather ends on the stop line" does not hold for these runs.
+- Starts come at ≈ −183 … −186, 1–3 min after the integral crosses `CompIntegral`.
+- The integral sums VF2 − **whole-degree** setpoint, measured as a rate in four phases:
+  - off at 27.5: −1.71 per minute, matching VF2 − 27 = −1.7 (VF2 − 27.5 would be −2.2);
+  - running at 29.5: 3.81 per minute, matching 3.8 (fine would give 3.3);
+  - off: −3.13 per minute, matching −3.15 (fine −3.65);
+  - running: 5.76 per minute, matching 5.75 (fine 5.25).
+  This explains the 02:13 start: −170 at 02:10, and the 27 → 29 jump at 02:11 steepened the
+  drain to −180 by 02:13. It also supports A.4b: the generator works on whole degrees.
+- The integral is not reset at a stop (it keeps summing, e.g. +12 after 08:43). It is not
+  clamped (+88 seen on 11-17, compressor off). It freezes during hot water (−113, −75, −86).
+  After hot water the compressor ran on into heating at −113 on 11-22, but not on 11-17 or
+  11-20 (cause open).
+- The only stop on the stop line on record is one run on 11-06 (integral ≈ −125 at the stop;
+  T6 and whole-degree data, deleted cycling plan). Owner view, HYPOTHESIS: a run ends on
+  whichever comes first. Since mid-November the integral has come first in every run checked.
+
+Consequences (HYPOTHESIS, follow from the above):
+- **Run length** ≈ 180 °min ÷ (VF2 − whole setpoint), plus the ramp: ≈ 35 min at 27, ≈ 50 min at
+  29. **Pause** ≈ 180 ÷ (whole setpoint − VF2 while off). So a lower setpoint gives a larger
+  excess, shorter runs, and less headroom to the stop line.
+- **Lever for run length:** `CompIntegral` (deeper → proportionally longer runs and pauses).
+  `CompHysteresis` matters only where flow reaches the stop line first: low setpoints in mild
+  weather (≤ 24–25).
+- **`TempDesired` acts on the compressor only through floor(fine setpoint).** At 22.5 every
+  fine value seen ended in .5 (26.5, 27.5, 29.5); at 22.0 they end in .0. The floor is the same
+  in both cases, so **22.5 → 22.0 does not change the whole-degree setpoint at any outdoor
+  temperature seen so far.** If the compressor works on whole degrees, this change will not
+  cool the house. 21.5 would lower the whole-degree setpoint by 1 K wherever the fine values
+  end in .5 at 22.5. Check: compare the whole-degree setpoint at matching geoTHERM outdoor values
+  before and after 08:43 (27 at −2.4 … −1.9 °C both before and after so far).
+- `sensor.heating_compressor_stop_temp` adds the hysteresis to the **fine** setpoint (#189). If
+  the stop line, like the integral, uses whole degrees, it reads up to 0.5 K too high (34.5
+  instead of 34 at 27.5). Unproven until a stop on the stop line is seen with VF2 data. A YAML
+  change needs approval.
 
 ## References
 
@@ -589,11 +634,15 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder)
 - [DONE] 0.6 (e) half degrees count; (b) dropped (0.7 covers it); hypothesis (f) 2 K steps
 - Closed 2026-11-22 with the new data: (a) damping part, (c), "setpoint only computed while
-  running"; A.4b test (1) recheck 2026-11-24; cold-weather runs end on the integral (Observations)
+  running"; A.4b test (1) recheck 2026-11-24
+- OBSERVED (not closed): 9 of 9 runs since 11-17 ended on the integral (≈ 0), mild and cold; the
+  integral uses the whole-degree setpoint, so 22.5 → 22.0 likely changed nothing for the
+  compressor (2.1)
 - [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope or offset change
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
-- [IN_PROGRESS] 2.1 `TempDesired` 22.5 → 22.0 (2026-11-22 08:43); settle ≥ 4 qualifying days
+- [IN_PROGRESS] 2.1 `TempDesired` 22.5 → 22.0 (2026-11-22 08:43); probably no whole-degree effect:
+  owner decides between confirming (≈ 1 day) and 21.5
 - [TODO] 2.2 Tuning loop on the office
 - [TODO] 3.1–3.2 Hydraulic balancing
 - [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, 4.9 after A.4b test (1)
