@@ -33,9 +33,11 @@ Outdoor: the weatherstation `sensor.wheatherstation_outdoor_temperature` and the
 `sensor.wheatherstation_solar_radiation`. Machine: geoTHERM exclusiv **VWS 83/2**: device doc
 `doc/devices/vaillant-vws-83-2/` (manuals in its README; heating curves: `heating-curve.md`).
 
-**All settings go over ebus; the panel is read-only (owner, 2026-11-22).** What counts is the
-ebus register format and what the controller does with it, not the panel's display steps
-(decodes: device `registers-*.md`; read-only: step 0.10):
+**All settings go over ebus (owner, 2026-11-22).** For this automation the VR 90/3 and the unit's
+own menus are manual inputs only: they write a setting only when someone changes it there, and
+their whole-number entry steps do not limit the bus, so 0.5 K `TempDesired` writes are fine
+(device VWS-24). What counts is the ebus register format and what the controller does with it
+(decodes: device `registers-*.md`):
 
 | Setting | Register (catalog) | Bus format | How |
 |---|---|---|---|
@@ -104,7 +106,7 @@ automatically.
 | 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Forced reads after it: `mc` 26.5, `uih` 26.00 (was 27.0 / 27): W −1 K |
 | 2026-11-22 17:07:57 | `input_number.heating_comfort_temp` | 21.0 → 20.5 | Owner, 1 K below `TempDesired` (5.1) |
 | before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
-| unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20, outdoor offset 0 K | — | read live / owner, 2026-11-21 |
+| unchanged | everything else | — | current values: the note's "Owner-side configuration" |
 
 ## Baseline (summary of Part A, 2026-11-21)
 
@@ -128,12 +130,11 @@ whole-degree W and the curve's jumps (f).
 - (a) The geoTHERM outdoor value is offset from the weatherstation (first night ≈ 1 K colder).
   Damping refuted (jumps fall in the same 5 min as the edge crossing). Step 0.5, informative only.
 - (b) Below 0.2 the curve does not follow the formula: answered passively by 0.7.
-- (f) The curve works in **2 K steps** over outdoor temperature. OBSERVED: one edge at ≈ −2.5 °C
-  (geoTHERM value), 27.5 ↔ 29.5 at 0.14 / 22.5, crossed once each way on 2026-11-22 with no
-  hysteresis; flat in between. Fits the 0.13 period's 24 ↔ 26 jumps (never 25). **Not always
-  2 K** (OBSERVED 2026-11-22, 0.14 / 22.0): 27 ↔ 26 at geoTHERM ≈ 1.9 °C (1.81 ↔ 2.06), up 11:10,
-  down 16:30, no hysteresis. Open: the other edges, the step sizes, whether `TempDesired` or the
-  offset moves the edges (0.7).
+- (f) The curve works in **steps** over outdoor temperature, flat in between (2 K and 1 K seen).
+  OBSERVED 2026-11-22, no hysteresis at either edge: 27.5 ↔ 29.5 (2 K) at ≈ −2.5 °C geoTHERM
+  value, 0.14 / 22.5, crossed once each way; 27 ↔ 26 (1 K) at ≈ 1.9 °C (1.81 ↔ 2.06), 0.14 /
+  22.0, up 11:10, down 16:30. The 0.13 period's 24 ↔ 26 jumps (never 25) were 2 K. Open: the other
+  edges, the step sizes, whether `TempDesired` or the offset moves the edges (0.7).
 
 ## Steps
 
@@ -150,8 +151,8 @@ whole-degree W and the curve's jumps (f).
   `TempDesired` (22.5 until 11-22 08:43, then 22.0). Per setting: a table of edges (outdoor °C)
   and levels (flow °C) next to the formula. Questions: fixed step size? Edges fixed or moved by
   `TempDesired`? Hysteresis? Why: with a stepped curve, a slope change of 0.01 may do nothing or
-  shift a whole step, and an offset may move every edge. Is the whole curve stepped (2 K), or
-  only the edge seen (device VWS-30)? Candidate causes of W 0–2 K below the formula (UNPROVEN):
+  shift a whole step, and an offset may move every edge. Is the whole curve stepped (2 K and 1 K seen), or
+  only the edges seen (device VWS-30)? Candidate causes of W 0–2 K below the formula (UNPROVEN):
   W's floor, the steps, the colder outdoor value. Enough when edges span about −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (VWS-30).
 - [TODO] **0.8** Outdoor offset hypotheses (a) and (b). Tested when the Phase 2 table first calls
   for an offset change. Settles the open questions on VWS-36. Research: bus format and addresses
@@ -167,9 +168,8 @@ whole-degree W and the curve's jumps (f).
   Result → "Observations"; the step size goes into the Phase 2 table.
 - [DONE] **0.9** Menu A2 (owner, 2026-11-22): hydraulic plan 6, electrical plan 3; plan-6
   statements apply (device `README.md` Identity, VWS-2, -4, -7, -18).
-- [TODO] **0.10** Owner at the panel: which menus can be changed, with and without the installer
-  code (the manual: code-level menus only with the code)? `TempDesiredLow`, curve and frost
-  settings were set at the unit. Result → device `behaviour.md` with a T row.
+- [DROPPED] **0.10** Which panel menus can be changed: not needed, the panels are manual inputs
+  only (owner, device VWS-24).
 - [TODO] **0.11** Does a `TempDesired`-only write start or stop the compressor (device VWS-25,
   design HPB-1 Known gaps)? At the next 2.2 change, with the integral far from 0 and VF2 far
   from the stop line, log compressor state, integral, VF2, W and fine setpoint to the second,
@@ -332,10 +332,9 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 
 ## Status
 
-- [DONE] 0.1–0.4, 0.6, 0.9; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8
-  (offset test at the first offset change), 0.10 (panel read-only, owner), 0.11 (`TempDesired`
-  write vs compressor, at the next 2.2 change), 0.12 (run-on after
-  hot water, passive)
+- [DONE] 0.1–0.4, 0.6, 0.9; [DROPPED] 0.10; [TODO] 0.5 (informative), 0.7 (edges, before any
+  slope change), 0.8 (offset test at the first offset change), 0.11 (`TempDesired` write vs
+  compressor, at the next 2.2 change), 0.12 (run-on after hot water, passive)
 - [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
 - [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
   (W 27 → 26 confirmed by forced read), evaluate from 2026-11-27

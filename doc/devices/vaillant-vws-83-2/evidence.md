@@ -55,3 +55,4 @@ Rows no fact cites (T16): `evidence-archive.md`.
 | T47 | 2026-11-22 | HA history of one hot-water run (17:01) | `uih/FlowTempDesired` and `mc/FlowTempDesired` both read 0 during hot water, as does `mc/Status0a` field 4 | OBSERVED |
 | T48 | 2026-11-22 | owner write `mc/TempDesired` 22.0 → 21.5 (17:07, during hot water), forced reads after | `mc/FlowTempDesired` 27.0 → 26.5, `uih/FlowTempDesired` 27 → 26.00: W −1 K | OBSERVED |
 | T49 | 2026-11-22 | HA history, 0.14 / `TempDesired` 22.0 | W 27 ↔ 26 at unit outdoor ≈ 1.9 °C (1.81 ↔ 2.06), up 11:10, down 16:30, no hysteresis: a 1 K step | OBSERVED |
+| T50 | 2026-11-22 | owner | the VR 90/3 and the unit's own (installer) menus read and write, but write a setting only when someone changes it there, never on their own; the VR 90/3 otherwise sends only its room temperature; settings entered there are whole numbers | OBSERVED |

@@ -65,8 +65,8 @@ setpoint.
 ### What the package does about unit facts
 
 - Never use `700`-circuit registers (`Hc1RoomCircuitMode`, `Z1DayTemp`): no VRC 700 here (device
-  VWS-38). HA is the only bus writer of `mc/OperatingMode` and `mc/TempDesired`: the VR 90 writes
-  neither, and a written value stays (device VWS-24).
+  VWS-38). HA is the only automatic bus writer of `mc/OperatingMode` and `mc/TempDesired`: the VR 90 and
+  the unit's menus write only on a manual change, and a written value stays (device VWS-24).
 - Ignore catalog entries gated `[id_sw>=…]` above 383; do not plan on pump speed, it has no
   software path (device VWS-23).
 - Read compressor state from `ehp/Comp`, never from hcmode, which stays `heat` between runs;
@@ -179,8 +179,8 @@ setpoint.
   heating starts a day, runs ≥ 20–30 min. Met in mild weather at hysteresis 7 K and start integral
   −180 °min (2026-11-14…20: ≈ 5 heating + 2 hot-water starts a day, daily mean run 22–30 min;
   baseline before: 9–11 heating starts). OBSERVED, confounded: the heating curve and `TempDesired`
-  changed in the same window, and the owner raised `CompHysteresis` from (likely) 6 to 7 K during
-  the cycling tuning (date unknown; HA keeps no history of it). Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, owner
+  changed in the same window, and so did `CompHysteresis` (likely 6 → 7 K; dated in the
+  `plans/heating-curve-tuning.md` change log). Lifetime average heating run ≈ 60 min (13277 h ÷ 13385 starts, owner
   read), so short runs are a mild-weather effect.
 - **Tuning levers, in order** (if runs shorten again; one change at a time, ≥ 3 nights of similar
   weather each): (1) the heating-circuit pump speed would be the main lever but has no software
