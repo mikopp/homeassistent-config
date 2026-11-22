@@ -101,13 +101,9 @@ change; their current values are kept by the package note named in `README.md` U
   flow and moves the curve's edges and every outdoor threshold: frost protection, AT-Abschaltgrenze,
   cooling release), and does the controller keep values finer than 1 K (VWS-36)?
   `plans/heating-curve-tuning.md` step 0.8
-- Why the compressor sometimes runs on into heating after hot water (`runs.md`):
-  `plans/heating-curve-tuning.md` step 0.12
 - hcmode `cooling` never seen yet; the cooling release (VWS-16 [ASSUMED]); does `TempDesired`
   move it; does heating mode `off` leave cooling running (VWS-15)?
   `plans/heating-cycling-from-ehp.md` step 14
-- Which pump runs on for `HwcLaggingTime` and where the water goes (VWS-13):
-  `plans/heating-cycling-from-ehp.md` step 17
 - Whether a call for heat is honoured above `OtShutdownLimit`; the `off` spell at ≈ 13 °C
   (VWS-17); whether the pump runs while hcmode is `off`; under frost protection with `off`,
   whether the room temperature is ignored and whether it repeats (VWS-6):

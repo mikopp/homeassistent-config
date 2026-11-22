@@ -57,9 +57,9 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
 | `ehp/Hc1Pump` on | `passive_heating` | heating |
 | otherwise | `off` | standby |
 
-- The hot-water run-on row exists for the unit's run-on after a hot-water charge
-  (`HwcLaggingTime`); that `ehp/Hc1Pump` is the pump running then is open (Known gaps).
-  Rests on: (device VWS-13)
+- The hot-water run-on row has not fired in the charge ends checked: hcmode leaves `water`
+  before the compressor stops, and the tail runs at heating power into the heating circuit, so
+  `active_heating` books it, the right bucket. Rests on: (device VWS-13)
 - The geoTHERM cools passively only: the compressor never runs for cooling, so checking
   the compressor first is safe. Rests on: (device VWS-14)
 - Cooling is `hvac_action` (what the machine does now), not `binary_sensor.heating_cooling_active`
@@ -83,6 +83,3 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
   rule rests on it; settling it: `plans/heating-curve-tuning.md` step 0.11.
 - HPB-1 row 2: that heating mode `off` leaves cooling running is untested (device VWS-15);
   settling it: `plans/heating-cycling-from-ehp.md` step 14.
-- HPB-2 hot-water run-on row: which pump runs on after a hot-water charge, and so whether
-  `ehp/Hc1Pump` shows it, is open (device VWS-13); settling it:
-  `plans/heating-cycling-from-ehp.md` step 17.

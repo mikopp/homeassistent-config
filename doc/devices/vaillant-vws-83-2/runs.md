@@ -44,10 +44,11 @@ charges fit into runs; indexed by `behaviour.md`. Only the unit, never HA; regis
   `CompStartsHwc` [T30]. The two start counters add up to the compressor starts [T30]. Heating
   gives way to hot water after "Max. Heizzeit" (factory 20 min) and hot water to heating after
   "Max. Ladezeit WW" (factory 40 min) when both ask [IA p.69].
-- **VWS-13** End of a hot-water charge: either straight to the idle pump level (~81 W) or a short
-  heating segment (~1.8 kW for ~2.5 min) before the compressor stops [T31]. The catalog has a
-  run-on after a hot-water charge, `HwcLaggingTime` ("WP Nachlaufzeit WW") [CAT], 3 min here
-  [T9]; which pump runs on and where the water goes: Open questions.
+- **VWS-13** End of a hot-water charge: every charge seen ends with 2–4 min of compressor at
+  heating power (~1.8–1.9 kW) into the heating circuit before it stops; hcmode has already left
+  `water` [T31] [T52]. The tail warms the flow (VF2 +12 K) and adds to the integral [T52]. A
+  5 min power mean hides it (trap: looks like "straight to idle"). Cause unproven: the catalog's
+  `HwcLaggingTime` ("WP Nachlaufzeit WW") [CAT] is 3 min here [T9] and fits.
 - **VWS-12** During a hot-water charge `ehp/HcReturnTemp` and the `ehp/Status` flow field read the
   hot-water circuit (51–56 °C), back to the slab level (24.7–26 °C) within the 5 min bucket the
   charge ends, no thermal tail, 7 of 7 runs [T32]. `mc/Status0a` field 4 reads 0 during hot water

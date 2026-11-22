@@ -175,9 +175,8 @@ whole-degree W and the curve's jumps (f).
   from the stop line, log compressor state, integral, VF2, W and fine setpoint to the second,
   5 min before to 10 min after. No change while W stays → no other path; a start or stop within
   seconds → a direct path. Repeat once. Result → device VWS-25, design Known gaps.
-- [TODO] **0.12** Why the compressor sometimes runs on into heating after hot water (11-22 at
-  integral −113, not 11-17 or 11-20). Passive: per hot-water end note integral, VF2 − W,
-  charge duration (vs "Max. Ladezeit WW" 40 min), run-on yes/no. Result → device `runs.md`.
+- [DONE] **0.12** Run-on into heating after hot water: not "sometimes", every charge ends with a
+  2–4 min heating tail that adds to the integral (device VWS-13).
 
 ### Phase 1 — settle the current setting
 
@@ -332,9 +331,9 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 
 ## Status
 
-- [DONE] 0.1–0.4, 0.6, 0.9; [DROPPED] 0.10; [TODO] 0.5 (informative), 0.7 (edges, before any
+- [DONE] 0.1–0.4, 0.6, 0.9, 0.12; [DROPPED] 0.10; [TODO] 0.5 (informative), 0.7 (edges, before any
   slope change), 0.8 (offset test at the first offset change), 0.11 (`TempDesired` write vs
-  compressor, at the next 2.2 change), 0.12 (run-on after hot water, passive)
+  compressor, at the next 2.2 change)
 - [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
 - [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
   (W 27 → 26 confirmed by forced read), evaluate from 2026-11-27
