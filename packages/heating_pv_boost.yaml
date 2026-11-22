@@ -163,24 +163,23 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | float | round(0) }}"
 
-    # mc/Status0a = flowtemp;mixer;pump;onoff;flowtempdesired. Field 4 is the flow SETPOINT the
-    # weather curve currently asks for (integer °C). Compared against the actual flow temp, the
-    # overshoot at the moment a run ends tells whether ehp/CompHysteresis is what stopped it.
-    - name: "Heating Circuit Flow Temp Desired"
+    # uih/FlowTempDesired — the flow setpoint the system controller hands to the generator: the
+    # whole-degree floor of mc/FlowTempDesired, and the value ehp/Integral counts against
+    # (→ doc/heating_pv_boost/registers.md). Was mc/Status0a field 4 (same value, but lagging and
+    # 0 during hot water); same entity, so its history continues.
+    - name: "Heating System Flow Temp Desired"
       unique_id: heating_circuit_flow_temp_desired
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired
-      state_topic: "ebusd/mc/Status0a"
+      state_topic: "ebusd/uih/FlowTempDesired"
       unit_of_measurement: "°C"
       device_class: temperature
       state_class: measurement
       icon: mdi:thermometer-chevron-up
       device: *ebusd_geotherm
-      value_template: >-
-        {% set f = value.split(';') %}
-        {{ f[4] | float | round(1) if f | count > 4 and f[4] | trim | float(none) is not none else '' }}
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(1) }}"
 
-    # mc/FlowTempDesired — the same circuit flow setpoint as mc/Status0a field 4, but in 0.5 K
-    # steps instead of whole °C. Read to check the curve against the formula in
+    # mc/FlowTempDesired — the circuit's weather-curve output in 0.5 K steps (uih above passes on
+    # its whole-degree floor). Read to check the curve against the formula in
     # doc/heating_pv_boost/heating-curve.md (with the outdoor temp and the curve below).
     - name: "Heating Circuit Flow Temp Desired Fine"
       unique_id: heating_circuit_flow_temp_desired_fine
@@ -973,7 +972,8 @@ template:
 
       # ── Compressor stop temperature (flow setpoint + hysteresis) ──────────
       # Where ehp/CompHysteresis forces the compressor off: flow above setpoint + hysteresis
-      # (setpoint from mc/FlowTempDesired, 0.5 K; mc/Status0a field 4 is whole °C only)
+      # (setpoint from uih/FlowTempDesired, whole °C: the integral's reference; that the stop
+      # line uses it too is UNPROVEN, → plans/heating-curve-tuning.md)
       # (no buffer: hydraulic plan 6 on the exclusiv — this house). Plotted next to the actual flow temp on the
       # "Why runs end" graph: if the flow reaches this line exactly when a run ends, the hysteresis
       # cut the run short. In cold weather it also shows how close the stop point comes to
@@ -986,10 +986,10 @@ template:
         state_class: measurement
         icon: mdi:thermometer-alert
         availability: >
-          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired_fine')
+          {{ has_value('sensor.geotherm_heating_circuit_flow_temp_desired')
              and has_value('sensor.geotherm_heating_compressor_hysteresis') }}
         state: >
-          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired_fine') | float)
+          {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)
               + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
 
       # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
@@ -1325,7 +1325,7 @@ automation:
           payload: "?5"
       - action: mqtt.publish
         data:
-          topic: "ebusd/mc/Status0a/get"
+          topic: "ebusd/uih/FlowTempDesired/get"
           payload: "?5"
       - action: mqtt.publish
         data:

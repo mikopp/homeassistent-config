@@ -215,7 +215,8 @@ room temperature is ignored then is UNPROVEN (likely, with Raumaufschaltung `Kei
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope, set at the panel) |
 | `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp` = the value of `ehp/OutsideTemp`, the geoTHERM's outdoor sensor (owner: one and the same, so `ehp/OutsideTemp` is not read separately); the sensor sits on the north side without sun (owner); read 0.65 K below the weatherstation (3.75 vs 4.4 °C; owner, 2026-11-21 evening, one reading) |
-| `sensor.geotherm_heating_circuit_flow_temp_desired_fine` | `mc/FlowTempDesired` (0.5 K steps; the same setpoint `Status0a` field 4 gives in whole °C, owner forced reads) |
+| `sensor.geotherm_heating_circuit_flow_temp_desired_fine` | `mc/FlowTempDesired`, the curve output (0.5 K steps) |
+| `sensor.geotherm_heating_circuit_flow_temp_desired` | `uih/FlowTempDesired`, its whole-degree floor: what the integral and `sensor.heating_compressor_stop_temp` use (`registers.md`) |
 | `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |
 | `binary_sensor.geotherm_heating_compressor_running` | `ehp/Comp` |
 | `binary_sensor.geotherm_heating_circuit_pump` | `ehp/Hc1Pump` |

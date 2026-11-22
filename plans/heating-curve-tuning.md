@@ -561,25 +561,19 @@ are already throttled a bit from last year's balancing; no flow-meter readings a
 - [DONE] **4.7** `sensor.geotherm_heating_outdoor_temp` (`Broadcast/Outsidetemp`, no poll) (#188).
 - [DONE] **4.8** `sensor.geotherm_heating_flow_temp_vf2` (`ehp/FlowTemp`, `?3`), on the
   Temperatures card and the "Why runs end" graph against the stop line (owner, 2026-11-21).
-- [TODO] **4.9** (revised 2026-11-22, proposal, needs owner approval) The whole-degree setpoint
-  is what the compressor works on (`uih/FlowTempDesired`, CONFIRMED). So it is not removed; it is
-  re-sourced from `uih`, the actual hand-over value:
-  - New MQTT sensor on `ebusd/uih/FlowTempDesired` (D2C; plain value): "System flow temp
-    desired (compressor reference)". Bridge lines `topic ebusd/uih/FlowTempDesired in 0` and
-    `.../get out 0`, a `?N` poll, and the `_POLLS` test literal. It replaces the `mc/Status0a`
-    field 4 sensor (that sensor, its `?5` poll, group entry, tests, baseline and its 2 bridge
-    lines go; its long-term statistics stay). Why `uih` and not field 4: field 4 equals floor(fine)
-    but lags ≈ 6 min (its own poll) and reads 0 during hot water. It is the circuit's status
-    message, not the value passed to the generator. What `uih` shows during hot water is unknown:
-    check after deploy.
-  - `sensor.heating_compressor_stop_temp`: base it on the `uih` value instead of the fine one
-    (#189). The integral is CONFIRMED on whole degrees. The stop line is UNPROVEN but most likely
-    the same value: say so in the YAML comment.
-  - Dashboard: "Why runs end" plots the `uih` value (the integral's reference) instead of the
-    fine one. "Curve check" keeps the fine value (the curve output, needed for 0.7) and adds the
-    `uih` value. Status card: both rows, with names that say which is which.
-  - No decision reads either setpoint (slab decision, writer): no logic change.
-  Depends on: owner approval; the package rules (`.claude/rules/ha-yaml.md`) and tests.
+- [IN_PROGRESS] **4.9** Whole-degree setpoint re-sourced from `uih` (owner approved
+  2026-11-22; implemented, deploy pending). The existing entity
+  `sensor.geotherm_heating_circuit_flow_temp_desired` now reads `ebusd/uih/FlowTempDesired`
+  (was `mc/Status0a` field 4), so its history continues; `sensor.heating_compressor_stop_temp`
+  uses it instead of the 0.5 K value; dashboard: "Why runs end" plots it, "Curve check" and the
+  status card show both. Left after deploy (owner):
+  - Bridge lines on the HA broker host, then restart Mosquitto: `topic ebusd/uih/FlowTempDesired
+    in 0`, `topic ebusd/uih/FlowTempDesired/get out 0`. The two `mc/Status0a` lines can go.
+  - Check: the sensor shows the `uih` value (≈ floor of the fine one) within a poll cycle.
+  - Open: what `uih` shows during hot water (0, the hot-water setpoint, or the heating value).
+    A jump there would also move the stop line; note it in Observations.
+  - Open: whether the stop line uses the whole-degree value (UNPROVEN): a stop-line stop at
+    W + 7 rather than fine + 7 decides it.
 
 ### Phase 5 — writer and sunny-day exception
 
@@ -637,7 +631,7 @@ OBSERVED:
   08:22. Whether the write itself triggered the stop is unknown. (An earlier reading here,
   "stop line flipping", assumed the fine setpoint and is withdrawn.)
 - A.4b test (1): whole-degree = floor(fine) at every value seen over 13 h (see (c)). The plan
-  asks for ≥ 3 days: recheck on 2026-11-24, then 4.9.
+  asked for ≥ 3 days; superseded by the `uih` A/B test (CONFIRMED), 4.9 went ahead.
 
 **Run starts and ends from `sensor.geotherm_heating_energy_integral`** (`ehp/Integral`, already
 recorded; 5 min statistics; checked 2026-11-22; `CompIntegral` −180 °min, `CompHysteresis` 7 K):
@@ -808,7 +802,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
   owner decides between confirming (≈ 1 day) and 21.5
 - [TODO] 2.2 Tuning loop on the office
 - [TODO] 3.1–3.2 Hydraulic balancing
-- [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, 4.9 re-source the whole-degree setpoint from uih (proposal)
+- [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, [IN_PROGRESS] 4.9 setpoint from uih: implemented, bridge lines + hot-water check after deploy
 - [DONE] 5.1; [TODO] 5.2 deferred (`warm_enough`)
 - [TODO] Close
 

@@ -352,7 +352,7 @@ _COMPRESSOR_TABLE = Table(
         "hvac": _HVAC,
         "comp": _COMP,
         "pump": _PUMP,
-        "flow_desired": _ebus("mc/FlowTempDesired"),  # 0.5 K setpoint
+        "flow_desired": _ebus("uih/FlowTempDesired"),  # whole-degree system setpoint
         "hysteresis": _ebus("ehp/CompHysteresis"),
         "yield": Input("ebusd/ehp/YieldTotal", None, lambda kwh: str(int(kwh))),
         "elec_wh": _HEAT_ENERGY,
@@ -412,11 +412,11 @@ COMPRESSOR_CASES = [
          then=[Step(seeds={"runtime": ("0.0", _H), "starts_hc": ("0", {}),
                            "starts_hwc": ("0", {})},
                     expect={"average": near(0)})]),
-    # Live 2026-10-30: setpoint 24 °C + hysteresis 7 K → forced stop at 31 °C; the half degree of
-    # mc/FlowTempDesired is kept (26.5 + 7 = 33.5, owner forced read 2026-11-21).
+    # Live 2026-10-30: setpoint 24 °C + hysteresis 7 K → forced stop at 31 °C. The base is the
+    # uih setpoint (27 while mc read 27.5, owner 2026-11-22): 27 + 7 = 34, not 34.5.
     Case(name="stop_temp_is_flow_setpoint_plus_hysteresis",
          inputs={"flow_desired": 24, "hysteresis": "7.0"}, expect={"stop_temp": near(31)},
-         then=[Step(inputs={"flow_desired": 26.5}, expect={"stop_temp": near(33.5)})]),
+         then=[Step(inputs={"flow_desired": 27}, expect={"stop_temp": near(34)})]),
     # 9 kWh heat from 3 kWh electricity → 3.0.
     Case(name="efficiency_is_heat_over_electricity_once_meaningful",
          inputs={"yield_inc": 9, "elec_inc": 3},
