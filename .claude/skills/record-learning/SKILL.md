@@ -54,6 +54,7 @@ mechanisms fitted to one confirming run, and both sent later sessions down wrong
   OBSERVED, and usually not a learning at all (section 0).
 - **OBSERVED** = real data from a real run, but a plausible alternative explanation is still open.
 - **UNPROVEN** = a hypothesis kept only so it is not re-litigated from scratch.
+- **DOC** = a manufacturer document, not tested here (device docs only).
 
 Never promote a learning a grade without new evidence. Write the grade next to any claim that is
 not CONFIRMED.
@@ -61,11 +62,11 @@ not CONFIRMED.
 ## 3. Route it to its one home
 
 Before editing any knowledge file: read `doc/KNOWLEDGE.md`, then `wc -c` the target. A note over
-its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replace something.
+its cap (K-1.2: 24,000 chars) takes no new entry: move content per K-1.2 or have the entry replace something.
 
 | The learning is… | Write it to |
 |---|---|
-| a fact about a physical unit itself, true whichever package uses it (behaviour, measured value, a lever that works or does not, register decode, manual page, test on the unit) | `doc/devices/<device>/` per the `device-knowledge` skill (tagged; T row in `evidence.md`); the package note points to it |
+| a fact about a physical unit itself, true whichever package uses it (first matching row wins): behaviour, measured value, a lever that works or does not, register decode, manual page, test on the unit | `doc/devices/<device>/` per the `device-knowledge` skill (tagged; T row in `evidence.md`); the package note points to it |
 | a current fact about one package that an editor needs before touching its YAML/tests (invariant, quirk, measured value, entity, owner value), even one behind a design decision | `doc/<pkg>/notes.md`, graded; a design doc cites it, never copies it (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | how a component works, a state machine or decision table, a decision with its rejected alternative, an invariant's mechanism, a contract with another package, an extension rule | `doc/<pkg>/design.md` (K-4.1 gate; create at the K-4 threshold), plus a one-line `→ design.md#ID` in the note if breaking it fails silently |
 | a known architectural gap or accepted risk | a GitHub issue; link `#n` from the note AND the design doc's Known gaps |
@@ -73,15 +74,14 @@ its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replac
 | a story about a cross-package topic (e.g. the test framework) | `doc/<topic>/background.md` |
 | a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |
 | a cross-package topic fact (templates, MQTT, energy, tests …) | the matching skill in `.claude/skills/`, or a new skill |
-| needed in every session | root `CLAUDE.md` (keep it < 100 lines) |
+| needed in every session | root `CLAUDE.md` (keep it < 8,000 chars) |
 | a hypothesis | the feature's `plans/` file, marked UNPROVEN |
 | a confirmed bug or flaky test not being fixed now | a GitHub issue (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts |
 | local to one YAML block | a YAML comment only, not also the note (`doc/KNOWLEDGE.md#K-1.1`, K-5) |
 | contradicted | delete or strike through where it lives |
 
-One home per fact: other places point to it, never copy it (the only fact with pointers in two
-places is a gap: the issue is its home). Keep entries dense and actionable;
-skip trivial details.
+One home per fact; the only allowed copy is the anchored one-liner of K-6. When editing either
+side of an anchor, re-check the other. Keep entries dense and actionable; skip trivial details.
 
 ## 4. No dated logs
 

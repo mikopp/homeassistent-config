@@ -5,20 +5,20 @@ link them as `doc/KNOWLEDGE.md#K-6`, never renumber, mark retired IDs as gone.
 
 ## K-1 Where knowledge lives
 
-| Home | What goes there | How it loads | Limit |
-|---|---|---|---|
-| root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start | < 100 lines |
-| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`; `plans.md` for plan format/status/close; `devices.md` for device-doc format; `knowledge.md`, which sends to this file when knowledge files are touched) | lazily, when a file matching its `paths:` is read | ~4 KB |
-| `doc/<pkg>/notes.md` | what an agent must know before editing the package (see K-1.1, K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` | ≤ 24 KB |
-| `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`) | on demand, when the task matches the skill description | one topic per skill |
-| `doc/<pkg>/design.md` | current architecture: components, decision tables, interfaces, decisions and trade-offs, known gaps, extension points (see K-1.1, K-4) | on demand (read when needed) | aim ≤ 24k, cap 40k chars |
-| `doc/devices/<device>/` | one physical unit, independent of HA and of the packages using it: identity, references, behaviour, control (what works, what does not), interface, test evidence (see K-9) | on demand; `.claude/rules/devices.md` loads when a device doc is read | each file aim ≤ 24k, cap 40k chars |
-| `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history | none |
-| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. the test framework) | guarded like package background | none |
-| YAML comments | what a block does + one-line why + pointer (see K-1.1, K-5) | with the file | short |
-| `plans/` | open work and hypotheses only | when working on that plan | deleted when done |
-| GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` | n/a |
-| git history / PRs | the log: what changed when and why | `git log`, `gh pr view` | n/a |
+| Home | What goes there | How it loads |
+|---|---|---|
+| root `CLAUDE.md` | rules needed in every session (constraints, version gate, MCP, config layout, this table) | always, at session start |
+| `.claude/rules/*.md` | cross-package rules tied to file types (`ha-yaml.md`, `tests.md`; `plans.md` for plan format/status/close; `devices.md` for device-doc format; `knowledge.md`, which sends to this file when knowledge files are touched) | lazily, when a file matching its `paths:` is read |
+| `doc/<pkg>/notes.md` | what an agent must know before editing the package (see K-1.1, K-3) | lazily: the note has its own `paths:` frontmatter and is symlinked as `.claude/rules/packages/<pkg>.md` |
+| `.claude/skills/<topic>/` | cross-package topic knowledge (templates, MQTT, energy, test harness) and workflows (`record-learning`); one topic per skill | on demand, when the task matches the skill description |
+| `doc/<pkg>/design.md` | current architecture: components, decision tables, interfaces, decisions and trade-offs, known gaps, extension points (see K-1.1, K-4) | on demand (read when needed) |
+| `doc/devices/<device>/` | one physical unit, independent of HA and of the packages using it: identity, references, behaviour, control (what works, what does not), interface, test evidence (see K-9) | on demand; `.claude/rules/devices.md` loads when a device doc is read |
+| `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history, superseded designs, investigations; raw transcripts, spreadsheets | guarded, read only when the user asks for history |
+| `doc/<topic>/background.md` | the same for a cross-package topic with a skill (e.g. the test framework) | guarded like package background |
+| YAML comments | what a block does + one-line why + pointer (see K-1.1, K-5) | with the file |
+| `plans/` | open work and hypotheses only; deleted when done | when working on that plan |
+| GitHub issues | confirmed bug or flaky test not being fixed now (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts | `gh issue view <n>` |
+| git history / PRs | the log: what changed when and why | `git log`, `gh pr view` |
 
 Rules:
 - **Never use `@` imports in a rule.** They are expanded eagerly at launch, so the imported file is
@@ -30,15 +30,14 @@ Rules:
   skills, design docs, YAML comments and tests must not link, cite or point to
   `doc/<pkg>/background.md` or `doc/sources/` (no "story → background", no "worked example in
   background"). A pointer invites the read the guard exists to prevent. If a fact matters, state it
-  where it is needed; if it does not, leave it out. Exempt: this file, the root `CLAUDE.md` homes
-  table and the `record-learning` routing table (they name background as a destination, not as
-  something to read), the guard in `.claude/settings.json`, and plans that route content there.
+  where it is needed; if it does not, leave it out. Exempt (they name background as a
+  destination): this file, root `CLAUDE.md`, the `record-learning` routing table, the guard in
+  `.claude/settings.json`, plans. The layout check (K-8) warns on any other mention.
   Sources live under `doc/sources/<pkg>/` (one tree, easy to guard), not inside `doc/<pkg>/`.
   Guard (`.claude/settings.json` `permissions.ask`): `Read(/doc/**/background*.md)`,
   `Read(/doc/sources/**)`, `Bash(cat doc/**/background*)`, `Bash(cat doc/sources/*)`.
-  Verified headless 2026-11-07: Read and `cat` are blocked; Grep content search is NOT blocked
-  (it printed the token), nor are other shell readers. The guard is a prompt, not a wall.
-- No dated logs anywhere. Git and PRs are the log.
+  The guard is a prompt, not a wall: Grep and other shell readers pass (K-8).
+- No dated logs anywhere (`evidence.md` T rows are evidence, not logs: K-9). Git and PRs are the log.
 
 ### K-1.1 Note, YAML comment or design doc?
 
@@ -87,6 +86,28 @@ One home per kind of fact. Ask the question of each home in order; the first "ye
   reason, or finds a mistake in it, also replaces any entity id, entity list or map in the part
   they touch with a role, name or source attribute.
 
+### K-1.2 Size caps
+
+Characters, never lines; hard (error) / warn. Source: `SIZE_CAPS` in the layout check (K-8).
+Not capped: `_template`, background, `doc/sources/`, `references/`.
+- root `CLAUDE.md` 8,000/7,000; skill `description:` 500/400; rule 5,000/4,000; `SKILL.md` body
+  20,000/12,000 (and > 500 lines); other skill files 40,000/30,000
+- note 24,000/21,600; `tests.md` 8,000/6,000; design doc 40,000/24,000 (and a section > 3,000);
+  package reference doc (`registers.md`) 40,000/30,000; `doc/KNOWLEDGE.md` 30,000/26,000;
+  `plans/*.md` 40,000/25,000
+- device `README.md` 8,000/6,000; `behaviour.md` 24,000/20,000; `interface.md` 40,000/32,000;
+  `evidence*.md` and topic files 40,000/30,000
+
+At a cap, move; never raise it:
+- note, in this order: unit facts → device doc; mechanisms → design (K-4.1); test facts →
+  `tests.md`; register decodes → `interface.md`. Cut dated values, stories, hypotheses. Never cut
+  an invariant: move it, leave a pointer.
+- device `behaviour.md`: split per subsystem into `<topic>.md`; it keeps the `## Control` and
+  `## Does not work` index. `interface.md`: split per circuit. `evidence.md`: rows no fact cites
+  move to `evidence-archive.md`; never delete a row or reuse a T number.
+- plan: collapse finished steps to one line, distil confirmed facts early. Rule: how-to → a
+  skill. `SKILL.md`: reference material → `references/*.md`.
+
 ## K-2 Current vs background
 
 - **Current** = what an agent needs to understand or change the package as it runs today:
@@ -105,24 +126,26 @@ short why in the note or design doc, with no link to background (K-1).
 Frontmatter `paths:` lists the package YAML, its tests (`tests/ha/test_<pkg>.py`; `tests/e2e/` only when a real-HA test targets the package), and `doc/<pkg>/design.md` if one exists.
 Never list background or sources. Sections, in order:
 
-1. Header: scope, rule paths, design-doc link (`doc/<pkg>/design.md`, `<PKG>-*` IDs)
+1. Header: scope, rule paths, design-doc link (`doc/<pkg>/design.md`, `<PKG>-*` IDs); per unit
+   the package drives a `Device:` line: folder + when to read which file (conditional, never
+   "read first"), e.g. `Device: doc/devices/<d>/ — read behaviour.md before changing a
+   write to the unit or reasoning about how it reacts; interface.md before adding a register.`
 2. Invariants: one line each; when a design ID holds the mechanism, end with `→ design.md#ID`
    and do not restate it (K-1.1)
 3. Hardware / integration quirks (graded; a design doc cites them, never copies them). A fact
    about the unit itself lives in its device doc (K-9); the note keeps only what this package
-   must do about it, one line with a pointer `(device: <file> <section>)`
+   must do about it, one line ending `(device <ID>)` (K-6 copy rule)
 4. Entity map (IDs from `default_entity_id` or ha-mcp lookup, never from `unique_id`); the full
    map lives here, never in the design doc
 5. Decisions in force (one-line why; no background link)
 6. Known biases / open issues (`#n`; the design doc's Known gaps lists the architectural ones by
    `#n`, the note keeps the entry and its grade)
 7. Tests: package-specific test facts only (generic harness knowledge is in the `ha-test-harness`
-   skill). Above ~2 KB, split into `doc/<pkg>/tests.md` with its own symlink rule and
+   skill). Above ~2,000 chars, split into `doc/<pkg>/tests.md` with its own symlink rule and
    `paths:` only `tests/ha/test_<pkg>.py` (plus the `tests/e2e/` files that cover the package, if any).
 8. Related
 
-Size: ≤ 24 KB (~6k tokens). Over that, move mechanisms and derivation results to `design.md`
-(K-4.1 gate) and stories to background.
+Size: K-1.2 (caps; what to move at a cap).
 
 ## K-4 Design docs (`doc/<pkg>/design.md`)
 
@@ -141,12 +164,20 @@ auto-loaded. No history, no noise. Gate before writing: K-4.1.
   X, and what breaks if done otherwise).
 - **Does not belong here:** implementation detail (K-1.1 table); history ("was", "no longer",
   "since #n", "pre-#n", "originally"), stories, derivation work, step logs, dated values;
-  hardware quirks and measured values (the device doc or the note: cite `(device: <file>
-  <section>)` or `(note: <section>)`, use the conclusion);
+  hardware quirks and measured values (the device doc or the note: cite `(device <ID>)` or
+  `(note: <section>)`, use the conclusion);
   cross-package topic facts (a skill); another package's note or design (point to it);
   procedures (resets, deploy steps: a skill or the PR).
+- **Device facts:** a design cites the unit's behaviour by anchor `(device <ID>)` and uses only
+  the conclusion; never its evidence, tags, decode or numbers unless the design derives from them.
+  Each decision or invariant that depends on unit behaviour ends with `Rests on: (device <ID>)[, …]`.
+  It may rest on an `[ASSUMED]` fact only under Known gaps (graded UNPROVEN, with a `plans/` step
+  or `#n`). When a fact it rests on changes or is disproved, the agent changing the device doc (it
+  found the design hit by the grep) must not change the architecture itself: it either confirms the
+  decision still holds (and adjusts the one-line why), or adds the decision to Known gaps with a
+  new issue `#n` and tells the owner. Re-architecting is a plan.
 - **Grades:** a statement about this repo's config needs none: the YAML wins, fix the doc when
-  they disagree. Anything else (device behaviour, HA/upstream semantics, expected physical
+  they disagree. Anything else (HA/upstream semantics, expected physical
   results) carries a grade (`record-learning` section 2), preferably by citing the note or skill
   that holds the graded fact. An owner-chosen rationale is marked `(owner decision)`. An UNPROVEN
   claim stays in `plans/` unless the design works around it; then it goes under Known gaps,
@@ -155,8 +186,8 @@ auto-loaded. No history, no noise. Gate before writing: K-4.1.
   uses `<PKG>-B<n>`); one prefix per design doc. Never renumber; a new topic takes the next free
   number. Before retiring an ID, grep `packages/ custom_templates/ tests/ dashboards/ doc/
   .claude/` and repoint every hit, then list it on one final line: `Retired: <ID> → <ID>`.
-- **Size:** aim ≤ 24k chars, cap 40k (on-demand files are truncated above 40k, K-8). No section
-  over ~3k chars: split it or cut.
+- **Size:** K-1.2 (on-demand files are truncated above 40,000 chars, K-8). No section over
+  ~3,000 chars: split it or cut.
 - **Loading:** never `@`-import it. Add `doc/<pkg>/design.md` to the note's `paths:` so editing
   the design doc loads the note.
 - **Template** (sections in this order; omit an empty one):
@@ -168,7 +199,7 @@ auto-loaded. No history, no noise. Gate before writing: K-4.1.
   5. Formulas and derived constants (results only).
   6. Invariants: mechanism and why it holds (the rule line stays in the note).
   7. Interfaces: inputs consumed, outputs published, contract (sign, unit, availability).
-  8. Decisions and trade-offs: chosen / rejected / cost accepted.
+  8. Decisions and trade-offs: chosen / rejected / cost accepted; `Rests on:` per decision.
   9. Known gaps and accepted risks: `#n` or `plans/…`, grade if not CONFIRMED.
   10. Extension points: how to add a state / input / consumer, and what breaks it.
 
@@ -225,11 +256,15 @@ architectural change.
 - **New device:** `device-knowledge` skill (copies `doc/devices/_template/`, K-9).
 - **New cross-package topic:** a skill in `.claude/skills/<topic>/SKILL.md`; the first words of its
   description carry the trigger.
-- **One home per fact.** Every other place points to it; never copy.
+- **One home per fact.** Every other place points to it. Exception, for token efficiency only: an
+  auto-loaded note may keep a one-line copy of a device fact (the conclusion, no evidence) so a
+  routine edit needs no device read; the copy ends with its source anchor `(device <ID>)`. A copy
+  never adds to or qualifies its source. Contradiction between a copy and its source is a bug: the
+  device doc wins until the owner decides.
 - **Every plan's last step:** distil the result into note / design (K-4.1 gate: architecture,
-  decisions and gaps only) / skill, move the story to
+  decisions and gaps only) / device doc (T rows, `device-knowledge` skill) / skill, move the story to
   background (a package's `doc/<pkg>/background.md`, or `doc/<topic>/background.md` for a
-  cross-package topic), update pointers, check the note is ≤ 24 KB, then DELETE the plan.
+  cross-package topic), update pointers, check sizes (K-1.2), then DELETE the plan.
   `.claude/rules/plans.md` tells plan authors to include this step; the layout check (K-8)
   fails a plan without a Close step.
 - Before deleting a fact during a move, confirm the target holds it. Never promote an UNPROVEN
@@ -254,8 +289,7 @@ A prompt outside the description must not invoke it.
 ## K-8 Loading mechanics (Claude Code)
 
 What the layout in K-1 relies on. Grades: DOC = Claude Code docs (2026-11-07), CONFIRMED = tested
-headless in this repo 2026-11-07 (K-7 method), OBSERVED = real data from a real run with an
-alternative explanation still open (same meaning as in `record-learning`).
+headless in this repo 2026-11-07 (K-7 method), OBSERVED as in `record-learning` section 2.
 
 - Startup loads only root `CLAUDE.md` plus each skill's name + description; no rule or note bodies.
   A skill body loads only when the skill is invoked. (CONFIRMED)
@@ -263,7 +297,8 @@ alternative explanation still open (same meaning as in `record-learning`).
   file. **Grep and Glob do not trigger it**: before relying on package facts after a search, read
   the package YAML or its note. (DOC; Read trigger CONFIRMED)
 - Broken frontmatter makes a rule load always. (DOC)
-- On-demand files (path rules, nested `CLAUDE.md`, their imports) are truncated above 40k chars.
+- On-demand files (path rules, nested `CLAUDE.md`, their imports) are truncated above 40,000
+  chars.
   (DOC)
 - `@` imports in a rule load eagerly at launch; a symlinked note with its own `paths:` loads
   lazily. (CONFIRMED, canary)
@@ -272,14 +307,12 @@ alternative explanation still open (same meaning as in `record-learning`).
 - Guards: `permissions.ask` blocks Read and `cat`, not Grep (K-1). (CONFIRMED)
 - Rules are context, not enforcement: anything that must never happen (CRLF, YAML errors) needs a
   check (`.gitattributes`, `ci-local.sh`, CI), not only a rule.
-- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow `.github/workflows/knowledge-layout.yml`) enforces the layout: every
-  `plans/*.md` has a `## Status` heading and a Close step, every `packages/*.yaml` has a
-  `.claude/rules/packages/<name>.md` symlink to an existing note, every `doc/<pkg>/design.md` is
-  ≤ 40k chars, is listed in its note's `paths:` and owns its ID prefix, and every design-ID
-  reference (`doc/<pkg>/design.md#ID` or a bare `<PKG>-<n>`) resolves to a heading, and every
-  `doc/devices/<device>/` meets the K-9 format checks (`_template` skipped). History
-  markers in a design doc are a warning only (until the existing docs are clean). Not yet
-  checked: the K-4 template sections (the existing docs lack Known gaps / Interfaces).
+- `.github/scripts/check_knowledge_layout.py` (in `ci-local.sh` and the workflow
+  `.github/workflows/knowledge-layout.yml`) enforces the layout (full list: its docstring): plans,
+  note symlinks, design IDs, size caps (K-1.2), K-9 device format and `(device <ID>)` anchors,
+  skill and rule frontmatter; warnings for warn caps, design history markers and `[ASSUMED]`
+  reliance, long evidence rows, background references. Not yet checked: the K-4 template
+  sections.
 - A findings trigger worded "bug or non-obvious fact" missed measured hardware quirks (1/3, haiku,
   3 runs); naming "measured value, hardware quirk, user-supplied reason" gave 3/3. Word findings
   triggers by the concrete case, not the abstract category. (OBSERVED)
@@ -295,18 +328,18 @@ Somfy, Shelly, Victron).
 - **One home per fact** (K-1.1 first row). True of the unit whatever HA does = device doc. How a
   package uses the unit (entity map, which register it reads and why, its decisions, how it works
   around a device limit) = the package note or design, which points to the device doc
-  (`(device: <file> <section>)`, or `→ doc/devices/<device>/<file>.md` in YAML) and never copies
-  it. The device README lists the packages that use the unit; it never restates their decisions.
+  (`(device <ID>)`, or `→ doc/devices/<device>/<file>.md` in YAML) and copies only per K-6
+  (anchored one-liner). The device README lists the packages using the unit, never their decisions.
   Quirks of the software in between (an HA integration, ebusd as a program, MQTT payloads) stay in
   the note or a skill; what the device itself answers over that interface is a device fact.
 - **Folder per model as installed:** `<maker>-<model>`, lowercase kebab (`vaillant-vws-83-2`).
   Several units of one model share the folder; their evidence rows name the unit. An accessory
   without its own interface or manual lives in its main unit's folder.
-- **Files, evidence tags, graduation:** `.claude/rules/devices.md`, the single home of the format
+- **Files, evidence tags, fact IDs, graduation:** `.claude/rules/devices.md`, the single home of the format
   (loads when a device doc is read). **Workflow** (add a device, record a finding, answer "can X
   steer it?"): the `device-knowledge` skill. **Skeleton:** `doc/devices/_template/` (never cited).
-- **Grades:** the evidence tag is the grade (rule), mapped onto `record-learning` section 2 plus
-  DOC (a manufacturer document, not tested here). The record-learning gate (section 0) applies.
+- **Grades:** the evidence tag is the grade (rule), mapped onto `record-learning` section 2
+  (DOC = a manufacturer document). The record-learning gate (section 0) applies.
   An UNPROVEN fact stays in a device doc only tagged `[ASSUMED]` and only when something relies on
   it; the test that would settle it is a `plans/` step.
 - **Current only:** no history narrative. A disproved fact is rewritten; the test row that

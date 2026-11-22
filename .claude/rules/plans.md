@@ -23,7 +23,8 @@ A plan file has:
 7. A last step named `Close`, done per `doc/KNOWLEDGE.md#K-6`.
 
 The plan follows the conventions in `doc/KNOWLEDGE.md`: open work and hypotheses only, hypotheses
-marked as such, no learnings until CONFIRMED. `.github/scripts/check_knowledge_layout.py` fails
+marked as such, no learnings until CONFIRMED. A step that tests unit behaviour names the device
+fact (`<ID>` or `[ASSUMED]` line) it settles. `.github/scripts/check_knowledge_layout.py` fails
 CI for a plan without a Status section or a `Close:` step.
 
 ## Working on a plan

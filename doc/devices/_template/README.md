@@ -9,6 +9,7 @@ Only the unit, independent of HA. Format and evidence tags: `.claude/rules/devic
 
 | Item | Value |
 |---|---|
+| Prefix | <PFX> (fact IDs `<PFX>-<n>`, repo-unique) |
 | Maker, model | <maker> <model> [<REF> p.<n>] |
 | Article / part no. | <no.> [T<n>] (type plate) |
 | Firmware / controller | <version> [T<n>] |

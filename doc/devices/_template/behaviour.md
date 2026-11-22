@@ -7,20 +7,20 @@ carries an evidence tag (`.claude/rules/devices.md`).
 
 ## States and sequences
 
-- <state or sequence> [<REF> p.<n>] [T<n>]
+- **<PFX>-<n>** <state or sequence> [<REF> p.<n>] [T<n>] (ID only when cited from outside)
 
 ## Control
 
-| Lever (menu, register, input) | Effect | Limits | Evidence |
-|---|---|---|---|
-| <lever> | <what the unit does> | <range, delay, side effects> | [<REF> p.<n>] [T<n>] |
+| ID | Lever (menu, register, input) | Effect | Limits | Evidence |
+|---|---|---|---|---|
+| <PFX>-<n> | <lever> | <what the unit does> | <range, delay, side effects> | [<REF> p.<n>] [T<n>] |
 
 ## Does not work
 
-| Lever tried | What happens instead | Evidence |
-|---|---|---|
-| <lever and value> | <ignored, refused, other effect> | [T<n>] |
+| ID | Lever tried | What happens instead | Evidence |
+|---|---|---|---|
+| <PFX>-<n> | <lever and value> | <ignored, refused, other effect> | [T<n>] |
 
 ## Open questions
 
-- <question>: `plans/<feature>.md` step <n>
+- <question>: `plans/<feature>.md` step <n> or `#<n>`

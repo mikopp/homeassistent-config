@@ -10,9 +10,10 @@ Fails (exit 1) when:
     A sentence that merely contains the word ("- Close the valve") does not count.
   * a packages/*.yaml has no .claude/rules/packages/<name>.md symlink that resolves to a file
     (packages/ha_ci_fixtures.yaml is CI-generated and skipped).
-  * a doc/<pkg>/design.md (K-4) is over 40000 chars, has no doc/<pkg>/notes.md, is not listed in
-    that note's `paths:` frontmatter, or shares its ID prefix (`PG`, `AF` ...) with another design
-    doc,
+  * a doc/<pkg>/design.md (K-4) has no doc/<pkg>/notes.md, is not listed in that note's `paths:`
+    frontmatter, or shares its ID prefix (`PG`, `AF` ...) with another design doc,
+  * a knowledge file is over its hard cap in SIZE_CAPS (characters, K-1.2; symlinks resolved and
+    deduplicated; `_template`, background*, doc/sources/ and references/ skipped),
   * a design-ID reference does not resolve to a heading `## <ID>` .. `#### <ID>` in its design doc.
     Scanned: tracked and untracked (not ignored) .md/.yaml/.py/.jinja files except background,
     doc/sources/, doc/KNOWLEDGE.md (examples) and this script. Two forms: `doc/<pkg>/design.md#<ID>`
@@ -21,13 +22,33 @@ Fails (exit 1) when:
   * a doc/devices/<device>/ (K-9, format in .claude/rules/devices.md; `_`-prefixed folders such as
     `_template` are skipped) lacks README.md, behaviour.md, interface.md or evidence.md, lacks a
     required heading (README `## References`; behaviour `## Control`, `## Does not work`,
-    `## Open questions`; interface `## Unusable on this unit`), has a file over 40000 chars, cites
-    `[T<n>]` without an evidence.md row or `[<REF> ...]` without a References row, or has a T row
-    without a YYYY-MM[-DD] date or a CONFIRMED/OBSERVED grade. Code spans and fences are ignored.
+    `## Open questions`; interface `## Unusable on this unit`), cites `[T<n>]` without an
+    evidence*.md row or `[<REF> ...]` without a References row, has a T row without a
+    YYYY-MM[-DD] date or a CONFIRMED/OBSERVED grade or a T number twice across its evidence*.md,
+    has no README Identity `| Prefix | <PFX> |` row, shares its prefix with another device or a
+    design doc, defines a fact ID `<PFX>-<n>` (first table cell or leading `**<PFX>-<n>**`) more
+    than once, or names a plans/<file>.md that does not exist. Code spans and fences are ignored
+    for tags and IDs.
+  * a `(device <ID>)` anchor in doc/, packages/, tests/, plans/ or custom_templates/ names no
+    defined device fact ID,
+  * an .md file outside doc/devices/ carries a device evidence tag `[T<n>]` or `[<REF> p.<n>]`
+    outside code (device facts are cited by anchor, K-9),
+  * a .claude/skills/*/SKILL.md lacks `name:` or `description:`, or the description is over its
+    SIZE_CAPS hard cap,
+  * a .claude/rules/**/*.md (symlinks followed) lacks frontmatter `---` / a `paths:` list / the
+    closing `---`, or has a line starting `@` (an eager import, K-1).
 
-Warns (exit code unchanged) when a design doc has a history marker outside code fences (a date,
-`pre-#n`, `since #n`, "originally", "previously", "formerly", "no longer"): K-4 keeps design docs
-history-free; the warning becomes an error once the existing docs are clean.
+Warns (exit code unchanged) when:
+  * a design doc has a history marker outside code fences (a date, `pre-#n`, `since #n`,
+    "originally", "previously", "formerly", "no longer"): K-4 keeps design docs history-free; the
+    warning becomes an error once the existing docs are clean,
+  * a file is over its SIZE_CAPS warn level, a SKILL.md is over 500 lines, or a design-doc section
+    is over 3000 chars,
+  * a design doc anchors `(device <ID>)` whose source line carries only `[ASSUMED]`, outside a
+    Known gaps heading (K-4 device facts),
+  * an evidence row is over 400 chars,
+  * agent knowledge (.claude/, doc/, packages/, tests/, custom_templates/) names background*.md or
+    doc/sources/; exempt: doc/KNOWLEDGE.md, CLAUDE.md, the record-learning SKILL, plans/ (K-1).
 
 Stdlib only; run from anywhere inside the repo: python3 .github/scripts/check_knowledge_layout.py
 """
@@ -50,8 +71,34 @@ CLOSE_STEP_RE = re.compile(
 CLOSE_HEAD_RE = re.compile(r"^#{1,6}\s+(?:Step\s+\d+\s*[-\u2013]\s*)?Close\b", re.MULTILINE)
 # Package YAML files that are generated in CI and need no note.
 SKIP_PACKAGES = {"ha_ci_fixtures"}
-# Design-doc size cap in characters (doc/KNOWLEDGE.md K-4).
-DESIGN_MAX_CHARS = 40000
+# Size caps in characters, the single source of the numbers (doc/KNOWLEDGE.md K-1.2):
+# (glob from the repo root, hard cap = error, warn level = warning, K-ref, measure).
+# Measure: "text" = whole file, "body" = after the frontmatter, "description" = the skill's
+# `description:` (checked by check_skill_frontmatter). Each real file takes the FIRST matching row,
+# so specific rows come before the catch-all ones (device topic files, package reference docs).
+SIZE_CAPS = [
+    ("CLAUDE.md", 8000, 7000, "K-1.2", "text"),
+    ("doc/KNOWLEDGE.md", 30000, 26000, "K-1.2", "text"),
+    ("doc/*/notes.md", 24000, 21600, "K-3", "text"),
+    ("doc/*/tests.md", 8000, 6000, "K-3", "text"),
+    ("doc/*/design.md", 40000, 24000, "K-4", "text"),
+    ("doc/devices/*/README.md", 8000, 6000, "K-1.2", "text"),
+    ("doc/devices/*/behaviour.md", 24000, 20000, "K-1.2", "text"),
+    ("doc/devices/*/interface.md", 40000, 32000, "K-1.2", "text"),
+    ("doc/devices/*/evidence*.md", 40000, 30000, "K-1.2", "text"),
+    ("doc/devices/*/*.md", 40000, 30000, "K-1.2", "text"),
+    ("doc/*/*.md", 40000, 30000, "K-1.2", "text"),
+    (".claude/rules/*.md", 5000, 4000, "K-1.2", "text"),
+    (".claude/skills/*/SKILL.md", 20000, 12000, "K-1.2", "body"),
+    (".claude/skills/*/**/*.md", 40000, 30000, "K-1.2", "text"),
+    ("plans/*.md", 40000, 25000, "K-1.2", "text"),
+    (".claude/skills/*/SKILL.md", 500, 400, "K-1.2", "description"),
+]
+# Extra warnings: SKILL.md line count, design-doc section length (K-1.2, K-4).
+SKILL_WARN_LINES = 500
+DESIGN_SECTION_WARN = 3000
+# A design-doc section: from a `##`..`####` heading to the next one.
+SECTION_HEAD_RE = re.compile(r"^#{2,4}\s", re.MULTILINE)
 # A design-doc heading that carries a stable ID: `## PG-4`, `#### AF-7.1.1`, `### AF-5.3b`.
 ID_HEAD_RE = re.compile(r"^#{2,4}\s+([A-Z]+-\d+(?:\.\d+)*[a-z]?)(?![\w-])", re.MULTILINE)
 # Reference with path: doc/<pkg>/design.md#<ID> (a `<pkg>` placeholder never matches).
@@ -76,6 +123,23 @@ T_ROW_RE = re.compile(r"^\|\s*(T\d+)\s*\|(.*)$", re.MULTILINE)
 REF_ROW_RE = re.compile(r"^\|\s*([A-Z][A-Z0-9-]*)\s*\|", re.MULTILINE)
 # File types that can hold a design-ID reference.
 REF_SUFFIXES = {".md", ".yaml", ".py", ".jinja"}
+# README Identity row declaring the device's fact-ID prefix: `| Prefix | VWS |`.
+PREFIX_ROW_RE = re.compile(r"^\|\s*Prefix\s*\|\s*([A-Z][A-Z0-9]*)\s*\|", re.MULTILINE)
+# Anchor to a device fact outside its folder: `(device VWS-7)`, also `(device VWS-7, VWS-9)`.
+DEVICE_CITE_RE = re.compile(r"\(device ([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)\)")
+# Top-level folders whose files may anchor device facts (rule: .claude/rules/devices.md).
+DEVICE_CITE_DIRS = ("doc/", "packages/", "tests/", "plans/", "custom_templates/")
+# Device evidence tags that must not appear outside doc/devices/: `[T4]`, `[IA p.63]`, `[IA §2]`.
+STRAY_TAG_RE = re.compile(r"\[(?:T\d+|[A-Z][A-Z0-9-]*\s+(?:p\.|§)\s*\d+[^\]\n]*)\](?!\()")
+# A plan file named in a device doc.
+PLAN_NAME_RE = re.compile(r"plans/([\w.-]+\.md)")
+# Evidence rows longer than this are warned (a row is evidence, not a story, K-9).
+EVIDENCE_ROW_WARN = 400
+# Mentions of guarded history/raw material that agent knowledge must not make (K-1).
+BACKGROUND_RE = re.compile(r"background[\w*-]*\.md|doc/sources/")
+# Agent-knowledge folders scanned for BACKGROUND_RE, and the files exempt from it (K-1).
+AGENT_DIRS = (".claude/", "doc/", "packages/", "tests/", "custom_templates/")
+BACKGROUND_EXEMPT = {"CLAUDE.md", "doc/KNOWLEDGE.md", ".claude/skills/record-learning/SKILL.md"}
 
 
 def strip_fences(text):
@@ -154,12 +218,10 @@ def design_ids(errors):
 
 
 def check_design_docs(errors, warnings):
-    """Each design doc: size cap, a note listing it in `paths:`, history markers warned (K-4)."""
+    """Each design doc: a note listing it in `paths:`, history markers warned (K-4)."""
     for design in sorted((ROOT / "doc").glob("*/design.md")):
         rel = design.relative_to(ROOT).as_posix()
         text = design.read_text(encoding="utf-8")
-        if len(text) > DESIGN_MAX_CHARS:
-            errors.append(f"{rel}: {len(text)} chars, cap {DESIGN_MAX_CHARS} (doc/KNOWLEDGE.md#K-4)")
         note = design.parent / "notes.md"
         if not note.is_file():
             errors.append(f"{rel}: no doc/{design.parent.name}/notes.md (doc/KNOWLEDGE.md#K-6)")
@@ -196,9 +258,8 @@ def ref_files():
         yield name, path
 
 
-def check_design_refs(errors):
+def check_design_refs(errors, ids, prefixes):
     """Every design-ID reference must name an existing heading (K-4 IDs, K-5 pointers)."""
-    ids, prefixes = design_ids(errors)
     if not prefixes:
         return
     # Bare ID with a known prefix, not part of a longer token (`PG-B1`, `VIC-N3` never match).
@@ -233,8 +294,19 @@ def section(text, heading):
     return m.group(1) if m else ""
 
 
-def check_devices(errors):
-    """Each device folder: files, headings, size, evidence tags resolve, T rows graded (K-9)."""
+def device_md(dev):
+    """Yield a device folder's markdown files; manufacturer copies under references/ skipped."""
+    for path in sorted(dev.rglob("*.md")):
+        if "references" not in path.relative_to(dev).parts:
+            yield path
+
+
+def check_devices(errors, warnings, design_prefixes):
+    """Each device folder (K-9): files, headings, tags, T rows, prefix, fact IDs, plan names.
+
+    Returns {fact ID: (file, source line)} for the `(device <ID>)` anchor check.
+    """
+    defs, owners = {}, {}
     for dev in sorted(p for p in (ROOT / "doc" / "devices").glob("*") if p.is_dir()):
         # `_template` (and any `_`-prefixed folder) holds placeholders, not a device.
         if dev.name.startswith("_"):
@@ -250,24 +322,76 @@ def check_devices(errors):
             for h in headings:
                 if not re.search(r"^##\s+%s\s*$" % re.escape(h), texts[name], re.M):
                     errors.append(f"{rel}/{name}: no '## {h}' heading (.claude/rules/devices.md)")
-        # Known T rows and reference IDs; each T row needs a date and a grade.
+        # Known T rows across evidence.md and evidence-archive.md: each needs a date and a grade,
+        # and a T number exists once per device (never reused, K-9).
         t_ids = set()
-        for tid, rest in T_ROW_RE.findall(texts.get("evidence.md", "")):
-            t_ids.add(tid)
-            cells = [c.strip() for c in rest.split("|")]
-            if not cells or not re.fullmatch(r"20\d\d-\d\d(?:-\d\d)?", cells[0]):
-                errors.append(f"{rel}/evidence.md: {tid} has no YYYY-MM[-DD] date")
-            if "CONFIRMED" not in rest and "OBSERVED" not in rest:
-                errors.append(f"{rel}/evidence.md: {tid} has no CONFIRMED/OBSERVED grade")
+        for ev in sorted(dev.glob("evidence*.md")):
+            for line in strip_fences(ev.read_text(encoding="utf-8")).splitlines():
+                m = T_ROW_RE.match(line)
+                if not m:
+                    continue
+                tid, rest = m.groups()
+                if tid in t_ids:
+                    errors.append(f"{rel}/{ev.name}: {tid} defined twice across evidence*.md")
+                t_ids.add(tid)
+                cells = [c.strip() for c in rest.split("|")]
+                if not cells or not re.fullmatch(r"20\d\d-\d\d(?:-\d\d)?", cells[0]):
+                    errors.append(f"{rel}/{ev.name}: {tid} has no YYYY-MM[-DD] date")
+                if "CONFIRMED" not in rest and "OBSERVED" not in rest:
+                    errors.append(f"{rel}/{ev.name}: {tid} has no CONFIRMED/OBSERVED grade")
+                if len(line) > EVIDENCE_ROW_WARN:
+                    warnings.append(
+                        f"{rel}/{ev.name}: {tid} row {len(line)} chars, warn above "
+                        f"{EVIDENCE_ROW_WARN} (.claude/rules/devices.md)"
+                    )
         refs = set(REF_ROW_RE.findall(section(texts.get("README.md", ""), "References")))
         refs.discard("ID")
-        # Every tag in every markdown file of the device must resolve.
-        for path in sorted(dev.rglob("*.md")):
-            if "references" in path.relative_to(dev).parts:
-                continue
+        # Fact-ID prefix: declared once, unique across devices, never a design-doc prefix.
+        m = PREFIX_ROW_RE.search(section(texts.get("README.md", ""), "Identity"))
+        prefix = m.group(1) if m else None
+        if prefix is None:
+            errors.append(
+                f"{rel}/README.md: no Identity row '| Prefix | <PFX> |' (.claude/rules/devices.md)"
+            )
+        elif prefix in owners:
+            errors.append(f"{rel}/README.md: prefix {prefix} also used by {owners[prefix]}")
+        elif prefix in design_prefixes:
+            errors.append(
+                f"{rel}/README.md: prefix {prefix} is the ID prefix of "
+                f"doc/{design_prefixes[prefix]}/design.md"
+            )
+        if prefix:
+            owners.setdefault(prefix, rel)
+        # Fact ID definitions: first table cell or a leading bold bullet, once per folder.
+        def_re = (
+            re.compile(r"^(?:\|\s*|\s*[-*]\s+\*\*)(%s-\d+)(?:\*\*|\s*\|)" % prefix)
+            if prefix
+            else None
+        )
+        seen_ids = {}
+        for path in device_md(dev):
             raw = path.read_text(encoding="utf-8")
-            if len(raw) > DESIGN_MAX_CHARS:
-                errors.append(f"{rel}/{path.name}: {len(raw)} chars, cap {DESIGN_MAX_CHARS}")
+            # Plans named by a device doc must exist (Open questions point to them).
+            for plan in sorted(set(PLAN_NAME_RE.findall(raw))):
+                if not (ROOT / "plans" / plan).is_file():
+                    errors.append(f"{rel}/{path.name}: names plans/{plan}, which does not exist")
+            if def_re is None:
+                continue
+            for n, line in enumerate(strip_fences(raw).splitlines(), 1):
+                m = def_re.match(line)
+                if not m:
+                    continue
+                fid = m.group(1)
+                if fid in seen_ids:
+                    errors.append(
+                        f"{rel}/{path.name}:{n}: {fid} already defined in {seen_ids[fid]}"
+                    )
+                    continue
+                seen_ids[fid] = f"{path.name}:{n}"
+                defs[fid] = (f"{rel}/{path.name}", line)
+        # Every tag in every markdown file of the device must resolve.
+        for path in device_md(dev):
+            raw = path.read_text(encoding="utf-8")
             for n, line in enumerate(strip_code_spans(strip_fences(raw)).splitlines(), 1):
                 for tag, _ in DEVICE_TAG_RE.findall(line):
                     if tag == "ASSUMED":
@@ -277,6 +401,169 @@ def check_devices(errors):
                             errors.append(f"{rel}/{path.name}:{n}: [{tag}] has no evidence.md row")
                     elif tag not in refs:
                         errors.append(f"{rel}/{path.name}:{n}: [{tag}] not in README References")
+    return defs
+
+
+def heading_stack_iter(text):
+    """Yield (line number, line, current heading texts by level) over text without fences."""
+    stack = {}
+    for n, line in enumerate(strip_fences(text).splitlines(), 1):
+        m = re.match(r"(#{1,6})\s+(.*)", line)
+        if m:
+            level = len(m.group(1))
+            stack = {k: v for k, v in stack.items() if k < level}
+            stack[level] = m.group(2)
+        yield n, line, stack
+
+
+def check_device_refs(errors, warnings, defs):
+    """Every `(device <ID>)` anchor resolves; a design resting on an [ASSUMED] fact sits under
+    Known gaps (K-4 device facts); device evidence tags never appear outside doc/devices/ (K-9)."""
+    for name, path in ref_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        # Evidence tags outside the device folders: markdown only, code spans and fences ignored.
+        if path.suffix == ".md" and not name.startswith("doc/devices/"):
+            for n, line in enumerate(strip_code_spans(strip_fences(text)).splitlines(), 1):
+                for m in STRAY_TAG_RE.finditer(line):
+                    errors.append(
+                        f"{name}:{n}: evidence tag {m.group(0)} outside doc/devices/: "
+                        "cite `(device <ID>)` (doc/KNOWLEDGE.md#K-9)"
+                    )
+        if not name.startswith(DEVICE_CITE_DIRS) or name.startswith("doc/devices/_"):
+            continue
+        is_design = name.startswith("doc/") and path.name == "design.md"
+        for n, line, stack in heading_stack_iter(text):
+            for group in DEVICE_CITE_RE.findall(line):
+                for fid in re.split(r",\s*", group):
+                    if fid not in defs:
+                        errors.append(f"{name}:{n}: (device {fid}) names no device fact ID")
+                        continue
+                    tags = {t for t, _ in DEVICE_TAG_RE.findall(strip_code_spans(defs[fid][1]))}
+                    in_gaps = any("known gaps" in h.lower() for h in stack.values())
+                    if is_design and tags == {"ASSUMED"} and not in_gaps:
+                        warnings.append(
+                            f"{name}:{n}: rests on {fid}, only [ASSUMED] in {defs[fid][0]}; "
+                            "allowed under Known gaps only (doc/KNOWLEDGE.md#K-4)"
+                        )
+
+
+def frontmatter(text):
+    """Return (frontmatter lines, body) of a `---` delimited header; (None, text) if absent."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None, text
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            return lines[1:i], "\n".join(lines[i + 1:])
+    return None, text
+
+
+def size_skipped(rel):
+    """Never capped: templates, guarded history/raw material, references/ copies (K-1.2)."""
+    parts = rel.split("/")
+    return (
+        any(p.startswith("_") for p in parts[:-1])
+        or parts[-1].startswith("background")
+        or rel.startswith("doc/sources/")
+        or "references" in parts
+    )
+
+
+def check_sizes(errors, warnings):
+    """Every knowledge file against its first matching SIZE_CAPS row (K-1.2), by real path."""
+    seen = set()
+    for pattern, hard, warn, kref, measure in SIZE_CAPS:
+        if measure == "description":
+            continue
+        for path in sorted(ROOT.glob(pattern)):
+            rel = path.relative_to(ROOT).as_posix()
+            real = path.resolve()
+            if real in seen or not path.is_file() or size_skipped(rel):
+                continue
+            seen.add(real)
+            text = real.read_text(encoding="utf-8")
+            measured = frontmatter(text)[1] if measure == "body" else text
+            size = len(measured)
+            if size > hard:
+                errors.append(f"{rel}: {size} chars, cap {hard} (doc/KNOWLEDGE.md#{kref})")
+            elif size > warn:
+                warnings.append(f"{rel}: {size} chars, warn above {warn} (doc/KNOWLEDGE.md#{kref})")
+            if path.name == "SKILL.md" and len(text.splitlines()) > SKILL_WARN_LINES:
+                warnings.append(
+                    f"{rel}: {len(text.splitlines())} lines, warn above {SKILL_WARN_LINES} "
+                    "(doc/KNOWLEDGE.md#K-1.2)"
+                )
+            if path.name == "design.md":
+                body = strip_fences(text)
+                starts = [m.start() for m in SECTION_HEAD_RE.finditer(body)] + [len(body)]
+                for a, b in zip(starts, starts[1:]):
+                    if b - a > DESIGN_SECTION_WARN:
+                        head = body[a:body.find("\n", a)].strip()[:60]
+                        warnings.append(
+                            f"{rel}: section '{head}' {b - a} chars, warn above "
+                            f"{DESIGN_SECTION_WARN} (doc/KNOWLEDGE.md#K-4)"
+                        )
+
+
+def check_skill_frontmatter(errors, warnings):
+    """Each SKILL.md has `name:` and `description:`; the description stays under its cap (K-1.2)."""
+    _, hard, warn, kref, _ = next(r for r in SIZE_CAPS if r[4] == "description")
+    for skill in sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md")):
+        rel = skill.relative_to(ROOT).as_posix()
+        head, _ = frontmatter(skill.read_text(encoding="utf-8"))
+        if head is None:
+            errors.append(f"{rel}: no `---` frontmatter")
+            continue
+        keys, desc, cur = set(), [], None
+        for line in head:
+            m = re.match(r"([\w-]+):\s*(.*)$", line)
+            if m:
+                cur = m.group(1)
+                keys.add(cur)
+                if cur == "description" and m.group(2) not in (">", "|", ">-", "|-", ""):
+                    desc.append(m.group(2))
+            elif cur == "description" and line.strip():
+                # Folded or literal block scalar continuation.
+                desc.append(line.strip())
+        for key in ("name", "description"):
+            if key not in keys:
+                errors.append(f"{rel}: frontmatter has no `{key}:`")
+        size = len(" ".join(desc))
+        if size > hard:
+            errors.append(f"{rel}: description {size} chars, cap {hard} (doc/KNOWLEDGE.md#{kref})")
+        elif size > warn:
+            warnings.append(
+                f"{rel}: description {size} chars, warn above {warn} (doc/KNOWLEDGE.md#{kref})"
+            )
+
+
+def check_rule_frontmatter(errors):
+    """Each rule (symlinked notes too): `---` / `paths:` list / `---`, no `@` line (K-1, K-8)."""
+    for rule in sorted((ROOT / ".claude" / "rules").rglob("*.md")):
+        rel = rule.relative_to(ROOT).as_posix()
+        if not rule.is_file():
+            continue  # dangling symlink: check_package_notes reports it
+        text = rule.read_text(encoding="utf-8")
+        head, _ = frontmatter(text)
+        if head is None:
+            errors.append(f"{rel}: no `---` ... `---` frontmatter (a broken one loads always, K-8)")
+        elif not note_paths(rule):
+            errors.append(f"{rel}: frontmatter has no `paths:` list")
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.startswith("@"):
+                errors.append(f"{rel}:{n}: line starts with '@' (eager import, K-1)")
+
+
+def check_no_background_refs(warnings):
+    """Agent knowledge never names background or sources (K-1); warning only."""
+    for name, path in ref_files():
+        if not name.startswith(AGENT_DIRS) or name in BACKGROUND_EXEMPT:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for n, line in enumerate(text.splitlines(), 1):
+            m = BACKGROUND_RE.search(line)
+            if m:
+                warnings.append(f"{name}:{n}: names '{m.group(0)}' (doc/KNOWLEDGE.md#K-1)")
 
 
 def main():
@@ -284,8 +571,14 @@ def main():
     check_plans(errors)
     check_package_notes(errors)
     check_design_docs(errors, warnings)
-    check_design_refs(errors)
-    check_devices(errors)
+    ids, prefixes = design_ids(errors)
+    check_design_refs(errors, ids, prefixes)
+    defs = check_devices(errors, warnings, prefixes)
+    check_device_refs(errors, warnings, defs)
+    check_sizes(errors, warnings)
+    check_skill_frontmatter(errors, warnings)
+    check_rule_frontmatter(errors)
+    check_no_background_refs(warnings)
     for w in warnings:
         print(f"WARNING {w}")
     for e in errors:

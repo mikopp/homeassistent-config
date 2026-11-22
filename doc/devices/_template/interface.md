@@ -11,12 +11,12 @@ The single home of register/API definitions for this unit; what the unit does wi
 
 ## Registers
 
-| Register / path | Decode (fields, type, unit) | Access | Evidence |
-|---|---|---|---|
-| <name> | <fields> | r / w / rw | [<REF>] [T<n>] |
+| ID | Register / path | Decode (fields, type, unit) | Access | Evidence |
+|---|---|---|---|---|
+| <PFX>-<n> | <name> | <fields> | r / w / rw | [<REF>] [T<n>] |
 
 ## Unusable on this unit
 
-| Register / path | Problem (timeout, placeholder data, write-only, wrong label) | Evidence |
-|---|---|---|
-| <name> | <problem> | [T<n>] |
+| ID | Register / path | Problem (timeout, placeholder data, write-only, wrong label) | Evidence |
+|---|---|---|---|
+| <PFX>-<n> | <name> | <problem> | [T<n>] |
