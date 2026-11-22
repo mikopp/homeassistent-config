@@ -40,4 +40,4 @@ name the sub-plan.
 Confirmed bugs and learnings: invoke the `record-learning` skill; it routes them to their home.
 
 ## Closing a plan
-At the last step, read `doc/KNOWLEDGE.md` (K-1, K-2, K-6) and follow K-6's last-step procedure.
+At the last step, read `doc/KNOWLEDGE.md#K-6` and follow its last-step procedure (it names the other sections it needs).

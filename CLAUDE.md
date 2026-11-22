@@ -75,7 +75,7 @@ HA YAML rules (helpers, template sensors, entity ids, device key): `.claude/rule
 Hypotheses go to the feature's `plans/` file, marked as such. To record anything learned, invoke the `record-learning` skill: it holds the evidence rules and routing.
 
 ## Where knowledge lives
-Before creating, moving or deleting knowledge (note, rule, skill, design doc, a plan's close step), read `doc/KNOWLEDGE.md`.
+Creating, moving or deleting knowledge: read only the `doc/KNOWLEDGE.md` sections it needs (all of it to change homes/kinds).
 Kinds (`doc/KNOWLEDGE.md#K-1`): **always** = in every session; **rule** = a Claude rule, auto-loads when a matching file is read/edited; **skill** = body loads when invoked; **reference** = never auto-loads, read only when a pointer's read-when condition applies; **guarded** = read only when the owner asks for history, never cited; **external** = outside the repo files.
 
 | Home | Kind | Holds |

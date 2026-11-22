@@ -61,7 +61,8 @@ not CONFIRMED.
 
 ## 3. Route it to its one home
 
-Before editing any knowledge file: read `doc/KNOWLEDGE.md`, then `wc -c` the target. A note over
+Before editing any knowledge file: `wc -c` the target (the table below is the routing; read a
+`doc/KNOWLEDGE.md` section only where a row names it). A note over
 its cap (K-1.2: 24,000 chars) takes no new entry: move content per K-1.2 or have the entry replace something.
 
 | The learning is… | Write it to |

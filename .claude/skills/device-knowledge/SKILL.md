@@ -5,16 +5,18 @@ description: Hardware unit facts (heat pump, ventilation, Somfy, Shelly, Victron
 
 # Device knowledge
 
-Home and boundary with packages: `doc/KNOWLEDGE.md#K-9`. File roles, evidence tags, T rows and
-graduation: `.claude/rules/devices.md`; it loads when you Read any file under `doc/devices/`, so
-read the device's `README.md` (or `doc/devices/_template/README.md`) first. Whether a finding is
-worth writing and what proves it: `record-learning` sections 0 to 2, plus the device gate below.
+File roles, evidence tags, T rows and graduation: `.claude/rules/devices.md`; it loads when you
+Read any file under `doc/devices/`. Existing device: read its `README.md` (identity, References,
+file map), then only the file the task needs. New device: start from
+`doc/devices/_template/README.md`. Recording a test result: `record-learning` section 1 (what
+proves it). `doc/KNOWLEDGE.md#K-9` only when the table below does not settle whether a fact
+belongs to the unit at all.
 
 ## Is it worth writing? (device gate)
 
 A device doc is not a copy of the manual: a fact the References row already answers, cheaply and
-plainly, is found there. Record a fact only if at least one holds, and it passes `record-learning`
-section 0:
+plainly, is found there. Record a fact only if at least one holds, and no entry in the device folder
+covers it yet (grep it; extend that entry instead):
 
 - **Would not be looked up otherwise:** a test on this unit, behaviour the documents are silent
   on, a lever that does not work, a conflict with the manual. An agent cannot know to check.
