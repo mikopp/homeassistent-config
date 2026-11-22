@@ -36,9 +36,19 @@ Machine: geoTHERM exclusiv **VWS 83/2** (art. `0010002787`; manuals in the note 
 participants"). Heating curves: `doc/heating_pv_boost/heating-curve.md` (manufacturer diagram,
 Kühne formula).
 
-The curve is a panel setting. `TempDesired` is set by hand, at the panel or with
-`number.geotherm_heating_temp_desired` (#186). HA writes nothing automatically: the comfort
-control stays off.
+**All settings go over ebus; the panel is read-only (owner, 2026-11-22).** What counts is the
+ebus register format and what the controller does with it, not the panel's display steps.
+Settings are written with `ebusctl write` on the ebusd host, or with the HA hand setter where
+one exists:
+
+| Setting | Register (catalog) | Bus format | How |
+|---|---|---|---|
+| `TempDesired` | `mc/TempDesired` (`0e3200`) | D1C, 0.5 K | `number.geotherm_heating_temp_desired` (#186) or `ebusctl write -c mc TempDesired 21.5` |
+| Curve slope | `mc/HeatingCurve` (`0e3500`) | UIN ÷ 100, 0.01 | `ebusctl write -c mc HeatingCurve 0.14` (no HA setter, no `/set` bridge line) |
+| Outdoor offset | `ehp/OutsideTempOffset` (`0ec300`, installer level) | D2C, 1/16 K | `ebusctl write -c ehp OutsideTempOffset 0.5` |
+
+Read back every write with `ebusctl read -f` and log it in the change log. HA writes nothing
+automatically: the comfort control stays off.
 
 ## Design approach
 
@@ -48,30 +58,30 @@ control stays off.
   `mc/TempDesired` = `input_number.heating_comfort_temp` + 1 (rows 4–7) and a hand value is
   overwritten.
 - **Which lever does what:**
-  - **Curve slope** (panel) sets the balance between cold and mild weather. Too warm in mild
-    weather and right in cold weather: slope too steep. Right in mild weather, too cold in cold
-    weather: slope too flat. Smallest step 0.01 (panel); by the formula ≈ 0.25 K flow in mild
+  - **Curve slope** (`mc/HeatingCurve` over ebus) sets the balance between cold and mild weather.
+    Too warm in mild weather and right in cold weather: slope too steep. Right in mild weather,
+    too cold in cold weather: slope too flat. Bus step 0.01; by the formula ≈ 0.25 K flow in mild
     weather, ≈ 0.45 K at −10 °C.
   - **What the compressor acts on: the whole-degree setpoint** W = floor(`mc/FlowTempDesired`),
     passed on by `uih` (CONFIRMED, Observations). Runs end at integral ≈ 0, so the mean flow ≈ W
     (HYPOTHESIS). A lever changes the room level only when it changes W, at least for part of the
     outdoor range.
-  - **`TempDesired`** (panel or hand setter) shifts the curve in parallel: the fine setpoint moves
+  - **`TempDesired`** (hand setter or `ebusctl`) shifts the curve in parallel: the fine setpoint moves
     ≈ 1.2 K per K (formula), and 0.5 K per 0.5 K step on a flat part of the curve (observed). At a
     given outdoor temperature W changes only when floor(fine) changes. Every fine value seen is
     `TempDesired` + a whole number, so from a `TempDesired` ending in .0 a −0.5 K step lowers W by 1
     K and a +0.5 K step does nothing. From one ending in .5 it is the other way round. Near a jump of
     the curve the half degree may also move the jump by ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
     Effective step: 1 K of W ≈ 0.6–0.7 K room (rough estimate from P2 vs P3, HYPOTHESIS).
-  - **Outdoor sensor offset** (menu "Kalibrierung" → "Aussentemperatur", ±5 K; the /2
-    Installationsanleitung 0020045204_01 p. 65 reads as 1 K steps; ebusd `ehp/OutsideTempOffset`;
-    owner: 0 now). **A valid tuning lever (owner, 2026-11-22).** The goal is the room temperatures
-    measured by the indoor Ecowitt sensors, the owner reads outdoor temperature from the
-    weatherstation, and the geoTHERM outdoor sensor is used only by the geoTHERM. Which of the two
-    outdoor sensors is "right" therefore does not matter. **Working assumption (owner): 0.5 K
-    steps**; resolution research is running (step 0.8).
-    - Effect, if the curve uses the corrected value (UNPROVEN; the first offset change tests it,
-      see 2.1): a positive offset makes the geoTHERM read warmer and lowers the flow. It moves the
+  - **Outdoor sensor offset** (`ehp/OutsideTempOffset` over ebus, D2C 1/16 K; owner: 0 now).
+    **A tuning lever (owner, 2026-11-22).** The goal is the room temperatures measured by the
+    indoor Ecowitt sensors, the owner reads outdoor temperature from the weatherstation, and the
+    geoTHERM outdoor sensor is used only by the geoTHERM. Which of the two outdoor sensors is
+    "right" therefore does not matter. Two working HYPOTHESES (owner), tested when the table first
+    calls for an offset change (step 0.8): (a) the curve uses the corrected value; (b) the
+    controller keeps values finer than whole K (0.5 K assumed; the bus carries 1/16 K, the outdoor
+    sensor reads in ≈ 0.06–0.25 K steps, e.g. 1.81).
+    - Effect, if (a) holds: a positive offset makes the geoTHERM read warmer and lowers the flow. It moves the
       curve's jumps along the outdoor axis by the offset. At a fixed outdoor temperature W drops by
       one step only within that distance of a jump. Averaged over the day ≈ curve slope × offset ≈
       0.25 K flow per K at 0.14 in mild weather (formula), ≈ 0.12 K per 0.5 K. So it is a fine
@@ -399,29 +409,23 @@ Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
   Enough when edges are seen across the outdoor range of the season so far, about −5 to +10 °C.
   Result → "Observations"; once CONFIRMED, → `doc/heating_pv_boost/heating-curve.md` at Close.
   Depends on: 0.4.
-- [TODO] **0.8** Outdoor offset: resolution, and does the curve use it? Research result
-  (subagent, 2026-11-22; manual quote and catalog rows checked):
-  - **Panel: ±5 K in 1.0 K steps. CONFIRMED** in three Vaillant manuals: /2 Installationsanleitung
-    0020045204_01 p. 65, "Kalibrier-Verstellbereich Außentemperatur: +/- 5 K, Schrittweite 1,0
-    K. alle anderen: +/- 3 K, Schrittweite 0,5 K"; the /3 manual 0020087974_00; and 0020202605_01
-    p. 59.
-  - **Bus: `ehp/OutsideTempOffset` is D2C (1/16 K), write needs installer level** (published
-    catalog `08.ehp.csv`: read `b509 0dc300`, write `0ec300`). The format can carry 0.5 K.
-    Whether the firmware keeps a non-integer value is UNKNOWN: no source reports such a write on
+- [TODO] **0.8** Outdoor offset, hypotheses (a) the curve uses it, (b) finer than whole K.
+  Tested when the Phase 2 table first calls for an offset change, not before. Research
+  (subagent, 2026-11-22; catalog rows checked):
+  - Bus: `ehp/OutsideTempOffset` is D2C (1/16 K), write at installer level (published catalog
+    `08.ehp.csv`: read `b509 0dc300`, write `0ec300`). No source reports a non-integer write on
     any model. `uih` and `mc` have no offset register.
-  - **Whether the curve uses the corrected value: UNKNOWN.** The manuals say only "Manuelle
-    Anpassung der angezeigten Temperaturen" (displayed temperatures). Forums: nothing for the
-    geoTHERM /2 (weak).
-  - Working assumption (owner) stays 0.5 K until the test. Owner test, in mild weather away from
-    3 °C and the cut-off:
+  - The Vaillant manuals describe the panel menu only (±5 K, 1.0 K steps; "Manuelle Anpassung
+    der angezeigten Temperaturen"). The panel is read-only here, so this does not decide (b),
+    and nothing in any source decides (a). Forums: nothing for the geoTHERM /2 (weak).
+  - Test, as part of the first offset change, in mild weather away from 3 °C and the cut-off:
     1. Read `ehp OutsideTempOffset` (expect 0), `ehp OutsideTemp` (raw), `uih OutsideTemp`, the
        broadcast and `mc FlowTempDesired`.
-    2. Set +1 K at the panel and read again. If the raw `ehp` value stays while the broadcast or
-       `uih` and the setpoint move, the offset reaches the curve; if only the display moves, it
-       does not. (This +1 K can also be the first Phase 2 offset change if the table calls for
-       it.)
-    3. Optional: `ebusctl write -c ehp OutsideTempOffset 0.5`, then read it back with `-f` and
-       look at the panel: 0.5 = accepted, 0 or 1 = rounded, error = rejected.
+    2. `ebusctl write -c ehp OutsideTempOffset 0.5` (the table's step), then read the offset back
+       with `-f`. 0.5 means (b) holds; 0 or 1 means it was rounded; an error means rejected.
+    3. Read the values of step 1 again. If the raw `ehp` value stays while the broadcast or
+       `uih` and the setpoint move, (a) holds; if nothing moves, the offset is no lever: set 0
+       back and drop the offset rows.
   Result → "Observations"; the step size goes into the Phase 2 table.
 
 ### Phase 1 — settle the current setting (0.14 / 22.5), no changes
@@ -454,7 +458,7 @@ in HA within minutes that W moved as intended; if not, the step did nothing.
 |---|---|---|---|
 | d > +0.5 K (both classes, or the only one) | `TempDesired` down to the next value that **lowers W** | from x.0: −0.5 K; from x.5: −1.0 K | W −1 K on the flat parts ≈ room −0.6…−0.7 K |
 | d < −0.5 K (both classes, or the only one) | `TempDesired` up to the next value that **raises W** | from x.5: +0.5 K; from x.0: +1.0 K | W +1 K ≈ room +0.6…+0.7 K |
-| +0.3 < d ≤ +0.5 K (both classes, or the only one) | outdoor offset **up** (geoTHERM reads warmer) | +0.5 K (assumed resolution; 1 K if only whole K) | mean flow ≈ −0.12 K per 0.5 K, as full W steps within 0.5 K of each jump ≈ room −0.1 K |
+| +0.3 < d ≤ +0.5 K (both classes, or the only one) | outdoor offset **up** (geoTHERM reads warmer) | +0.5 K via `ebusctl` (hypothesis (b), 0.8; 1 K if rounded) | mean flow ≈ −0.12 K per 0.5 K, as full W steps within 0.5 K of each jump ≈ room −0.1 K |
 | −0.5 ≤ d < −0.3 K (both classes, or the only one) | outdoor offset **down** | −0.5 K (or 1 K) | the mirror of the row above |
 | Within ±0.3 K on mild days, below −0.3 K on cold days | slope up | 0.01 | ≈ +0.25 K flow mild, +0.45 K at −10 °C (formula), delivered as moved jumps |
 | Within ±0.3 K on cold days, above +0.3 K on mild days | slope down | 0.01 | mirror |
@@ -495,7 +499,7 @@ Rules for the table:
   Expected next step by the new table: office d ≈ +0.9 → `TempDesired` 22.0 → **21.5** (W −1 K
   on the flat parts).
   Apply at most one change from the table (`TempDesired` with
-  `number.geotherm_heating_temp_desired`, the curve at the panel). Log it in the change log with the
+  `number.geotherm_heating_temp_desired`, curve and offset with `ebusctl write`). Log it in the change log with the
   forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
   mean run against the note targets ("Decisions in force"). Then wait the settle time and
   evaluate again (as 1.2).
@@ -580,7 +584,7 @@ are already throttled a bit from last year's balancing; no flow-meter readings a
 ### Phase 5 — writer and sunny-day exception
 
 - [DONE] **5.1** Decided (owner, 2026-11-21): the comfort control stays off; `TempDesired` is
-  tuned by hand with `number.geotherm_heating_temp_desired` (or the panel), no dynamic target.
+  tuned by hand with `number.geotherm_heating_temp_desired` (or `ebusctl`), no dynamic target.
   If the writer is armed later, set `input_number.heating_comfort_temp` to `TempDesired` − 1 first.
 - [TODO] **5.2** (deferred until `warm_enough` works again, separate issue) Sunny-day exception:
   with the curve right, `warm_enough` should switch `off` only on very sunny days. Cutting off at
@@ -796,7 +800,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
   integral uses the whole-degree setpoint, so 22.5 → 22.0 likely changed nothing for the
   compressor (2.1)
 - [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope change
-- [TODO] 0.8 Outdoor offset: panel 1 K (confirmed), bus 1/16 K; 0.5 K and curve effect need the owner test
+- [TODO] 0.8 Outdoor offset hypotheses (a) acts on the curve, (b) finer than 1 K: test at the first offset change
 - Phase 2 table rewritten for whole-degree effects; the outdoor offset is a tuning lever (owner)
 - [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
 - [TODO] 1.2 Evaluate settled days (after 2.1's change)
