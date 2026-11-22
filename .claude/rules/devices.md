@@ -5,64 +5,68 @@ paths:
 
 # Device docs (`doc/devices/<device>/`)
 
-The device-doc format. Home and boundary: `doc/KNOWLEDGE.md#K-9`; workflow: `device-knowledge`
-skill; skeleton: `doc/devices/_template/`.
+Format. Home and boundary: `doc/KNOWLEDGE.md#K-9`; workflow, gate, minimal device:
+`device-knowledge` skill; skeleton: `doc/devices/_template/`.
 
 ## Files (one home per topic inside the device)
 
 | File | Holds |
 |---|---|
-| `README.md` | identity (maker, model, article no., firmware, interface, where installed), `## References`, file map, packages using it |
-| `behaviour.md` | only the unit, never HA: states, sequences, protections; `## Control` (levers that steer it: effect, limits); `## Does not work` (levers that do not steer it, what happens instead); `## Open questions` (`plans/…` or `#n` only) |
-| `interface.md` | transport, addressing, polling limits; register/API definitions (name, decode, unit, access, evidence), defined here only; `## Unusable on this unit` |
-| `evidence.md` | T table: tests on this unit (`evidence-archive.md`: uncited rows, K-1.2) |
-| `<topic>.md` | optional self-contained topic (e.g. a curve table); in the README file map with its read-when condition (K-1.3) |
+| `README.md` | identity (firmware, interface, where installed), `## References`, file map, Used by |
+| `behaviour.md` | states, sequences, protections; `## Control` (lever: effect, limits); `## Does not work` (lever tried, what happens instead); `## Open questions` (`plans/…` or `#n` only) |
+| `interface.md` | `## Access`: per path (bus, gateway, program or HA integration, its config) the sections of template `access.md`; `## Registers` (defined here only); `## Unusable on this unit` |
+| `evidence.md` | T table: tests on this unit |
 
-**Minimal device:** `README.md` alone (no other file), when no fact passes the gate (§Content).
-Only if each reference is stable (doc no. + edition, or a local copy under `references/`) and
-agent-readable: HTML, Markdown or text; a PDF only with a text layer and `Covers` naming the pages
-per topic; a scanned PDF never alone. `[<REF>]` tags only. First gated fact: add the other three.
+No entity ids, automations or package decisions anywhere (K-9). Minimal device: `README.md` alone.
+
+## Parts: caps K-1.2 (12,000; README 8,000; evidence 16,000)
+
+Above the cap split by decision (K-1.3). A part starts with one line: what it covers,
+`indexed by <file>`; the index lists it with `read before/when <decision>`.
+
+| Part | Indexed in | Holds |
+|---|---|---|
+| `access-<path>.md` | `interface.md` | one access path (template `access.md`) |
+| `registers-<area>.md` | `interface.md` | register table of one circuit or address range |
+| `<topic>.md` | `behaviour.md` (subsystem) or README | one subsystem or lookup topic |
+| `evidence-archive.md` | `evidence.md` | rows no fact cites |
+
+`interface.md` moves registers out first, an access path only if still over. Kept:
+`interface.md` an access summary and `## Unusable on this unit`;
+`behaviour.md` States summary, `## Control`, `## Does not work`, `## Open questions`.
+Register rows: `| ID | Register / path | Decode (type, scale, unit) | Values / range | Access | Evidence |`
+(an enum: both forms if the path delivers both).
 
 ## Evidence tags: every fact carries one; untagged = a bug
 
 | Tag | Means | Grade |
 |---|---|---|
-| `[<REF> p.<n>]`, `[<REF> §<n>]`, `[<REF>]` | a row of README `## References`, ID `<REF>` (uppercase) | by its Kind: `manual`, `datasheet`, `vendor` = DOC; `catalog` = DOC for decodes only; `forum` = UNPROVEN |
+| `[<REF> p.<n>]`, `[<REF> §<n>]`, `[<REF>]` | a README `## References` row, ID `<REF>` (uppercase) | by Kind: `manual`, `datasheet`, `vendor` = DOC; `catalog` = DOC for decodes only; `software` (program or integration docs, pinned version) = DOC for generic behaviour only; `forum` = UNPROVEN |
 | `[T<n>]` | tested on this unit, row `T<n>` of `evidence.md` | that row's grade |
-| `[ASSUMED]` | our reading, no source, no test | UNPROVEN; only if something relies on it; settling test = a `plans/` step |
+| `[ASSUMED]` | our reading, no source, no test | UNPROVEN; only if something relies on it |
 
-- One source per bracket: `[IA p.63] [T4]`.
-- This unit beats the manual; keep both: `X [IA p.63]; this unit does Y [T5]`.
-- A maker default and this unit's value: separate facts.
-- References columns: `ID | Kind | Document (title, doc no., edition, language) | Covers | Where`
-  (URL or local copy under `references/`, never edited; format if not obvious: HTML, PDF).
+- One source per bracket: `[IA p.63] [T4]`. This unit beats the manual; keep both:
+  `X [IA p.63]; this unit does Y [T5]`. A maker default and this unit's value: separate facts.
+- References: `ID | Kind | Document (title, doc no., edition or version, language) | Covers | Where`
+  (URL or `references/` copy, never edited).
 
 ## Fact IDs
 
 - Prefix: README Identity row `| Prefix | VWS |`, uppercase, repo-unique, never a design-doc prefix.
-- Only a fact cited from outside gets an ID `<PREFIX>-<n>`: first cell of a table row, or a
-  leading `**VWS-<n>**` on a bullet. Never renumber; retire like a design ID (K-4).
-- Outside the folder cite `(device VWS-7)`; text restating the fact there is a copy (K-6).
+- Only a fact cited from outside gets `<PREFIX>-<n>`: first cell of a table row, or a leading
+  `**VWS-<n>**` on a bullet. Never renumber; retire like a design ID (K-4). Outside the folder
+  cite `(device VWS-7)`; text restating the fact there is a copy (K-6).
 
 ## evidence.md rows
 
 `| T<n> | <YYYY-MM-DD or YYYY-MM> | <method> | <what was seen> | CONFIRMED or OBSERVED |`
-- Method is repeatable (forced `ebusctl read`, write + read-back, panel menu read by the owner,
-  HA history query); name the unit if several.
-- Never reuse a number or delete a row; a contradicting row says `contradicts T<n>`. A row
-  exists because a fact cites it (not a work log).
+Method is repeatable (forced read, write + read-back, panel menu); name the unit if several.
+Never reuse a number or delete a row; a contradicting row says `contradicts T<n>`. A row exists because a fact cites it (not a work log).
 
-## Graduation
+## Graduation and content
 
-`[ASSUMED]`/`forum` → `plans/` step with the test → T row → replace the tag. OBSERVED →
-CONFIRMED only with a new T row. A disproved fact is rewritten citing the new row; a failed lever
-moves to `## Does not work`, and back to `## Control` only with a T row showing it works.
-
-## Content
-
-Gate: record a fact only if its source would not be checked otherwise, is easy to misread or is
-costly to read; never what a `Covers` pointer already answers (`device-knowledge` skill).
-Current state only (no "was", "no longer"). No entity ids, automations or package decisions.
-Changing or disproving a fact that has an ID: `grep -rn '<ID>\b' doc packages plans tests custom_templates`;
-make every copy agree or delete it; for a design hit apply K-4 "Rests on". Never skip that grep.
-`.github/scripts/check_knowledge_layout.py` enforces this format.
+`[ASSUMED]`/`forum` → `plans/` step → T row → new tag. OBSERVED → CONFIRMED: a new T row. A failed
+lever goes to `## Does not work`, back only with a T row showing it works.
+Record only what passes the skill's gate. Current state only. Changing a fact with an ID:
+`grep -rn '<ID>\b' doc packages plans tests custom_templates`; fix or delete every copy; a design
+hit: K-4 "Rests on". The layout check enforces it.

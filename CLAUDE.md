@@ -36,7 +36,7 @@ pin in `requirements_test.txt` (in-process tests; same release as the image), th
 - Read the `FROM` line first, at the start of any research into HA behavior/config/docs. The live
   instance may differ from the pin; check it with ha-mcp (`ha_get_system_health`) when that matters.
 - Verify behaviour against source at the pinned tag: `gh api repos/home-assistant/core/contents/<path>?ref=<tag>`
-  (docs were ambiguous or silent every time it mattered).
+  (docs were ambiguous every time it mattered).
 - When citing docs or web results, prefer version-pinned docs over version-less blog/forum answers; flag
   an answer whose version isn't stated as unverified for this major version.
 - Existing YAML reflects the version it was written under: note conflicts instead of silently "fixing" them.
@@ -84,8 +84,8 @@ Kinds (`doc/KNOWLEDGE.md#K-1`): **always** = in every session; **rule** = a Clau
 | `doc/<pkg>/notes.md` | rule (symlink) | what to know before editing one package (invariants, quirks, entity map) |
 | `.claude/rules/*.md` | rule | file-type rules (`ha-yaml.md`, `tests.md`, `plans.md`, `devices.md`, `knowledge.md`) |
 | `.claude/skills/<topic>/SKILL.md` | skill | cross-package topic knowledge and workflows (`record-learning`, `device-knowledge`) |
-| `doc/<pkg>/design.md` | reference | architecture, decisions, trade-offs, gaps of complex packages; no implementation detail |
-| `doc/devices/<device>/` | reference | one physical unit independent of HA; tagged facts (`device-knowledge` skill) |
+| `doc/<pkg>/design.md` | reference | architecture, decisions, trade-offs, gaps; no implementation detail |
+| `doc/devices/<device>/` | reference | one physical unit, how it is reached, its registers; tagged facts (`device-knowledge` skill) |
 | skill `references/`, `doc/<pkg>/<topic>.md` | reference | detail split off a skill or note; listed in its index with a read-when condition |
 | `plans/` | reference | open work and hypotheses only; deleted when done |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | guarded | history and raw material; never cite or link from agent knowledge |

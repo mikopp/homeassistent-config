@@ -5,6 +5,9 @@ description: "MQTT sensors in this repo: unique_id vs entity_id/default_entity_i
 
 # MQTT entities
 
+HA MQTT platform semantics only. A unit's topics, payload forms and broker bridge wiring live in its
+device doc (`interface.md` `## Access`, `device-knowledge` skill).
+
 Grades: **CONFIRMED** = source read at the pinned version (`.github/ha-versions/ha/Dockerfile` `FROM`),
 stack trace, or deterministic repro. Never promote a grade without new evidence.
 

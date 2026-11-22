@@ -1,6 +1,6 @@
 ---
 name: device-knowledge
-description: Hardware unit facts (heat pump, ventilation, Somfy, Shelly, Victron): adding a device, a test on the unit, a lever that does or does not steer it, a register decode, a manual page; use before writing under doc/devices/ or putting a hardware fact into a note.
+description: Hardware unit facts (heat pump, ventilation, Somfy, Shelly, Victron): adding a device, a test on the unit, a lever that does or does not steer it, a register decode, an ebusd catalog entry, a Modbus register, how a unit is polled or written via ebusd, Modbus or its HA integration, a manual page; use before writing under doc/devices/ or putting a hardware fact into a note.
 ---
 
 # Device knowledge
@@ -26,9 +26,16 @@ covers it yet (grep it; extend that entry instead):
 - **Expensive to read:** the answer sits in a long PDF, a scanned page, a large catalog or across
   several documents. Write the conclusion with the page tag so nobody reads the source again.
 
+- **Access path (ebusd, Modbus, an HA integration):** only what the program's or integration's
+  documentation omits, gets wrong or makes hard to find for THIS unit: what it answers or not,
+  its catalog entries, write paths proven on it, setup-specific wiring (bridge topics). Record:
+  "`mc/TempDesired/set` takes a one-decimal payload and reads back on this unit [T<n>]". Do not
+  record: "`?N` on `/get` sets poll priority N" (ebusd's MQTT docs): a `software` References row
+  whose `Covers` names that page.
+
 Do NOT record: what a References row's `Covers` pointer already leads to in a short HTML/MD
-page; generic knowledge of the device class; values no package or decision uses; restated
-manual chapters.
+page; generic knowledge of the device class or of the program in between; values no package or
+decision uses; restated manual or program-documentation chapters.
 
 **Before skipping, name what would be lost.** Say in one line what a later agent pays without the
 entry: which source it must re-read (document, pages, size), what it could misread there, or that
@@ -44,10 +51,12 @@ costs a lookup or a repeated test, a useless one costs context in every read.
 |---|---|
 | the unit's behaviour, a protection, a sequence, a threshold from the manual | device `behaviour.md` |
 | a lever that steers the unit, or one that does not | device `behaviour.md` `## Control` / `## Does not work` |
-| a register's decode, access, timeout or bogus answer | device `interface.md` |
-| a manual, catalog or forum post used as a source | device `README.md` `## References` |
-| which entity reads it, why the package uses it, a workaround for a device limit | package note / design, citing `(device <ID>)` |
-| a quirk of the software in between (HA integration, ebusd program, MQTT payload) | package note or a skill |
+| a register's decode, access, timeout or bogus answer | device `interface.md` (or its `registers-<area>.md`) |
+| how the unit is reached: path, program/integration and config source, addressing, polling, write payload and read-back, wiring a write needs, a quirk of the software in between as it affects this unit | device `interface.md` `## Access` (or its `access-<path>.md`) |
+| a manual, catalog, program/integration doc (`software`, with version) or forum post used as a source | device `README.md` `## References` |
+| which entity reads it, why the package uses it, a workaround for a device limit, a package procedure (poll registration, PR deploy lines) | package note / design, citing `(device <ID>)` |
+| generic behaviour of a program or HA platform: documented | a `software` References row, never restated |
+| the same, undocumented and needed by several devices or packages (MQTT sensor semantics) | a skill (`ha-mqtt`); the device doc cites it |
 | an untested idea | `plans/` (UNPROVEN), with the test that would settle it |
 
 ## Add a device
@@ -56,7 +65,9 @@ costs a lookup or a repeated test, a useless one costs context in every read.
 packages need: copy only `_template/README.md`, drop the `## Files` table for the line
 `Minimal: no behaviour, interface or evidence files; the References rows are the doc.`, and fill
 Identity (`[<REF>]` tags only, no `[T<n>]`), References and Used by. Allowed only if every
-reference is stable and agent-readable (rule: Minimal device). Each `Covers` cell says which
+reference is stable (doc no. + edition or version, or a local copy under `references/`) and
+agent-readable (HTML, Markdown, text; a PDF only with a text layer and page pointers in `Covers`;
+a scanned PDF never alone). Each `Covers` cell says which
 topics and pages to read for what (`controls p.12-14; error codes p.40`), so an agent reads one
 page, not the document. The first fact that passes the gate makes it a full doc: copy the other
 three template files.
@@ -68,10 +79,11 @@ three template files.
    One `## References` row per document, with document number, edition and download URL; give
    each a short uppercase ID (`IA`, `BA`, `CAT`).
 3. Fill `behaviour.md` and `interface.md` only with tagged facts. Every lever you know to fail
-   goes under `## Does not work` now, not later.
+   goes under `## Does not work` now, not later. Delete `access.md` and `registers.md` (part
+   templates, used only at the cap).
 4. Point both ways: the package note header gets a `Device:` line naming each device doc and the
    decision that requires reading it (`behaviour.md` before changing a write to the unit or
-   reasoning about how it reacts; `interface.md` before adding a register; a topic file before
+   reasoning about how it reacts; `interface.md` before adding a register, a poll or a write path; a topic file before
    touching its topic), never "read first" (K-3). The device README lists the package. Move
    device facts out of the note; keep at most an anchored one-liner (K-6).
 5. Run `.github/scripts/check_knowledge_layout.py`.
@@ -89,10 +101,18 @@ Apply the device gate first; a finding that fails it is not written.
 4. Contradicts a manual: keep both, the unit's behaviour wins (rule: conflicts).
 5. The package relies on it: one imperative line in the package note ending `(device <ID>)`;
    give the fact an ID first (rule: Fact IDs).
-6. The fact has an ID: run the grep in `.claude/rules/devices.md` §Content before finishing.
+6. The fact has an ID: run the grep in `.claude/rules/devices.md` §Graduation and content before finishing.
+7. An access path: a block under `interface.md` `## Access` with the sections of
+   `_template/access.md`; a References row for the program's docs (kind `software`, version).
+   An API quirk: the access block's quirks section, tagged; the package keeps only what it must
+   do about it, `(device <ID>)`.
+8. A file passes its warn level (layout check, K-1.2): split per the rule's Parts table; each part
+   opens with what it covers and `indexed by <file>`, the parent gets one `read when` line per
+   part, and every pointer from notes to a moved fact still resolves (grep the IDs).
 
 ## Answer "can X steer the unit?"
 
-Read `behaviour.md` `## Control` and `## Does not work`, then `interface.md`. Answer with the
+Read `behaviour.md` `## Control` and `## Does not work`, then `interface.md` (its `## Access`
+for whether a write arrives at all). Answer with the
 tags: say whether it is tested here (`T`), only documented (DOC), or assumed. Nothing found =
 unknown, not "no".

@@ -14,7 +14,7 @@ Every knowledge file is one of four **kinds**; the kind decides when it loads an
 - **skill**: the body of `.claude/skills/<topic>/SKILL.md`. Loads when the task matches the
   description. Workflows and cross-package know-how, one topic per skill.
 - **reference**: every other file an agent reads (design docs, device docs, package reference docs
-  such as `registers.md`, skill `references/*.md`, plans, this file). Never loads by itself: it is
+  (`doc/<pkg>/<topic>.md`), skill `references/*.md`, plans, this file). Never loads by itself: it is
   reached only through a pointer that says when to read it (K-1.3).
 
 Not loaded as knowledge: background and sources (guarded), manufacturer copies under
@@ -28,8 +28,8 @@ Not loaded as knowledge: background and sources (guarded), manufacturer copies u
 | `.claude/skills/<topic>/SKILL.md` | skill | cross-package topic knowledge and workflows (`record-learning`, `device-knowledge`) |
 | `.claude/skills/<topic>/references/*.md` | reference | a skill's detail, indexed in its `SKILL.md` (K-1.3) |
 | `doc/<pkg>/design.md` | reference | current architecture: components, decision tables, interfaces, decisions and trade-offs, known gaps, extension points (K-1.1, K-4) |
-| `doc/<pkg>/<topic>.md` | reference | a package's lookup material (register decodes, curves), indexed in the note header |
-| `doc/devices/<device>/` | reference | one physical unit, independent of HA and of the packages using it (K-9); `devices.md` loads when one is read |
+| `doc/<pkg>/<topic>.md` | reference | lookup material the package owns (unit facts: K-9), indexed in the note header |
+| `doc/devices/<device>/` | reference | one physical unit and how it is reached, independent of the packages using it (K-9); `devices.md` loads when one is read |
 | `plans/` | reference | open work and hypotheses only; deleted when done; large ones split (`.claude/rules/plans.md`) |
 | YAML comments | with the file | what a block does + one-line why + pointer (K-1.1, K-5) |
 | `doc/<pkg>/background.md`, `doc/<topic>/background.md`, `doc/sources/<pkg>/` | guarded | history, superseded designs, investigations; raw transcripts, spreadsheets. Never current behaviour; read only when the user asks for history |
@@ -53,9 +53,9 @@ One home per kind of fact. Ask the question of each home in order; the first "ye
 
 | Home | One-question test | Holds |
 |---|---|---|
-| device doc | Would it stay true if HA were replaced or another package used the unit? | what the hardware is, does, answers and refuses (K-9) |
+| device doc | Would it stay true if HA were replaced or another package used the unit? | what the hardware is, does, answers and refuses; how it is reached (K-9) |
 | YAML comment | Is it about this one block only? | what the block does, at most one line of why, a pointer (K-5) |
-| note | Must an agent know it **before editing** this package's YAML or tests? | invariants (one line each), hardware/integration quirks, entity map, decisions in force with a one-line why, owner-supplied values and their origin, open issues (`#n`) (K-3) |
+| note | Must an agent know it **before editing** this package's YAML or tests? | invariants (one line each), what the package does about hardware/integration quirks, entity map, decisions in force with a one-line why, owner-supplied values and their origin, open issues (`#n`) (K-3) |
 | design doc | Is it needed to **change the architecture**, or to check that an addition does not break it? | components and responsibilities, state machines and decision tables, interfaces/contracts, decisions with rejected alternatives and trade-offs, known gaps, extension points and what breaks them (K-4) |
 
 - **Note vs YAML comment: never both.** A fact local to one block lives in its comment. A fact
@@ -70,7 +70,7 @@ One home per kind of fact. Ask the question of each home in order; the first "ye
   editing if an entity were renamed, a helper retuned, or a template restructured without changing
   behaviour?* Yes = implementation: point to it.
 
-  | Architecture (design doc) | Implementation detail (note or YAML; the design doc points) |
+  | Architecture (design doc) | Implementation detail (note, device doc or YAML; the design doc points) |
   |---|---|
   | which component decides and which single writer owns each actuator | entity ids, entity maps, helper lists, automation `id`s |
   | the state set, the transitions and the priority order, with why that order | trigger lists, condition-by-condition template text, `float()` defaults |
@@ -91,26 +91,26 @@ One home per kind of fact. Ask the question of each home in order; the first "ye
 
 ### K-1.2 Size caps
 
-Characters, never lines; hard (error) / warn. Source: `SIZE_CAPS` in the layout check (K-8).
-Not capped: `_template`, background, `doc/sources/`, manufacturer copies under
-`doc/devices/*/references/`.
+Characters, never lines; hard (error) / warn; `SIZE_CAPS` in the layout check (K-8) holds the
+numbers and a why per row. Not capped: `_template`, background, sources, `doc/devices/*/references/`.
 - always: root `CLAUDE.md` 8,000/7,000; skill `description:` 500/400
 - rule 5,000/4,000; note 24,000/21,600; `tests.md` 8,000/6,000
 - skill: `SKILL.md` body 20,000/12,000 (and > 500 lines); `references/*.md` and other skill files
   40,000/30,000
 - reference: design doc 40,000/24,000 (and a section > 3,000); package reference doc
-  40,000/30,000; `doc/KNOWLEDGE.md` 30,000/26,000; `plans/*.md` 40,000/25,000; device `README.md`
-  8,000/6,000, `behaviour.md` 24,000/20,000, `interface.md` 40,000/32,000, `evidence*.md` and
-  topic files 40,000/30,000
+  40,000/30,000; `doc/KNOWLEDGE.md` 30,000/26,000; `plans/*.md` 40,000/25,000; device (one
+  decision per read): `README.md` 8,000/6,000; `evidence*.md` 16,000/12,000; other 12,000/10,000
 
 At a cap, move or split; never raise it:
-- note, in this order: unit facts → device doc; mechanisms → design (K-4.1); test facts →
-  `tests.md`; register decodes → `interface.md`. Cut dated values, stories, hypotheses. Never cut
-  an invariant: move it, leave a pointer.
+- note, in this order: unit facts (incl. access, registers) → device doc; mechanisms → design
+  (K-4.1); test facts → `tests.md`. Cut dated values, stories, hypotheses. Never cut an
+  invariant: move it, leave a pointer.
 - rule: how-to → a skill. `SKILL.md`: detail → `references/*.md`.
-- device: `behaviour.md` per subsystem into `<topic>.md` (it keeps the `## Control` and
-  `## Does not work` index); `interface.md` per circuit; `evidence.md`: rows no fact cites →
-  `evidence-archive.md`, never delete a row or reuse a T number.
+- device: split into the standard parts (`.claude/rules/devices.md` Parts): `behaviour.md` per
+  subsystem into `<topic>.md` (it keeps States summary, `## Control`, `## Does not work`);
+  `interface.md` into `access-<path>.md` and `registers-<area>.md` (it keeps the access summary
+  and `## Unusable on this unit`); `evidence.md`: rows no fact cites → `evidence-archive.md`,
+  never delete a row or reuse a T number.
 - any other reference: split per K-1.3. A plan first collapses finished steps and distils
   confirmed facts; still over the warn level → a master plan with sub-plans
   (`.claude/rules/plans.md`).
@@ -126,9 +126,9 @@ An agent loads the smallest file that answers the decision in front of it.
   registers, one subsystem, one workflow), is readable without its siblings, and starts with one
   line: what it covers and which file indexes it.
 - **The parent becomes the index:** one line per part with its condition, plus what all parts
-  share. Index per kind: `SKILL.md` for `references/*.md`; the device README file map (or
-  `behaviour.md` for a subsystem) for device topic files; the note header for `doc/<pkg>/<topic>.md`;
-  the master plan for sub-plans. Design docs are not split into files: K-4 (cut, or split sections).
+  share. Index per kind: `SKILL.md` for `references/*.md`; for device parts the README file map
+  (`behaviour.md` for a subsystem, `interface.md` for access and register parts); the note header
+  for `doc/<pkg>/<topic>.md`; the master plan for sub-plans. Design docs are not split into files: K-4 (cut, or split sections).
 - Point straight to the part when the condition already decides it; to the index only when the
   choice needs reading.
 - A line repeated across parts is allowed only when it saves a read; a contradiction never is
@@ -159,8 +159,9 @@ Never list background or sources. Sections, in order:
 2. Invariants: one line each; when a design ID holds the mechanism, end with `→ design.md#ID`
    and do not restate it (K-1.1)
 3. Hardware / integration quirks (graded; a design doc cites them, never copies them). A fact
-   about the unit itself lives in its device doc (K-9); the note keeps only what this package
-   must do about it, one line ending `(device <ID>)` (K-6 copy rule)
+   about the unit or how it is reached lives in its device doc, a generic program or platform
+   fact in a skill (K-9); the note keeps what this package must do about it, one line ending
+   `(device <ID>)` (K-6 copy rule)
 4. Entity map (IDs from `default_entity_id` or ha-mcp lookup, never from `unique_id`); the full
    map lives here, never in the design doc
 5. Decisions in force (one-line why; no background link)
@@ -315,19 +316,23 @@ headless in this repo 2026-11-07 (K-7 method), OBSERVED as in `record-learning` 
 
 ## K-9 Device knowledge (`doc/devices/<device>/`)
 
-What a physical unit is and does, independent of HA and of which package uses it: identity,
-references (manuals by document number and page, register catalogs), behaviour, how it can be
-steered, how it **cannot** (first-class entries, never dropped silently), its interface (registers,
-API) and the tests on this unit behind each fact. Generic for any hardware (heat pump, ventilation,
-Somfy, Shelly, Victron).
+What a physical unit is, does and answers, independent of which package uses it: identity,
+references (manuals by document number and page, catalogs, software docs), behaviour, how it can
+and **cannot** be steered (first-class, never dropped silently), how it is reached (access path,
+registers) and the tests behind each fact. Any hardware (heat pump, ventilation, Somfy, Victron).
 
-- **One home per fact** (K-1.1 first row). True of the unit whatever HA does = device doc. How a
-  package uses the unit (entity map, which register it reads and why, its decisions, how it works
-  around a device limit) = the package note or design, which points to the device doc
-  (`(device <ID>)`, or `→ doc/devices/<device>/<file>.md` in YAML) and copies only per K-6
-  (anchored one-liner). The device README lists the packages using the unit, never their decisions.
-  Quirks of the software in between (an HA integration, ebusd as a program, MQTT payloads) stay in
-  the note or a skill; what the device itself answers over that interface is a device fact.
+- **One home per fact** (K-1.1 first row). True of the unit whatever package uses it = device
+  doc, including how it is reached: access path (bus, gateway, the program or HA integration in
+  between and its config source), addressing, polling limits, write semantics and the wiring a
+  write needs, register definitions, and quirks of the software in between as they affect this
+  unit. How a package uses the unit (entity map, which register it reads and why, its decisions,
+  workarounds) = the package note or design, which points to the device doc (`(device <ID>)`, or
+  `→ doc/devices/<device>/<file>.md` in YAML) and copies only per K-6 (anchored one-liner).
+  Generic program or HA-platform behaviour = its docs, cited by a `software` References row
+  (`Covers`), never restated; undocumented and used by several devices or packages = a skill
+  (`ha-mqtt`). The README lists the packages, never their decisions.
+- **No entity ids in a device doc:** they are registry state and change on a rename; the note's
+  entity map maps entity → register, the device doc defines the register.
 - **Folder per model as installed:** `<maker>-<model>`, lowercase kebab (`vaillant-vws-83-2`).
   Several units of one model share the folder; their evidence rows name the unit. An accessory
   without its own interface or manual lives in its main unit's folder.
@@ -337,17 +342,17 @@ Somfy, Shelly, Victron).
 - **Worth writing (gate, `device-knowledge` skill):** a device doc holds only what saves a later
   agent from a miss, a misreading or a costly read: a source it would not check, one that is
   ambiguous or easy to misread, or one too long to re-read. Never a copy of what a reference
-  answers plainly. Skipping names what would be lost; a doubtful case goes to the owner.
+  answers plainly; for an access path only what the program's documentation omits, gets wrong or
+  hides for this unit. Skipping names what would be lost; a doubtful case goes to the owner.
 - **Minimal device:** `README.md` alone (identity, References with per-topic page pointers, Used
   by) when no fact passes the gate and every reference is stable and agent-readable (HTML, MD,
   text; a text-layer PDF with page pointers). It becomes a full doc with its first gated fact.
 - **Grades:** the evidence tag is the grade (rule), mapped onto `record-learning` section 2
-  (DOC = a manufacturer document). The record-learning gate (section 0) applies.
+  (DOC = a manufacturer or `software` doc). The record-learning gate (section 0) applies.
   An UNPROVEN fact stays in a device doc only tagged `[ASSUMED]` and only when something relies on
   it; the test that would settle it is a `plans/` step.
 - **Current only:** no history narrative. A disproved fact is rewritten; the test row that
   disproved it stays as evidence. Manufacturer files under `references/` are never edited (like
   sources, but meant to be read and cited).
-- **Existing device facts under a package** (`doc/heating_pv_boost/registers.md`,
-  `heating-curve.md`, hardware quirks in notes) move to their device doc when that device's
-  knowledge is next worked on; not rewritten for this alone.
+- **Existing device facts under a package** (decodes, access facts, hardware quirks in notes) move
+  to the device doc when that device is next worked on, not for this alone.

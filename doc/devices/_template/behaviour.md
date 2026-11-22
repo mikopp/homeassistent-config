@@ -3,7 +3,9 @@
 > **TEMPLATE.** See `README.md` in this folder.
 
 Only the unit, never HA. Registers are named here, defined in `interface.md`. Every statement
-carries an evidence tag (`.claude/rules/devices.md`).
+carries an evidence tag (`.claude/rules/devices.md`). Over its cap (K-1.2) a subsystem moves to
+`<topic>.md` (first line: what it covers, `indexed by behaviour.md`); this file keeps a States
+summary with one `<topic>.md — read when <decision>` line per part, and the three sections below.
 
 ## States and sequences
 

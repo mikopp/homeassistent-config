@@ -4,7 +4,7 @@ Background only: not design-relevant; current facts are in doc/heating_pv_boost/
 
 History, investigations and one-day snapshots for `packages/heating_pv_boost.yaml`. Never cite this
 file as current behaviour; current package facts are in `doc/heating_pv_boost/notes.md`,
-register decodes in `doc/heating_pv_boost/registers.md`. IDs `HPB-B<n>` are stable.
+register decodes in `doc/devices/vaillant-vws-83-2/registers-*.md`. IDs `HPB-B<n>` are stable.
 Text below is kept as written at the time (moved out of the note and the YAML comments).
 
 ## HPB-B1 Live confirmations (dated provenance)

@@ -4,8 +4,8 @@ Every MQTT entity fed from an `ebusd/...` register gets real payloads over the r
 its resulting state is asserted, so a broken `value_template` fails a test. The FIRST payload of
 every topic is the exact string seen on the live broker (MQTT Explorer, 2026-11-12, geoTHERM
 EHP00 SW 0383); the following ones are variants derived from the templates and from
-doc/heating_pv_boost/registers.md (every enum in both forms, case, whitespace, unmapped values,
-short or empty payloads, garbage numbers).
+the register parts indexed by doc/devices/vaillant-vws-83-2/interface.md (every enum in both
+forms, case, whitespace, unmapped values, short or empty payloads, garbage numbers).
 
 One looping test on ONE fresh HA (stateless templates): per topic the payloads are published in
 order WITHOUT a reset, so "ignored payload keeps the last value" is checked against the value the
@@ -93,7 +93,7 @@ _ACTION, _FLOW = "heating_hvac_action", "heating_circuit_flow_temp"
 
 
 def _status(flow: str, mode: str, tail: str = "00") -> str:
-    """ehp/Status: HcFlowTemp;HcPress;SourcePress;hcmode;raw hex (registers.md)."""
+    """ehp/Status: temp;press;press_1;hcmode;raw hex (device VWS-32)."""
     return f"{flow};1.540;1.513;{mode};{tail}"
 
 
@@ -383,7 +383,7 @@ async def test_ebusd_poll_registration(ha: HomeAssistant, broker: Broker) -> Non
 
     The triggers (scan → finished / OK, ebusd running → on) each send exactly `_POLLS`; while the
     scan reads `running` nothing is sent (a catalog mid-discovery is unreliable).
-    → doc/heating_pv_boost/notes.md "Polling"
+    → doc/heating_pv_boost/notes.md (Invariants); doc/devices/vaillant-vws-83-2/interface.md (Polling)
     """
     await wait_subscribed(ha, broker, "ebusd/global/scan", "ebusd/global/running")
     count = 0

@@ -30,11 +30,14 @@ gives the upper floor more flow. Bathroom: a temperature spike with a humidity s
 
 Outdoor: the weatherstation `sensor.wheatherstation_outdoor_temperature` and the machine's own
 `sensor.geotherm_heating_outdoor_temp` (north side, no sun). Sun:
-`sensor.wheatherstation_solar_radiation`. Machine: geoTHERM exclusiv **VWS 83/2** (manuals in the
-note "Bus participants"); heating curves: `doc/heating_pv_boost/heating-curve.md`.
+`sensor.wheatherstation_solar_radiation`. Machine: geoTHERM exclusiv **VWS 83/2**: device doc
+`doc/devices/vaillant-vws-83-2/` (manuals in its README; heating curves: `heating-curve.md`).
 
-**All settings go over ebus; the panel is read-only (owner, 2026-11-22).** What counts is the
-ebus register format and what the controller does with it, not the panel's display steps:
+**All settings go over ebus (owner, 2026-11-22).** For this automation the VR 90/3 and the unit's
+own menus are manual inputs only: they write a setting only when someone changes it there, and
+their whole-number entry steps do not limit the bus, so 0.5 K `TempDesired` writes are fine
+(device VWS-24). What counts is the ebus register format and what the controller does with it
+(decodes: device `registers-*.md`):
 
 | Setting | Register (catalog) | Bus format | How |
 |---|---|---|---|
@@ -51,15 +54,14 @@ automatically.
   line (#186). The control law is unchanged. If the writer is armed later, `mc/TempDesired` =
   `input_number.heating_comfort_temp` + 1 and a hand value is overwritten.
 - **What the compressor acts on: the whole-degree setpoint** W = floor(`mc/FlowTempDesired`),
-  passed on by `uih` (CONFIRMED, `doc/heating_pv_boost/registers.md`). Runs end at integral ≈ 0,
+  passed on by `uih` (device VWS-3). Runs end at integral ≈ 0,
   so the mean flow ≈ W (HYPOTHESIS). A lever changes the room level only when it changes W, at
   least for part of the outdoor range. 1 K of W ≈ 0.6–0.7 K room (rough estimate, HYPOTHESIS).
 - **Levers:**
-  - **`TempDesired`** shifts the curve in parallel: the fine setpoint moves 0.5 K per 0.5 K step
-    on a flat part (observed). Every fine value seen is `TempDesired` + a whole number, so from a
-    `TempDesired` ending in .0 a −0.5 K step lowers W by 1 K and a +0.5 K step does nothing; from
-    one ending in .5 it is the other way round. Near a jump of the curve the half degree may also
-    move the jump by ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
+  - **`TempDesired`** shifts the curve in parallel: from a `TempDesired` ending in .0 a −0.5 K
+    step lowers W by 1 K and a +0.5 K step does nothing; from one ending in .5 it is the other way
+    round (device VWS-25). Near a jump of the curve the half degree may also move the jump by
+    ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
   - **Curve slope** sets the balance between cold and mild weather. Too warm mild and right cold:
     too steep; right mild and too cold cold: too flat. Step 0.01 ≈ 0.25 K flow mild, ≈ 0.45 K at
     −10 °C (Kühne formula; below 0.2 the formula is the only model, HYPOTHESIS).
@@ -81,8 +83,8 @@ automatically.
   `TempDesired` or the offset may change; slope rows need both classes.
 - **Settle time:** ≥ 4 full qualifying days after a change before the next evaluation.
 - **Interactions:** run length is set by the integral (Observations); floor protection =
-  `FlowTempMax` + `CompHysteresis` + 2 K at VF2 (note "Compressor and measurements"); frost
-  protection (`off` below 3 °C still heats to `TempDesiredLow` 20 °C, note "Frost protection").
+  `FlowTempMax` + `CompHysteresis` + 2 K at VF2 (device VWS-7); frost protection (`off` below
+  3 °C still heats to `TempDesiredLow`, 20 °C here) (device VWS-6).
 - Invariants: no automatic write, no change to the control law, every register read has its
   bridge lines and poll (note "Invariants").
 
@@ -104,7 +106,7 @@ automatically.
 | 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Forced reads after it: `mc` 26.5, `uih` 26.00 (was 27.0 / 27): W −1 K |
 | 2026-11-22 17:07:57 | `input_number.heating_comfort_temp` | 21.0 → 20.5 | Owner, 1 K below `TempDesired` (5.1) |
 | before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
-| unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20, outdoor offset 0 K | — | read live / owner, 2026-11-21 |
+| unchanged | everything else | — | current values: the note's "Owner-side configuration" |
 
 ## Baseline (summary of Part A, 2026-11-21)
 
@@ -128,12 +130,11 @@ whole-degree W and the curve's jumps (f).
 - (a) The geoTHERM outdoor value is offset from the weatherstation (first night ≈ 1 K colder).
   Damping refuted (jumps fall in the same 5 min as the edge crossing). Step 0.5, informative only.
 - (b) Below 0.2 the curve does not follow the formula: answered passively by 0.7.
-- (f) The curve works in **2 K steps** over outdoor temperature. OBSERVED: one edge at ≈ −2.5 °C
-  (geoTHERM value), 27.5 ↔ 29.5 at 0.14 / 22.5, crossed once each way on 2026-11-22 with no
-  hysteresis; flat in between. Fits the 0.13 period's 24 ↔ 26 jumps (never 25). **Not always
-  2 K** (OBSERVED 2026-11-22, 0.14 / 22.0): 27 ↔ 26 at geoTHERM ≈ 1.9 °C (1.81 ↔ 2.06), up 11:10,
-  down 16:30, no hysteresis. Open: the other edges, the step sizes, whether `TempDesired` or the
-  offset moves the edges (0.7).
+- (f) The curve works in **steps** over outdoor temperature, flat in between (2 K and 1 K seen).
+  OBSERVED 2026-11-22, no hysteresis at either edge: 27.5 ↔ 29.5 (2 K) at ≈ −2.5 °C geoTHERM
+  value, 0.14 / 22.5, crossed once each way; 27 ↔ 26 (1 K) at ≈ 1.9 °C (1.81 ↔ 2.06), 0.14 /
+  22.0, up 11:10, down 16:30. The 0.13 period's 24 ↔ 26 jumps (never 25) were 2 K. Open: the other
+  edges, the step sizes, whether `TempDesired` or the offset moves the edges (0.7).
 
 ## Steps
 
@@ -150,13 +151,14 @@ whole-degree W and the curve's jumps (f).
   `TempDesired` (22.5 until 11-22 08:43, then 22.0). Per setting: a table of edges (outdoor °C)
   and levels (flow °C) next to the formula. Questions: fixed step size? Edges fixed or moved by
   `TempDesired`? Hysteresis? Why: with a stepped curve, a slope change of 0.01 may do nothing or
-  shift a whole step, and an offset may move every edge. Enough when edges are seen across about
-  −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (6.1).
+  shift a whole step, and an offset may move every edge. Is the whole curve stepped (2 K and 1 K seen), or
+  only the edges seen (device VWS-30)? Candidate causes of W 0–2 K below the formula (UNPROVEN):
+  W's floor, the steps, the colder outdoor value. Enough when edges span about −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (VWS-30).
 - [TODO] **0.8** Outdoor offset hypotheses (a) and (b). Tested when the Phase 2 table first calls
-  for an offset change. Research: `ehp/OutsideTempOffset` is D2C (1/16 K), read `b509 0dc300`,
-  write `0ec300` (installer level); no source reports a non-integer write on any model; `uih` and
-  `mc` have no offset register; the manuals describe only the panel menu (±5 K, 1 K steps), which
-  does not decide (b); nothing decides (a). Test, in mild weather away from 3 °C and the cut-off:
+  for an offset change. Settles the open questions on VWS-36. Research: bus format and addresses
+  are in device `registers-ehp.md`; a web search (2026-11) found no
+  report of a non-integer write on any model; the manuals describe only the panel menu (±5 K,
+  1 K steps), which does not decide (b); nothing decides (a). Test, in mild weather away from 3 °C and the cut-off:
   1. Read `ehp OutsideTempOffset` (expect 0), `ehp OutsideTemp` (raw), `uih OutsideTemp`, the
      broadcast and `mc FlowTempDesired`.
   2. `ebusctl write -c ehp OutsideTempOffset 0.5`, read back with `-f`: 0.5 → (b) holds; 0 or 1 →
@@ -164,6 +166,17 @@ whole-degree W and the curve's jumps (f).
   3. Read step 1 again. Raw `ehp` unchanged while the broadcast or `uih` and the setpoint move →
      (a) holds. Nothing moves → no lever: set 0 back, drop the offset rows.
   Result → "Observations"; the step size goes into the Phase 2 table.
+- [DONE] **0.9** Menu A2 (owner, 2026-11-22): hydraulic plan 6, electrical plan 3; plan-6
+  statements apply (device `README.md` Identity, VWS-2, -4, -7, -18).
+- [DROPPED] **0.10** Which panel menus can be changed: not needed, the panels are manual inputs
+  only (owner, device VWS-24).
+- [TODO] **0.11** Does a `TempDesired`-only write start or stop the compressor (device VWS-25,
+  design HPB-1 Known gaps)? At the next 2.2 change, with the integral far from 0 and VF2 far
+  from the stop line, log compressor state, integral, VF2, W and fine setpoint to the second,
+  5 min before to 10 min after. No change while W stays → no other path; a start or stop within
+  seconds → a direct path. Repeat once. Result → device VWS-25, design Known gaps.
+- [DONE] **0.12** Run-on into heating after hot water: not "sometimes", every charge ends with a
+  2–4 min heating tail that adds to the integral (device VWS-13).
 
 ### Phase 1 — settle the current setting
 
@@ -204,7 +217,7 @@ configuration".
   cold class, 22 W/m²; inflated by the 6 h at 29.5 overnight and noon sun), every room above its
   band → **21.5** at 17:07 (owner, a day early). 21.5 rather than 21.0: same W (fine = `TempDesired`
   + whole number), and from 21.5 one +0.5 step raises W again. Expected: W −1 K, office ≈ +0.3.
-  `uih` passes floor(`mc`) and the integral uses it (CONFIRMED).
+  `uih` passes floor(`mc`) and the integral uses it (device VWS-3).
 - [IN_PROGRESS] **2.2** Settle 21.5, then evaluate as 1.2 (≥ 4 qualifying days: earliest
   2026-11-27). W moved 27 → 26 (forced reads after hot water, 11-22). Checks: the cold edge (was 29.5 at 22.5) now 28.5 or 29; run
   length ≥ 20 min at the lower W (≈ 180 ÷ (VF2 − W) + ramp); daily starts. Then the table again,
@@ -219,7 +232,7 @@ Success metrics, on qualifying days: office daily mean 21.7–22.3 °C, every ot
 ### Phase 3 — room imbalance (owner)
 
 The upper-floor rooms run 0.5–1.0 K below the living room (Baseline). The curve shifts every room
-together, the pump speed cannot be set (note "Bus participants"), no flow meters.
+together, the pump speed cannot be set (device VWS-23), no flow meters.
 
 - [TODO] **3.1** Hydraulic balancing, when 1.2 shows an office-to-living gap > 0.5 K.
   - **3.1a** Rule out room causes: doors, furniture or rugs over the loops, the bathroom's towel
@@ -240,7 +253,7 @@ together, the pump speed cannot be set (note "Bus participants"), no flow meters
   and a "Room deviation" card. Depends on: owner approval.
 - [DONE] **4.9** W from `uih/FlowTempDesired` (#191), deployed: on 11-22 17:01 the stop line
   followed W, not the fine value. `uih` reads **0 during hot water**, like `mc`
-  (`registers.md`); the stop line is unavailable while W is 0 (this PR, was 0 + 7 = 7 °C). Still
+  (device `registers-mc-uih.md`); the stop line is unavailable while W is 0 (this PR, was 0 + 7 = 7 °C). Still
   UNPROVEN: whether the stop line uses W; a stop-line stop at W + 7 rather than fine + 7 decides it
   (passive).
 
@@ -254,19 +267,10 @@ together, the pump speed cannot be set (note "Bus participants"), no flow meters
 
 ### Phase 6 — geoTHERM device knowledge
 
-- [TODO] **6.1** Build `doc/devices/` docs for the geoTHERM (VWS 83/2, SW 0383, circuits `ehp`,
-  `mc`, `uih`, `hwc`) with the framework of #192: how it can and cannot be steered, every fact
-  tagged by origin (manual page, test on this unit, `[ASSUMED]`), and what is known not to work
-  (`mc/Mode`, a `TempDesired` step that leaves W unchanged, registers that do not answer, the
-  panel as read-only). Sources: this plan, `plans/heating-cycling-from-ehp.md`,
-  `doc/heating_pv_boost/registers.md`, `heating-curve.md`, and the unit facts in the note
-  ("Bus participants", "Compressor and measurements", frost protection, Raumaufschaltung, outdoor
-  sensor). Move them, leaving anchored one-liners `(device <ID>)` in the note; the note is at
-  23.9k of its 24,000 char cap and should drop to ≈ 18k.
-  **Timing (owner, 2026-11-22): right after #192 merges, alongside the tuning loop, not at the
-  end.** Hypotheses still open go in as `[ASSUMED]` with the plan step that settles them; facts
-  confirmed later in 0.7, 0.8, 2.x go straight into the device docs.
-  Depends on: #192 merged.
+- [DONE] **6.1** geoTHERM device docs built in #193: `doc/devices/vaillant-vws-83-2/`, every
+  fact tagged by origin, open hypotheses as `[ASSUMED]` with the plan step that settles them,
+  anchored one-liners `(device <ID>)` left in the note. Facts confirmed later in 0.7, 0.8, 2.x go
+  straight into the device docs.
 
 ## Observations
 
@@ -287,16 +291,12 @@ charged the slab (return 24.3 → 26.2 °C).
 
 **How runs start and end** (`ehp/Integral`, 5 min statistics; `CompIntegral` −180,
 `CompHysteresis` 7 K):
-- Starts at integral ≈ −183 … −186, 1–3 min after it crosses `CompIntegral`.
-- **A run ends on whichever comes first** (OBSERVED): the integral back at ≈ 0 (9 of 9 runs
-  11-17…22, mild and cold, −8 … +8), or the flow at W + `CompHysteresis` (four stops with the
-  integral clearly negative, all at `TempDesired` 22 and W 24–26 in mild weather: 11-06,
-  11-14 20:23, 11-18 23:07, 11-19 22:10). The hysteresis acts on this unit although the /2 manual
-  (p. 69) limits it to hydraulic plans 1 and 3. Manual p. 48–49 supports runs ending on the
-  integral.
-- The integral counts VF2 − W (CONFIRMED, registers.md). It is not reset at a stop, not clamped
-  (+88 seen), and freezes during hot water. After hot water the compressor once ran on into
-  heating at −113 (11-22), not on 11-17 or 11-20 (cause open).
+- Runs start just past `CompIntegral` and end on whichever comes first: the integral back at
+  ≈ 0, or the flow at W + `CompHysteresis` (device VWS-2, VWS-4), although the manual limits the
+  hysteresis to plans 1 and 3 and this unit runs plan 6 (device VWS-4).
+- The integral counts VF2 − W (device VWS-3); not reset, not clamped, held during hot water
+  (device VWS-5). After hot water the compressor once ran on into heating at −113 (11-22), not on
+  11-17 or 11-20 (cause open).
 - Step 0.6: the compressor stopped 1 s after the 08:43 write, with the integral ≈ 0 and VF2 at the
   stop line: whether the write triggered it is unknown.
 
@@ -308,42 +308,39 @@ Consequences (HYPOTHESIS):
   (W − VF2 while off). A lower W gives shorter runs and less headroom to the stop line.
 - Run-length lever: `CompIntegral`. `CompHysteresis` matters only where the flow reaches the stop
   line first (W ≤ 24–25, mild).
-- **`TempDesired` acts on the compressor only through W.** On the flat parts a 0.5 K step from .5
-  to .0 never changes W; near an edge it may move the edge by ≈ 0.5 K outdoor (0.7).
+- **`TempDesired` acts on the compressor only through W** (the integral uses W: device VWS-3;
+  other paths: step 0.11); on the flat parts a
+  0.5 K step from .5 to .0 never changes W (device VWS-26); near an edge it may move the edge by
+  ≈ 0.5 K outdoor (0.7).
 
 ## References
 
-1. *Bedienungsanleitung geoTHERM exclusiv VWS* 0020025604_00: heating curves p. 21, 45°
-   room-setpoint shift p. 18, frost protection p. 10.
-2. *Installationsanleitung geoTHERM exclusiv VWS* 0020045204_01: floor protection p. 46, energy
-   balance p. 48–49, menus C2 p. 58, C4/C5 p. 59, calibration p. 65, compressor and FlowTempMax
-   p. 69; revision _00 p. 59 for the frost delay.
-3. Kühne formula (sensoCOMFORT, OpenEnergyMonitor forum), used below 0.2.
-
-Links and the owner's printed copy: the note "Bus participants" and `heating-curve.md`.
+Manuals (with pages per topic), the ebusd catalog and the Kühne formula (used below 0.2): the
+References table of `doc/devices/vaillant-vws-83-2/README.md`.
 
 ## Knowledge homes
 
-- geoTHERM device docs (`doc/devices/`, 6.1): every unit fact confirmed here, graded by origin,
+- geoTHERM device docs (`doc/devices/vaillant-vws-83-2/`, 6.1): every unit fact confirmed here, graded by origin,
   incl. what does not work; the curve-step and offset results of 0.7 and 0.8.
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve, `TempDesired`
   and offset values, the room targets and limiting room, the loop valve settings after 3.1. Unit
-  facts only as anchored one-liners (no new entries before 6.1: the note is at its cap).
+  facts only as anchored one-liners.
 - Design doc: HPB-1 already carries the hand-setter line; no further change expected (K-4.1).
 - Story (the 0.13 episode, the spike analysis) → `doc/heating_pv_boost/background.md` at Close,
   from commit `4956e8a` of this file.
 
 ## Status
 
-- [DONE] 0.1–0.4, 0.6; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8 (offset
-  test at the first offset change)
+- [DONE] 0.1–0.4, 0.6, 0.9, 0.12; [DROPPED] 0.10; [TODO] 0.5 (informative), 0.7 (edges, before any
+  slope change), 0.8 (offset test at the first offset change), 0.11 (`TempDesired` write vs
+  compressor, at the next 2.2 change)
 - [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
 - [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
   (W 27 → 26 confirmed by forced read), evaluate from 2026-11-27
 - [TODO] 3.1–3.2 balancing
 - [DONE] 4.3, 4.5–4.9; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
 - [DONE] 5.1; [TODO] 5.2 deferred
-- [TODO] 6.1 geoTHERM device docs, right after #192 merges
+- [DONE] 6.1 geoTHERM device docs (#193)
 - [TODO] Close
 
 ## Close

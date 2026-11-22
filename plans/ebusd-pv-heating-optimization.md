@@ -36,18 +36,18 @@ geoTHERM.
   program; the time program is ignored. Loxone owns the schedule through `warm_enough`. With `on`
   the setpoint is always `TempDesired` (= comfort + 1), so `TempDesiredLow` no longer acts as a
   night setback. It is the machine's frost floor with no HA logic: below 3 °C outdoor `off` still
-  heats to it (`doc/heating_pv_boost/notes.md`, "Frost protection").
+  heats to it (device VWS-6).
 - **Warm enough = `off`** in `active_heating` and `neutral`, unless a slab boost overrides it
   (boost only in `active_heating`).
 - **Not warm enough = `on`.** Loxone publishes `warm_enough` retained and re-sends it every hour
   (owner); 24 h without a message makes it `unavailable` (`expire_after`), which counts as not warm
   enough, as does `unknown`: a lost signal heats, never stops.
-- **At most one mode change every 30 min** (compressor minimum between starts is 20 min). A change
+- **At most one mode change every 30 min** (compressor minimum between starts is 20 min, device
+  VWS-10). A change
   that falls inside the hold is applied when the hold ends, not dropped.
 - **Cooling season → heating `off`** (unchanged from 10-30). `mc/OperatingMode` is the *heating*
-  mode only ("Betriebsmodus Heizen", enum `0=disabled 1=on 2=off 3=auto 4=eco 5=low`, no cooling
-  value); cooling is the separate register `mc/CoolingOperatingModeHc2`, so `off` does not touch
-  cooling. The indicator works on a 48 h outdoor mean with hysteresis, so a single warm day cannot
+  mode only; cooling has its own register, so `off` should not touch cooling (untested, device
+  VWS-15, VWS-28). The indicator works on a 48 h outdoor mean with hysteresis, so a single warm day cannot
   change the season.
 - An `unknown`/`unavailable` **season indicator** writes nothing (mode stays as it is).
 
@@ -72,12 +72,14 @@ under our own action.
 
 - **HA rebuilds room comfort from HA room sensors.** Loxone already holds per-room setpoints and
   weighting. Duplicating it would drift. Comfort during a boost is instead bounded by the offset
-  cap, enforced by the Vaillant's own VR 90 room influence — so HA needs no room sensors at all.
+  cap alone (Raumaufschaltung is `Keine`, so the VR 90 room influence plays no part, device
+  VWS-21) — so HA needs no room sensors at all.
 - **HA toggles the VR 90's "Raumaufschaltung" (off/thermostat) room-influence setting.** This
   toggle is confirmed to exist and be ebus-communicated, but its own write is not in the public
   register catalog (only the continuous `mc/RoomTempOffset` "Raumaufschaltung" correction value
-  is — see `doc/heating_pv_boost/notes.md` "Room influence"). Since this design already doesn't use or need room-sensor trim
-  (Loxone's boolean is the sole comfort input; bedrooms are not throttled, all valves open — owner 2026-11-06), the setting is
+  is, and it is write-only — device VWS-22, `interface.md` "Unusable on this unit"). Since this design already doesn't use or need room-sensor trim
+  (Loxone's boolean is the sole comfort input; bedrooms are not throttled — owner 2026-11-06; the
+  ground floor is throttled a bit from earlier balancing — owner 2026-11-21), the setting is
   redundant with this architecture regardless of boost state — so the fix is a one-time manual
   change (below), not a register HA has to find and drive.
 - **HA never writes `off` in heating season** (10-30 law). Rejected 2026-11-14: without `off`
@@ -103,7 +105,7 @@ template strictly and fails on a sentinel output.
 ### 3. `doc/heating_pv_boost/notes.md`
 
 Verified register findings that outlive this plan (see that note and
-`doc/heating_pv_boost/registers.md`).
+`doc/devices/vaillant-vws-83-2/interface.md`).
 
 ## Transport — getting `ebusd/#` to HA's broker
 
@@ -144,8 +146,8 @@ also repointed at the same time, an extra, coupled change this plan does not oth
 > `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
 > `ebusd/global/scan` `in` only. Every new register needs both lines — see
 > `doc/heating_pv_boost/notes.md` "Invariants". Writes need a third kind of line:
-> `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`, see
-> `plans/heating-baseline-and-phase2-prerequisites.md` step 2). The snippet below is kept for the
+> `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`;
+> wiring: device VWS-41). The snippet below is kept for the
 > history only.
 
 Leave ebusd exactly as configured today (still publishing to its current broker, so Loxone's
@@ -208,8 +210,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
    ebusd/<circuit>/<name>/get -m '?5'` (or `ebusctl -p 5 read -c <circuit> <name>`). If a topic
    never appears at all, the sensor stays `unavailable`: that is the signal.
 3. Leave `--mqttjson` **off**.
-4. DONE: Raumaufschaltung is `Keine` (owner-confirmed; `doc/heating_pv_boost/notes.md` "Room
-   influence").
+4. DONE: Raumaufschaltung is `Keine` (owner-confirmed; device VWS-21).
 
 ## Status
 
@@ -252,8 +253,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
 - [x] 8b. Phase 2 prerequisite: `binary_sensor.heating_compressor_active` (Shelly clamp > 500 W) —
       owner chose the Shelly as the source, so no new ebus register or MQTT topic. Tests added.
       REMOVED 2026-11-14 (owner: nothing read it, `ehp/Comp` is the compressor; Phase 2 re-adds an
-      electrical threshold if it needs one). `Hc1Pump` still unread (open question in
-      Observations, finding 4).
+      electrical threshold if it needs one). `Hc1Pump` is read now; finding 4: step 15 (c).
 - [ ] 8c. Set `input_number.heating_pv_min_battery_soc` to 50 (UI, user). The current 30 equals the
       Victron's own floor, so the gate never blocked.
 - [x] 9. Loxone: publish `warm_enough`; stop writing the geoTHERM heating mode — owner, 2026-10-30.
@@ -270,7 +270,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       unknown season), tests in `tests/ha/test_heating_pv_boost_comfort.py`. Control law revised by
       the owner 2026-11-14, see `doc/heating_pv_boost/design.md#HPB-1`. Post-deploy steps (owner, in this order):
       1. Add `topic ebusd/mc/OperatingMode/set out 0` and `topic ebusd/mc/TempDesired/set out 0` to the
-         Mosquitto bridge (`plans/heating-baseline-and-phase2-prerequisites.md` step 2), restart Mosquitto.
+         Mosquitto bridge (device VWS-41), restart Mosquitto.
       2. Prove each line with an idempotent write of the CURRENT value (e.g. publish the current
          mode name / setpoint, `22.0` form for TempDesired: the one-decimal payload is unverified)
          and see ebusd accept it.
@@ -281,6 +281,22 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
 - [ ] 13. Phase 4 — tests, dashboard
 - [x] 14. Compressor short-cycling observation + tuning — separate plan, closed 2026-11-21
       (no `CompHysteresis` change, owner); result in `doc/heating_pv_boost/notes.md` "Decisions in force"
+- [TODO] 15. Unit questions behind the mode law (device VWS-17, VWS-6; findings 4 and 7), from HA
+      history, no setting changes: (a) on the first armed sunny day above `mc/OtShutdownLimit`,
+      is a boost (`on`) honoured or does hcmode stay `off`; (b) the next `off` spell below the
+      limit (like 10-16 at ≈ 13 °C): outdoor value, mode, time program; (c) does `ehp/Hc1Pump`
+      read on while hcmode is `off` (now read, so the ~9 W in `off` can be checked); (d) frost
+      protection with mode `off` below 3 °C: does heating follow the room temperature, and does it
+      come on once after `FrostOverRideTime` or repeat every 3 h (owner reading); (e) electrical
+      plan 3 EVU block. Hypothesis (owner, unconfirmed): the block contact is wired; the panel
+      shows "Sperrzeit" at some times around lunch. Test: `ebusctl read -f PowerCut` (device
+      `registers-ehp.md`) during such a spell and outside it, or poll it for a few days; note the
+      menu 1 status text at the same time ("Sperrzeit" there may be compressor timing, not EVU).
+      `1` at lunch → wired, times → device; `0` during a panel Sperrzeit → compressor timing.
+      Then: does a block explain (b)? Result → device
+      `protections.md` (T rows).
+- [DONE] 16. Catalog generation confirmed: ebusd 26.1, `hcmode` with `1=cooling` (device VWS-32,
+      T51). The numeric enum branch stays: some enums arrive as numbers (VWS-44).
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 
@@ -307,7 +323,7 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
    compressor runs on the machine's own schedule and the pump circulates between runs. HA currently
    sees only hcmode, so `heat`/`off` cannot tell compressor from circulation. Open: recorded Shelly
    power shows ~83 W in `heat` (idle) and ~9 W in `off`, which does not obviously match "pump runs
-   while `off`" — needs `Hc1Pump` read live to reconcile.
+   while `off`"; `ehp/Hc1Pump` is read now, reconcile in step 15 (c).
 5. **Heating draw (owner-confirmed).** Heating never exceeds ~2 kW, usually ~1.8 kW, so the 2000 W
    start threshold is right. (Hourly maxima of 2.0–2.6 kW in statistics were start-up peaks; DHW
    ~3.5 kW.) 10-16 never reached 2 kW for 15 min; 10-17 morning would have started ~09:15.
@@ -315,7 +331,7 @@ recorded data; OBSERVED = real data with an alternative explanation still open.
    the 20 min `delay_off` (20:48 restart → `off` 21:11). Phase 3 must treat `unknown` as off.
 7. **Possible outdoor shutdown (OBSERVED, one day).** 10-17 `hvac_action` `off` 13:52–17:00 matched
    outdoor ≥ 15 °C (`mc/OtShutdownLimit`); 10-16 14:43–16:11 `off` at ~13 °C is unexplained. Whether
-   a boost is honoured above 15 °C is untested — check on the first armed sunny day.
+   a boost is honoured above 15 °C is untested: step 15 (a), (b).
 
 8. **Owner changes and short-cycling (2026-10-30, owner-reported).** Loxone stopped writing the
    mode; geoTHERM set to `auto` with a day `on` / night `low` time program; `CompIntegral`

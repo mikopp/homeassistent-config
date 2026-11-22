@@ -5,7 +5,7 @@
 # is on. number.geotherm_heating_temp_desired writes mc/TempDesired only when the owner sets it.
 # Rollout: plans/ebusd-pv-heating-optimization.md.
 # → doc/heating_pv_boost/notes.md (facts, invariants); register decodes in
-#   doc/heating_pv_boost/registers.md.
+#   doc/devices/vaillant-vws-83-2/interface.md.
 #
 # ebusd payloads are plain ';'-separated values (--mqttjson must stay off: Loxone reads the same
 # topics), so multi-field messages are parsed positionally; field lists are inline at each sensor.
@@ -20,9 +20,9 @@ mqtt:
     # never a setting anyone chooses. Do not confuse it with sensor.geotherm_heating_hvac_mode below,
     # which reads mc/OperatingMode, the configured setting (HVAC MODE).
     #
-    # ehp/Status fields: 0 HcFlowTemp °C | 1 HcPress bar | 2 SourcePress bar | 3 hcmode | 4 raw hex
-    # hcmode enum: 0=off 1=cooling 3=heat 4=water; name and number both accepted.
-    # → doc/heating_pv_boost/registers.md
+    # ehp/Status fields: 0 temp (T6) °C | 1 press bar | 2 press_1 bar | 3 hcmode | 4 raw hex
+    # hcmode enum: 0=off 1=cooling 3=heat 4=water; names arrive here, numbers accepted as insurance.
+    # → doc/devices/vaillant-vws-83-2/registers-ehp.md
     - name: "Heating HVAC Action"
       unique_id: heating_hvac_action
       default_entity_id: sensor.geotherm_heating_hvac_action
@@ -47,7 +47,7 @@ mqtt:
         {% else %}unknown{% endif %}
         {# A payload without field 3 renders unknown: a text sensor (no device_class) stores '' as its state. #}
 
-    # ehp/Status field 0 = HcFlowTemp (T6), the heating CIRCUIT's flow temperature ("circuit"
+    # ehp/Status field 0 = temp (T6, the value of ehp/HcFlowTemp), the heating CIRCUIT's flow temperature ("circuit"
     # because ehp/FlowTemp (VF2), the system-wide flow sensor, is a different register).
     # Freshness reference for binary_sensor.heating_ebusd_online: force_update keeps last_updated
     # moving while an idle system republishes the same value, or liveness would read "offline".
@@ -82,7 +82,7 @@ mqtt:
         {% if f | count > 1 and f[1] | trim | lower == 'ok' %}{{ f[0] | float | round(2) }}{% endif %}
 
     # ehp/FlowTemp — flow temperature at the external sensor VF2. The controller's energy integral
-    # and floor protection use VF2, not the internal T6 above (→ doc/heating_pv_boost/registers.md).
+    # and floor protection use VF2, not the internal T6 above (→ doc/devices/vaillant-vws-83-2/runs.md).
     # Same temp;sensor-status fields and "ok" rule as the return sensor. Polled at priority 3.
     - name: "Heating Flow Temp VF2"
       unique_id: heating_flow_temp_vf2
@@ -165,8 +165,9 @@ mqtt:
 
     # uih/FlowTempDesired — the flow setpoint the system controller hands to the generator: the
     # whole-degree floor of mc/FlowTempDesired, and the value ehp/Integral counts against
-    # (→ doc/heating_pv_boost/registers.md). 0 during hot water, like mc/FlowTempDesired. Was
-    # mc/Status0a field 4 (same value, lagging); same entity, so its history continues.
+    # (→ doc/devices/vaillant-vws-83-2/registers-mc-uih.md). 0 during hot water, like
+    # mc/FlowTempDesired. Was mc/Status0a field 4 (same value, lagging); same entity, so its
+    # history continues.
     - name: "Heating System Flow Temp Desired"
       unique_id: heating_circuit_flow_temp_desired
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired
@@ -180,7 +181,7 @@ mqtt:
 
     # mc/FlowTempDesired — the circuit's weather-curve output in 0.5 K steps (uih above passes on
     # its whole-degree floor). Read to check the curve against the formula in
-    # doc/heating_pv_boost/heating-curve.md (with the outdoor temp and the curve below).
+    # doc/devices/vaillant-vws-83-2/heating-curve.md (with the outdoor temp and the curve below).
     - name: "Heating Circuit Flow Temp Desired Fine"
       unique_id: heating_circuit_flow_temp_desired_fine
       default_entity_id: sensor.geotherm_heating_circuit_flow_temp_desired_fine
@@ -861,14 +862,12 @@ template:
       # While the heat pump is making hot water, its water temperatures reflect the DHW circuit
       # rather than the heating circuit, so the return reading says nothing about the slab.
       # The mask is binary_sensor.heating_return_temp_masked: the energy mode water_heating
-      # (compressor or pump run-on with hvac_action water), held 5 min after it ends (owner: the
-      # return needs time to settle; in 7 of 7 runs checked 2026-11-04..14 the raw return climbs
-      # 25 → 50-55 °C only while hot water runs and was back to normal within the 5 min bucket
-      # where it ends, so 5 min is a safe margin).
+      # (compressor or pump run-on with hvac_action water), held 5 min after it ends: a package
+      # safety margin, the unit's return shows no tail after a charge
+      # (→ doc/devices/vaillant-vws-83-2/runs.md VWS-12).
       # While masked this sensor goes UNAVAILABLE instead of publishing a misleading number, which
       # means every numeric threshold downstream simply never fires — no sentinel value to
       # remember, and it matches the repo rule on propagating unavailable.
-      # → plans/heating-cycling-from-ehp.md step 11
       - name: "Heating Circuit Return Temp Valid"
         unique_id: heating_circuit_return_temp_valid
         unit_of_measurement: "°C"
@@ -1241,7 +1240,7 @@ automation:
   # Publishes "?N" to every read register's ".../get" topic: a read now plus ongoing polling at
   # relative priority N. ebusd forgets these on restart, so they are re-asserted on HA start,
   # ebusd running, bus data back and scan finished/OK; never while the scan reads "running".
-  # → doc/heating_pv_boost/notes.md "Polling"
+  # → doc/heating_pv_boost/notes.md (Invariants); doc/devices/vaillant-vws-83-2/interface.md (Polling)
   - alias: "Heating: ebusd poll registration"
     id: heating_ebusd_poll_registration
     description: "Register/refresh ebusd polling priorities once its bus scan is not in progress"

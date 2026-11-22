@@ -99,7 +99,7 @@ def _ebus(topic: str) -> Input:
 
 
 def _status(mode: str) -> str:
-    """ehp/Status: HcFlowTemp;HcPress;SourcePress;hcmode;raw. Only field 3 (mode) varies."""
+    """ehp/Status: temp;press;press_1;hcmode;raw. Only field 3 (mode) varies."""
     return f"25.2;1.5;1.2;{mode};0a01"
 
 
