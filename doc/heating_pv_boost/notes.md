@@ -238,5 +238,5 @@ Package-specific test facts: `doc/heating_pv_boost/tests.md` (loads with the tes
 - `doc/heating_pv_boost/design.md` (control law, energy modes); the unit:
   `doc/devices/vaillant-vws-83-2/`.
 - `plans/ebusd-pv-heating-optimization.md` (rollout),
-  `plans/heating-baseline-and-phase2-prerequisites.md`.
+  `plans/heating-baseline-and-phase2-prerequisites.md` (raw-history retention).
 - Victron surplus inputs: `doc/victron/notes.md`.

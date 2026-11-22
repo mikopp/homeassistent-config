@@ -146,8 +146,8 @@ also repointed at the same time, an extra, coupled change this plan does not oth
 > `topic ebusd/<circuit>/<name>/get out 0` line per poll registration, `ebusd/global/running` and
 > `ebusd/global/scan` `in` only. Every new register needs both lines — see
 > `doc/heating_pv_boost/notes.md` "Invariants". Writes need a third kind of line:
-> `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`, see
-> `plans/heating-baseline-and-phase2-prerequisites.md` step 2). The snippet below is kept for the
+> `topic ebusd/<circuit>/<name>/set out 0` (Phase 2: `mc/OperatingMode` and `mc/TempDesired`;
+> wiring: device VWS-41). The snippet below is kept for the
 > history only.
 
 Leave ebusd exactly as configured today (still publishing to its current broker, so Loxone's
@@ -270,7 +270,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       unknown season), tests in `tests/ha/test_heating_pv_boost_comfort.py`. Control law revised by
       the owner 2026-11-14, see `doc/heating_pv_boost/design.md#HPB-1`. Post-deploy steps (owner, in this order):
       1. Add `topic ebusd/mc/OperatingMode/set out 0` and `topic ebusd/mc/TempDesired/set out 0` to the
-         Mosquitto bridge (`plans/heating-baseline-and-phase2-prerequisites.md` step 2), restart Mosquitto.
+         Mosquitto bridge (device VWS-41), restart Mosquitto.
       2. Prove each line with an idempotent write of the CURRENT value (e.g. publish the current
          mode name / setpoint, `22.0` form for TempDesired: the one-decimal payload is unverified)
          and see ebusd accept it.
