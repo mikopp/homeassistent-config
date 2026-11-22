@@ -417,6 +417,11 @@ COMPRESSOR_CASES = [
     Case(name="stop_temp_is_flow_setpoint_plus_hysteresis",
          inputs={"flow_desired": 24, "hysteresis": "7.0"}, expect={"stop_temp": near(31)},
          then=[Step(inputs={"flow_desired": 27}, expect={"stop_temp": near(34)})]),
+    # uih reports 0 during hot water (owner, 2026-11-22 17:01): no stop line, not 0 + 7 = 7 °C;
+    # back to setpoint + hysteresis once heating resumes.
+    Case(name="stop_temp_is_unavailable_while_the_setpoint_is_zero",
+         inputs={"flow_desired": 0, "hysteresis": "7.0"}, expect={"stop_temp": _UNAV},
+         then=[Step(inputs={"flow_desired": 26}, expect={"stop_temp": near(33)})]),
     # 9 kWh heat from 3 kWh electricity → 3.0.
     Case(name="efficiency_is_heat_over_electricity_once_meaningful",
          inputs={"yield_inc": 9, "elec_inc": 3},

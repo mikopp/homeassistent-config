@@ -53,7 +53,7 @@ From `08.ehp.csv` and `50.ehp.mc.csv`. All answer a forced read on this unit.
 | `ehp/CompHysteresis` | forced start below setpoint − hyst, forced **stop** above setpoint + hyst (no buffer = hydraulic plan 6 on the exclusiv; *Installationsanleitung* 0020045204_01 p. 63, p. 69) |
 | `ehp/BackupIntegral` | backup heater starts at BackupIntegral + CompIntegral (e.g. −600 + −60 = −660); not read |
 | `ehp/CompDemand` | regulation wants the compressor (0=no 1=yes) |
-| `uih/FlowTempDesired` | the system flow setpoint handed to the generator (`D2C`, `b509 0d0500`; whole °C in practice): read as `sensor.geotherm_heating_circuit_flow_temp_desired`. Replaces `mc/Status0a` field 4 (same value, own poll lag, 0 during hot water); what `uih` shows during hot water is not yet observed |
+| `uih/FlowTempDesired` | the system flow setpoint handed to the generator (`D2C`, `b509 0d0500`; whole °C in practice): read as `sensor.geotherm_heating_circuit_flow_temp_desired`. Replaces `mc/Status0a` field 4 (same value, own poll lag). **0 during hot water**, as is `mc/FlowTempDesired` (OBSERVED 2026-11-22 17:01, one run; Status0a field 4 did the same) |
 | `mc/FlowTempDesired` | the same setpoint, `D1C` (0.5 K; `b509 0d4600`, also passive update `2946`); `uih/FlowTempDesired` (`D2C`, 1/16 K) passes on floor of it (26.00 at 26.5; 27.0 at 27.5 for 26 min of forced reads, CONFIRMED 2026-11-22) |
 | `ehp/CompStartsHc`, `ehp/CompHoursHc`, `ehp/YieldTotal` | lifetime heating starts, heating hours, total heat kWh (heating + hot water, whole kWh) |
 | `ehp/CompStartsHwc` | lifetime hot-water starts ("Compressor_Commutations_DHW"); owner `ebusctl` read 9419 |
