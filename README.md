@@ -73,7 +73,7 @@ no buffer tank — so the heat pump's return temperature reads directly on its c
 
 *Phase 1 (current): read-only. Every sensor and the full decision are live, but nothing is written
 to the heat pump. See `plans/ebusd-pv-heating-optimization.md` for the rollout and
-`doc/heating_pv_boost/registers.md` for the verified ebusd register decodes.*
+`doc/devices/vaillant-vws-83-2/interface.md` for the verified ebusd register decodes.*
 
 ### `packages/energy.yaml` — Metered Devices for the Energy Dashboard
 MQTT sensors for every individually metered appliance, plus the wallbox abstraction layer.
@@ -142,7 +142,7 @@ Runs on every push and on manual dispatch; checks only, it never commits.
 ### `knowledge-layout.yml` — knowledge layout
 Runs `.github/scripts/check_knowledge_layout.py` (stdlib only; also part of `ci-local.sh`). It checks the agent knowledge described in `doc/KNOWLEDGE.md`, where every file is one of four kinds: *always* (root `CLAUDE.md`, skill descriptions), *rule* (`.claude/rules/**`, including the symlinked package notes; loads when a matching file is touched), *skill* (`.claude/skills/<topic>/SKILL.md`; loads when invoked) or *reference* (design docs, device docs, package reference docs, skill `references/`, plans; read on demand through a read-when pointer).
 
-- **Errors:** plan Status and Close steps and sub-plan `Master:` links; package note symlinks; design-doc IDs and references to them; device-doc format and `(device <ID>)` anchors; size caps per kind (K-1.2); skill and rule frontmatter; reference indexes (every skill, device or package reference file is named by its index).
+- **Errors:** plan Status and Close steps and sub-plan `Master:` links; package note symlinks; design-doc IDs and references to them; device-doc format and `(device <ID>)` anchors; size caps per kind (K-1.2); skill and rule frontmatter; reference indexes (every skill, device or package reference file is named by its index; device `access-*`/`registers-*` parts by `interface.md`, and each device part names its index in its opening lines).
 - **Warnings:** warn-level size caps, history markers in design docs, mentions of background or sources in agent knowledge.
 
 The full list is in the script's docstring.

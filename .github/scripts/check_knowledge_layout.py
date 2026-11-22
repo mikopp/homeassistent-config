@@ -43,7 +43,9 @@ Fails (exit 1) when:
   * a reference part is named by no index (K-1.3; by relative path or basename):
       - a .claude/skills/<t>/**/*.md other than SKILL.md, not named in that skill's SKILL.md;
       - a doc/devices/<d>/*.md (top level; `_`-folders skipped) other than README.md,
-        behaviour.md, interface.md and evidence*.md, not named in README.md or behaviour.md;
+        behaviour.md, interface.md and evidence*.md: `access-*.md` / `registers-*.md` not named
+        in interface.md, any other part not named in README.md or behaviour.md; and a part whose
+        opening lines (before its first `##`) name no index file (README/behaviour/interface.md);
       - a doc/<pkg>/*.md (not devices/ or sources/) other than notes.md, design.md, tests.md and
         background*.md, not named in that package's notes.md or design.md,
   * a plans/*.md with a line `Master: plans/<x>.md` names a master that does not exist, or a
@@ -53,6 +55,7 @@ Warns (exit code unchanged) when:
   * a design doc has a history marker outside code fences (a date, `pre-#n`, `since #n`,
     "originally", "previously", "formerly", "no longer"): K-4 keeps design docs history-free; the
     warning becomes an error once the existing docs are clean,
+  * a device interface.md has no `## Access` heading (.claude/rules/devices.md),
   * a file is over its SIZE_CAPS warn level, a SKILL.md is over 500 lines, or a design-doc section
     is over 3000 chars,
   * a design doc anchors `(device <ID>)` whose source line carries only `[ASSUMED]`, outside a
@@ -93,11 +96,21 @@ SIZE_CAPS = [
     ("doc/*/notes.md", 24000, 21600, "K-3", "text"),
     ("doc/*/tests.md", 8000, 6000, "K-3", "text"),
     ("doc/*/design.md", 40000, 24000, "K-4", "text"),
+    # Device files are read one decision at a time (K-1.2, .claude/rules/devices.md Parts):
+    # README: read at the start of every device task, so the smallest.
     ("doc/devices/*/README.md", 8000, 6000, "K-1.2", "text"),
-    ("doc/devices/*/behaviour.md", 24000, 20000, "K-1.2", "text"),
-    ("doc/devices/*/interface.md", 40000, 32000, "K-1.2", "text"),
-    ("doc/devices/*/evidence*.md", 40000, 30000, "K-1.2", "text"),
-    ("doc/devices/*/*.md", 40000, 30000, "K-1.2", "text"),
+    # behaviour.md: index (States summary, Control, Does not work) plus subsystems until split.
+    ("doc/devices/*/behaviour.md", 12000, 10000, "K-1.2", "text"),
+    # interface.md: index (access summary, Unusable) plus registers and access until split.
+    ("doc/devices/*/interface.md", 12000, 10000, "K-1.2", "text"),
+    # registers-<area>.md: one circuit's table, read whole to add or parse one of its registers.
+    ("doc/devices/*/registers-*.md", 12000, 10000, "K-1.2", "text"),
+    # access-<path>.md: one path (polling, writes, wiring), read with a register part.
+    ("doc/devices/*/access-*.md", 12000, 10000, "K-1.2", "text"),
+    # evidence*.md: looked up by T number (grep), rarely read whole; uncited rows go to the archive.
+    ("doc/devices/*/evidence*.md", 16000, 12000, "K-1.2", "text"),
+    # <topic>.md: one subsystem or lookup topic, one decision.
+    ("doc/devices/*/*.md", 12000, 10000, "K-1.2", "text"),
     ("doc/*/*.md", 40000, 30000, "K-1.2", "text"),
     (".claude/rules/*.md", 5000, 4000, "K-1.2", "text"),
     (".claude/skills/*/SKILL.md", 20000, 12000, "K-1.2", "body"),
@@ -126,6 +139,12 @@ DEVICE_HEADINGS = {
     "interface.md": ["Unusable on this unit"],
     "evidence.md": [],
 }
+# Headings warned when missing (not yet an error: existing docs predate them).
+DEVICE_HEADINGS_WARN = {"interface.md": ["Access"]}
+# Device parts indexed by interface.md (rule: Parts); every other part by README or behaviour.md.
+INTERFACE_PARTS = ("access-", "registers-")
+# Device files that are indexes or the evidence table, not parts (K-1.3).
+DEVICE_NON_PARTS = ("README.md", "behaviour.md", "interface.md")
 # Evidence tag in brackets, not a markdown link `[text](url)`: `[T4]`, `[IA p.63]`, `[ASSUMED]`.
 DEVICE_TAG_RE = re.compile(r"\[([A-Z][A-Z0-9-]*)((?:\s[^\]\n]*)?)\](?!\()")
 # A T row of evidence.md: `| T<n> | <date> | <method> | <seen> | <grade> |`.
@@ -338,6 +357,9 @@ def check_devices(errors, warnings, design_prefixes):
             for h in headings:
                 if not re.search(r"^##\s+%s\s*$" % re.escape(h), texts[name], re.M):
                     errors.append(f"{rel}/{name}: no '## {h}' heading (.claude/rules/devices.md)")
+            for h in DEVICE_HEADINGS_WARN.get(name, []):
+                if not re.search(r"^##\s+%s\s*$" % re.escape(h), texts[name], re.M):
+                    warnings.append(f"{rel}/{name}: no '## {h}' heading (.claude/rules/devices.md)")
         # Known T rows across evidence.md and evidence-archive.md: each needs a date and a grade,
         # and a T number exists once per device (never reused, K-9).
         t_ids = set()
@@ -597,20 +619,35 @@ def check_reference_index(errors):
                 f"{p.relative_to(ROOT).as_posix()}: not named in "
                 f"{skill.relative_to(ROOT).as_posix()} (doc/KNOWLEDGE.md#K-1.3)"
             )
-    # Device topic files: indexed in the README file map or behaviour.md.
+    # Device parts: access-*/registers-* indexed in interface.md, other topic files in the
+    # README file map or behaviour.md; each opens (before its first `##`) naming its index.
     for dev in sorted(p for p in (ROOT / "doc" / "devices").glob("*") if p.is_dir()):
         if dev.name.startswith("_"):
             continue
         parts = [
             p for p in sorted(dev.glob("*.md"))
-            if p.name not in ("README.md", "behaviour.md", "interface.md")
-            and not p.name.startswith("evidence")
+            if p.name not in DEVICE_NON_PARTS and not p.name.startswith("evidence")
         ]
-        for p in unindexed(parts, [dev / "README.md", dev / "behaviour.md"], dev):
+        iface = [p for p in parts if p.name.startswith(INTERFACE_PARTS)]
+        topics = [p for p in parts if p not in iface]
+        for p in unindexed(iface, [dev / "interface.md"], dev):
+            errors.append(
+                f"{p.relative_to(ROOT).as_posix()}: not named in interface.md "
+                "(.claude/rules/devices.md Parts, doc/KNOWLEDGE.md#K-1.3)"
+            )
+        for p in unindexed(topics, [dev / "README.md", dev / "behaviour.md"], dev):
             errors.append(
                 f"{p.relative_to(ROOT).as_posix()}: not named in README.md file map or "
                 "behaviour.md (doc/KNOWLEDGE.md#K-1.3)"
             )
+        for p in parts:
+            # Opening = text after the `#` title up to the first `##` heading, banners included.
+            head = re.split(r"^##\s", strip_fences(p.read_text(encoding="utf-8")), maxsplit=1, flags=re.M)[0]
+            if not re.search(r"\b(?:README|behaviour|interface)\.md\b", head):
+                errors.append(
+                    f"{p.relative_to(ROOT).as_posix()}: opening lines name no index file "
+                    "(README.md, behaviour.md or interface.md; doc/KNOWLEDGE.md#K-1.3)"
+                )
     # Package reference docs: indexed in the package note (header) or design doc.
     for pkg in sorted(p for p in (ROOT / "doc").glob("*") if p.is_dir()):
         if pkg.name in ("devices", "sources"):

@@ -58,7 +58,7 @@ views:
             name: Flow Temp Desired, compressor (uih, whole °C)
 
       # Curve check: the inputs and the result of the weather curve side by side, to compare with
-      # the formula in doc/heating_pv_boost/heating-curve.md (plans/heating-curve-tuning.md).
+      # the formula in doc/devices/vaillant-vws-83-2/heating-curve.md (plans/heating-curve-tuning.md).
       - type: history-graph
         title: Curve check
         hours_to_show: 48

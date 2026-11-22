@@ -1,0 +1,53 @@
+# Vaillant geoTHERM exclusiv VWS 83/2: tests on this unit
+
+Each row is cited by a fact in this folder. Numbers are never reused, rows never deleted
+(`.claude/rules/devices.md`). "Owner" = the owner ran or read it; "HA history" = the recorded
+ebusd values (5 min statistics unless stated); W = the whole-degree flow setpoint.
+Rows no fact cites (T16): `evidence-archive.md`.
+
+| # | Date | Method | What was seen | Grade |
+|---|---|---|---|---|
+| T1 | 2026-09 | owner `ebusctl info` (bus scan) | 08/23/25/50 `EHP00` art. 0010002787 `SW=0383 HW=7201`, circuits ehp, cc, hwc, mc; 15 `UIH00` (uih); 75 VR 90/3 art. 0020040079 (rcc); 05 VR 920 art. 0020252922, no circuit; no `700` circuit | CONFIRMED |
+| T2 | 2026-09 | full `ebusctl` dump: multi-field message against the standalone registers | `ehp/Status` `25.19;1.266;1.682;off;00` matched HcFlowTemp, HcPress, SourcePress and hcmode value for value | CONFIRMED |
+| T3 | 2026-09 | full `ebusctl` dump | `ehp/Status02` `disabled;0;100.0;0;100.0`; `ehp/Status01` `ERR: read timeout`; `mc/Mode` field 5 `pool` while `mc/CfgHeatSinkType`, `mc/Params` read `mixer`; `rcc/HolidayPeriod`, `rcc/RoomTempHoliday` 2015 dates; `rcc/RoomTempOffset` 0.50, `RoomTempOffsetSelfWarming` −2.00; `mc/RoomTempOffset` 0.00 | OBSERVED |
+| T4 | 2026-09 | settings in the same dump | FlowTempMax 35 °C; FloorProtectionLimit 44 °C; ReturnTempMax 46 °C; TimeBetweenTwoCompStartsMin 1200 s, TimeCompOffMin 300 s, TimeCompOnMin 240 s; BackupType `internalheatandwater`, BackupModeHc `no_backup`, BackupIntegral −600; CoolingStartOffsetHc2 2; EfficiencyHysteresisHc2Min 1.0; both DWM delays 6 h | OBSERVED |
+| T5 | 2026-09 | passive bus observation (ebusd decodes every telegram it sees) | the VR 90/3 writes only `mc/RoomTempOffset`, never `mc/OperatingMode` or another control register; values written to `mc` through ebusd stay until written again | OBSERVED |
+| T6 | 2026-09 | owner inspected the VR 90/3 controls | no Party button | OBSERVED |
+| T7 | 2026-10 | owner `ebusctl write` + read-back (by 2026-10-30) | writes to `mc/OperatingMode` and `mc/TempDesired` accepted | OBSERVED |
+| T8 | 2026-10-30 | owner forced `ebusctl read` of the compressor counters and tuning registers | all answer; lifetime `CompHoursHc` 13277 h, `CompStartsHc` 13385 | CONFIRMED |
+| T9 | 2026-11 | owner `ebusctl read` (by 2026-11-12) | `CompStartsHwc` 9419; `HwcLaggingTime` 3 min | OBSERVED |
+| T10 | 2026-11 | owner at the unit, outdoor below 3 °C, mode `off` (by 2026-11-15) | floor pump runs, compressor starts | OBSERVED |
+| T11 | 2026-11 | owner read menu C5 / VR 90/3 (by 2026-11-15) | Raumaufschaltung `Keine` | OBSERVED |
+| T12 | 2026-11-21 | owner panel menu C2 read | "Art" = Brennerkreis (direct circuit, no mixer) while the catalog decodes the value as `mixer` (raw 1) | OBSERVED |
+| T13 | 2026-11-21 | owner forced `ebusctl read -f`, evening | `mc FlowTempDesired` 26.5, `uih FlowTempDesired` 26.00; `ehp FlowTemp` (VF2) 31.94, `ehp HcFlowTemp` (T6) 32.00, `uih FlowTemp` 32.00; `mc Params` `22;20;0.14;mixer;15;0;15;35;0` | OBSERVED |
+| T14 | 2026-11-21 | owner reads of the outdoor registers, one evening | `Broadcast/Outsidetemp` carries the value of `ehp/OutsideTemp`; `ehp/OutsideTempOffset` 0 K; 3.75 °C vs house weatherstation 4.4 °C | OBSERVED |
+| T15 | 2026-11-21 | owner `HeatingCurve` 0.14 → other value → 0.14, flow setpoint watched, evening | the flow setpoint followed each change within minutes, compressor running | OBSERVED |
+| T17 | 2026-11-22 | owner write `TempDesired` 22.5 → 22.0 at 08:43:17, read from HA history (no `read -f`); compressor running (planned: off); outdoor −2.12 → −1.88 °C, no hot water, curve 0.14 | `mc/FlowTempDesired` 27.5 → 27.0 (08:43:32), W stayed 27; compressor stopped 08:43:18.7, integral ≈ 0, VF2 34.0 = 27 + 7 | OBSERVED |
+| T18 | 2026-11-22 | owner `ebusctl write` `TempDesired` 22.0 → 22.5 → 22.0 (10:10–10:40), forced reads, HA integral rate; compressor off, no hot water, outdoor 0.3 → 1.3 °C | `mc` 27.5, `uih` 27.0 in every read 10:14–10:40 (26 min); back at 22.0 both 27; integral −0.91/min before (VF2 26.11), −1.01/min during (VF2 26.0) = VF2 − 27, not −1.5 | CONFIRMED |
+| T19 | 2026-11-22 | HA history: integral rate per minute vs VF2 in ≈ 13 phases (2026-11-20…22) | rates fit VF2 − W, not the 0.5 K value: −1.71, +3.81, −3.13, +5.76/min; −0.45/min at fine 27.0 (W 27). Mild band +5.91/+5.94 vs 5.89: fine values not recorded (taken as whole + 0.5) | OBSERVED |
+| T20 | 2026-11-22 | HA history of `mc/FlowTempDesired` against `TempDesired` (2026-11-21…22) | every value = `TempDesired` + a whole number (26.5, 27.5, 29.5 at 22.5; 27.0 at 22.0); W 27 at −2.4 … −1.9 °C before and after 08:43 | OBSERVED |
+| T21 | 2026-11-22 | HA history, `mc/FlowTempDesired` vs `Broadcast/Outsidetemp`, curve 0.14, `TempDesired` 22.5 | 27.5 → 29.5 at 02:11 (−2.38 → −2.62 °C), back 08:20 (−2.62 → −2.38), no hysteresis; flat 27.5 from +1.06 to −2.38 (formula 28.5 → 29.2), 29.5 from −2.62 to −4.25 (formula 29.3 → 29.6) | OBSERVED |
+| T22 | 2026-11-22 | same data with Shelly power on the unit | both jumps in the same 5 min window as the outdoor value crossing the edge; the 02:11 jump at 82 W (compressor off), compressor started 2–3 min later | OBSERVED |
+| T23 | 2026-11-20 | HA history of `mc/Status0a` field 4, curve 0.13, `TempDesired` 22 (2026-11-17…20) | setpoint jumps 24 ↔ 26, never 25 | OBSERVED |
+| T24 | 2026-11-21 | HA history 2026-11-07…21, night and evening hours: W (`mc/Status0a` field 4) vs Kühne formula, weatherstation outdoor (±1 K) | 0.15 / 22 within −1.4 … +0.1 K; 0.13 / 22 and 0.14 / 22.5 0.8–2.1 K below, 0.13 / 22 ≈ 2 K below at 8 °C (unexplained) | OBSERVED |
+| T25 | 2026-11-22 | HA history, 13 h of both setpoint registers | `mc/Status0a` field 4 = floor(`mc/FlowTempDesired`) at every value (27.0, 27.5, 29.5); it reads 0 during hot water | OBSERVED |
+| T26 | 2026-11-22 | HA history of `ehp/Integral`, VF2/T6, W, 2026-11-17…22; `CompIntegral` −180, `CompHysteresis` 7 K | 9 of 9 runs ended at integral ≈ 0 (−8 … +8), outdoor −8 … +8 °C; at W 26 0.5–1.3 K below the stop line, cold runs 1.5–3 K below, at W 24 (11-20) on it; starts at −183 … −186, 1–3 min after crossing −180 | OBSERVED |
+| T27 | 2026-11-22 | same data | integral keeps summing after a stop (+12 after 08:43), reached +88 (11-17, compressor off), holds during hot water (−113, −75, −86); after hot water ran on into heating at −113 on 11-22, not on 11-17 or 11-20 | OBSERVED |
+| T28 | 2026-11-22 | HA history, scan of stops 2026-11-12…22 (11-18 spot-checked) plus 11-06 from an earlier scan | 4 stops at flow = W + 7 with integral negative, all `TempDesired` 22: 11-06 ≈ −125 (W 26, T6 33.1–33.3); 11-14 20:23 −104 (W 27 → 26, T6 33.31); 11-18 23:07 −56 (W 24, T6 31.31); 11-19 22:10 ≈ −40 (W 24, T6 31.12, borderline) | OBSERVED |
+| T29 | 2026-11-14 | HA history: `ehp/Comp`, hcmode, start counters | one compressor run 05:30–06:52 with hot water 05:50–06:30 inside it; one start, in `CompStartsHc` | OBSERVED |
+| T30 | 2026-11-21 | HA statistics 2026-11-18…20: daily start counters vs Shelly runs > 500 W | 11-20: 7 runs (02:25, 05:50, 09:25, 17:00, 18:05, 20:15, 23:05) = 5 heating + 2 hot-water starts; the 17:00 hot-water run rolling into heating = one start; heating 3/4/5, hot water 2/2/2 | OBSERVED |
+| T31 | 2026-11-21 | Shelly power, hcmode, `ehp/Comp` on 2026-11-20 | hot-water end 05:50–06:16: ~3.1 kW straight to ~81 W idle; 17:00 run: `water` → `heat` at 17:24:32, ~1.8 kW for ~2.5 min until `ehp/Comp` off ≈ 17:28 | OBSERVED |
+| T32 | 2026-11-14 | HA statistics of `ehp/HcReturnTemp` around 7 hot-water runs (2026-11-04…14) | 7 of 7: 51–56 °C only while hot water ran (39–43 °C in the first bucket), back to 24.7–26 °C within the bucket it ended, residual ≤ 28.25 °C; `ehp/Status` flow field alike | OBSERVED |
+| T33 | 2026-11 | Shelly Pro 3EM on the unit's supply (2026-10…11) | idle circulation ~81–83 W, standby ~9 W, heating ~1.8 kW (never above ~2 kW; start peaks 2.0–2.6 kW as hourly maxima), hot water ~3.1–3.5 kW; hcmode stays `heat` at idle draw between runs | OBSERVED |
+| T34 | 2026-10-17 | HA history of hcmode vs outdoor (2026-10-16/17) | 10-17 `off` 13:52–17:00 at outdoor ≥ 15 °C (OtShutdownLimit 15); 10-16 14:43–16:11 `off` at ≈ 13 °C unexplained | OBSERVED |
+| T35 | 2026-11-22 | HA, geoTHERM outdoor vs house weatherstation, night 2026-11-21/22 | geoTHERM ≈ 1 K colder 20–06 h, ≈ 0.5 K at 08:30; minimum −4.25 vs −3.2 °C | OBSERVED |
+| T36 | 2026-11-22 | owner writes of `mc/TempDesired` `22.0` and `22.5`, each read back from the bus | both values kept; `mc/FlowTempDesired` moved with each | CONFIRMED |
+| T37 | 2026-09 | buffer flags in the same dump | `uih/EhpHeatBufferAvailable` off; both storage (buffer) sensors read `cutoff` | OBSERVED |
+| T38 | 2026-11-22 | owner statement of the installation | heats the underfloor slab directly, no buffer tank; external flow sensor VF2 fitted; outdoor sensor on the north side without sun; VR 920 dormant (maker discontinued its service) | OBSERVED |
+| T39 | 2026-11-20 | HA 5 min statistics (±1 min): `ehp/Comp` against the Shelly clamp (> 500 W), one heating run and one hot-water end | 18:05 run: clamp on ≈ 18:09, `ehp/Comp` on ≈ 18:11; clamp off ≈ 18:50:50, `ehp/Comp` off ≈ 18:51:50; hot-water end ≈ 17:27 also +1 min | OBSERVED |
+| T40 | 2026-11 | owner observation over past seasons and at the panel | above `OtShutdownLimit` no heating, below it no cooling; the Raumaufschaltung setting is communicated on eBUS | OBSERVED |
+| T41 | 2026-09 | owner observation of ebusd on this setup | a poll priority set at runtime is gone after an ebusd restart; `ebusd/global/scan` reads `running` while ebusd discovers the bus | OBSERVED |
+| T42 | 2026-09 | MQTT payloads seen live against `ebusctl` decodes | `mc/OperatingMode` arrives as `low`, `mc/CoolingOperatingModeHc2` as `1`, `mc/CoolingRequestHc2` and `ehp/Hc1Pump` as `0`, while `ebusctl` decodes all of them to names | OBSERVED |
+| T43 | 2026-10-17 | HA history after HA restarts | `ebusd/global/scan` settles on `finished` (never `OK`); after it the polled `mc` and cooling registers publish within ≈ 1–2 s | OBSERVED |
+| T44 | 2026-10 | owner-supplied live Mosquitto bridge config (HA broker ← ebusd broker) | every ebusd topic listed individually, no `ebusd/#` in either direction; `ebusd/global/running` and `/scan` `in` only; broadcast topic `ebusd/Broadcast/Outsidetemp` in the catalog's case | OBSERVED |
+| T45 | 2026-10 | HA history of polled registers | `ehp/HcReturnTemp` updates every 30–85 s; registers whose value does not change (`mc/TempDesiredLow`) are not re-published, so their poll rate cannot be seen | OBSERVED |

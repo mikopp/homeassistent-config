@@ -23,7 +23,7 @@ causes go away; the hypothesis does not need to be settled first.
 
 ## Design
 
-### Registers (published catalog `08.ehp.csv`)
+### Registers (published catalog `08.ehp.csv`; decodes: `doc/devices/vaillant-vws-83-2/registers-ehp.md`)
 
 | Need | Register | Note |
 |---|---|---|
@@ -54,14 +54,13 @@ Five modes, defined by the owner. A template sensor `sensor.heating_energy_mode`
   The interlock keeps using the OR (safer). UNPROVEN: `hcmode` has never been seen reading
   `cooling` on this unit (heating season since the package exists); confirm in the first cooling
   period, with `uih/CoolingActive` as the fallback signal.
-- The geoTHERM has passive cooling only (owner): the compressor never runs for cooling, so the row
-  order (compressor before cooling) is safe.
-- UNKNOWN: where the hot-water run-on goes (`HwcLaggingTime` 3 min, catalog "WP Nachlaufzeit WW";
-  the pump keeps running after the compressor stops). Expected: into the tank while the
+- The geoTHERM has passive cooling only: the compressor never runs for cooling, so the row
+  order (compressor before cooling) is safe (device VWS-14).
+- UNKNOWN: where the hot-water run-on goes (a run-on of `HwcLaggingTime` follows the charge;
+  which pump runs is open, device VWS-13). Expected: into the tank while the
   heating/hot-water valve (`HwcHcValve`) still points to hot water. The mode books it by
   `hvac_action`: `water` → hot water, else `passive_heating`. Its electricity is small
-  (~83 W × 3 min ≈ 4 Wh per run). Settle after deploy: watch `hvac_action`, `HwcHcValve` and the
-  tank temperature for the minutes after a hot-water run ends.
+  (~83 W × 3 min ≈ 4 Wh per run). Settle after deploy: step 17.
 
 ### Booking energy to a mode
 
@@ -217,6 +216,10 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 ### Phase 7 — after deploy
 14. [TODO] First cooling period: confirm `hvac_action` reads `cooling` (`ehp/Status` hcmode `1`);
     if not, switch the cooling row to `uih/CoolingActive` (owner; not before cooling season).
+    Also log the outdoor temperature, `mc/OtShutdownLimit` and `CoolingStartOffsetHc2` at the first
+    cooling start and stop (settles the release, device VWS-16 [ASSUMED]), whether a
+    `TempDesired` change moves it, and that cooling keeps running with heating mode `off`
+    (device VWS-15, design HPB-1 Known gaps).
 15. [TODO] Owner: delete the two restored entities `sensor.heating_yield_by_mode_active_heating`
     and `_passive_heating` (unavailable) from the UI and statistics, but NOT before 30 days after
     #164 reached the system (the 30-day yield sum reads them; `space_heating_yield_30d` still
@@ -228,6 +231,12 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
     leftovers are the two step-15 yield meters, kept on purpose. ha-mcp cannot read the entity
     registry: a "not provided" row in Settings > Entities would still be possible (owner glance).
 
+17. [TODO] Where the hot-water run-on goes (device VWS-13, design HPB-2 Known gaps): for three
+    hot-water ends, watch `ehp/Hc1Pump`, `hvac_action`, `HwcHcValve` (forced read) and the tank
+    temperature for the `HwcLaggingTime` minutes after the compressor stops. Which pump runs, and
+    whether the valve still points to hot water. Result → device `runs.md` (T row); if the pump
+    is not `Hc1Pump`, revisit the HPB-2 run-on row. Depends on: nothing (heating season).
+
 ### Close
 13. [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
    plan (`doc/KNOWLEDGE.md#K-6`).
@@ -236,7 +245,8 @@ runtimes shift by that lag. Measure it against the Shelly after deploy.
 
 - `doc/heating_pv_boost/notes.md`: entity map (new entities), the energy-mode decision, the
   baseline method's "Starts per day" and efficiency lines, the "Tests" section.
-- `doc/heating_pv_boost/registers.md`: `CompStartsHwc`, `Comp`, `Hc1Pump`.
+- `doc/devices/vaillant-vws-83-2/registers-ehp.md`: `CompStartsHwc`, `Comp`, `Hc1Pump` (done in the
+  device-doc move).
 - `.claude/skills/ha-test-harness/SKILL.md`: the stubbed-action gotcha (real `select` domain).
 - YAML comments in `packages/heating_pv_boost.yaml` (K-5).
 
@@ -261,9 +271,10 @@ Done:
   own seen, no phantom runs under 1 min since 2026-11-15 (daily minimum of last run 11.1 min).
 
 Left, in order:
-1. Step 14 (cooling check): waits for cooling season.
-2. Step 15 (owner): delete the two pre-merge yield meters, earliest about 2026-12-12.
-3. Step 13 Close (Claude): after 14 and 15 or after the owner agrees to close without the cooling
+1. Step 17 (hot-water run-on destination): any time in the heating season.
+2. Step 14 (cooling check): waits for cooling season.
+3. Step 15 (owner): delete the two pre-merge yield meters, earliest about 2026-12-12.
+4. Step 13 Close (Claude): after 14, 15 and 17 or after the owner agrees to close without the cooling
    check (then note it as UNPROVEN in notes).
 
 Observation, not a bug: `sensor.heating_efficiency_30d` (2.48) is lower than space heating (3.29)

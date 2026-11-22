@@ -54,7 +54,8 @@ mechanisms fitted to one confirming run, and both sent later sessions down wrong
   OBSERVED, and usually not a learning at all (section 0).
 - **OBSERVED** = real data from a real run, but a plausible alternative explanation is still open.
 - **UNPROVEN** = a hypothesis kept only so it is not re-litigated from scratch.
-- **DOC** = a manufacturer document, not tested here (device docs only).
+- **DOC** = a manufacturer document, or a program's own docs for its generic behaviour, not tested
+  here (device docs only).
 
 Never promote a learning a grade without new evidence. Write the grade next to any claim that is
 not CONFIRMED.
@@ -67,14 +68,14 @@ its cap (K-1.2: 24,000 chars) takes no new entry: move content per K-1.2 or have
 
 | The learning is… | Write it to |
 |---|---|
-| a fact about a physical unit itself, true whichever package uses it (first matching row wins): behaviour, measured value, a lever that works or does not, register decode, manual page, test on the unit | `doc/devices/<device>/` per the `device-knowledge` skill (tagged; T row in `evidence.md`); the package note points to it |
+| a fact about a physical unit itself, true whichever package uses it (first matching row wins): behaviour, measured value, a lever that works or does not, register decode, how it is reached (access path, polling, write payload, wiring a write needs, a quirk of ebusd/Modbus/the HA integration as it affects this unit), manual page, test on the unit | `doc/devices/<device>/` per the `device-knowledge` skill (tagged; T row in `evidence.md`); the package note points to it |
 | a current fact about one package that an editor needs before touching its YAML/tests (invariant, quirk, measured value, entity, owner value), even one behind a design decision | `doc/<pkg>/notes.md`, graded; a design doc cites it, never copies it (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | how a component works, a state machine or decision table, a decision with its rejected alternative, an invariant's mechanism, a contract with another package, an extension rule | `doc/<pkg>/design.md` (K-4.1 gate; create at the K-4 threshold), plus a one-line `→ design.md#ID` in the note if breaking it fails silently |
 | a known architectural gap or accepted risk | a GitHub issue; link `#n` from the note AND the design doc's Known gaps |
 | a story, superseded design or investigation | `doc/<pkg>/background.md` |
 | a story about a cross-package topic (e.g. the test framework) | `doc/<topic>/background.md` |
 | a transcript or spreadsheet | `doc/sources/<pkg>/` (never edited) |
-| a cross-package topic fact (templates, MQTT, energy, tests …) | the matching skill in `.claude/skills/`, or a new skill |
+| a cross-package topic fact (templates, MQTT, energy, tests …), or generic program/integration behaviour its own docs omit | the matching skill in `.claude/skills/`, or a new skill (documented behaviour: a `software` References row of the device, not restated) |
 | needed in every session | root `CLAUDE.md` (keep it < 8,000 chars) |
 | a hypothesis | the feature's `plans/` file, marked UNPROVEN |
 | a confirmed bug or flaky test not being fixed now | a GitHub issue (repo issues are enabled); link the issue number from the affected note. A plan file is created only when work starts |

@@ -25,7 +25,7 @@ Each was re-checked against the code at base `0a4cab0` (master, includes #129-#1
 | # | Finding | Evidence |
 |---|---|---|
 | A | **Resolved in code (step 1):** `configuration.yaml` now has `recorder: purge_keep_days: 14`. Original finding: raw history was purged after 5 days. The cycling plan's step 7 needs a 3-day baseline, then a `CompHysteresis` change, then a comparison "a week later" (about 10 days after the baseline starts), plus a cold-weather step-back. With 5 days the baseline days would have been gone by the comparison. | was `configuration.yaml` `purge_keep_days: 5`; now 14 (comment above it says LTS is separate and kept) |
-| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237) have a unit but no `state_class` (the third one, `..._backup_start_integral`, no longer exists: HA reads no backup register, see the note's "Compressor and measurements"). The history_stats sensors, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
+| A2 | Entities without `state_class` get no long-term statistics (LTS), so after 5 days nothing is left: `sensor.geotherm_heating_compressor_start_integral` (l.~214-224), `..._compressor_hysteresis` (l.~237) have a unit but no `state_class` (the third one, `..._backup_start_integral`, no longer exists: HA reads no backup register, see the note's "Hardware and integration quirks"). The history_stats sensors, `sensor.geotherm_heating_hvac_mode` and `..._hvac_action` have none either. The settings are the ones that matter most: they are what makes two baselines comparable. | `packages/heating_pv_boost.yaml` l.214-255, l.155-161; history_stats l.525-552 |
 | B | The Phase 2 write path is not documented. The Mosquitto bridge is an explicit allowlist. Phase 2 must publish to `ebusd/mc/OperatingMode/set` and `ebusd/mc/TempDesired/set`. The notes only describe `in` lines and `/get out` lines; "`/set`" appears in neither the slab plan nor the notes (grep of `plans/`, `doc/*/notes.md`, `packages/CLAUDE.md` finds no ebusd `/set`). | `doc/heating_pv_boost/notes.md` "Invariants" (now documents `/set`); slab plan l.150-160 |
 | C | `sensor.geotherm_heating_compressor_starts` (unique_id `heating_compressor_starts`) has `state_class: total_increasing` but no `unit_of_measurement`. Sibling counters have units (`h`, `kWh`). The daily `utility_meter` built on it inherits this. Owner reports a utility_meter warning and unitless LTS. | `packages/heating_pv_boost.yaml` l.258-266; utility_meter l.556-560 |
 | D | The daily meters and history_stats only exist since the 2026-10-30 ~16:06 deploy. The first complete baseline day is 2026-10-31. Today's partial day must not be counted. | deploy time reported by owner |
@@ -78,7 +78,7 @@ Docs only plus a manual user step. No HA YAML change.
 
 Design:
 
-1. `doc/heating_pv_boost/notes.md`, "Transport: the bridge is an allowlist": add one paragraph.
+1. `doc/heating_pv_boost/notes.md` Invariants (bridge lines; wiring: device `interface.md` Writes): add one paragraph.
    The bridge is `in` for state topics and `out` for `/get`. **Writes need a third kind of line:**
    `topic ebusd/<circuit>/<name>/set out 0`. Phase 2 therefore needs two more lines. State the rule
    (every register HA writes needs a `/set out` line) and not the topic list.
@@ -139,8 +139,8 @@ cycling"). Edit them there, not here.
 Points superseded since this step was written:
 - Mode flips: the "2 per day" norm held only under the 10-30 `auto` time program. Since Phase 2
   HA writes only `on`/`off` (design HPB-1), so flips follow Loxone, at most one per 30 min.
-- Settings: `BackupIntegral` is no longer read by HA (backup stays `no_backup`, note "Compressor
-  and measurements"); log `CompHysteresis` and `CompIntegral` only.
+- Settings: `BackupIntegral` is no longer read by HA (backup stays `no_backup`, note "Hardware
+  and integration quirks"); log `CompHysteresis` and `CompIntegral` only.
 - Compressor vs circulation: moot. The compressor is `ehp/Comp`, the circulation pump
   `ehp/Hc1Pump` (`binary_sensor.geotherm_heating_circuit_pump`); the Shelly > 500 W sensor and
   its inference are gone (removed 2026-11-14).
