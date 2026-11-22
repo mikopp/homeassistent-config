@@ -1,0 +1,116 @@
+#!/bin/bash
+# Vendored unchanged (below this block) from the ebusd project, GPL-3.0:
+#   https://github.com/john30/ebusd/blob/master/contrib/scripts/ebusctl (master, fetched 2026-11-22)
+# Repo usage and the read-only policy: .claude/skills/ebusd/SKILL.md
+# Needs bash, getopt and nc (netcat). ebusd options go after `--`: `ebusctl -- read -f ...`.
+# ebusctl - tool for accessing ebusd via TCP.
+# this can either pass excess arguments to ebusd and then quit,
+# or run interactively if no excess arguments were given.
+
+# print help
+help() {
+  cat << EOF
+Usage: ebusctl [OPTION...] [COMMAND...]
+Client for accessing ebusd via TCP.
+
+ Options:
+  -s, --server=HOST   Connect to ebusd on HOST (name or IP) [localhost]
+  -p, --port=PORT     Connect to ebusd on PORT [8888]
+  -t, --timeout=SECS  Timeout for connecting to/receiving from ebusd, 0 for
+                      none [60]
+  -e, --error         Exit non-zero if the connection was fine but the response
+                      indicates non-success
+        [COMMAND...]  COMMAND (and arguments) to send to ebusd.
+
+If given, send COMMAND together with arguments to ebusd.
+Use 'help' as COMMAND for help on available ebusd commands.
+EOF
+}
+
+# parse cmdline options
+OPTS=$(getopt -n ebusctl -o 's:p:t:eh' -l 'server:,port:,timeout:,error,help' -- "$@")
+if [ $? -ne 0 ]; then
+  help
+  exit 1
+fi
+eval set -- "$OPTS"
+server=localhost
+port=8888
+timeout=60
+error=
+while true; do
+  case "$1" in
+    '-s'|'--server')
+      shift
+      server="$1"
+      shift
+      if [ -z "$server" ]; then
+        echo "invalid server" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-p'|'--port')
+      shift
+      port="$1"
+      shift
+      if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "invalid port" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-t'|'--timeout')
+      shift
+      timeout="$1"
+      shift
+      if [ "$timeout" -lt 0 ] || [ "$timeout" -gt 3600 ]; then
+        echo "invalid timeout" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-e'|'--error')
+      shift
+      error=1
+      continue
+      ;;
+    '-h'|'--help')
+      shift
+      help
+      exit
+      ;;
+    '--')
+      shift
+      break
+      ;;
+    *)
+      echo "error" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# set arguments to netcat
+args=(-q 0)
+if [ "$timeout" -gt 0 ]; then
+  args+=(-w "$timeout")
+fi
+args+=("$server" "$port")
+
+# check interactive mode
+if [ $# -ne 0 ]; then
+  # non-interactive mode
+  ret=0
+  while IFS= read -r line; do
+    echo "$line"
+    if [ -n "$error" ] && [ "${line##ERR:}" != "$line" ]; then
+      ret=1
+    fi
+  done < <(echo "$@"|nc "${args[@]}")
+  exit $ret
+fi
+
+# interactive mode
+echo "entering interactive mode" >&2
+nc "${args[@]}"

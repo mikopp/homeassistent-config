@@ -8,7 +8,7 @@ description: Hardware unit facts (heat pump, ventilation, Somfy, Shelly, Victron
 File roles, evidence tags, T rows and graduation: `.claude/rules/devices.md`; it loads when you
 Read any file under `doc/devices/`. Existing device: read its `README.md` (identity, References,
 file map), then only the file the task needs. New device: start from
-`doc/devices/_template/README.md`. Recording a test result: `record-learning` section 1 (what
+`doc/devices/_template/README.md`. Reading a live value from the eBUS: `ebusd` skill. Recording a test result: `record-learning` section 1 (what
 proves it). `doc/KNOWLEDGE.md#K-9` only when the table below does not settle whether a fact
 belongs to the unit at all.
 
