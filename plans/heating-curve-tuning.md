@@ -422,6 +422,17 @@ on qualifying days:
   setpoint vs geoTHERM outdoor data, or go to 21.5 now (−1 K whole-degree where the 22.5 fine
   values ended in .5). The size column of the table then reads "whole-degree effect": a step
   counts only when floor(fine) changes.
+  **Owner decision 2026-11-22: one day at 22.0, re-evaluate on 2026-11-23, then 21.5 if the data
+  support it.** Checks for the re-evaluation:
+  1. Fine and whole-degree setpoints across the outdoor range of the day. Any x.5 fine value at
+     22.0 separates floor(fine) from a truncated room setpoint: measure the integral rate there.
+  2. Whole-degree setpoint at matching geoTHERM outdoor values: 11-21 20:15 … 11-22 08:43 (22.5)
+     against after the write (22.0).
+  3. Run and pause lengths against 180 ÷ |VF2 − whole setpoint|; Shelly kWh per degree-day.
+  4. Owner, cheapest direct test: `ebusctl read -f -c uih FlowTempDesired` next to
+     `ebusctl read -f -c mc FlowTempDesired`, a few times at different fine values. If `uih`
+     always shows floor(`mc`), the system setpoint is whole-degree.
+  5. Room temperatures (office first), shower hours left out.
   Apply at most one change from the table (`TempDesired` with
   `number.geotherm_heating_temp_desired`, the curve at the panel). Log it in the change log with the
   forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
@@ -584,9 +595,47 @@ OBSERVED (9 of 9 runs, mild and cold):
   clamped (+88 seen on 11-17, compressor off). It freezes during hot water (−113, −75, −86).
   After hot water the compressor ran on into heating at −113 on 11-22, but not on 11-17 or
   11-20 (cause open).
-- The only stop on the stop line on record is one run on 11-06 (integral ≈ −125 at the stop;
-  T6 and whole-degree data, deleted cycling plan). Owner view, HYPOTHESIS: a run ends on
-  whichever comes first. Since mid-November the integral has come first in every run checked.
+- **Stops on the stop line exist** (second subagent scan, 11-12…22, spot-checked 11-18). With
+  the integral clearly negative:
+
+  | Stop | Integral at stop | Whole-degree setpoint | Flow at stop | Line |
+  |---|---|---|---|---|
+  | 11-06 (deleted cycling plan) | ≈ −125 | 26 | T6 33.1–33.3 | 26 + 7 |
+  | 11-14 20:23 | −104 | 27 → 26 at ≈ 20:21 (the drop triggered the stop) | T6 33.31 | 26 + 7 |
+  | 11-18 23:07 | −56 | 24 | T6 31.31 | 24 + 7 |
+  | 11-19 22:10 | ≈ −40 | 24 | T6 31.12 | 24 + 7 (borderline) |
+
+  So the owner's view holds as OBSERVED: **a run ends on whichever comes first**, the integral
+  back at ≈ 0 or the flow at setpoint + `CompHysteresis`. The stop line won at low setpoints in
+  mild weather (24–26); the integral won in every run since 11-20 22:01. The hysteresis
+  therefore acts on this unit, although the /2 installation manual (p. 69) says "Komp.
+  Hysterese (nur bei Hydraulikplan 1 und 3)". All four stops were at `TempDesired` 22, where
+  fine = whole, so they cannot show whether the stop line uses floor(fine).
+- Whole-degree integral, more tests (second subagent, 2026-11-22):
+  - **Mild band, T6 instead of VF2.** VF2 − T6 is ≈ +0.2 K when off and ≈ −0.3 K when running.
+    On 11-21 daytime (TD 22.5, 5–7 °C): with the whole-degree setpoint the implied T6 offset is
+    0.18–0.27 K in seven off phases, the same as at TD 22 on 11-20 (0.22–0.32). Fine would need
+    0.68–0.77. Two runs: +5.91 and +5.94 per minute, against 5.89 predicted with whole and 5.39
+    with fine. Weak point: the fine values that day were not recorded (taken as whole + 0.5).
+  - **Rejected alternatives:** integral on T6 (−1.95 vs −1.75 observed), rounding 27.5 to 28
+    (−2.75), integer VF2 (−2.0), integer steps per minute (fractional drift visible), fine
+    setpoint with a fixed bias (the phase after the write).
+  - **Open alternative:** the setpoint computed from a room setpoint truncated to whole degrees
+    instead of floor(fine). It gives the same answer for 2.1 and is separable only by a fine x.5
+    value at TD 22.0.
+- Sources (second subagent; extracts checked):
+  - *Installationsanleitung* 0020045204_01 p. 48–49 (primary): the deficit is summed per minute,
+    and the compressor "schaltet erst wieder ab, wenn die zugeführte Wärmemenge gleich dem
+    Wärmedefizit ist". This supports runs ending on the integral.
+  - No Vaillant document or forum states the setpoint resolution the integral uses.
+  - The ebusd catalog decodes `uih/FlowTempDesired` as D2C (1/16 K), so the owner's read of 26.00
+    while `mc` read 26.5 was not a format limit. This weakly supports a whole-degree system
+    setpoint.
+  - Forums (energiesparhaus, buildhub, OpenEnergyMonitor, bauexpertenforum): definitions or
+    other models (aroTHERM, flexoTHERM). Not evidence for this unit.
+- Grades: integral on whole degrees, OBSERVED, strong (≈ 13 phases, two bands, VF2 and T6;
+  mechanism open). Stop line on whole degrees: UNPROVEN. 22.0 without compressor effect: OBSERVED
+  for run timing at −2.4 … −0.2 °C, inferred elsewhere.
 
 Consequences (HYPOTHESIS, follow from the above):
 - **Run length** ≈ 180 °min ÷ (VF2 − whole setpoint), plus the ramp: ≈ 35 min at 27, ≈ 50 min at
