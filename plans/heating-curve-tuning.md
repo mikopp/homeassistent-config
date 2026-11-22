@@ -587,6 +587,23 @@ are already throttled a bit from last year's balancing; no flow-meter readings a
   here). Below 3 °C, `off` still heats to `TempDesiredLow`.
   Depends on: 2.2, `warm_enough` fixed.
 
+### Phase 6 — unit behaviour knowledge (owner, 2026-11-22)
+
+- [TODO] **6.1** Write the geoTHERM's "unit behaviour" knowledge: how this VWS 83/2 (SW 0383, ebusd
+  circuits `ehp`, `mc`, `uih`, `hwc`) can and cannot be steered, as the lasting documentation of
+  the unit. Content: every finding of this plan and of `plans/heating-cycling-from-ehp.md`, each
+  graded by origin: manual (document number and page), real-world tested on this unit (date, how),
+  or assumed. **What is known not to work** gets its own entries: e.g. `mc/Mode` unusable, the
+  0.5 K `TempDesired` step that leaves the whole-degree setpoint unchanged, registers that do not
+  answer, the panel as a read-only reference (all settings over ebus). The references (manuals,
+  ebusd catalog rows, the register decodes now in `doc/heating_pv_boost/registers.md` and
+  `heating-curve.md`) go where the hardware-knowledge framework puts them.
+  Uses the hardware-knowledge skill/rule built on a separate branch (owner: modelled on
+  `mikopp/homeassistant-innova-hrds` `doc/references`, PR linked in "References" once open), so
+  the same layout serves other devices in this repo later.
+  Depends on: that framework PR merged; 2.2 settled (so the steering findings are final);
+  hypotheses still open at that point go in as "assumed", graded.
+
 ## Observations
 
 (Log settled evaluations and test results here: dates, outdoor and radiation mean, per-room
@@ -776,6 +793,8 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - `doc/heating_pv_boost/registers.md`: the `mc/Params` field list and the A.4b test (1) result.
 - Design doc: HPB-1 already carries the hand-setter line (#186); no further change expected
   (K-4.1 gate).
+- Unit behaviour knowledge for the geoTHERM (6.1), in the home the hardware-knowledge framework
+  defines.
 - Story (the 0.13 episode, the spike analysis, the interpolation error and its correction) →
   `doc/heating_pv_boost/background.md` at Close.
 
@@ -804,6 +823,7 @@ Links, the /3 successor manual and the owner's printed copy: the note "Bus parti
 - [TODO] 3.1–3.2 Hydraulic balancing
 - [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, [IN_PROGRESS] 4.9 setpoint from uih: implemented, bridge lines + hot-water check after deploy
 - [DONE] 5.1; [TODO] 5.2 deferred (`warm_enough`)
+- [TODO] 6.1 geoTHERM unit behaviour knowledge (needs the hardware-knowledge framework PR)
 - [TODO] Close
 
 ## Close
