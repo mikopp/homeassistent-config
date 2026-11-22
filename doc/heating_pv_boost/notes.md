@@ -222,8 +222,8 @@ a case table in `test_energy_mode`).
 
 ## Known biases / open issues
 
-- Which ebusd config generation this instance runs is unconfirmed (device VWS-32). Keep the dual
-  name/number parsing (incl. raw `1` → `cooling`) as cheap insurance.
+- Keep the dual name/number parsing of enums (incl. raw `1` → `cooling`): the catalog generation
+  is the current one (device VWS-32), but some enums arrive as numbers (device VWS-44).
 - `automation.heating_slab_charge_decision_changed` still says "Phase 1 — observation only,
   nothing was written" (message and `description:`), but with both switches on the decision IS
   written (Invariants "Two switches"). Fixing it changes the automation's output: do it with a
