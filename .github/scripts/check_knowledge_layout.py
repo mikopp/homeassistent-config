@@ -18,6 +18,12 @@ Fails (exit 1) when:
     doc/sources/, doc/KNOWLEDGE.md (examples) and this script. Two forms: `doc/<pkg>/design.md#<ID>`
     and a bare `<PREFIX>-<n>[.<m>][a-z]` whose prefix a design doc defines. Lines starting
     `Retired:` in a design doc are skipped (they list gone IDs on purpose).
+  * a doc/devices/<device>/ (K-9, format in .claude/rules/devices.md; `_`-prefixed folders such as
+    `_template` are skipped) lacks README.md, behaviour.md, interface.md or evidence.md, lacks a
+    required heading (README `## References`; behaviour `## Control`, `## Does not work`,
+    `## Open questions`; interface `## Unusable on this unit`), has a file over 40000 chars, cites
+    `[T<n>]` without an evidence.md row or `[<REF> ...]` without a References row, or has a T row
+    without a YYYY-MM[-DD] date or a CONFIRMED/OBSERVED grade. Code spans and fences are ignored.
 
 Warns (exit code unchanged) when a design doc has a history marker outside code fences (a date,
 `pre-#n`, `since #n`, "originally", "previously", "formerly", "no longer"): K-4 keeps design docs
@@ -55,6 +61,19 @@ HISTORY_RE = re.compile(
     r"\b(?:20\d\d-\d\d-\d\d|pre-#\d+|since #\d+|originally|previously|formerly|no longer)\b",
     re.IGNORECASE,
 )
+# Device docs: required files and the headings each must have (K-9, .claude/rules/devices.md).
+DEVICE_HEADINGS = {
+    "README.md": ["References"],
+    "behaviour.md": ["Control", "Does not work", "Open questions"],
+    "interface.md": ["Unusable on this unit"],
+    "evidence.md": [],
+}
+# Evidence tag in brackets, not a markdown link `[text](url)`: `[T4]`, `[IA p.63]`, `[ASSUMED]`.
+DEVICE_TAG_RE = re.compile(r"\[([A-Z][A-Z0-9-]*)((?:\s[^\]\n]*)?)\](?!\()")
+# A T row of evidence.md: `| T<n> | <date> | <method> | <seen> | <grade> |`.
+T_ROW_RE = re.compile(r"^\|\s*(T\d+)\s*\|(.*)$", re.MULTILINE)
+# A References row: first cell is an uppercase ID.
+REF_ROW_RE = re.compile(r"^\|\s*([A-Z][A-Z0-9-]*)\s*\|", re.MULTILINE)
 # File types that can hold a design-ID reference.
 REF_SUFFIXES = {".md", ".yaml", ".py", ".jinja"}
 
@@ -203,12 +222,70 @@ def check_design_refs(errors):
                     errors.append(f"{name}:{n}: {ref} has no heading in doc/{owner}/design.md")
 
 
+def strip_code_spans(text):
+    """Drop inline `code` so a tag shown as an example never counts as a citation."""
+    return re.sub(r"`[^`\n]*`", "", text)
+
+
+def section(text, heading):
+    """Return the body of `## <heading>` up to the next `## ` heading ('' if absent)."""
+    m = re.search(r"^##\s+%s\s*$(.*?)(?=^##\s|\Z)" % re.escape(heading), text, re.M | re.S)
+    return m.group(1) if m else ""
+
+
+def check_devices(errors):
+    """Each device folder: files, headings, size, evidence tags resolve, T rows graded (K-9)."""
+    for dev in sorted(p for p in (ROOT / "doc" / "devices").glob("*") if p.is_dir()):
+        # `_template` (and any `_`-prefixed folder) holds placeholders, not a device.
+        if dev.name.startswith("_"):
+            continue
+        rel = dev.relative_to(ROOT).as_posix()
+        texts = {}
+        for name, headings in DEVICE_HEADINGS.items():
+            path = dev / name
+            if not path.is_file():
+                errors.append(f"{rel}: missing {name} (doc/KNOWLEDGE.md#K-9)")
+                continue
+            texts[name] = strip_fences(path.read_text(encoding="utf-8"))
+            for h in headings:
+                if not re.search(r"^##\s+%s\s*$" % re.escape(h), texts[name], re.M):
+                    errors.append(f"{rel}/{name}: no '## {h}' heading (.claude/rules/devices.md)")
+        # Known T rows and reference IDs; each T row needs a date and a grade.
+        t_ids = set()
+        for tid, rest in T_ROW_RE.findall(texts.get("evidence.md", "")):
+            t_ids.add(tid)
+            cells = [c.strip() for c in rest.split("|")]
+            if not cells or not re.fullmatch(r"20\d\d-\d\d(?:-\d\d)?", cells[0]):
+                errors.append(f"{rel}/evidence.md: {tid} has no YYYY-MM[-DD] date")
+            if "CONFIRMED" not in rest and "OBSERVED" not in rest:
+                errors.append(f"{rel}/evidence.md: {tid} has no CONFIRMED/OBSERVED grade")
+        refs = set(REF_ROW_RE.findall(section(texts.get("README.md", ""), "References")))
+        refs.discard("ID")
+        # Every tag in every markdown file of the device must resolve.
+        for path in sorted(dev.rglob("*.md")):
+            if "references" in path.relative_to(dev).parts:
+                continue
+            raw = path.read_text(encoding="utf-8")
+            if len(raw) > DESIGN_MAX_CHARS:
+                errors.append(f"{rel}/{path.name}: {len(raw)} chars, cap {DESIGN_MAX_CHARS}")
+            for n, line in enumerate(strip_code_spans(strip_fences(raw)).splitlines(), 1):
+                for tag, _ in DEVICE_TAG_RE.findall(line):
+                    if tag == "ASSUMED":
+                        continue
+                    if re.fullmatch(r"T\d+", tag):
+                        if tag not in t_ids:
+                            errors.append(f"{rel}/{path.name}:{n}: [{tag}] has no evidence.md row")
+                    elif tag not in refs:
+                        errors.append(f"{rel}/{path.name}:{n}: [{tag}] not in README References")
+
+
 def main():
     errors, warnings = [], []
     check_plans(errors)
     check_package_notes(errors)
     check_design_docs(errors, warnings)
     check_design_refs(errors)
+    check_devices(errors)
     for w in warnings:
         print(f"WARNING {w}")
     for e in errors:

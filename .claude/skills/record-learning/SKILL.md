@@ -65,6 +65,7 @@ its cap (K-3: 24 KB) takes no new entry: split it (K-4) or have the entry replac
 
 | The learning is… | Write it to |
 |---|---|
+| a fact about a physical unit itself, true whichever package uses it (behaviour, measured value, a lever that works or does not, register decode, manual page, test on the unit) | `doc/devices/<device>/` per the `device-knowledge` skill (tagged; T row in `evidence.md`); the package note points to it |
 | a current fact about one package that an editor needs before touching its YAML/tests (invariant, quirk, measured value, entity, owner value), even one behind a design decision | `doc/<pkg>/notes.md`, graded; a design doc cites it, never copies it (if missing: create the note + symlink rule, `doc/KNOWLEDGE.md#K-6`) |
 | how a component works, a state machine or decision table, a decision with its rejected alternative, an invariant's mechanism, a contract with another package, an extension rule | `doc/<pkg>/design.md` (K-4.1 gate; create at the K-4 threshold), plus a one-line `→ design.md#ID` in the note if breaking it fails silently |
 | a known architectural gap or accepted risk | a GitHub issue; link `#n` from the note AND the design doc's Known gaps |

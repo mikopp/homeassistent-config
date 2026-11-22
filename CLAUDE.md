@@ -81,8 +81,7 @@ HA YAML rules (helpers, template sensors, entity ids, device key) live in `.clau
 
 ## Learnings — hard rule
 **Never write an unconfirmed learning** (one green CI run or "symptom went away" is not proof).
-Hypotheses go to the feature's `plans/` file, marked as such.
-To record anything learned, invoke the `record-learning` skill: it holds the evidence rules and routing.
+Hypotheses go to the feature's `plans/` file, marked as such. To record anything learned, invoke the `record-learning` skill: it holds the evidence rules and routing.
 
 ## Where knowledge lives
 Before creating, moving or deleting knowledge (note, rule, skill, design doc, a plan's close step), read `doc/KNOWLEDGE.md`.
@@ -93,8 +92,8 @@ Before creating, moving or deleting knowledge (note, rule, skill, design doc, a 
 | `.claude/rules/*.md` | file-type rules (`ha-yaml.md`, `tests.md`, `plans.md`, `knowledge.md`); auto-load on matching paths |
 | `.claude/skills/<topic>/` | cross-package topic knowledge and workflows (`record-learning`) |
 | `doc/<pkg>/design.md` | current architecture, decisions, trade-offs and gaps of complex packages; no implementation detail; read on demand |
+| `doc/devices/<device>/` | one physical unit, independent of HA and packages: identity, manuals by doc no./page, behaviour, what steers it and what does not, registers, test evidence; every fact tagged (`device-knowledge` skill) |
 | `doc/<pkg>/background.md`, `doc/sources/<pkg>/` | history and raw material: not design-relevant; never cite, and never link from agent knowledge |
 | YAML comments | what + one-line why + pointer to note/design; never a copy of a note fact (`doc/KNOWLEDGE.md#K-1.1`) |
 | `plans/` | open work and hypotheses only; deleted when done |
-| GitHub issues | confirmed bugs/flaky tests not fixed now; link `#n` from the note; plan only when work starts |
-| git history / PRs | the log; no dated logs elsewhere |
+| GitHub issues; git / PRs | issues: confirmed bugs/flaky tests not fixed now, `#n` linked from the note; git/PRs: the log, no dated logs elsewhere |
