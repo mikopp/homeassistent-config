@@ -868,7 +868,6 @@ template:
       # While masked this sensor goes UNAVAILABLE instead of publishing a misleading number, which
       # means every numeric threshold downstream simply never fires — no sentinel value to
       # remember, and it matches the repo rule on propagating unavailable.
-      # → plans/heating-cycling-from-ehp.md step 11
       - name: "Heating Circuit Return Temp Valid"
         unique_id: heating_circuit_return_temp_valid
         unit_of_measurement: "°C"
