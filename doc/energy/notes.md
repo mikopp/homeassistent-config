@@ -2,7 +2,6 @@
 paths:
   - "packages/energy.yaml"
   - "tests/ha/test_energy_*.py"
-  - "plans/energy-*.md"
 ---
 # energy package notes (`packages/energy.yaml`)
 

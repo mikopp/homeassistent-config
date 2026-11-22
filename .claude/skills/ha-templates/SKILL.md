@@ -1,6 +1,6 @@
 ---
 name: ha-templates
-description: "Runtime semantics of HA template sensors/automations at the pinned version: trigger vs state-based, this.state self-reference, re-render/propagation, variables, automation.trigger conditions. Use when designing or debugging template:/automation logic; not for YAML style (see yaml)."
+description: "Runtime semantics of HA template sensors/automations at the pinned version: trigger vs state-based, this.state self-reference, re-render/propagation, variables, automation.trigger conditions. Use when designing or debugging template:/automation logic; not for YAML style."
 ---
 
 # HA template & automation runtime semantics
@@ -13,7 +13,7 @@ stack trace, or deterministic repro. **OBSERVED** = real data, alternative expla
 - **W→kWh accumulator** (CONFIRMED, every accumulator in `packages/victron.yaml` passes CI):
   `trigger: [platform: time_pattern, minutes: "/1"]`, `state: "{{ (this.state | float(0)) + (power/60000) }}"`.
   - Why: `this.state` reads the entity's PREVIOUS (pre-write) state, so it accumulates cleanly.
-  - Limit: 1/min sampling is coarse for sources pushing every 1-2 s; use `platform: integration` there (see `ha-energy-metering`).
+  - Limit: 1/min sampling is coarse for sources pushing every 1-2 s; use `platform: integration` there (`ha-energy-metering` only when adding one).
 - **Cross-tick baseline / counter delta**: dedicated sibling sensor with its own plain `state:`, declared
   AFTER its consumers in the same trigger block; consumers read `states('sensor.the_baseline')`.
   - Why: consumers see the pre-this-tick value. Behaviour CONFIRMED by the counter-delta tests.
@@ -27,7 +27,7 @@ stack trace, or deterministic repro. **OBSERVED** = real data, alternative expla
   - Scope: `sensor: platform: integration` listens to both and IS driven by a same-value re-post.
 - **A template reading `this` re-renders on its OWN state change**, up to `len(_template_attrs)` times in a row
   before the "Template loop detected" guard (CONFIRMED 2026.10.1, `components/template/template_entity.py::_handle_results`).
-  - Why it matters: an externally set state does not stick; each re-render recomputes from real inputs, so a hysteresis ladder walks one step per render toward the inputs. Test consequence: see `ha-test-harness`.
+  - Why it matters: an externally set state does not stick; each re-render recomputes from real inputs, so a hysteresis ladder walks one step per render toward the inputs. Test consequence, only when a test seeds such a sensor: `ha-test-harness` `references/fixtures.md`.
 
 ## Decision design
 - **One decision sensor, consumers read only it** (CONFIRMED 2026.10.1): compute the decision once in a

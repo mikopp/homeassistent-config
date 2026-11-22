@@ -55,7 +55,7 @@ Rules:
   Group related entities with a `group:` and the package's dashboard card instead.
 
 ## Comments and findings while you edit
-- Comment style: `.claude/rules/comments.md` (loads with this rule); do not repeat the
+- Comment style: `.claude/rules/comments.md` (loads with this rule on YAML/Jinja files); do not repeat the
   availability-guard / no-`float`-default rule above in a comment.
 - If a comment's why rests on a fact not visible in the YAML (measured value, hardware quirk,
   user-supplied reason) or you found a bug: invoke `record-learning` before you finish. The fact

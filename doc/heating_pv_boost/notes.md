@@ -8,8 +8,6 @@ paths:
   - "tests/e2e/test_restart.py"
   - "dashboards/heating-dashboard.yaml"
   - "doc/heating_pv_boost/design.md"
-  - "plans/heating-*.md"
-  - "plans/ebusd-*.md"
 ---
 # heating_pv_boost.yaml — Vaillant geoTHERM via ebusd
 

@@ -4,7 +4,7 @@ The recorder records only the history sources of the entity platforms that read 
 derived from the config at run time. These tests fail when the config or the tests outgrow that:
 a new platform nobody classified, a classification the HA source contradicts, a test that reads
 a recorded event type the filter drops. Static (no HA boot), so they run with every --package.
-→ .claude/skills/ha-test-harness/SKILL.md (fixtures)
+→ .claude/skills/ha-test-harness/references/fixtures.md
 """
 
 from __future__ import annotations
