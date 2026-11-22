@@ -27,6 +27,15 @@ marked as such, no learnings until CONFIRMED. A step that tests unit behaviour n
 fact (`<ID>` or `[ASSUMED]` line) it settles. `.github/scripts/check_knowledge_layout.py` fails
 CI for a plan without a Status section or a `Close:` step.
 
+## Splitting a plan
+Over its warn cap (`doc/KNOWLEDGE.md#K-1.2`), first collapse finished steps. Still too big: it
+becomes a master `plans/<feature>.md` holding the goal, the ordered sub-plans with dependencies
+and status, the binding decisions, Status and Close. Each sub-plan `plans/<feature>-<part>.md`
+follows the implementation order, is a complete self-contained plan (all items above), starts with
+the line `Master: plans/<feature>.md`, never contradicts the master, and its Close ticks it off in
+the master. The layout check fails a `Master:` naming a missing plan or a master that does not
+name the sub-plan.
+
 ## Working on a plan
 Confirmed bugs and learnings: invoke the `record-learning` skill; it routes them to their home.
 

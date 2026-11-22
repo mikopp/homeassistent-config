@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the knowledge layout rules that must never be forgotten (doc/KNOWLEDGE.md K-4, K-6, K-8).
+"""Check the knowledge layout rules that must never be forgotten (doc/KNOWLEDGE.md K-1..K-9).
 
 Fails (exit 1) when:
   * a plans/*.md has neither a `## Status` heading nor a line starting `**Status:**`,
@@ -13,7 +13,8 @@ Fails (exit 1) when:
   * a doc/<pkg>/design.md (K-4) has no doc/<pkg>/notes.md, is not listed in that note's `paths:`
     frontmatter, or shares its ID prefix (`PG`, `AF` ...) with another design doc,
   * a knowledge file is over its hard cap in SIZE_CAPS (characters, K-1.2; symlinks resolved and
-    deduplicated; `_template`, background*, doc/sources/ and references/ skipped),
+    deduplicated; `_template`, background*, doc/sources/ and the manufacturer copies under
+    doc/devices/<d>/references/ skipped; skill references/*.md are capped),
   * a design-ID reference does not resolve to a heading `## <ID>` .. `#### <ID>` in its design doc.
     Scanned: tracked and untracked (not ignored) .md/.yaml/.py/.jinja files except background,
     doc/sources/, doc/KNOWLEDGE.md (examples) and this script. Two forms: `doc/<pkg>/design.md#<ID>`
@@ -36,7 +37,15 @@ Fails (exit 1) when:
   * a .claude/skills/*/SKILL.md lacks `name:` or `description:`, or the description is over its
     SIZE_CAPS hard cap,
   * a .claude/rules/**/*.md (symlinks followed) lacks frontmatter `---` / a `paths:` list / the
-    closing `---`, or has a line starting `@` (an eager import, K-1).
+    closing `---`, or has a line starting `@` (an eager import, K-1),
+  * a reference part is named by no index (K-1.3; by relative path or basename):
+      - a .claude/skills/<t>/**/*.md other than SKILL.md, not named in that skill's SKILL.md;
+      - a doc/devices/<d>/*.md (top level; `_`-folders skipped) other than README.md,
+        behaviour.md, interface.md and evidence*.md, not named in README.md or behaviour.md;
+      - a doc/<pkg>/*.md (not devices/ or sources/) other than notes.md, design.md, tests.md and
+        background*.md, not named in that package's notes.md or design.md,
+  * a plans/*.md with a line `Master: plans/<x>.md` names a master that does not exist, or a
+    master that does not name the sub-plan's filename (.claude/rules/plans.md "Splitting a plan").
 
 Warns (exit code unchanged) when:
   * a design doc has a history marker outside code fences (a date, `pre-#n`, `since #n`,
@@ -459,13 +468,14 @@ def frontmatter(text):
 
 
 def size_skipped(rel):
-    """Never capped: templates, guarded history/raw material, references/ copies (K-1.2)."""
+    """Never capped: templates, guarded history/raw material, manufacturer copies under
+    doc/devices/<d>/references/ (K-1.2). Skill references/*.md are capped."""
     parts = rel.split("/")
     return (
         any(p.startswith("_") for p in parts[:-1])
         or parts[-1].startswith("background")
         or rel.startswith("doc/sources/")
-        or "references" in parts
+        or (parts[:2] == ["doc", "devices"] and len(parts) > 4 and parts[3] == "references")
     )
 
 
@@ -554,6 +564,73 @@ def check_rule_frontmatter(errors):
                 errors.append(f"{rel}:{n}: line starts with '@' (eager import, K-1)")
 
 
+def unindexed(parts, indexes, base):
+    """Return the parts that no index file names, by path relative to `base` or by basename."""
+    text = "\n".join(i.read_text(encoding="utf-8") for i in indexes if i.is_file())
+    return [
+        p for p in parts
+        if p.relative_to(base).as_posix() not in text and p.name not in text
+    ]
+
+
+def check_reference_index(errors):
+    """Every reference part is named by its index, so a read-when pointer reaches it (K-1.3)."""
+    # Skill detail files: indexed in the skill's SKILL.md.
+    for skill in sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md")):
+        parts = [p for p in sorted(skill.parent.rglob("*.md")) if p != skill]
+        for p in unindexed(parts, [skill], skill.parent):
+            errors.append(
+                f"{p.relative_to(ROOT).as_posix()}: not named in "
+                f"{skill.relative_to(ROOT).as_posix()} (doc/KNOWLEDGE.md#K-1.3)"
+            )
+    # Device topic files: indexed in the README file map or behaviour.md.
+    for dev in sorted(p for p in (ROOT / "doc" / "devices").glob("*") if p.is_dir()):
+        if dev.name.startswith("_"):
+            continue
+        parts = [
+            p for p in sorted(dev.glob("*.md"))
+            if p.name not in ("README.md", "behaviour.md", "interface.md")
+            and not p.name.startswith("evidence")
+        ]
+        for p in unindexed(parts, [dev / "README.md", dev / "behaviour.md"], dev):
+            errors.append(
+                f"{p.relative_to(ROOT).as_posix()}: not named in README.md file map or "
+                "behaviour.md (doc/KNOWLEDGE.md#K-1.3)"
+            )
+    # Package reference docs: indexed in the package note (header) or design doc.
+    for pkg in sorted(p for p in (ROOT / "doc").glob("*") if p.is_dir()):
+        if pkg.name in ("devices", "sources"):
+            continue
+        parts = [
+            p for p in sorted(pkg.glob("*.md"))
+            if p.name not in ("notes.md", "design.md", "tests.md")
+            and not p.name.startswith("background")
+        ]
+        for p in unindexed(parts, [pkg / "notes.md", pkg / "design.md"], pkg):
+            errors.append(
+                f"{p.relative_to(ROOT).as_posix()}: not named in doc/{pkg.name}/notes.md or "
+                "design.md (doc/KNOWLEDGE.md#K-1.3)"
+            )
+
+
+# Sub-plan header naming its master plan (.claude/rules/plans.md "Splitting a plan").
+MASTER_RE = re.compile(r"^Master:\s*plans/([\w.-]+\.md)", re.MULTILINE)
+
+
+def check_plan_masters(errors):
+    """A sub-plan's `Master:` names an existing plan, and that master names the sub-plan."""
+    for plan in sorted((ROOT / "plans").glob("*.md")):
+        m = MASTER_RE.search(plan.read_text(encoding="utf-8"))
+        if not m:
+            continue
+        rel = plan.relative_to(ROOT).as_posix()
+        master = ROOT / "plans" / m.group(1)
+        if master == plan or not master.is_file():
+            errors.append(f"{rel}: Master plans/{m.group(1)} is missing or the plan itself")
+        elif plan.name not in master.read_text(encoding="utf-8"):
+            errors.append(f"{rel}: master plans/{m.group(1)} does not name {plan.name}")
+
+
 def check_no_background_refs(warnings):
     """Agent knowledge never names background or sources (K-1); warning only."""
     for name, path in ref_files():
@@ -578,6 +655,8 @@ def main():
     check_sizes(errors, warnings)
     check_skill_frontmatter(errors, warnings)
     check_rule_frontmatter(errors)
+    check_reference_index(errors)
+    check_plan_masters(errors)
     check_no_background_refs(warnings)
     for w in warnings:
         print(f"WARNING {w}")

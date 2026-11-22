@@ -16,7 +16,7 @@ The single home of the device-doc format. Home and boundary with packages:
 | `behaviour.md` | only the unit, never HA: states, sequences, protections; `## Control` (levers that steer it: effect, limits); `## Does not work` (levers tried or documented that do not steer it, and what happens instead); `## Open questions` (pointers to `plans/…` or `#n` only) |
 | `interface.md` | transport, addressing, polling limits; register/API definitions (name, decode, unit, access, evidence); `## Unusable on this unit`. Registers are defined here only, named elsewhere |
 | `evidence.md` | the T table: tests on this unit (`evidence-archive.md`: rows no fact cites, K-1.2) |
-| `<topic>.md` | optional, one large self-contained topic (e.g. a curve table); listed in the file map |
+| `<topic>.md` | optional, one self-contained topic (e.g. a curve table); listed in the README file map with its read-when condition (K-1.3) |
 
 ## Evidence tags: every fact carries one; untagged = a bug
 
