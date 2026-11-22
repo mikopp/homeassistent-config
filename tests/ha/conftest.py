@@ -271,7 +271,7 @@ async def apply_baseline(
     await seed(hass, states)
     # Second pass: a later seed can re-render an entity seeded earlier. The delayed trigger-based
     # airflow indicators (delay_on/delay_off never elapsed, so no internal state) re-render to
-    # `unknown` when their inputs are seeded after them (ha-test-harness skill, "Seed trigger
+    # `unknown` when their inputs are seeded after them (ha-test-harness references/fixtures.md, "Seed trigger
     # inputs FIRST"). Restore every entry that no longer holds its baseline state, so the
     # baseline is one consistent snapshot. Why the Docker suite did not need this is UNPROVEN
     # (presumably REST timing).
@@ -499,7 +499,7 @@ def _victron_mqtt_unique_ids() -> list[str]:
 # whole boot cost ~1.1 s of CPU per test (the recorder thread competes with the loop for the GIL).
 # The recorder is only READ by the entity platforms below, so it records only their sources and
 # drops event types no test reads. Both parts are derived or guarded, never a hand-kept list:
-# → .claude/skills/ha-test-harness/SKILL.md (fixtures), test_recorder_filter.py (the guards).
+# → .claude/skills/ha-test-harness/references/fixtures.md, test_recorder_filter.py (the guards).
 # Entity platform → config key holding the entity whose state history it reads (source read at the
 # pinned HA: filter/statistics/history_stats import `recorder.history` and query the source's states).
 HISTORY_PLATFORMS = {"filter": "entity_id", "statistics": "entity_id", "history_stats": "entity_id"}

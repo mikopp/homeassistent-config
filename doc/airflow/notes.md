@@ -11,7 +11,7 @@ paths:
 Read before touching `packages/airflow_cooling.yaml`, `custom_templates/airflow_decision.jinja`,
 its tests or its dashboard. Scope: ComfoConnect (Zehnder ComfoAir Q350 ERV) temperature profile,
 ventilation level and humidity boost. Design (entities, season machine, decision table, actuator
-automations, bypass estimation): `doc/airflow/design.md` (`AF-1` … `AF-12`). This note holds what
+automations, bypass estimation): `doc/airflow/design.md` (`AF-1` … `AF-12`), on demand: read it only to change the architecture or check an addition against it; for one rule, follow the `→ design.md#ID` at that line. This note holds what
 you must not break.
 
 ## Invariants

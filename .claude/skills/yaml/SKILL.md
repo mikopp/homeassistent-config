@@ -1,6 +1,6 @@
 ---
 name: yaml
-description: Best practices for Home Assistant automations, templates, blueprints, scripts, scenes, and YAML configuration. General style only; this repo's binding rules are in .claude/rules/ha-yaml.md.
+description: General HA style when writing a new automation, script, scene or blueprint (modes, triggers, conditions, actions, naming, gotchas). Not for template-sensor semantics (ha-templates) or this repo's binding rules (.claude/rules/ha-yaml.md, auto-loaded).
 ---
 
 # Home Assistant YAML & Automation Best Practices
@@ -228,16 +228,9 @@ action:
 
 ## 5. Templates (Jinja2)
 
-### Defaults Only for Unguarded Sensor Reads
+### Defaults and `availability:`
 
-```jinja2
-{{ states('sensor.temp') | float(0) }}           {# Unguarded sensor read: default 0 if invalid #}
-{{ states('sensor.count') | int(0) }}            {# Unguarded sensor read: integer with default #}
-{{ states('input_number.x') | float }}           {# Helper: never a default #}
-{{ state_attr('entity', 'attr') | default(0) }}  {# Attribute default #}
-```
-
-**Critical:** Since HA 2021.10, template filters error on invalid input without defaults. Use a default only on reads of sensors that have no `availability:` guard. Never on helpers (`input_number`, `input_boolean`, `input_select`, `input_datetime`), and never inside a `state:` template guarded by `availability:`; there a default hides real errors.
+Binding rule: `.claude/rules/ha-yaml.md` (no defaults on helpers or in guarded `state:` templates; loads with any package edit).
 
 ### Check Availability
 
@@ -296,176 +289,16 @@ template:
 
 ---
 
-## 6. Blueprints
+## 6. Blueprints, scripts, scenes, watchdogs
 
-### Blueprint Schema
-
-```yaml
-blueprint:
-  name: Motion-activated Light
-  description: |
-    Turn lights on when motion is detected.
-    Supports multiple sensors and configurable timeout.
-  domain: automation
-  author: Your Name
-  homeassistant:
-    min_version: 2024.6.0
-  input:
-    motion_sensor:
-      name: Motion Sensor
-      selector:
-        entity:
-          filter:
-            - domain: binary_sensor
-              device_class: motion
-```
-
-### Key Limitation: enabled: false NOT SUPPORTED
-
-```yaml
-# WRONG - Causes HA startup error
-- id: my_automation
-  enabled: false          # NOT ALLOWED in blueprints
-  use_blueprint:
-    path: custom/my_blueprint.yaml
-```
-
-**Workaround:** Remove from YAML file, disable via UI after creation.
-
-### Using Inputs in Templates
-
-**Inputs must be exposed as variables first:**
-
-```yaml
-variables:
-  target: !input target_entity
-
-triggers:
-  - trigger: state
-    entity_id: !input target_entity   # OK in trigger
-
-actions:
-  - action: light.turn_on
-    target:
-      entity_id: "{{ target }}"       # Use variable, NOT !input
-```
-
-### For Template Triggers Use trigger_variables
-
-```yaml
-trigger_variables:
-  my_entity: !input sensor_entity
-
-triggers:
-  - trigger: template
-    value_template: "{{ states(my_entity) | float > 25 }}"
-```
-
-### Input Sections (HA 2024.6.0+)
-
-```yaml
-input:
-  motion_settings:
-    name: Motion Settings
-    icon: mdi:motion-sensor
-    collapsed: false
-    input:
-      motion_sensor:
-        name: Motion Sensor
-        selector:
-          entity:
-            domain: binary_sensor
-```
+- Read `references/blueprints.md` before writing or changing a blueprint (schema, `!input`, `trigger_variables`, input sections, no `enabled: false`).
+- Read `references/scripts-scenes.md` before writing a script (modes, fields, blocking vs `script.turn_on`) or a scene / scene snapshot.
+- Read `references/watchdog.md` before writing an auto-off or unavailable-entity recovery automation.
+- File layout (packages): root `CLAUDE.md` "Config structure".
 
 ---
 
-## 7. Scripts
-
-### Script Modes
-
-Same as automation modes: `single`, `restart`, `queued`, `parallel`
-
-### Script Fields (Parameters)
-
-```yaml
-script:
-  notify_user:
-    alias: "Notify User"
-    fields:
-      message:
-        name: Message
-        required: true
-        selector:
-          text:
-      title:
-        name: Title
-        default: "Home Assistant"
-        selector:
-          text:
-    sequence:
-      - action: notify.mobile_app
-        data:
-          title: "{{ title }}"
-          message: "{{ message }}"
-```
-
-### Calling Scripts
-
-```yaml
-# Method 1: Direct call (blocking - waits for completion)
-action:
-  - action: script.notify_user
-    data:
-      message: "Alert!"
-
-# Method 2: script.turn_on (non-blocking - continues immediately)
-action:
-  - action: script.turn_on
-    target:
-      entity_id: script.notify_user
-    data:
-      variables:
-        message: "Alert!"
-```
-
----
-
-## 8. Scenes
-
-### When to Use
-
-| Component | Use When |
-|-----------|----------|
-| **Scene** | Setting multiple devices to specific states simultaneously |
-| **Script** | Reusable action sequences called from multiple places |
-| **Automation** | Event-driven responses requiring triggers |
-
-### Scene Snapshots (Save/Restore)
-
-```yaml
-# Save current state before change
-- action: scene.create
-  data:
-    scene_id: before_window_open
-    snapshot_entities:
-      - climate.ecobee
-      - light.ceiling_lights
-
-# Later, restore saved state
-- action: scene.turn_on
-  target:
-    entity_id: scene.before_window_open
-```
-
-**Common use cases:**
-- Window open/close (save HVAC state, restore on close)
-- Cleaning mode (all lights 100%, then restore)
-- Doorbell notification (flash lights, then restore)
-- TV/Media playback (dim lights, restore after)
-
----
-
-## 9. Common Gotchas
+## 7. Common Gotchas
 
 ### wait_for_trigger vs wait_template
 
@@ -507,26 +340,9 @@ condition:
     state: "off"
 ```
 
-### input_number: Never Use initial:
-
-```yaml
-# WRONG - Value resets after every HA restart
-input_number:
-  temp_study_eco:
-    initial: 19     # REMOVE THIS!
-
-# CORRECT - Value persists between restarts
-input_number:
-  temp_study_eco:
-    min: 14
-    max: 22
-    step: 0.5
-    unit_of_measurement: "°C"
-```
-
 ---
 
-## 10. Naming Conventions
+## 8. Naming Conventions
 
 ### Automation Naming
 
@@ -548,91 +364,6 @@ input_number:
 - Avoid brand names in entity IDs (use `motion_study` not `aqara_p1_motion_study`)
 - Entity IDs should remain stable (rename via friendly names)
 - Use Areas and Labels for organization
-
----
-
-## 11. File Organization
-
-### Packages Pattern (Recommended)
-
-```yaml
-# configuration.yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
-
-**Package file** (`packages/vacuum.yaml`):
-```yaml
-input_boolean:
-  vacuum_enabled:
-    name: Vacuum Enabled
-
-automation:
-  - alias: 'Vacuum: Auto-Start if Idle 3 Days'
-    id: vacuum_auto_start
-    # ...
-
-script:
-  start_vacuum:
-    alias: Start Vacuum
-    sequence: # ...
-```
-
-### Directory Splitting
-
-```yaml
-# configuration.yaml
-automation: !include_dir_merge_list automations/
-template: !include_dir_merge_list templates/
-```
-
----
-
-## 12. Watchdog Patterns
-
-### Auto-Off After Duration
-
-```yaml
-- alias: 'Light WatchDog - Auto-off after 1 hour'
-  trigger:
-    - platform: state
-      entity_id:
-        - light.hallway_lights
-        - light.bathroom_lights
-      to: 'on'
-      for: '01:00:00'
-  action:
-    - action: homeassistant.turn_off
-      data:
-        entity_id: "{{ trigger.entity_id }}"
-```
-
-### Unavailable Entity Recovery
-
-```yaml
-- alias: 'Device Recovery'
-  mode: queued
-  trigger:
-    - platform: state
-      entity_id: light.led_strip
-      to: "unavailable"
-      for: "00:00:30"
-  action:
-    - repeat:
-        while:
-          - condition: state
-            entity_id: light.led_strip
-            state: "unavailable"
-          - condition: template
-            value_template: "{{ repeat.index <= 5 }}"
-        sequence:
-          - action: switch.turn_off
-            entity_id: switch.led_power
-          - delay: "00:00:05"
-          - action: switch.turn_on
-            entity_id: switch.led_power
-          - delay: "00:00:10"
-```
 
 ---
 

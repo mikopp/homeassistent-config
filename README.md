@@ -2,7 +2,7 @@
 
 My personal [Home Assistant](https://www.home-assistant.io/) configuration for a house in Linz, Austria.
 
-The setup uses a modular **packages** pattern — each feature lives in its own YAML file under `packages/`, keeping concerns separated and testable. A CI pipeline runs on every push to validate the configuration, lint YAML, and execute integration tests against a live HA instance.
+The setup uses a modular **packages** pattern — each feature lives in its own YAML file under `packages/`, keeping concerns separated and testable. A CI pipeline runs on every push to validate the configuration, lint YAML, and run the tests in-process and against the real HA image in Docker.
 
 ---
 
@@ -130,7 +130,7 @@ Runs on pull requests and on pushes to `master`. Home Assistant core runs inside
 ### `e2e.yaml` — real Home Assistant in Docker (`tests/e2e`)
 Same triggers and change detection, plus a nightly run against the Home Assistant beta image (informational). Boots this repo's real `configuration.yaml` in the pinned image (`.github/ha-versions/ha/Dockerfile`) against the host mosquitto: full boot of every package, `check_config`, totals surviving a real restart, and a log free of errors and deprecations. Logs of a failed run are uploaded as an artifact.
 
-**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer. While developing, `--package <name>` or `-- <pytest test id / args>` runs only the matching `tests/ha` tests (`--yaml`: only the YAML checks); the full run without arguments is the pre-push check (usage: header of the script).
+**Run the checks locally:** `.github/scripts/ci-local.sh` (needs `brew install yamllint python@3.15 python@3.14 mosquitto`; builds `.venv` and `.venv-test` itself) runs the YAML checks and the in-process suite; `--e2e` adds the Docker layer. While developing, `--package <name>` or `-- <pytest test id / args>` runs only the matching `tests/ha` tests (`--yaml`: only the YAML checks); the full run without arguments is the pre-push check. Like GitHub CI, it runs `tests/ha` only when the branch changes a path in `.github/test-paths`; a docs/rules/plans-only change runs the YAML and knowledge checks alone (`--all` forces the tests; usage: header of the script).
 
 ### `yaml-lint.yml` — YAML style and lint
 Runs on every push and on manual dispatch; checks only, it never commits.
@@ -140,7 +140,12 @@ Runs on every push and on manual dispatch; checks only, it never commits.
 3. **lint-resolved**: resolves the `!include` directives of `configuration.yaml` and `dashboards/*.yaml` (`.github/scripts/resolve_ha_yaml.py`) and lints the flat output, which catches issues that only appear after expansion
 
 ### `knowledge-layout.yml` — knowledge layout
-Runs `.github/scripts/check_knowledge_layout.py` (stdlib only): every plan has a Status section and a Close step, every package has its note symlink; see `doc/KNOWLEDGE.md`.
+Runs `.github/scripts/check_knowledge_layout.py` (stdlib only; also part of `ci-local.sh`). It checks the agent knowledge described in `doc/KNOWLEDGE.md`, where every file is one of four kinds: *always* (root `CLAUDE.md`, skill descriptions), *rule* (`.claude/rules/**`, including the symlinked package notes; loads when a matching file is touched), *skill* (`.claude/skills/<topic>/SKILL.md`; loads when invoked) or *reference* (design docs, device docs, package reference docs, skill `references/`, plans; read on demand through a read-when pointer).
+
+- **Errors:** plan Status and Close steps and sub-plan `Master:` links; package note symlinks; design-doc IDs and references to them; device-doc format and `(device <ID>)` anchors; size caps per kind (K-1.2); skill and rule frontmatter; reference indexes (every skill, device or package reference file is named by its index).
+- **Warnings:** warn-level size caps, history markers in design docs, mentions of background or sources in agent knowledge.
+
+The full list is in the script's docstring.
 
 ---
 

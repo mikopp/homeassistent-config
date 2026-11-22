@@ -1,6 +1,7 @@
 ---
 # Knowledge layout (doc/KNOWLEDGE.md K-6, K-8): every plans/*.md has a Status section and a
-# Close step, every packages/*.yaml has a note symlink in .claude/rules/packages/.
+# Close step, every packages/*.yaml has a note symlink in .claude/rules/packages/, every
+# doc/devices/<device>/ meets the K-9 format.
 # Its own workflow so it needs no Docker and no pip install (the script is stdlib only).
 name: Knowledge Layout
 

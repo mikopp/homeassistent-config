@@ -8,7 +8,7 @@ paths:
 # Victron package notes (`packages/victron.yaml`)
 
 Current facts of the Victron package. Design (accounting model, formulas, sign table, identities):
-`doc/victron/design.md` (`VIC-n`).
+`doc/victron/design.md` (`VIC-n`), on demand: read it only to change the architecture or check an addition against it; for one rule, follow the `→ design.md#ID` at that line.
 
 ## Invariants
 - Power identity, any η: `solar_ac + ac_pv + grid + batt_ac == ac_load` (VIC-5). Energy identity

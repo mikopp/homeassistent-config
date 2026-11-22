@@ -5,14 +5,14 @@ paths:
   - "dashboards/Pergola-management.yaml"
   - "dashboards/elements/pergola_card.yaml"
   - "doc/pergola/design.md"
-  - "plans/pergola-*.md"
 ---
 # Pergola package notes (`packages/pergola.yaml`)
 
 Read before touching `packages/pergola.yaml`, its tests or its dashboard. Scope: tilt control of
 the two Somfy bioclimatic covers `cover.dach_links` / `cover.dach_rechts` (state machine, slat
 formulas, rain/frost protection). Design (state machine, formulas, deadband, verification table):
-`doc/pergola/design.md` (`PG-1` … `PG-8`). This note holds what you must not break.
+`doc/pergola/design.md` (`PG-1` … `PG-8`), on demand: read it only to change the architecture or check an addition against it; for one rule, follow the `→ design.md#ID` at that line.
+This note holds what you must not break.
 
 ## Invariants
 - **Group + card sync.** Every new or removed pergola `input_*`, `sensor` or `binary_sensor` is
