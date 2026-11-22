@@ -26,8 +26,15 @@ section 0:
 
 Do NOT record: what a References row's `Covers` pointer already leads to in a short HTML/MD
 page; generic knowledge of the device class; values no package or decision uses; restated
-manual chapters. Unsure: ask the owner; a skipped fact costs a lookup, a useless one costs
-context in every read.
+manual chapters.
+
+**Before skipping, name what would be lost.** Say in one line what a later agent pays without the
+entry: which source it must re-read (document, pages, size), what it could misread there, or that
+it would not know to look at all (a test result, a lever that failed: these are lost for good,
+only a new test brings them back). Skip silently only when the loss is one short, unambiguous
+lookup the `Covers` pointer already leads to. Otherwise, or when unsure, ask the owner, giving that
+line and the one-line entry you would write; never decide a doubtful case alone. A skipped fact
+costs a lookup or a repeated test, a useless one costs context in every read.
 
 ## Device doc or package note?
 

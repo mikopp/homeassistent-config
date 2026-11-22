@@ -337,7 +337,7 @@ Somfy, Shelly, Victron).
 - **Worth writing (gate, `device-knowledge` skill):** a device doc holds only what saves a later
   agent from a miss, a misreading or a costly read: a source it would not check, one that is
   ambiguous or easy to misread, or one too long to re-read. Never a copy of what a reference
-  answers plainly.
+  answers plainly. Skipping names what would be lost; a doubtful case goes to the owner.
 - **Minimal device:** `README.md` alone (identity, References with per-topic page pointers, Used
   by) when no fact passes the gate and every reference is stable and agent-readable (HTML, MD,
   text; a text-layer PDF with page pointers). It becomes a full doc with its first gated fact.
