@@ -15,13 +15,13 @@ One path: eBUS → ebusd → ebusd's MQTT broker → Mosquitto bridge → HA's b
   (what ebusd ≥ 24.1 downloads and runs) [CAT], checked against a full `ebusctl` dump of this bus
   [T2] [T3]. ebusd 26.1 runs here and loads `vaillant/<addr>.<id>.csv` per scanned address
   (`08.ehp`, `15.uih`, `23.ehp.cc`, `25.ehp.hwc`, `50.ehp.mc`, `75.rcc`); `hcmode` with `1=cooling`
-  shows the current generation (VWS-32) [T50]. Never the `archived/` CSVs of a `john30/ebusd-configuration` checkout: a frozen
+  shows the current generation (VWS-32) [T51]. Never the `archived/` CSVs of a `john30/ebusd-configuration` checkout: a frozen
   snapshot that diverges from the served config [CAT].
 - **VWS-45** Payloads on this setup are plain `;`-separated values, not JSON (`--mqttjson` off; the flag:
   [EBD]); multi-field messages are positional (field lists in `registers-*.md`) [T2]. Field
   positions are stable across catalog generations, field names are not (VWS-32) [CAT].
 - ebusd's update check reports `vaillant/15.uih.csv: different version available`: the loaded
-  `uih` file differs from the served one, which of the two is newer is unknown [T50].
+  `uih` file differs from the served one, which of the two is newer is unknown [T51].
 
 ### Addressing
 

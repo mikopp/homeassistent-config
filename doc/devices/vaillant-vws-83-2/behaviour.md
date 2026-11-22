@@ -70,7 +70,7 @@ change; their current values are kept by the package note named in `README.md` U
 | | `ehp/CompIntegral` ("Komp. Start in", installer; panel C2 "Komp.Start ab", given "nur bei direkter Hydraulik" [IA p.58]) | start threshold of the energy balance; deeper = longer runs and pauses [IA p.49] | backup start moves with it (VWS-20) [IA p.60] | [IA p.49] [IA p.60] |
 | VWS-37 | `ehp/CompHysteresis` (installer) | stop line setpoint + hysteresis (VWS-4; W or fine setpoint: Open questions) [T28]; raises the floor-protection limit (VWS-7) [IA p.69] | one fixed value; the manual's entry (given "nur bei Hydraulikplan 1 und 3", this unit runs plan 6 [T46] and acts on it [T28]) describes no weather dependency [IA p.69] | [T28] [IA p.69] |
 | VWS-36 | `ehp/OutsideTempOffset` / panel "Kalibrierung" → "Aussentemperatur" | adjusts the displayed outdoor temperature ("Manuelle Anpassung der angezeigten Temperaturen") [IA p.65] | panel ±5 K in 1 K steps, factory 0 K [IA p.65]; bus format in `registers-ehp.md`; whether the curve uses the corrected value: Open questions | [IA p.65] |
-| VWS-24 | `mc/OperatingMode`, `mc/TempDesired` (the registers written so far) written over the bus | the written value stays until written again: the VR 90/3 writes only `mc/RoomTempOffset` [T5] | — | [T5] [T7] |
+| VWS-24 | `mc/OperatingMode`, `mc/TempDesired` (the registers written so far) written over the bus | the written value stays until written again: the VR 90/3 and the unit's own menus write a setting only when someone changes it there, never on their own; the VR 90/3 otherwise sends only `mc/RoomTempOffset` [T5] [T50] | an automation can treat both panels as manual inputs only; their whole-number entry steps do not limit bus writes (VWS-25) [T50] | [T5] [T7] [T50] |
 
 ## Does not work
 
@@ -90,9 +90,6 @@ change; their current values are kept by the package note named in `README.md` U
   Menu 1 also shows "Sperrzeit Warmwasser" / "Sperrzeit Bereitschaft" [IA p.54], which the
   manual does not tie to the EVU contact:
   `plans/ebusd-pv-heating-optimization.md` step 15
-- Is the panel read-only, and for which menus? Without the installer code the code-level menus
-  C1–C9, D1–D5, I1–I5 and A1–A9 show values but cannot be changed [IA p.49]:
-  `plans/heating-curve-tuning.md` step 0.10
 - Can a `TempDesired`-only write start or stop the compressor (VWS-25)? The compressor stopped
   1 s after the 08:43 write, with the integral ≈ 0 and VF2 at the stop line [T17]:
   `plans/heating-curve-tuning.md` step 0.11

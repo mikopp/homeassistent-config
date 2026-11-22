@@ -10,7 +10,7 @@ and its parts. No entity ids. Decodes from the published catalog [CAT], checked 
 
 | ID | Register / path | Decode (type, scale, unit) | Values / range | Access | Evidence |
 |---|---|---|---|---|---|
-| VWS-32 | `ehp/Status` | fields `temp;press;press_1;hcmode;hex` [T50]: flow T6 °C, bar, bar = the values of `ehp/HcFlowTemp`, `HcPress`, `SourcePress` [T2]; enum; raw hex | `hcmode` `0=off 1=cooling 3=heat 4=water` here [T50], name or number (VWS-44); the archived catalog names it `hcmode2` without `1` [CAT] | r | [CAT] [T2] [T50] |
+| VWS-32 | `ehp/Status` | fields `temp;press;press_1;hcmode;hex` [T51]: flow T6 °C, bar, bar = the values of `ehp/HcFlowTemp`, `HcPress`, `SourcePress` [T2]; enum; raw hex | `hcmode` `0=off 1=cooling 3=heat 4=water` here [T51], name or number (VWS-44); the archived catalog names it `hcmode2` without `1` [CAT] | r | [CAT] [T2] [T51] |
 | | `ehp/HcReturnTemp` | register `0A00`, internal sensor T5: `temp;sensor` | sensor `ok\|circuit\|cutoff`; reads the hot-water circuit during a hot-water charge (VWS-12) | r | [CAT] [T32] |
 | | `ehp/FlowTemp` | VF2, external flow sensor: `temp;sensor`; a different register from the `ehp/Status` flow field (T6) | the controller's flow input (VWS-18) | r | [CAT] [T13] |
 | | `ehp/OutsideTemp` | `b509 0d0600`: outdoor temp + sensor status | same value as `Broadcast/Outsidetemp` | r | [CAT] [T14] |

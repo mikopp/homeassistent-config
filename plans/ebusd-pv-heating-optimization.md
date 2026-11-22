@@ -296,7 +296,7 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       Then: does a block explain (b)? Result → device
       `protections.md` (T rows).
 - [DONE] 16. Catalog generation confirmed: ebusd 26.1, `hcmode` with `1=cooling` (device VWS-32,
-      T50). The numeric enum branch stays: some enums arrive as numbers (VWS-44).
+      T51). The numeric enum branch stays: some enums arrive as numbers (VWS-44).
 
 ## Observations (2026-10-17, ~46 h of live data, boost disabled)
 
