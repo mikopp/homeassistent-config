@@ -1,13 +1,16 @@
 # Heating — tune the heating curve and `TempDesired` for stable room temperatures
 
+Done steps are collapsed to one line. Their full analysis (baseline Part A, the curve tables, the
+step 0.6 procedure, the run scans) is in git: this file at commit `4956e8a`.
+
 ## Overview
 
 Goal: stable room temperatures from the geoTHERM's own weather compensation alone, that is the
-heating curve (slope) and `mc/TempDesired` (parallel shift), plus hydraulic balancing of the
-floor loops where rooms differ. Loxone's `warm_enough` is ignored for now (owner, 2026-11-21: its
-publishing does not update, a separate issue not fixed here); the comfort control stays off and
-the target is not adapted dynamically. A later sunny-day exception is out of scope until
-`warm_enough` works again.
+heating curve (slope), `mc/TempDesired` (parallel shift) and the outdoor offset, plus hydraulic
+balancing of the floor loops where rooms differ. The goal is the real room temperature measured
+by the indoor Ecowitt sensors, not a particular setting (owner). Loxone's `warm_enough` is ignored
+for now (its publishing does not update, a separate issue); the comfort control stays off and the
+target is not adapted dynamically.
 
 Room targets (owner):
 
@@ -19,814 +22,339 @@ Room targets (owner):
 | Bedroom | 21.5 °C | 21.2–21.8 | upper floor | `sensor.wheatherstation_temperature_1` |
 | Kids' room (Kilian) | 21.5–22 °C | 21.2–22.3 | upper floor | `sensor.wheatherstation_temperature_2` |
 
-The room sensor IDs come from the ha-mcp baseline (Part A); no YAML in this repo references them.
-
-Owner facts (2026-11-21): the bedroom and Kilian's room warm up at night with people sleeping in
-them (expected, not a fault). The bedroom sensor sat close to the sleepers and has been moved to a
-more neutral spot, so bedroom readings before the move overstate it. Last year the owner
-balanced the manifold so the upper floor gets more flow; without it the ground floor was always
-warmer. Bathroom (owner, 2026-11-22): a temperature spike that comes with a humidity spike
+No YAML in this repo references the room sensors. Owner facts: the bedroom and Kilian's room warm
+up at night with people sleeping in them (judge them on 08–20 h); the bedroom sensor was moved to a
+neutral spot on or before 2026-11-21 (older bedroom data overstate it); last year's balancing
+gives the upper floor more flow. Bathroom: a temperature spike with a humidity spike
 (`sensor.wheatherstation_humidity_5`) is a shower; leave those hours out of every evaluation.
 
 Outdoor: the weatherstation `sensor.wheatherstation_outdoor_temperature` and the machine's own
-sensor `sensor.geotherm_heating_outdoor_temp` (VRC DCF, north side of the house, no sun; owner).
-Sun: `sensor.wheatherstation_solar_radiation`, PV `sensor.victron_solar_yield_total_kwh`.
-
-Machine: geoTHERM exclusiv **VWS 83/2** (art. `0010002787`; manuals in the note "Bus
-participants"). Heating curves: `doc/heating_pv_boost/heating-curve.md` (manufacturer diagram,
-Kühne formula).
+`sensor.geotherm_heating_outdoor_temp` (north side, no sun). Sun:
+`sensor.wheatherstation_solar_radiation`. Machine: geoTHERM exclusiv **VWS 83/2** (manuals in the
+note "Bus participants"); heating curves: `doc/heating_pv_boost/heating-curve.md`.
 
 **All settings go over ebus; the panel is read-only (owner, 2026-11-22).** What counts is the
-ebus register format and what the controller does with it, not the panel's display steps.
-Settings are written with `ebusctl write` on the ebusd host, or with the HA hand setter where
-one exists:
+ebus register format and what the controller does with it, not the panel's display steps:
 
 | Setting | Register (catalog) | Bus format | How |
 |---|---|---|---|
 | `TempDesired` | `mc/TempDesired` (`0e3200`) | D1C, 0.5 K | `number.geotherm_heating_temp_desired` (#186) or `ebusctl write -c mc TempDesired 21.5` |
-| Curve slope | `mc/HeatingCurve` (`0e3500`) | UIN ÷ 100, 0.01 | `ebusctl write -c mc HeatingCurve 0.14` (no HA setter, no `/set` bridge line) |
+| Curve slope | `mc/HeatingCurve` (`0e3500`) | UIN ÷ 100, 0.01 | `ebusctl write -c mc HeatingCurve 0.14` (no HA setter) |
 | Outdoor offset | `ehp/OutsideTempOffset` (`0ec300`, installer level) | D2C, 1/16 K | `ebusctl write -c ehp OutsideTempOffset 0.5` |
 
 Read back every write with `ebusctl read -f` and log it in the change log. HA writes nothing
-automatically: the comfort control stays off.
+automatically.
 
 ## Design approach
 
 - **Design IDs touched:** HPB-1 (`doc/heating_pv_boost/design.md`) already carries the hand-setter
-  line (#186): with the writer off, `number.geotherm_heating_temp_desired` writes `mc/TempDesired`
-  only on a change by hand. The control law is unchanged. If the writer is armed later,
-  `mc/TempDesired` = `input_number.heating_comfort_temp` + 1 (rows 4–7) and a hand value is
-  overwritten.
-- **Which lever does what:**
-  - **Curve slope** (`mc/HeatingCurve` over ebus) sets the balance between cold and mild weather.
-    Too warm in mild weather and right in cold weather: slope too steep. Right in mild weather,
-    too cold in cold weather: slope too flat. Bus step 0.01; by the formula ≈ 0.25 K flow in mild
-    weather, ≈ 0.45 K at −10 °C.
-  - **What the compressor acts on: the whole-degree setpoint** W = floor(`mc/FlowTempDesired`),
-    passed on by `uih` (CONFIRMED, Observations). Runs end at integral ≈ 0, so the mean flow ≈ W
-    (HYPOTHESIS). A lever changes the room level only when it changes W, at least for part of the
-    outdoor range.
-  - **`TempDesired`** (hand setter or `ebusctl`) shifts the curve in parallel: the fine setpoint moves
-    ≈ 1.2 K per K (formula), and 0.5 K per 0.5 K step on a flat part of the curve (observed). At a
-    given outdoor temperature W changes only when floor(fine) changes. Every fine value seen is
-    `TempDesired` + a whole number, so from a `TempDesired` ending in .0 a −0.5 K step lowers W by 1
-    K and a +0.5 K step does nothing. From one ending in .5 it is the other way round. Near a jump of
-    the curve the half degree may also move the jump by ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
-    Effective step: 1 K of W ≈ 0.6–0.7 K room (rough estimate from P2 vs P3, HYPOTHESIS).
-  - **Outdoor sensor offset** (`ehp/OutsideTempOffset` over ebus, D2C 1/16 K; owner: 0 now).
-    **A tuning lever (owner, 2026-11-22).** The goal is the room temperatures measured by the
-    indoor Ecowitt sensors, the owner reads outdoor temperature from the weatherstation, and the
-    geoTHERM outdoor sensor is used only by the geoTHERM. Which of the two outdoor sensors is
-    "right" therefore does not matter. Two working HYPOTHESES (owner), tested when the table first
-    calls for an offset change (step 0.8): (a) the curve uses the corrected value; (b) the
-    controller keeps values finer than whole K (0.5 K assumed; the bus carries 1/16 K, the outdoor
-    sensor reads in ≈ 0.06–0.25 K steps, e.g. 1.81).
-    - Effect, if (a) holds: a positive offset makes the geoTHERM read warmer and lowers the flow. It moves the
-      curve's jumps along the outdoor axis by the offset. At a fixed outdoor temperature W drops by
-      one step only within that distance of a jump. Averaged over the day ≈ curve slope × offset ≈
-      0.25 K flow per K at 0.14 in mild weather (formula), ≈ 0.12 K per 0.5 K. So it is a fine
-      trim, finer than `TempDesired`.
-    - Side effects (accepted as part of the lever): every other geoTHERM outdoor decision moves
-      with it. Frost protection ("below 3 °C") then starts at a real 3 °C − offset. The
-      AT-Abschaltgrenze (no heating above, no cooling below) and the cooling release move the
-      same way. Log the offset with every change, and re-check it before the cooling season.
-  - **Room-to-room differences** (upper floor colder than the living room) are hydraulics or room
-    losses. Neither lever fixes them: Phase 3.
-  - **`warm_enough`** is ignored for now (see Overview). Later, sunny days only, never to
-    correct a curve that is too high.
-- **Limiting room (owner, 2026-11-21):** `TempDesired` and the slope are steered on the **office**
-  (22 °C). A living-room overshoot is accepted until Phase 3; the other rooms' spread relative to
-  the office is Phase 3's job.
-- **Order (owner):** balance first. If the office-to-living gap after 1.2 is > 0.5 K, Phase 3 runs
-  before Phase 2, so the curve is not tuned twice. Across both phases: one change at a time, each
-  followed by the settle time.
-- **Qualifying days** (used by 1.2, 2.1, 2.2): daily radiation mean < 25 W/m². Cold class: daily
-  outdoor mean < 3 °C; mild class: > 7 °C. Comparable: same class and daily means within ±2 K.
-  With only one class available, only `TempDesired` or the outdoor offset may change (both act
-  roughly in parallel); slope rows need both classes.
-- **Settle time:** the slab lags by a day or more. After a change, wait at least 4 full qualifying
-  days before the next evaluation. Log every change in the change log (date, time, old, new).
-- **Interactions:** compressor cycling (HYPOTHESIS run model, note "Decisions in force": a higher
-  flow setpoint gives more headroom up to setpoint + hysteresis and longer runs; superseded by
-  the integral data under "Observations": the integral sets the run length, and a lower setpoint
-  shortens runs through a larger VF2 excess); floor protection
-  = `FlowTempMax` + `CompHysteresis` + 2 K at VF2 (note "Compressor and measurements"); frost
+  line (#186). The control law is unchanged. If the writer is armed later, `mc/TempDesired` =
+  `input_number.heating_comfort_temp` + 1 and a hand value is overwritten.
+- **What the compressor acts on: the whole-degree setpoint** W = floor(`mc/FlowTempDesired`),
+  passed on by `uih` (CONFIRMED, `doc/heating_pv_boost/registers.md`). Runs end at integral ≈ 0,
+  so the mean flow ≈ W (HYPOTHESIS). A lever changes the room level only when it changes W, at
+  least for part of the outdoor range. 1 K of W ≈ 0.6–0.7 K room (rough estimate, HYPOTHESIS).
+- **Levers:**
+  - **`TempDesired`** shifts the curve in parallel: the fine setpoint moves 0.5 K per 0.5 K step
+    on a flat part (observed). Every fine value seen is `TempDesired` + a whole number, so from a
+    `TempDesired` ending in .0 a −0.5 K step lowers W by 1 K and a +0.5 K step does nothing; from
+    one ending in .5 it is the other way round. Near a jump of the curve the half degree may also
+    move the jump by ≈ 0.5 K outdoor (HYPOTHESIS, 0.7).
+  - **Curve slope** sets the balance between cold and mild weather. Too warm mild and right cold:
+    too steep; right mild and too cold cold: too flat. Step 0.01 ≈ 0.25 K flow mild, ≈ 0.45 K at
+    −10 °C (Kühne formula; below 0.2 the formula is the only model, HYPOTHESIS).
+  - **Outdoor offset** (owner: 0 now). A tuning lever (owner): the rooms are the reference, so
+    which outdoor sensor is "right" does not matter. Two working HYPOTHESES, tested at the first
+    offset change (0.8): (a) the curve uses the corrected value; (b) the controller keeps values
+    finer than whole K (0.5 K assumed). If (a) holds, a positive offset makes the geoTHERM read
+    warmer, lowers the flow and moves the curve's jumps along the outdoor axis by the offset;
+    averaged ≈ 0.12 K flow per 0.5 K at slope 0.14, a trim finer than `TempDesired`. Side effects
+    (accepted): frost protection ("below 3 °C"), the AT-Abschaltgrenze and the cooling release
+    move with it. Log the offset with every change; re-check it before the cooling season.
+  - **Room-to-room differences** are hydraulics or room losses: Phase 3, no lever above fixes them.
+- **Limiting room:** steer on the **office** (22 °C). A living-room overshoot is accepted until
+  Phase 3.
+- **Order (owner):** office-to-living gap > 0.5 K → Phase 3 before Phase 2. One change at a time,
+  each followed by the settle time.
+- **Qualifying days:** daily radiation mean < 25 W/m². Cold class: daily outdoor mean < 3 °C; mild:
+  > 7 °C. Comparable: same class, daily means within ±2 K. With one class only, only
+  `TempDesired` or the offset may change; slope rows need both classes.
+- **Settle time:** ≥ 4 full qualifying days after a change before the next evaluation.
+- **Interactions:** run length is set by the integral (Observations); floor protection =
+  `FlowTempMax` + `CompHysteresis` + 2 K at VF2 (note "Compressor and measurements"); frost
   protection (`off` below 3 °C still heats to `TempDesiredLow` 20 °C, note "Frost protection").
-- Invariants checked: no automatic write and no change to the control law. Every register read
-  has its bridge lines and poll (note "Invariants"; step 0.4 lists them).
+- Invariants: no automatic write, no change to the control law, every register read has its
+  bridge lines and poll (note "Invariants").
 
 ## Change log (owner settings)
 
 | When (local) | Setting | Old → new | Evidence |
 |---|---|---|---|
-| 2026-11-14 ≈ 20:20 | Heating curve | 0.15 → 0.13 | OBSERVED, estimated from the data: the flow setpoint stepped 27 → 26 °C while it got colder outside (2.6 → 1.8 °C). No other input changed. Owner: "after the heat spike" |
-| 2026-11-14 23:05 – 11-15 00:45 | `TempDesired` | 22 → 21 → 19 (briefly) → 22 | OBSERVED: the HA target followed the comfort knob (21, 18), so these were writes by the armed Phase 2 writer |
-| 2026-11-15 ≈ 08:30 – 11-16 00:07 | `mc/OperatingMode` | `on` → `off` → `on` | HYPOTHESIS: the setpoint ran ≈ 2 K below the 0.13 relation all day (frost protection at `TempDesiredLow` 20); `heating_mode_last_written` = 11-16 00:07:52, and the setpoint jumped 25 → 27 at 00:08. Requires < 3 °C outdoor on 11-15 (the pump never stopped, A.4). Checked 2026-11-22: the weatherstation read below 3 °C on 11-15 except 11–15 h (2.1–4.5 °C), down to −4.6 °C at night. The geoTHERM reads ≈ 1 K colder (0.5), so its value probably stayed below the 4 °C end most of the day. Consistent with the hypothesis, but not proof: the mode history cannot be read |
-| 2026-11-20 evening (read back 22:14) | Heating curve | 0.13 → 0.14 | Owner: read back at 22:14 and shown on the wall unit |
-| 2026-11-20 22:01:44 | `TempDesired` | 22 → 22.5 | Owner: written by HA (the writer was armed for ≈ 3 s; switched off at 22:01:47) |
-| 2026-11-20 22:01:47 | Comfort control | on → off | Owner: `warm_enough` does not update; stays off, `warm_enough` ignored |
-| 2026-11-21 or shortly before | Bedroom sensor | moved away from the bed to a neutral spot | Owner. Bedroom data before the move are not comparable |
-| 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes; set back to 0.14 (owner). Test values and times not recorded |
-| 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, with `number.geotherm_heating_temp_desired`: step 0.6 (e) and kept as the first Phase 2 change (2.1). Fine flow setpoint 27.5 → 27.0 (read 08:43:32) |
-| 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, by hand, to keep the knob 1 K below `TempDesired` (5.1). Writer still off |
-| 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `ebusctl` write: `uih` resolution test (Observations). Set back within 1 h, so the 22.0 settle time does not restart |
-| before 2026-11-21 (date unknown) | `CompHysteresis` | likely 6 → 7 K | Owner (2026-11-22): +1 K during the cycling tuning. Not in HA: the hysteresis sensor keeps no long-term statistics, so only changed run behaviour would show it |
-| unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
-| unchanged | Outdoor sensor offset 0 K | — | Owner, 2026-11-21 |
+| 2026-11-14 ≈ 20:20 | Heating curve | 0.15 → 0.13 | OBSERVED from the data (setpoint 27 → 26 while it got colder) |
+| 2026-11-14 23:05 – 11-15 00:45 | `TempDesired` | 22 → 21 → 19 → 22 | OBSERVED: writes by the then-armed writer |
+| 2026-11-15 ≈ 08:30 – 11-16 00:07 | `mc/OperatingMode` | `on` → `off` → `on` | HYPOTHESIS (setpoint ≈ 2 K low all day, consistent with frost protection; mode history unreadable) |
+| 2026-11-20 evening (read back 22:14) | Heating curve | 0.13 → 0.14 | Owner |
+| 2026-11-20 22:01:44 | `TempDesired` | 22 → 22.5 | Owner: written by HA (writer armed ≈ 3 s) |
+| 2026-11-20 22:01:47 | Comfort control | on → off | Owner |
+| on or before 2026-11-21 | Bedroom sensor | moved to a neutral spot | Owner |
+| 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test; the setpoint followed within minutes, compressor running |
+| 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, hand setter (2.1). Fine 27.5 → 27.0, W stayed 27 |
+| 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, keeps the knob 1 K below `TempDesired` (5.1) |
+| 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `uih` test; set back within 1 h, settle time not restarted |
+| before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
+| unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20, outdoor offset 0 K | — | read live / owner, 2026-11-21 |
 
-## Part A — baseline and current state (ha-mcp, long-term statistics, 2026-11-21)
+## Baseline (summary of Part A, 2026-11-21)
 
-Data come from the recorder's long-term statistics (hourly or 5 min means). The read-only tools give
-no state history for non-numeric entities, so the mode and `warm_enough` history cannot be counted
-(see A.4).
+Room daily means: P1 = 0.15 / 22 (11-07…13, outdoor 4.6 °C), P2 = 0.13 / 22 (11-17…20, 8.9 °C).
 
-### A.1 Did the changes take effect?
-
-- **`TempDesired` = 22.5: CONFIRMED** (read-back `sensor.geotherm_heating_temp_desired` 22.5 since
-  2026-11-20 22:01:44; the owner confirms HA wrote it).
-- **Curve 0.14: CONFIRMED by the owner** (read back at 22:14, shown on the wall unit). The data
-  agree: the only setpoint step on 11-20 that the weather does not explain is 24 → 25 → 26 °C
-  between 22:00 and 22:20, at a steady 8.9 °C outside, together with the `TempDesired` write. The
-  steps at 18:05 (24 → 26) and 21:40 (26 → 24) match the usual 24 ↔ 26 transitions of the 0.13
-  period at about 7–9 °C outside. Since then the setpoint has been 26 °C at 5.4–9.7 °C outside (one
-  hour at 25), where 0.13/22 gave 24 °C at 8–11 °C (nights of 11-19/20). By the formula, 0.14 / 22.5
-  gives +0.9 K over 0.13 / 22 at 8 °C; observed +2 K (whole-degree readings; see A.3).
-- **Phase 2 writer: disarmed** (`input_boolean.heating_comfort_control_enabled` off since 11-20
-  22:01:47). `input_number.heating_comfort_temp` = 21.5, so `sensor.heating_target_temp` = 22.5
-  equals the machine value: arming it now would not change `TempDesired` (rows 4–7), only the mode.
-- **Mode:** `on` since 2026-11-16 00:07:52 (an HA write). `warm_enough` is `on` since 11-21
-  06:20, but with the writer off it has no effect. So the machine is not being cut off now.
-
-### A.2 Periods and room temperatures (daily means of the statistics)
-
-Periods: **P1** = 0.15 / 22, 11-07 … 11-13 (outdoor mean 4.6 °C, low sun); **Spike** = 11-14
-(sunny after a cold night, setpoint 29 °C in the morning) and 11-15 (mode probably `off`); **P2** =
-0.13 / 22, mode `on`, 11-17 … 11-20 (outdoor mean 8.9 °C, a little sunnier); **P3** = 0.14 / 22.5,
-since 11-20 22:00 (≈ 11 h of data).
-
-| Room (target) | P1 mean (min–max) | Spike 11-14 mean (max) | P2 mean (min–max) | P2 − P1 | P3 11-21 00–09 h | P1 / P2 vs living room |
-|---|---|---|---|---|---|---|
-| Living (22–23) | 23.33 (22.4–23.9) | 24.04 (25.0) | 22.74 (21.8–24.0) | −0.59 | 22.51 (22.4–22.8) | — |
-| Bathroom (22) | 22.65 (22.2–23.3) | 23.10 (23.9) | 21.74 (21.2–22.3) | −0.91 | 21.59 | −0.68 / −1.00 |
-| Office (22) | 22.76 (22.4–23.5) | 23.01 (23.2) | 21.93 (21.5–22.3) | −0.83 | 22.15 | −0.57 / −0.81 |
-| Bedroom (21.5) | 22.83 (22.2–23.4) | 23.30 (23.9) | 22.01 (21.2–22.6) | −0.82 | 22.28 | −0.50 / −0.73 |
-| Kilian (21.5–22) | 22.63 (22.1–23.4) | 22.86 (23.0) | 21.80 (21.2–22.2) | −0.83 | 22.02 | −0.70 / −0.94 |
-
-OBSERVED:
-- P1 was 0.5–1.3 K **above** the targets in every room except the living room. P2 was close to the
-  targets on average (office −0.07, bathroom −0.26, bedroom +0.5), but falling: P2 days ran
-  21.5–21.9 in the bathroom and reached 21.2 in bedroom, Kilian and bathroom on the evening of 11-20.
-- The other rooms' gap to the living room grew by ≈ 0.25–0.3 K at the lower flow temperature.
-- Daily swing (P2 hourly): the bedroom is warmest at ≈ 06:00 and coldest at ≈ 19:00 (≈ 0.8–1 K);
-  Kilian similar, ≈ 0.6 K; office warmest at midday (≈ 0.5 K); bathroom warmest in the morning.
-- P3 so far: bedroom 21.2 → 22.5 (19:00 → 07:00, +1.3 K vs +0.5 K the night before), Kilian
-  +1.0 K, living +0.7 K, office and bathroom +0.45 K. Part of this is the normal night rise.
-- Spikes on 11-05 (living max 24.8, Kilian 24.9) and 11-14 (living 25.0) were both sunny days
-  after a cold night, when the curve had charged the slab (setpoint 27–29 °C).
-
-HYPOTHESIS: P2 means flatter the equilibrium of 0.13/22, because the slab was still giving back the
-11-14 spike and P2 was mild. The real 0.13/22 level at ≈ 9 °C was probably ≈ 0.3 K below the P2
-means (bathroom and office under target). The spikes are a sun-after-cold-night effect, so a
-"lower the curve" reaction to a spike over-corrects (as P2 shows).
-
-### A.3 Curve relation
-
-**Open hypotheses** (every other section refers to these letters):
-- (a) The machine's outdoor value differs from the real outdoor temperature or is damped before
-  the curve. One reading (geoTHERM 3.75 °C vs weatherstation 4.4 °C, 2026-11-21 evening) points
-  the wrong way (a colder reading raises the setpoint); step 0.5 tests it over ≥ 2 days, incl.
-  08–11 h. No Vaillant document mentions damping (/2 manuals checked). **Damping part refuted**
-  (2026-11-22): both setpoint jumps of (f) fell in the same 5 min window as the geoTHERM value
-  crossing the edge, so the curve follows the broadcast value without lag. Still open: the
-  offset (first night ≈ 1 K colder than the weatherstation, step 0.5).
-- (b) Below 0.2 the curve does not follow the formula (the 83/2 diagram draws nothing below 0.2;
-  no /2 document gives a range or step). The 0.20 test (0.6 (b)) is dropped. Step 0.7 answers
-  the question directly at the setting in use, from passive data.
-- (c) `mc/Status0a` field 4 is not the plain curve setpoint. **Refuted** (2026-11-22, 13 h of
-  both sensors): field 4 = floor(`mc/FlowTempDesired`) at every value seen (27.0, 27.5, 29.5). It
-  followed each jump within ≈ 6 min (its own poll, `?5`).
-- (d) The VR 90 room sensor offset (`rcc/RoomTempOffset` 0.5 K) moves the curve. **Ruled out:** it
-  only calibrates the VR 90's own reading, Raumaufschaltung is `Keine`, and `mc/RoomTempOffset`
-  (the channel that would carry room influence) reads 0.00 (owner, `ebusctl find -w`).
-- (e) The controller computes with whole degrees of `TempDesired` (22.5 acts as 22). **Refuted**
-  by step 0.6 (e) on 2026-11-22: 22.5 → 22.0 moved the fine setpoint 27.5 → 27.0 (Observations).
-- (f) NEW, **HYPOTHESIS** (not proven): the curve works in **2 K steps** over the outdoor
-  temperature. OBSERVED so far: one edge, crossed once in each direction, at one setting (0.14 /
-  22.5). Two crossings of one edge do not show the step size or spacing elsewhere; step 0.7
-  tests that. At that edge, about −2.5 °C (geoTHERM value), the setpoint went 27.5 → 29.5 at
-  02:11 (−2.38 → −2.62) and back at 08:20 (−2.62 → −2.38), 2026-11-22, with no hysteresis
-  between the two directions. In between it stayed flat: 27.5 from +1.06 to −2.38 °C (20–02 h)
-  while the formula goes 28.5 → 29.2; 29.5 from −2.62 to −4.25 °C (formula 29.3 → 29.6). So the
-  machine sits 0–2 K below the formula, depending on where it is on a step. This matches the
-  0.13 period's 24 ↔ 26 jumps (never 25), the 0–2 K deficit in the table above, and the 08–11 h
-  drops (a warming geoTHERM value crossing an edge, no damping needed). It would also explain (b).
-  The jump came before the compressor started, so the run does not cause it. Open: the other
-  edges and step sizes (step 0.7), and whether the outdoor offset moves the edges.
-
-Data: flow setpoint = `mc/Status0a` field 4 (whole °C; 0 during hot water, excluded), against the
-weatherstation (night/evening hours), error ±1 K. The setpoint often drops 1–2 K between 08 and
-11 h without a matching weatherstation change (see (a)).
-
-| Outdoor (weatherstation) | 0.15 / 22 (P1) | 0.13 / 22 (P2) | 0.14 / 22.5 (P3) |
+| Room (target) | P1 | P2 | P1 / P2 vs living |
 |---|---|---|---|
-| −2 °C | 29 (11-14 07 h, −1.8) | 27 (11-16 01–04 h) | — |
-| 2–3 °C | 27 | — | — |
-| 3.5–6 °C | 26 (27 below ≈ 3.5) | 26 | 26 (5.4–6.9) |
-| 7–9 °C | 26 (7.6–7.9) | 24 | 26 (7.7–9.7; one hour 25) |
-| 10–11 °C | 24 (daytime) | 24 | — |
-| 13–15 °C | — | 23 | — |
+| Living (22–23) | 23.33 | 22.74 | — |
+| Bathroom (22) | 22.65 | 21.74 | −0.68 / −1.00 |
+| Office (22) | 22.76 | 21.93 | −0.57 / −0.81 |
+| Bedroom (21.5) | 22.83 | 22.01 | −0.50 / −0.73 |
+| Kilian (21.5–22) | 22.63 | 21.80 | −0.70 / −0.94 |
 
-An earlier linear fit to this table (b ≈ 0.28–0.38) is superseded by the formula below; the table
-stays as data.
+OBSERVED: P1 was 0.5–1.3 K above target except the living room; P2 near target but falling. The
+upper-floor gap to the living room grew ≈ 0.25–0.3 K at the lower flow. Sun spikes (11-05, 11-14)
+come on sunny days after a cold night: lowering the curve after a spike over-corrects
+(HYPOTHESIS). The machine runs 0–2 K below the Kühne formula; explained partly by the
+whole-degree W and the curve's jumps (f).
 
-**Manufacturer curve:** `doc/heating_pv_boost/heating-curve.md`. The Kühne formula flow = RS +
-2.55 · (curve · (RS − T))^0.78 reproduces the 83/2 diagram within ±0.7 K for 0.2–1.0 and 1.5
-(computed); below 0.2 it is the only model (HYPOTHESIS there). Against it:
-
-| Setting | Outdoor | Observed | Formula | Formula if RS acts as 22 |
-|---|---|---|---|---|
-| 0.15 / 22 | −1.8 | 29 | 28.9 | — |
-| 0.15 / 22 | 2.5 | 27 | 27.9 | — |
-| 0.15 / 22 | 4.75 | 26 | 27.4 | — |
-| 0.15 / 22 | 7.75 | 26 | 26.6 | — |
-| 0.15 / 22 | 10.5 (day) | 24 | 25.9 | — |
-| 0.13 / 22 | −2 | 27 | 28.2 | — |
-| 0.13 / 22 | 4.75 | 26 | 26.8 | — |
-| 0.13 / 22 | 8 | 24 | 26.1 | — |
-| 0.13 / 22 | 14 | 23 | 24.6 | — |
-| 0.14 / 22.5 | 6.15 | 26 | 27.4 | 26.7 |
-| 0.14 / 22.5 | 8.7 | 26 | 26.8 | 26.1 |
-| 0.14 / 22.5 | 3.75 (geoTHERM sensor; `mc FlowTempDesired` 26.5) | 26.5 | 27.9 | 27.3 |
-
-OBSERVED: the machine runs 0–2 K below the formula, mostly 0.5–1.5 K; 0.15 / 22 within −1.4 …
-+0.1 K. Candidates: whole-degree readings of `Status0a` field 4 (up to 1 K; truncation UNPROVEN),
-(e) (with RS 22 the 0.14 rows fit within 0.2–0.8 K), (a) (daytime rows lowest), the formula
-itself (0.3–0.7 K below the diagram at 0.2). Unexplained: 0.13 / 22 reads ≈ 2 K below the formula
-at 8 °C, more than whole-degree readings allow; candidates (a) and (b). The new 0.5 K setpoint
-sensor and the geoTHERM outdoor sensor (step 0.4) give the data to settle this.
-
-### A.4 Machine figures per period
-
-| Figure | P1 (11-07…13) | P2 (11-17…20) | 11-21 so far |
-|---|---|---|---|
-| Outdoor mean / radiation mean | 4.6 °C / 16 W/m² | 8.9 °C / 20 W/m² | 7.3 °C |
-| Flow setpoint, daily mean incl. hot-water zeros | 25.0–25.6 | 23.5–23.9 | 25.9 (no hot water yet) |
-| Return temperature (slab charge), daily mean | 25.9 | 24.5 | 24.5 |
-| Heating starts/day (`CompStartsHc`) | 7.0 (4–9) | 4.0 (3–5) | 3 by 09 h |
-| Heating hours/day (`CompHoursHc`, whole h) | 3.3 | 2.25 | — |
-| Hot-water starts/day | (from 11-12) 2 | 2 | 0 |
-| Yield / electricity per day (incl. hot water) | 34.4 kWh / 10.4 kWh | 24.0 / 8.1 | — |
-| Yield per K (22 − outdoor) per day | 1.98 kWh/K | 1.83 kWh/K | — |
-| Average run today / last run | — | — | 34 min / 32.5 min |
-
-- `warm_enough` cut-ins and `off` hours: **not measurable** with the read-only tools (binary and
-  text states have no statistics). Known: `off` most likely ran 11-15 ≈ 08:30 → 11-16 00:07
-  (change log); the mode has been `on` since.
-- The Energy-mode `off` meter stayed 0 every day: the heating-circuit pump never stopped.
-
-### A.4b Setpoint and flow registers
-
-Decodes and meanings: `doc/heating_pv_boost/registers.md`. What matters here:
-- Owner reads 2026-11-21 evening: `ehp FlowTemp` (VF2) 31.94, `ehp HcFlowTemp` (T6) 32.00,
-  `uih FlowTemp` 32.00; forced reads `mc FlowTempDesired` 26.5, `uih FlowTempDesired` 26.00;
-  `mc Params` `22;20;0.14;mixer;15;0;15;35;0`; panel C2 "Art" = Brennerkreis (direct circuit).
-- HA now reads the 0.5 K setpoint (`sensor.geotherm_heating_circuit_flow_temp_desired_fine`,
-  step 4.6) next to the whole-degree one, and VF2 (`sensor.geotherm_heating_flow_temp_vf2`,
-  step 4.8), the flow input the controller's energy integral and floor protection use
-  (Installationsanleitung 0020045204_01 p. 46, p. 59).
-- HYPOTHESIS: `uih/FlowTempDesired` passes on a whole-degree value, so the generator works on 26
-  while the circuit asks 26.5. (The /2 manual's "Temp.überhöhung" adds ≥ 0 K at heat-pump level,
-  so it does not explain a lower `uih` value.)
-- HYPOTHESIS (owner): composite status/display messages (`mc/Status0a`, `mc/Params`, the panel)
-  show whole degrees as a simplification; the dedicated registers (`mc/FlowTempDesired`,
-  `mc/TempDesired`) hold the value the controller works with. Audit: of everything HA reads, only
-  `mc/Status0a` field 4 was whole-degree. Tests after step 0.4, ≥ 3 days of data: (1) whole =
-  floor(fine) or round(fine) at all times (note which); (2) the fine setpoint moves in 0.5 K steps
-  between whole ones; (3) step 0.6 (e). Only (3) shows what the controller computes with.
-- `ebusctl find` prints ebusd's cache, not a bus read: use `ebusctl read -f` for tests.
-- Owner hypothesis "curve changes during a run are ignored": **DISPROVED** (owner, one test: the
-  setpoint followed a curve change after a few minutes with the compressor running). "The
-  setpoint is only computed while the compressor runs": **DISPROVED** (2026-11-22). The fine
-  setpoint jumped 27.5 → 29.5 at 02:11 with the compressor off; the compressor started 2–3 min
-  later (Shelly 82 W until the end of the 02:10 window). This matches the /2 manual's curve
-  setpoint and integral summed every minute (0020045204_01 p. 48).
-
-### A.5 What can and cannot be concluded yet
-
-- Can: `TempDesired` 22.5 is in the machine. The setpoint is now ≈ 2 K higher than under 0.13/22 at
-  the same mild outdoor temperature. 0.13/22 in mild weather gave rooms 0.8–0.9 K colder than
-  0.15/22 gave in colder weather (P1), and P1 itself was above the targets. The formula explains the
-  0.15 period within −1.4 … +0.1 K and the others within 0–2 K.
-- Cannot: where 0.14/22.5 settles (needs ≥ 4 days, the slab lags); how it behaves in cold weather
-  (no frost day since); how much of the 11-21 overnight rise is the setting vs the normal night
-  rise; hypotheses (a), (b), (e).
+**Open curve hypotheses:**
+- (a) The geoTHERM outdoor value is offset from the weatherstation (first night ≈ 1 K colder).
+  Damping refuted (jumps fall in the same 5 min as the edge crossing). Step 0.5, informative only.
+- (b) Below 0.2 the curve does not follow the formula: answered passively by 0.7.
+- (f) The curve works in **2 K steps** over outdoor temperature. OBSERVED: one edge at ≈ −2.5 °C
+  (geoTHERM value), 27.5 ↔ 29.5 at 0.14 / 22.5, crossed once each way on 2026-11-22 with no
+  hysteresis; flat in between. Fits the 0.13 period's 24 ↔ 26 jumps (never 25). Open: the other
+  edges, the step sizes, whether `TempDesired` or the offset moves the edges (0.7).
 
 ## Steps
 
 ### Phase 0 — verify and record
 
-- [DONE] **0.1** Part A analysis (above).
-- [DONE] **0.2** Curve 0.14 confirmed (owner read-back 2026-11-20 22:14, wall unit).
-- [DONE] **0.3** Owner answers (2026-11-21): 22.5 written by HA; the comfort control is off
-  because `warm_enough` does not update (separate issue), and `warm_enough` is ignored for now;
-  bedroom sensor moved away from the sleepers (night warming by occupants is expected in the
-  bedroom and Kilian's room); hydraulic balancing is part of this plan; the upper floor already
-  gets more flow from last year's balancing; no dynamic target; office is the limiting room;
-  balance before tuning.
-- [DONE] **0.4** Deployed (owner, 2026-11-22). Checked with ha-mcp: curve 0.14, hand setter, fine
-  setpoint, VF2 and the geoTHERM outdoor sensor all report. The `ebusctl read -f` comparisons
-  were not run (they need the owner).
-  Original step: Deploy the HA additions (steps 4.3, 4.5–4.8). Bridge lines on the HA
-  broker host; the first five (`mc/HeatingCurve`, `mc/FlowTempDesired`, `Broadcast/Outsidetemp`)
-  are live (owner, 2026-11-21), `ehp/FlowTemp` comes with the deploy of #190:
-  ```
-  topic ebusd/mc/HeatingCurve in 0
-  topic ebusd/mc/HeatingCurve/get out 0
-  topic ebusd/mc/FlowTempDesired in 0
-  topic ebusd/mc/FlowTempDesired/get out 0
-  topic ebusd/ehp/FlowTemp in 0
-  topic ebusd/ehp/FlowTemp/get out 0
-  topic ebusd/Broadcast/Outsidetemp in 0
-  ```
-  (the broadcast has no `/get` line: it cannot be polled). Restart Mosquitto (a reload does not
-  load bridge changes), then check: `sensor.geotherm_heating_curve` 0.14,
-  `number.geotherm_heating_temp_desired` 22.5, `sensor.geotherm_heating_circuit_flow_temp_desired_fine`
-  = `ebusctl read -f -c mc FlowTempDesired`, `sensor.geotherm_heating_flow_temp_vf2` ≈
-  `ebusctl read -f -c ehp FlowTemp`, `sensor.geotherm_heating_outdoor_temp` shows a value, the
-  "Curve check" and "Why runs end" graphs fill.
-- [TODO] **0.5** First night (11-21/22): geoTHERM ≈ 1 K colder than the weatherstation from 20 to
-  06 h (20 h 0.38 vs 1.57; 22 h −1.17 vs −0.07; 06 h −4.01 vs −3.06), ≈ 0.5 K at 08:30. More
-  More nights for the record.
-  Machine outdoor value vs weatherstation (hypothesis (a); damping part refuted). Informative
-  only: it is **no longer a precondition** for using the outdoor offset (owner, 2026-11-22: the
-  offset is a tuning lever, the indoor rooms are the reference). Use the difference to read edge
-  positions in weatherstation terms (the owner's outdoor reference). Result → "Observations".
-  Depends on: 0.4.
-- [DONE] **0.6** (e) DONE 2026-11-22: half degrees count (Observations). Item 5's
-  set-back only covered the case where 0.5 K steps might not act. They do act, so 22.0 stays as
-  the first Phase 2 change. `TempDesired` is a lever, not a goal: the goal is the room
-  temperatures (owner). (b) DROPPED (owner, 2026-11-22): 0.20 would never be used, and step
-  0.7 shows how the curve behaves at the setting actually in use, without touching it.
-  Controller resolution tests (owner; background A.3 (e), (b)). Each test changes
-  ONE setting, at a steady outdoor temperature (`sensor.geotherm_heating_outdoor_temp` within
-  ±0.5 K during the test), not during hot water (`binary_sensor.geotherm_heating_hwc_active` off).
-  Read with `ebusctl read -f` (not `find`). Log every value with its time under "Observations" and
-  in the change log. A test change set back within 1 h does not restart Phase 1's settle time and
-  is not a Phase 2 step.
-  - **(e) Does `TempDesired` act in 0.5 K steps?** Run it with
-    `binary_sensor.geotherm_heating_compressor_running` **off** (this also tests "computed only
-    while running", A.4b).
-    1. Force-read `mc FlowTempDesired`, `mc TempDesired` (expect 22.5), `mc HeatingCurve`.
-    2. Set `number.geotherm_heating_temp_desired` to **22.0**. Curve unchanged.
-    3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min.
-    4. Result: 0.5 K drop → half degrees count. ≥ 1.0 K drop → ambiguous (22.5 may round to 23):
-       repeat 22.0 → 21.5; a drop there confirms half degrees. Unchanged → 22.5 acts as 22,
-       (e) confirmed.
-    5. If (e) is confirmed: **keep 22.0** (owner decision) and use whole-degree `TempDesired`
-       steps from then on; otherwise set 22.5 back. Log it.
-  - **[DROPPED] (b) Does the curve below 0.2 follow the formula?** (see above; kept for the
-    record). On a different day from (e), so the two set-backs cannot overlap.
-    1. Force-read `mc FlowTempDesired` and the geoTHERM outdoor value.
-    2. Set the curve **0.14 → 0.20** at the panel (`TempDesired` unchanged).
-    3. Force-read `mc FlowTempDesired` every 2–3 min for ≥ 15 min.
-    4. Compute the formula prediction from the outdoor value of step 1 and the current
-       `TempDesired` (example: +1.7 K at 3.75 °C / 22.5). A rise < 3 K supports the formula; ≈ 6 K
-       supports the old data.
-    5. Set **0.14** back at the panel; log both changes.
-  Depends on: 0.4.
-- [TODO] **0.7** Map the setpoint jumps (hypothesis (f)). Passive: no setting changes, only data
-  as the weather moves through them. From the "Curve check" graph (5 min statistics, kept ≈ 10
-  days): note every jump of the fine setpoint outside hot water, with its time, size and the
-  geoTHERM outdoor value before and after. Group the jumps by `TempDesired` (22.5 until 11-22
-  08:43, then 22.0). Per setting, the result is a table of edges (outdoor °C) and levels (flow
-  °C), next to the formula. Questions:
-  - Fixed step size (2 K at every edge)?
-  - Do the edges sit on fixed outdoor values, or does `TempDesired` move them? (So far 22.0 moved
-    the level by 0.5 K. Whether it moved the edge is unknown.)
-  - Hysteresis between rising and falling outdoor values? (Not at −2.5 °C on 11-22.)
-  Why: if the curve works in steps, a slope change of 0.01 may do nothing or shift a whole step,
-  and an outdoor offset of 1 K may move every edge. Neither can be predicted from the formula.
-  Enough when edges are seen across the outdoor range of the season so far, about −5 to +10 °C.
-  Result → "Observations"; once CONFIRMED, → `doc/heating_pv_boost/heating-curve.md` at Close.
-  Depends on: 0.4.
-- [TODO] **0.8** Outdoor offset, hypotheses (a) the curve uses it, (b) finer than whole K.
-  Tested when the Phase 2 table first calls for an offset change, not before. Research
-  (subagent, 2026-11-22; catalog rows checked):
-  - Bus: `ehp/OutsideTempOffset` is D2C (1/16 K), write at installer level (published catalog
-    `08.ehp.csv`: read `b509 0dc300`, write `0ec300`). No source reports a non-integer write on
-    any model. `uih` and `mc` have no offset register.
-  - The Vaillant manuals describe the panel menu only (±5 K, 1.0 K steps; "Manuelle Anpassung
-    der angezeigten Temperaturen"). The panel is read-only here, so this does not decide (b),
-    and nothing in any source decides (a). Forums: nothing for the geoTHERM /2 (weak).
-  - Test, as part of the first offset change, in mild weather away from 3 °C and the cut-off:
-    1. Read `ehp OutsideTempOffset` (expect 0), `ehp OutsideTemp` (raw), `uih OutsideTemp`, the
-       broadcast and `mc FlowTempDesired`.
-    2. `ebusctl write -c ehp OutsideTempOffset 0.5` (the table's step), then read the offset back
-       with `-f`. 0.5 means (b) holds; 0 or 1 means it was rounded; an error means rejected.
-    3. Read the values of step 1 again. If the raw `ehp` value stays while the broadcast or
-       `uih` and the setpoint move, (a) holds; if nothing moves, the offset is no lever: set 0
-       back and drop the offset rows.
+- [DONE] **0.1–0.4** Baseline, curve 0.14 confirmed, owner answers, HA additions deployed.
+- [TODO] **0.5** Machine outdoor value vs weatherstation, more nights (first night: geoTHERM
+  ≈ 1 K colder 20–06 h, ≈ 0.5 K at 08:30). Informative only, no precondition for the offset. Use
+  the difference to read edge positions in weatherstation terms. Result → "Observations".
+- [DONE] **0.6** (e) refuted: half degrees of `TempDesired` move the fine setpoint. (b) dropped.
+- [TODO] **0.7** Map the setpoint jumps (hypothesis (f)). Passive, no setting changes. From the
+  "Curve check" graph (5 min statistics, ≈ 10 days kept): every jump of the fine setpoint outside
+  hot water, with time, size and the geoTHERM outdoor value before and after. Group by
+  `TempDesired` (22.5 until 11-22 08:43, then 22.0). Per setting: a table of edges (outdoor °C)
+  and levels (flow °C) next to the formula. Questions: fixed step size? Edges fixed or moved by
+  `TempDesired`? Hysteresis? Why: with a stepped curve, a slope change of 0.01 may do nothing or
+  shift a whole step, and an offset may move every edge. Enough when edges are seen across about
+  −5 to +10 °C. Result → "Observations"; once CONFIRMED → the device docs (6.1).
+- [TODO] **0.8** Outdoor offset hypotheses (a) and (b). Tested when the Phase 2 table first calls
+  for an offset change. Research: `ehp/OutsideTempOffset` is D2C (1/16 K), read `b509 0dc300`,
+  write `0ec300` (installer level); no source reports a non-integer write on any model; `uih` and
+  `mc` have no offset register; the manuals describe only the panel menu (±5 K, 1 K steps), which
+  does not decide (b); nothing decides (a). Test, in mild weather away from 3 °C and the cut-off:
+  1. Read `ehp OutsideTempOffset` (expect 0), `ehp OutsideTemp` (raw), `uih OutsideTemp`, the
+     broadcast and `mc FlowTempDesired`.
+  2. `ebusctl write -c ehp OutsideTempOffset 0.5`, read back with `-f`: 0.5 → (b) holds; 0 or 1 →
+     rounded; error → rejected.
+  3. Read step 1 again. Raw `ehp` unchanged while the broadcast or `uih` and the setpoint move →
+     (a) holds. Nothing moves → no lever: set 0 back, drop the offset rows.
   Result → "Observations"; the step size goes into the Phase 2 table.
 
-### Phase 1 — settle the current setting (0.14 / 22.5), no changes
+### Phase 1 — settle the current setting
 
-- [DONE] **1.1** Ended early on 2026-11-22 08:43 (owner: too warm everywhere). After 35 h the
-  office (the limiting room) was at 22.9 (+0.9) and every room was still rising
-  (Observations). The office-to-living gap was 0.35–0.4 K (≤ 0.5), so by the Order rule Phase 2
-  comes first. Evaluated early, without 4 qualifying days: 11-21 was sunny and fit no class;
-  11-22 is cold class. So only `TempDesired` may change (Design approach).
-  Depends on: 0.2.
-- [TODO] **1.2** Evaluate the settled days: per room the daily mean minus target, min/max, the
-  outdoor mean and the radiation, on qualifying days per class (Design approach). Judge the
-  bedroom and Kilian's room on 08–20 h values: their night rise comes from the sleepers. Expected
-  (HYPOTHESIS): close to P1 in mild weather, so the living room ≈ 23, the office ≈ 22.4–22.7, the
-  bedroom ≈ 22.5–22.8 (less after the sensor move). Then decide the order: office-to-living gap
-  > 0.5 K → Phase 3 next, else Phase 2. Log the result under "Observations".
-  Depends on: 1.1.
+- [DONE] **1.1** Ended early 2026-11-22 08:43: office +0.9 and rising, office-to-living gap
+  0.35–0.4 K → Phase 2 first; only `TempDesired` may change (one class).
+- [TODO] **1.2** Evaluate settled days: per room daily mean minus target, min/max, outdoor mean,
+  radiation, per class. Bedroom and Kilian on 08–20 h. Then decide: office-to-living gap > 0.5 K →
+  Phase 3 next, else Phase 2. Log under "Observations". Depends on: 1.1.
 
 ### Phase 2 — tune, one change at a time
 
-Decision rule per evaluation, on the **office** (limiting room). d = its daily mean minus 22 °C
-on qualifying days. Target band d within ±0.3 K; swinging inside it is fine (owner).
-
-Everything acts through the whole-degree setpoint W = floor(fine) (Design approach). Before
-each change, read the fine setpoint (`sensor.geotherm_heating_circuit_flow_temp_desired_fine`)
-and W (`sensor.geotherm_heating_circuit_flow_temp_desired`). After a `TempDesired` change, check
-in HA within minutes that W moved as intended; if not, the step did nothing.
+Decision rule per evaluation, on the **office**. d = its daily mean minus 22 °C on qualifying
+days. Target band d within ±0.3 K; swinging inside it is fine (owner). Before each change read the
+fine setpoint (`sensor.geotherm_heating_circuit_flow_temp_desired_fine`) and W
+(`sensor.geotherm_heating_circuit_flow_temp_desired`). After a `TempDesired` change, check within
+minutes that W moved as intended; if not, the step did nothing.
 
 | Office result | Change | Step | Expected effect (HYPOTHESIS) |
 |---|---|---|---|
-| d > +0.5 K (both classes, or the only one) | `TempDesired` down to the next value that **lowers W** | from x.0: −0.5 K; from x.5: −1.0 K | W −1 K on the flat parts ≈ room −0.6…−0.7 K |
+| d > +0.5 K (both classes, or the only one) | `TempDesired` down to the next value that **lowers W** | from x.0: −0.5 K; from x.5: −1.0 K | W −1 K ≈ room −0.6…−0.7 K |
 | d < −0.5 K (both classes, or the only one) | `TempDesired` up to the next value that **raises W** | from x.5: +0.5 K; from x.0: +1.0 K | W +1 K ≈ room +0.6…+0.7 K |
-| +0.3 < d ≤ +0.5 K (both classes, or the only one) | outdoor offset **up** (geoTHERM reads warmer) | +0.5 K via `ebusctl` (hypothesis (b), 0.8; 1 K if rounded) | mean flow ≈ −0.12 K per 0.5 K, as full W steps within 0.5 K of each jump ≈ room −0.1 K |
-| −0.5 ≤ d < −0.3 K (both classes, or the only one) | outdoor offset **down** | −0.5 K (or 1 K) | the mirror of the row above |
-| Within ±0.3 K on mild days, below −0.3 K on cold days | slope up | 0.01 | ≈ +0.25 K flow mild, +0.45 K at −10 °C (formula), delivered as moved jumps |
-| Within ±0.3 K on cold days, above +0.3 K on mild days | slope down | 0.01 | mirror |
-| d within ±0.3 K, other rooms out of their band | no curve change: Phase 3 (living overshoot accepted until then) | — | — |
-| A sunny day overshoots | no change: the PV exception (Phase 5) | — | — |
+| +0.3 < d ≤ +0.5 K (both classes, or the only one) | outdoor offset **up** | +0.5 K via `ebusctl` (1 K if rounded, 0.8) | ≈ −0.12 K mean flow ≈ room −0.1 K |
+| −0.5 ≤ d < −0.3 K (both classes, or the only one) | outdoor offset **down** | −0.5 K (or 1 K) | mirror |
+| Within ±0.3 K mild, below −0.3 K cold | slope up | 0.01 | ≈ +0.25 K flow mild, +0.45 K at −10 °C, as moved jumps |
+| Within ±0.3 K cold, above +0.3 K mild | slope down | 0.01 | mirror |
+| d within ±0.3 K, other rooms out of band | no curve change: Phase 3 | — | — |
+| A sunny day overshoots | no change (Phase 5) | — | — |
 
-Rules for the table:
-- **Coarse, then fine.** `TempDesired` moves W by a whole degree (about one band width in the
-  rooms); the offset and the slope trim in between. When a `TempDesired` step would overshoot
-  (|d| barely above 0.5), use the offset instead.
-- **A 0.5 K `TempDesired` step that leaves W unchanged is not a change.** Example: 22.5 → 22.0 on
-  2026-11-22. Do not count its settle time.
-- **The first offset change is also a test.** Log the fine setpoint and the geoTHERM outdoor
-  value at each jump before and after (0.7). If the jumps do not move by the offset, the curve
-  uses the raw value and the offset is no lever: drop those rows.
-- The offset moves frost protection, the AT-Abschaltgrenze and the cooling release by the same
-  amount (Design approach); log it in the change log and the note's "Owner-side configuration".
+Rules: **coarse, then fine** (`TempDesired` moves W by a whole degree; offset and slope trim in
+between; when |d| is barely above 0.5, use the offset). **A step that leaves W unchanged is not a
+change** (e.g. 22.5 → 22.0); do not count its settle time. **The first offset change is also a
+test** (0.8): log the fine setpoint and the geoTHERM outdoor value at each jump; if the jumps do not
+move, drop the offset rows. Log every offset change in the change log and the note's "Owner-side
+configuration".
 
-- [IN_PROGRESS] **2.1** First change made: `TempDesired` 22.5 → 22.0 on 2026-11-22 08:43 (row 1,
-  0.5 K since (e) is refuted). Curve stays 0.14. Settle for ≥ 4 qualifying days, then evaluate
-  as 1.2. Judge the cycling on full days only.
-  **Caveat (HYPOTHESIS, Observations "Run starts and ends"):** the compressor works on the
-  whole-degree setpoint, and 22.5 → 22.0 left it unchanged (27 stays 27, 29 stays 29). So this
-  change may not cool the house at all. Owner decision: confirm with ≈ 1 day of whole-degree
-  setpoint vs geoTHERM outdoor data, or go to 21.5 now (−1 K whole-degree where the 22.5 fine
-  values ended in .5). The size column of the table then reads "whole-degree effect": a step
-  counts only when floor(fine) changes.
-  **Owner decision 2026-11-22: one day at 22.0, re-evaluate on 2026-11-23, then 21.5 if the data
-  support it.** Checks for the re-evaluation:
-  1. Fine and whole-degree setpoints across the outdoor range of the day. Any x.5 fine value at
-     22.0 separates floor(fine) from a truncated room setpoint: measure the integral rate there.
-  2. Whole-degree setpoint at matching geoTHERM outdoor values: 11-21 20:15 … 11-22 08:43 (22.5)
-     against after the write (22.0).
-  3. Run and pause lengths against 180 ÷ |VF2 − whole setpoint|; Shelly kWh per degree-day.
-  4. DONE 2026-11-22 10:10–10:40: `uih` passes floor(`mc`), and the integral uses it
-     (CONFIRMED, Observations).
-  5. Room temperatures (office first), shower hours left out.
-  Expected next step by the new table: office d ≈ +0.9 → `TempDesired` 22.0 → **21.5** (W −1 K
-  on the flat parts).
-  Apply at most one change from the table (`TempDesired` with
-  `number.geotherm_heating_temp_desired`, curve and offset with `ebusctl write`). Log it in the change log with the
-  forced-read `mc FlowTempDesired` before and after. Check the cycling after it: daily starts and
-  mean run against the note targets ("Decisions in force"). Then wait the settle time and
-  evaluate again (as 1.2).
-  Depends on: 1.2, 0.6 (e); Phase 3 first if 1.2 says so. The slope rows also depend on 0.7.
-  The offset rows do not: the first offset change maps its own effect (rules above), and 0.8
-  sets its step.
-- [TODO] **2.2** Repeat 2.1 until the success metrics hold across at least one cold-class and one
-  mild-class period. Any `CompHysteresis`/`CompIntegral` change (note "Decisions in force") waits
-  until 2.2 is done.
+- [IN_PROGRESS] **2.1** First change: `TempDesired` 22.5 → 22.0 on 2026-11-22 08:43. It left W
+  unchanged at every outdoor value seen (OBSERVED on the flat parts), so it may not cool the house.
+  **Owner decision: one day at 22.0, re-evaluate on 2026-11-23, then 21.5 if the data support
+  it.** Checks:
+  1. Fine and W across the day's outdoor range; any x.5 fine value at 22.0 → measure the integral
+     rate there.
+  2. W at matching geoTHERM outdoor values: 11-21 20:15 … 11-22 08:43 (22.5) vs after the write.
+  3. Run and pause lengths vs 180 ÷ |VF2 − W|; Shelly kWh per degree-day.
+  4. [DONE] `uih` passes floor(`mc`) and the integral uses it (CONFIRMED).
+  5. Room temperatures, office first, shower hours left out.
+  Expected next step by the table: office d ≈ +0.9 → **21.5** (W −1 K). Apply at most one change;
+  log it with the forced-read `mc FlowTempDesired` before and after; check the cycling (daily
+  starts and mean run against the note's "Decisions in force"); settle; evaluate as 1.2.
+  Depends on: 1.2. Slope rows also depend on 0.7; offset rows on nothing (0.8 runs with them).
+- [TODO] **2.2** Repeat 2.1 until the success metrics hold across one cold-class and one
+  mild-class period. Any `CompHysteresis`/`CompIntegral` change waits until 2.2 is done.
   Depends on: 2.1.
 
-Success metrics (readable in HA), on qualifying days:
-- Office daily mean within 21.7–22.3 °C; every other room within its band (Overview), the living
-  room's upper bound only after Phase 3.
-- Daily min/max range per room ≤ 1 K; bedroom and Kilian 08–20 h only.
-- Heating starts ≤ 8/day and daily mean run ≥ 20 min (note "Decisions in force").
+Success metrics, on qualifying days: office daily mean 21.7–22.3 °C, every other room in its band
+(living upper bound only after Phase 3); daily min/max range per room ≤ 1 K (bedroom and Kilian
+08–20 h); heating starts ≤ 8/day and mean run ≥ 20 min.
 
 ### Phase 3 — room imbalance (owner)
 
-The four upper-floor rooms run 0.5–1.0 K below the ground-floor living room, and the gap grew by
-≈ 0.25–0.3 K at the lower flow temperature of 0.13 (A.2). The curve shifts every room together, so
-it cannot fix it. The pump speed cannot be set (note "Bus participants"). The ground-floor loops
-are already throttled a bit from last year's balancing; no flow-meter readings are available
-(owner, 2026-11-21).
+The upper-floor rooms run 0.5–1.0 K below the living room (Baseline). The curve shifts every room
+together, the pump speed cannot be set (note "Bus participants"), no flow meters.
 
-- [TODO] **3.1** Hydraulic balancing (owner-approved as part of this plan). Start when 1.2 shows an
-  office-to-living gap > 0.5 K.
-  - **3.1a** Rule out room-side causes: doors (the bedroom and Kilian change ≈ 1 K over a day,
-    typical of ventilation or closed doors), furniture or rugs over the floor loops, a towel
-    radiator or ventilation settings in the bathroom.
-  - **3.1b** Record every loop's valve setting (turns or marks; no flow-meter readings), the
-    current state.
-  - **3.1c** Throttle the living-room loop(s) one small step further (owner's choice of step), one
-    change. With the pump fixed this lowers the total flow and widens the flow-return spread
-    (≈ 8 K now), which can shorten compressor runs: check the run lengths after it.
-  - **3.1d** After the settle time, evaluate as 1.2: repeat 3.1c, or accept the remaining spread.
+- [TODO] **3.1** Hydraulic balancing, when 1.2 shows an office-to-living gap > 0.5 K.
+  - **3.1a** Rule out room causes: doors, furniture or rugs over the loops, the bathroom's towel
+    radiator or ventilation.
+  - **3.1b** Record every loop's valve setting (turns or marks).
+  - **3.1c** Throttle the living-room loop(s) one small step (owner's choice). This lowers the
+    total flow and widens the flow-return spread (≈ 8 K now), which can shorten runs: check them.
+  - **3.1d** After the settle time, evaluate as 1.2: repeat 3.1c or accept the spread.
   Depends on: 1.2.
-- [TODO] **3.2** After any manifold change: settle ≥ 4 qualifying days, log it in the change log,
-  then continue with Phase 2.
+- [TODO] **3.2** After any manifold change: settle ≥ 4 qualifying days, log it, continue Phase 2.
   Depends on: 3.1.
 
-### Phase 4 — optional HA additions
+### Phase 4 — HA additions
 
-- [TODO] **4.1** Room deviation sensors: one template sensor per room = temperature − target (the
-  targets as `input_number` helpers or fixed in the template), with long-term statistics, plus a
-  "Room deviation" card on `dashboards/heating-dashboard.yaml` (daily mean statistics graph).
-  Depends on: owner approval; then the package rules (`.claude/rules/ha-yaml.md`) and tests.
-- [DROPPED] **4.2** `warm_enough` cut-in counters: `warm_enough` is ignored for now (owner).
-- [DONE] **4.3** `sensor.geotherm_heating_curve` (`mc/HeatingCurve`, UIN ÷ 100; `?9` poll; long-term
-  statistics) (#186).
-- [DROPPED] **4.4** Curve relation sensor: built on the superseded linear fit; the formula and
-  4.6 replace it.
-- [DONE] **4.5** `number.geotherm_heating_temp_desired`: MQTT number, state from
-  `ebusd/mc/TempDesired`, command to `ebusd/mc/TempDesired/set` (18–25 °C, 0.5 K steps). Writes only
-  when set by hand; the comfort control overwrites it while armed (#186).
-- [DONE] **4.6** `sensor.geotherm_heating_circuit_flow_temp_desired_fine` (`mc/FlowTempDesired`,
-  0.5 K, `?5`) and the "Curve check" graph (#188); `sensor.heating_compressor_stop_temp` and "Why
-  runs end" use it (#189).
-- [DONE] **4.7** `sensor.geotherm_heating_outdoor_temp` (`Broadcast/Outsidetemp`, no poll) (#188).
-- [DONE] **4.8** `sensor.geotherm_heating_flow_temp_vf2` (`ehp/FlowTemp`, `?3`), on the
-  Temperatures card and the "Why runs end" graph against the stop line (owner, 2026-11-21).
-- [IN_PROGRESS] **4.9** Whole-degree setpoint re-sourced from `uih` (owner approved
-  2026-11-22; implemented, deploy pending). The existing entity
-  `sensor.geotherm_heating_circuit_flow_temp_desired` now reads `ebusd/uih/FlowTempDesired`
-  (was `mc/Status0a` field 4), so its history continues; `sensor.heating_compressor_stop_temp`
-  uses it instead of the 0.5 K value; dashboard: "Why runs end" plots it, "Curve check" and the
-  status card show both. Left after deploy (owner):
-  - Bridge lines on the HA broker host, then restart Mosquitto: `topic ebusd/uih/FlowTempDesired
-    in 0`, `topic ebusd/uih/FlowTempDesired/get out 0`. The two `mc/Status0a` lines can go.
+- [DONE] **4.3, 4.5–4.8** Curve sensor, hand setter, fine setpoint and "Curve check", geoTHERM
+  outdoor sensor, VF2 (#186, #188–#190). [DROPPED] 4.2, 4.4.
+- [TODO] **4.1** Optional: room deviation sensors (temperature − target, long-term statistics)
+  and a "Room deviation" card. Depends on: owner approval.
+- [IN_PROGRESS] **4.9** W re-sourced from `uih/FlowTempDesired` (implemented in this PR): the
+  entity `sensor.geotherm_heating_circuit_flow_temp_desired` keeps its id and history,
+  `sensor.heating_compressor_stop_temp` uses it, the dashboard shows both setpoints. Left after
+  deploy (owner):
+  - Bridge lines on the broker host, then restart Mosquitto: `topic ebusd/uih/FlowTempDesired in
+    0`, `topic ebusd/uih/FlowTempDesired/get out 0`. The two `mc/Status0a` lines can go.
   - Check: the sensor shows the `uih` value (≈ floor of the fine one) within a poll cycle.
-  - Open: what `uih` shows during hot water (0, the hot-water setpoint, or the heating value).
-    A jump there would also move the stop line; note it in Observations.
-  - Open: whether the stop line uses the whole-degree value (UNPROVEN): a stop-line stop at
-    W + 7 rather than fine + 7 decides it.
+  - Open: what `uih` shows during hot water (0, hot-water setpoint, or heating value); a jump
+    there moves the stop line too.
+  - Open: whether the stop line uses W (UNPROVEN): a stop-line stop at W + 7 rather than
+    fine + 7 decides it.
 
 ### Phase 5 — writer and sunny-day exception
 
-- [DONE] **5.1** Decided (owner, 2026-11-21): the comfort control stays off; `TempDesired` is
-  tuned by hand with `number.geotherm_heating_temp_desired` (or `ebusctl`), no dynamic target.
-  If the writer is armed later, set `input_number.heating_comfort_temp` to `TempDesired` − 1 first.
-- [TODO] **5.2** (deferred until `warm_enough` works again, separate issue) Sunny-day exception:
-  with the curve right, `warm_enough` should switch `off` only on very sunny days. Cutting off at
-  the moment of overshoot does little, because the slab was charged the night before (A.2 spikes).
-  A forecast-based reduction the evening before is a separate idea (HYPOTHESIS, not planned
-  here). Below 3 °C, `off` still heats to `TempDesiredLow`.
-  Depends on: 2.2, `warm_enough` fixed.
+- [DONE] **5.1** The comfort control stays off; `TempDesired` is set by hand. If the writer is
+  armed later, set `input_number.heating_comfort_temp` to `TempDesired` − 1 first.
+- [TODO] **5.2** Deferred until `warm_enough` works: switch `off` only on very sunny days; the
+  slab is charged the night before, so a cut at the moment of overshoot does little. Below 3 °C
+  `off` still heats to `TempDesiredLow`. Depends on: 2.2, `warm_enough` fixed.
 
-### Phase 6 — unit behaviour knowledge (owner, 2026-11-22)
+### Phase 6 — geoTHERM device knowledge
 
-- [TODO] **6.1** Write the geoTHERM's "unit behaviour" knowledge: how this VWS 83/2 (SW 0383, ebusd
-  circuits `ehp`, `mc`, `uih`, `hwc`) can and cannot be steered, as the lasting documentation of
-  the unit. Content: every finding of this plan and of `plans/heating-cycling-from-ehp.md`, each
-  graded by origin: manual (document number and page), real-world tested on this unit (date, how),
-  or assumed. **What is known not to work** gets its own entries: e.g. `mc/Mode` unusable, the
-  0.5 K `TempDesired` step that leaves the whole-degree setpoint unchanged, registers that do not
-  answer, the panel as a read-only reference (all settings over ebus). The references (manuals,
-  ebusd catalog rows, the register decodes now in `doc/heating_pv_boost/registers.md` and
-  `heating-curve.md`) go where the hardware-knowledge framework puts them.
-  Uses the hardware-knowledge skill/rule built on a separate branch (owner: modelled on
-  `mikopp/homeassistant-innova-hrds` `doc/references`; PR #192: `doc/devices/<device>/`, `device-knowledge` skill, `.claude/rules/devices.md`), so
-  the same layout serves other devices in this repo later.
-  Depends on: #192 merged; 2.2 settled (so the steering findings are final);
-  hypotheses still open at that point go in as "assumed", graded.
+- [TODO] **6.1** Build `doc/devices/` docs for the geoTHERM (VWS 83/2, SW 0383, circuits `ehp`,
+  `mc`, `uih`, `hwc`) with the framework of #192: how it can and cannot be steered, every fact
+  tagged by origin (manual page, test on this unit, `[ASSUMED]`), and what is known not to work
+  (`mc/Mode`, a `TempDesired` step that leaves W unchanged, registers that do not answer, the
+  panel as read-only). Sources: this plan, `plans/heating-cycling-from-ehp.md`,
+  `doc/heating_pv_boost/registers.md`, `heating-curve.md`, and the unit facts in the note
+  ("Bus participants", "Compressor and measurements", frost protection, Raumaufschaltung, outdoor
+  sensor). Move them, leaving anchored one-liners `(device <ID>)` in the note; the note is at
+  23.9k of its 24,000 char cap and should drop to ≈ 18k.
+  **Timing (owner, 2026-11-22): right after #192 merges, alongside the tuning loop, not at the
+  end.** Hypotheses still open go in as `[ASSUMED]` with the plan step that settles them; facts
+  confirmed later in 0.7, 0.8, 2.x go straight into the device docs.
+  Depends on: #192 merged.
 
 ## Observations
 
-(Log settled evaluations and test results here: dates, outdoor and radiation mean, per-room
-deviation, starts/day; step 0.5, 0.6 and A.4b results.)
+**2026-11-22 07 h, 0.14 / 22.5 after 35 h, not settled** (11-21 mild and sunny 09–14 h, daily
+mean 5.6 °C / 23 W/m²; cold night to −3.2 °C weatherstation, −4.25 °C geoTHERM):
 
-**2026-11-22 08:30: 0.14 / 22.5 after 35 h, not settled** (ha-mcp hourly statistics). 11-21:
-mild (5.5–7.8 °C by day, weatherstation), sunny 09–14 h (≈ 90–110 W/m²), daily mean 5.6 °C /
-23 W/m². Then a cold night: weatherstation 5 °C at 18 h → −3.2 °C at 06 h; geoTHERM minimum
-−4.25 °C.
-
-| Room (band) | 11-21 00 h | 11-21 16 h | 11-22 07 h | 11-22 07 h vs band |
-|---|---|---|---|---|
-| Living (21.7–23.3) | 22.4 | 22.8 | 23.2 | in band, top |
-| Bathroom (21.7–22.3) | 21.4 | 22.1 | 22.6 | +0.3 |
-| **Office (21.7–22.3)** | 22.0 | 22.5 | 22.9 | +0.6 |
-| Bedroom (21.2–21.8) | 21.8 | 22.2 | 22.7 | +0.9 (partly sleepers) |
-| Kilian (21.2–22.3) | 21.8 | 22.1 | 22.8 | +0.5 |
-
-OBSERVED:
-- Bathroom showers on 11-21 at 08–09 h (humidity 54 → 76 %) and 20–22 h (53 → 74 %), left out.
-  Outside those hours the bathroom rose by itself: 21.4 → 22.1 by day and 22.4 → 22.6 from 02 to
-  07 h, while the humidity fell (57 → 53 %).
-- The office rose steadily and was still rising at 07 h, like every other room.
-- Fine setpoint: 27.5 until 02:11, 29.5 until 08:20, then 27.5 again (hypothesis (f)). Return
-  24.3 → 26.2 °C overnight: the 6 h at 29.5 charged the slab.
-- Daily means: office 22.35 (11-21), 22.74 (11-22 to 09 h); living 22.70, 23.14. The gap is
-  0.35–0.4 K (P1: 0.57).
-
-**Step 0.6 (e), 2026-11-22 08:43** (owner; read from HA, not `ebusctl read -f`):
-- Conditions: geoTHERM outdoor −2.12 → −1.88 °C (within ±0.5 K); no hot water; curve 0.14.
-  **Deviation:** the compressor was running, not off. The question "computed only while
-  running" is answered by (f) instead: the 02:11 jump came with the compressor off.
-- Result: `mc/TempDesired` 22.5 → 22.0 at 08:43:17. The fine setpoint went 27.5 → 27.0 (read
-  08:43:32), the whole-degree one stayed 27. So the circuit setpoint computes with half degrees,
-  and (e) is refuted for `mc/FlowTempDesired`. The formula predicts −0.6 K; −0.5 K is observed,
-  which fits at 0.5 K resolution. **But the compressor's energy integral runs on the
-  whole-degree setpoint** (run ends below), so this write changed nothing for the compressor (27
-  before and after).
-- Side effect: the compressor stopped at 08:43:18.7, 1 s after the write. **Ambiguous:** the
-  integral reached ≈ 0 in the same minutes (−2 at the end of the 08:40 bucket, rising ≈ 7 °min
-  per minute). VF2 34.0 had reached the whole-degree stop line (27 + 7), which had been at 34 since
-  08:22. Whether the write itself triggered the stop is unknown. (An earlier reading here,
-  "stop line flipping", assumed the fine setpoint and is withdrawn.)
-- A.4b test (1): whole-degree = floor(fine) at every value seen over 13 h (see (c)). The plan
-  asked for ≥ 3 days; superseded by the `uih` A/B test (CONFIRMED), 4.9 went ahead.
-
-**Run starts and ends from `sensor.geotherm_heating_energy_integral`** (`ehp/Integral`, already
-recorded; 5 min statistics; checked 2026-11-22; `CompIntegral` −180 °min, `CompHysteresis` 7 K):
-
-| Run | Whole-degree setpoint / stop line | Flow max | Integral at start → at stop |
+| Room (band) | 11-21 00 h | 11-22 07 h | vs band |
 |---|---|---|---|
-| 11-17 04:10–04:46 (mild) | 26 / 33 | T6 31.75 | −183 → +7 |
-| 11-17 07:24–07:57 (mild) | 26 / 33 | T6 32.44 | −183 → +8 |
-| 11-20 02:24–02:51 (mild) | 24 / 31 | T6 31.12 | −181 → ≈ −8 |
-| 11-20 09:25–09:51 (mild) | 24 / 31 | T6 31.31 | −181 → 0…+3 |
-| 11-21/22 23:40–00:16 (cold) | 27 / 34 | VF2 33.0 | −184 → +8 |
-| 11-22 02:13–03:07 (cold) | 29 / 36 | VF2 33.3 | −186 → +3 |
-| 11-22 04:12–05:01 (cold) | 29 / 36 | VF2 33.7 | −186 → +4 |
-| 11-22 06:30–06:55, after hot water | 29 / 36 | VF2 33.7 | −113 → +3 |
-| 11-22 08:12–08:43 | 27 / 34 | VF2 34.0 | −185 → ≈ 0 |
+| Living (21.7–23.3) | 22.4 | 23.2 | in band, top |
+| Bathroom (21.7–22.3) | 21.4 | 22.6 | +0.3 |
+| **Office (21.7–22.3)** | 22.0 | 22.9 | +0.6 |
+| Bedroom (21.2–21.8) | 21.8 | 22.7 | +0.9 (partly sleepers) |
+| Kilian (21.2–22.3) | 21.8 | 22.8 | +0.5 |
 
-OBSERVED (9 of 9 runs, mild and cold):
-- Every run ended with the integral back at ≈ 0 (−8 … +8). The mild runs at setpoint 26 ended
-  0.5–1.3 K below the stop line, the cold ones 1.5–3 K below. At setpoint 24 both limits
-  coincided. So "mild weather ends on the stop line" does not hold for these runs.
-- Starts come at ≈ −183 … −186, 1–3 min after the integral crosses `CompIntegral`.
-- The integral sums VF2 − **whole-degree** setpoint, measured as a rate in four phases:
-  - off at 27.5: −1.71 per minute, matching VF2 − 27 = −1.7 (VF2 − 27.5 would be −2.2);
-  - running at 29.5: 3.81 per minute, matching 3.8 (fine would give 3.3);
-  - off: −3.13 per minute, matching −3.15 (fine −3.65);
-  - running: 5.76 per minute, matching 5.75 (fine 5.25).
-  This explains the 02:13 start: −170 at 02:10, and the 27 → 29 jump at 02:11 steepened the
-  drain to −180 by 02:13. It also supports A.4b: the generator works on whole degrees.
-  Those four phases are all at 22.5, where whole = fine − 0.5 always. They cannot tell floor(fine)
-  from "fine minus a fixed 0.5 K". The phase after the write separates the two: 08:50–09:40,
-  fine 27.0, compressor off. Measured 12 → −10 = −0.45 per minute, VF2 mean 26.55: VF2 − 27 =
-  −0.45 fits, VF2 − 26.5 = +0.05 (rising) does not. So the integral used 27 at fine 27.5 and at
-  fine 27.0: of the three candidates (fine, fine − 0.5, floor) only floor fits both. OBSERVED in
-  one outdoor band (−2.4 … −1.4 °C) only; no manual states it.
-- The integral is not reset at a stop (it keeps summing, e.g. +12 after 08:43). It is not
-  clamped (+88 seen on 11-17, compressor off). It freezes during hot water (−113, −75, −86).
-  After hot water the compressor ran on into heating at −113 on 11-22, but not on 11-17 or
-  11-20 (cause open).
-- **Stops on the stop line exist** (second subagent scan, 11-12…22, spot-checked 11-18). With
-  the integral clearly negative:
+Every room was still rising. Office daily means 22.35 (11-21), 22.74 (11-22 to 09 h); gap to
+living 0.35–0.4 K. Fine setpoint 27.5, 29.5 from 02:11 to 08:20, then 27.5: the 6 h at 29.5
+charged the slab (return 24.3 → 26.2 °C).
 
-  | Stop | Integral at stop | Whole-degree setpoint | Flow at stop | Line |
-  |---|---|---|---|---|
-  | 11-06 (deleted cycling plan) | ≈ −125 | 26 | T6 33.1–33.3 | 26 + 7 |
-  | 11-14 20:23 | −104 | 27 → 26 at ≈ 20:21 (the drop triggered the stop) | T6 33.31 | 26 + 7 |
-  | 11-18 23:07 | −56 | 24 | T6 31.31 | 24 + 7 |
-  | 11-19 22:10 | ≈ −40 | 24 | T6 31.12 | 24 + 7 (borderline) |
+**How runs start and end** (`ehp/Integral`, 5 min statistics; `CompIntegral` −180,
+`CompHysteresis` 7 K):
+- Starts at integral ≈ −183 … −186, 1–3 min after it crosses `CompIntegral`.
+- **A run ends on whichever comes first** (OBSERVED): the integral back at ≈ 0 (9 of 9 runs
+  11-17…22, mild and cold, −8 … +8), or the flow at W + `CompHysteresis` (four stops with the
+  integral clearly negative, all at `TempDesired` 22 and W 24–26 in mild weather: 11-06,
+  11-14 20:23, 11-18 23:07, 11-19 22:10). The hysteresis acts on this unit although the /2 manual
+  (p. 69) limits it to hydraulic plans 1 and 3. Manual p. 48–49 supports runs ending on the
+  integral.
+- The integral counts VF2 − W (CONFIRMED, registers.md). It is not reset at a stop, not clamped
+  (+88 seen), and freezes during hot water. After hot water the compressor once ran on into
+  heating at −113 (11-22), not on 11-17 or 11-20 (cause open).
+- Step 0.6: the compressor stopped 1 s after the 08:43 write, with the integral ≈ 0 and VF2 at the
+  stop line: whether the write triggered it is unknown.
 
-  So the owner's view holds as OBSERVED: **a run ends on whichever comes first**, the integral
-  back at ≈ 0 or the flow at setpoint + `CompHysteresis`. The stop line won at low setpoints in
-  mild weather (24–26); the integral won in every run since 11-20 22:01. The hysteresis
-  therefore acts on this unit, although the /2 installation manual (p. 69) says "Komp.
-  Hysterese (nur bei Hydraulikplan 1 und 3)". All four stops were at `TempDesired` 22, where
-  fine = whole, so they cannot show whether the stop line uses floor(fine).
-- Whole-degree integral, more tests (second subagent, 2026-11-22):
-  - **Mild band, T6 instead of VF2.** VF2 − T6 is ≈ +0.2 K when off and ≈ −0.3 K when running.
-    On 11-21 daytime (TD 22.5, 5–7 °C): with the whole-degree setpoint the implied T6 offset is
-    0.18–0.27 K in seven off phases, the same as at TD 22 on 11-20 (0.22–0.32). Fine would need
-    0.68–0.77. Two runs: +5.91 and +5.94 per minute, against 5.89 predicted with whole and 5.39
-    with fine. Weak point: the fine values that day were not recorded (taken as whole + 0.5).
-  - **Rejected alternatives:** integral on T6 (−1.95 vs −1.75 observed), rounding 27.5 to 28
-    (−2.75), integer VF2 (−2.0), integer steps per minute (fractional drift visible), fine
-    setpoint with a fixed bias (the phase after the write).
-  - **Open alternative:** the setpoint computed from a room setpoint truncated to whole degrees
-    instead of floor(fine). It gives the same answer for 2.1 and is separable only by a fine x.5
-    value at TD 22.0.
-- Sources (second subagent; extracts checked):
-  - *Installationsanleitung* 0020045204_01 p. 48–49 (primary): the deficit is summed per minute,
-    and the compressor "schaltet erst wieder ab, wenn die zugeführte Wärmemenge gleich dem
-    Wärmedefizit ist". This supports runs ending on the integral.
-  - No Vaillant document or forum states the setpoint resolution the integral uses.
-  - The ebusd catalog decodes `uih/FlowTempDesired` as D2C (1/16 K), so the owner's read of 26.00
-    while `mc` read 26.5 was not a format limit. This weakly supports a whole-degree system
-    setpoint.
-  - Forums (energiesparhaus, buildhub, OpenEnergyMonitor, bauexpertenforum): definitions or
-    other models (aroTHERM, flexoTHERM). Not evidence for this unit.
-- **`uih` resolution test, 2026-11-22 10:10–10:40** (owner; compressor off, no hot water,
-  geoTHERM outdoor 0.3 → 1.3 °C, no edge crossed). `TempDesired` 22.0 → 22.5 via `ebusctl`. `mc
-  FlowTempDesired` read 27.5. `uih FlowTempDesired` read **27.0** in many forced reads from 10:14
-  to 10:40. Back at 22.0, both read 27. Integral rate in HA: −0.91/min before (VF2 26.11, fine
-  27.0), **−1.01/min during** (VF2 26.0, fine 27.5). VF2 − 27 = −1.0 fits, VF2 − 27.5 = −1.5 does
-  not. **CONFIRMED (controlled A/B):** `uih` passes on floor(`mc/FlowTempDesired`), and the
-  integral counts against that whole-degree value. This settles the "truncated room setpoint"
-  alternative in favour of floor(fine) at `uih`. Not tested: the stop line (most likely the same
-  `uih` value, UNPROVEN).
-- What the half degree can still do (HYPOTHESIS): every fine value seen equals `TempDesired` +
-  a whole number (26.5, 27.5, 29.5 at 22.5; 27.0 at 22.0). On the flat parts of the curve a 0.5 K
-  `TempDesired` step therefore never changes floor(fine). It can matter only where the curve's
-  own part changes with `TempDesired`. By the 45° shift (manual p. 18) the room setpoint also
-  moves the curve along the outdoor axis, so 22.0 vs 22.5 would move each edge by ≈ 0.5 K
-  outdoor and give a different whole-degree setpoint in that narrow band. Average effect ≈ step
-  × 0.5 K ÷ edge spacing: unknown until 0.7 maps the edges per `TempDesired`.
-- Time-average flow = whole-degree setpoint (HYPOTHESIS, follows from runs ending at integral
-  ≈ 0): the integral balances VF2 − setpoint to zero over each cycle, so the setpoint sets the
-  mean flow, and with it the room level. Exception: stop-line stops end with the integral
-  negative, so the mean flow falls a little below the setpoint. `CompIntegral` and
-  `CompHysteresis` change cycle length (and room ripple), not the level.
-- Grades:
-  - Integral on whole degrees via `uih`: **CONFIRMED** (the A/B test above, plus ≈ 13 phases).
-  - Stop line on whole degrees: UNPROVEN.
-  - 22.0 without compressor effect: OBSERVED on the flat parts of the curve. Near the edges it
-    is open (0.7).
-
-Consequences (HYPOTHESIS, follow from the above):
-- **Run length** ≈ 180 °min ÷ (VF2 − whole setpoint), plus the ramp: ≈ 35 min at 27, ≈ 50 min at
-  29. **Pause** ≈ 180 ÷ (whole setpoint − VF2 while off). So a lower setpoint gives a larger
-  excess, shorter runs, and less headroom to the stop line.
-- **Lever for run length:** `CompIntegral` (deeper → proportionally longer runs and pauses).
-  `CompHysteresis` matters only where flow reaches the stop line first: low setpoints in mild
-  weather (≤ 24–25).
-- **`TempDesired` acts on the compressor only through floor(fine setpoint).** At 22.5 every
-  fine value seen ended in .5 (26.5, 27.5, 29.5); at 22.0 they end in .0. The floor is the same
-  in both cases, so **22.5 → 22.0 does not change the whole-degree setpoint at any outdoor
-  temperature seen so far.** If the compressor works on whole degrees, this change will not
-  cool the house. 21.5 would lower the whole-degree setpoint by 1 K wherever the fine values
-  end in .5 at 22.5. Check: compare the whole-degree setpoint at matching geoTHERM outdoor values
-  before and after 08:43 (27 at −2.4 … −1.9 °C both before and after so far).
-- `sensor.heating_compressor_stop_temp` adds the hysteresis to the **fine** setpoint (#189). If
-  the stop line, like the integral, uses whole degrees, it reads up to 0.5 K too high (34.5
-  instead of 34 at 27.5). Unproven until a stop on the stop line is seen with VF2 data. A YAML
-  change needs approval.
+Consequences (HYPOTHESIS):
+- **Mean flow ≈ W** (the integral balances to zero each cycle), so W sets the room level;
+  stop-line stops leave the mean a little below W. `CompIntegral` and `CompHysteresis` change cycle
+  length and ripple, not the level.
+- **Run** ≈ 180 °min ÷ (VF2 − W) plus the ramp (≈ 35 min at 27, ≈ 50 min at 29); **pause** ≈ 180 ÷
+  (W − VF2 while off). A lower W gives shorter runs and less headroom to the stop line.
+- Run-length lever: `CompIntegral`. `CompHysteresis` matters only where the flow reaches the stop
+  line first (W ≤ 24–25, mild).
+- **`TempDesired` acts on the compressor only through W.** On the flat parts a 0.5 K step from .5
+  to .0 never changes W; near an edge it may move the edge by ≈ 0.5 K outdoor (0.7).
 
 ## References
 
-1. *Bedienungsanleitung geoTHERM exclusiv VWS* 0020025604_00 (VWS 63/2–103/2): heating curves p. 21,
-   45° room-setpoint shift p. 18, frost protection p. 10.
-2. *Installationsanleitung geoTHERM exclusiv VWS* 0020045204_01 (/2): floor protection p. 46,
-   energy balance p. 48, menus C2 p. 58, C4/C5 p. 59, calibration p. 65, compressor and
-   FlowTempMax p. 69; revision _00 p. 59 for the frost delay.
-3. Kühne formula (sensoCOMFORT, OpenEnergyMonitor forum), used for curves below 0.2.
+1. *Bedienungsanleitung geoTHERM exclusiv VWS* 0020025604_00: heating curves p. 21, 45°
+   room-setpoint shift p. 18, frost protection p. 10.
+2. *Installationsanleitung geoTHERM exclusiv VWS* 0020045204_01: floor protection p. 46, energy
+   balance p. 48–49, menus C2 p. 58, C4/C5 p. 59, calibration p. 65, compressor and FlowTempMax
+   p. 69; revision _00 p. 59 for the frost delay.
+3. Kühne formula (sensoCOMFORT, OpenEnergyMonitor forum), used below 0.2.
 
-Links, the /3 successor manual and the owner's printed copy: the note "Bus participants" and
-`doc/heating_pv_boost/heating-curve.md`.
+Links and the owner's printed copy: the note "Bus participants" and `heating-curve.md`.
 
 ## Knowledge homes
 
-- `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve and `TempDesired`
-  values with their origin, the room targets and limiting room, and the loop valve settings
-  after 3.1.
-- `doc/heating_pv_boost/heating-curve.md` "Open": the outcome of A.3 / (a), (b), (e) once
-  CONFIRMED, graded (not the note: it is at 23.6 KB of its 24 KB limit).
-- `doc/heating_pv_boost/registers.md`: the `mc/Params` field list and the A.4b test (1) result.
-- Design doc: HPB-1 already carries the hand-setter line (#186); no further change expected
-  (K-4.1 gate).
-- Unit behaviour knowledge for the geoTHERM (6.1), in the home the hardware-knowledge framework
-  defines.
-- Story (the 0.13 episode, the spike analysis, the interpolation error and its correction) →
-  `doc/heating_pv_boost/background.md` at Close.
+- geoTHERM device docs (`doc/devices/`, 6.1): every unit fact confirmed here, graded by origin,
+  incl. what does not work; the curve-step and offset results of 0.7 and 0.8.
+- `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve, `TempDesired`
+  and offset values, the room targets and limiting room, the loop valve settings after 3.1. Unit
+  facts only as anchored one-liners (no new entries before 6.1: the note is at its cap).
+- Design doc: HPB-1 already carries the hand-setter line; no further change expected (K-4.1).
+- Story (the 0.13 episode, the spike analysis) → `doc/heating_pv_boost/background.md` at Close,
+  from commit `4956e8a` of this file.
 
 ## Status
 
-- [DONE] 0.1 Part A analysis
-- [DONE] 0.2 Curve 0.14 confirmed (owner read-back)
-- [DONE] 0.3 Owner answers (2026-11-21)
-- [DONE] 0.4 Deployed; all new entities report (ebusctl comparisons not run)
-- [TODO] 0.5 Machine outdoor value vs weatherstation (first night: geoTHERM ≈ 1 K colder);
-  informative, no longer a precondition for the offset
-- [DONE] 0.6 (e) half degrees count; (b) dropped (0.7 covers it); hypothesis (f) 2 K steps
-- Closed 2026-11-22 with the new data: (a) damping part, (c), "setpoint only computed while
-  running"; A.4b test (1) recheck 2026-11-24
-- OBSERVED (not closed): 9 of 9 runs since 11-17 ended on the integral (≈ 0), mild and cold; the
-  integral uses the whole-degree setpoint, so 22.5 → 22.0 likely changed nothing for the
-  compressor (2.1)
-- [TODO] 0.7 Map the setpoint jumps (passive); needed before any slope change
-- [TODO] 0.8 Outdoor offset hypotheses (a) acts on the curve, (b) finer than 1 K: test at the first offset change
-- Phase 2 table rewritten for whole-degree effects; the outdoor offset is a tuning lever (owner)
-- [DONE] 1.1 Ended early 2026-11-22: office +0.9 and rising; gap to living ≤ 0.5 → Phase 2 first
-- [TODO] 1.2 Evaluate settled days (after 2.1's change)
-- [IN_PROGRESS] 2.1 `TempDesired` 22.5 → 22.0 (2026-11-22 08:43); probably no whole-degree effect:
-  owner decides between confirming (≈ 1 day) and 21.5
-- [TODO] 2.2 Tuning loop on the office
-- [TODO] 3.1–3.2 Hydraulic balancing
-- [DONE] 4.3, 4.5, 4.6, 4.7, 4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional, [IN_PROGRESS] 4.9 setpoint from uih: implemented, bridge lines + hot-water check after deploy
-- [DONE] 5.1; [TODO] 5.2 deferred (`warm_enough`)
-- [TODO] 6.1 geoTHERM unit behaviour knowledge (needs #192)
+- [DONE] 0.1–0.4, 0.6; [TODO] 0.5 (informative), 0.7 (edges, before any slope change), 0.8 (offset
+  test at the first offset change)
+- [DONE] 1.1; [TODO] 1.2
+- [IN_PROGRESS] 2.1 `TempDesired` 22.0 since 2026-11-22 08:43; re-evaluate 2026-11-23, expected
+  next 21.5
+- [TODO] 2.2 tuning loop; 3.1–3.2 balancing
+- [DONE] 4.3, 4.5–4.8; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional; [IN_PROGRESS] 4.9 bridge lines +
+  hot-water check after deploy
+- [DONE] 5.1; [TODO] 5.2 deferred
+- [TODO] 6.1 geoTHERM device docs, right after #192 merges
 - [TODO] Close
 
 ## Close
 
-- [TODO] Close: distil into note/design/skill, story → background, update pointers, delete this
-  plan (`doc/KNOWLEDGE.md#K-6`).
+- [TODO] Close: distil into device docs / note / design / skill, story → background, update
+  pointers, delete this plan (`doc/KNOWLEDGE.md#K-6`).
