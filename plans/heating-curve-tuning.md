@@ -99,6 +99,7 @@ control stays off.
 | 2026-11-21 evening | Heating curve | 0.14 → ? → 0.14 | Owner test with the compressor running: `mc/FlowTempDesired` followed after a few minutes; set back to 0.14 (owner). Test values and times not recorded |
 | 2026-11-22 08:43:17 | `TempDesired` | 22.5 → 22.0 | Owner, with `number.geotherm_heating_temp_desired`: step 0.6 (e) and kept as the first Phase 2 change (2.1). Fine flow setpoint 27.5 → 27.0 (read 08:43:32) |
 | 2026-11-22 08:43:21 | `input_number.heating_comfort_temp` | 21.5 → 21.0 | Owner, by hand, to keep the knob 1 K below `TempDesired` (5.1). Writer still off |
+| before 2026-11-21 (date unknown) | `CompHysteresis` | likely 6 → 7 K | Owner (2026-11-22): +1 K during the cycling tuning. Not in HA: the hysteresis sensor keeps no long-term statistics, so only changed run behaviour would show it |
 | unchanged | `CompHysteresis` 7 K, `CompIntegral` −180, `TempDesiredLow` 20 (owner-stated) | — | read live 2026-11-21 (the first two) |
 | unchanged | Outdoor sensor offset 0 K | — | Owner, 2026-11-21 |
 
