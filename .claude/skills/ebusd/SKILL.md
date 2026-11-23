@@ -56,11 +56,14 @@ ebusd listens on TCP 8888 on its host, by default without authentication: anyone
 can write, so never expose or tunnel it beyond the LAN. A cloud session is not on the LAN and cannot
 reach it. The script needs bash, `getopt` and `nc` (Windows: WSL, or Git Bash with netcat).
 
-The host comes from `.claude/skills/ebusd/.ebusctl.conf` (`host=` / `port=` lines, git-ignored, the
-owner's local copy of `.ebusctl.conf.example`); without it the script tries `localhost:8888`. Never
-commit, create or edit that file, and never write its host into a tracked file. Missing or
-unreachable: ask the owner to fill it; do not scan the network. Connection refused or timeout: report it,
-do not retry in a loop.
+The host comes from `.claude/skills/ebusd/.ebusctl.conf`, the owner's git-ignored local file (template
+`.ebusctl.conf.example`); without it the script tries `localhost:8888`. **Never access that file in
+any form**: no Read, Grep, Glob, Edit or Write, no `cat`, `ls`, `cp`, `grep`, `source`, wildcards
+or other indirect reads, no checking whether it exists (deny rules in `.claude/settings.json` back
+this up). Only the script reads it. Pass no `-s` / `-p`, never look up, guess or ask for the host
+or port, and if an error message shows them, do not repeat or record them anywhere. Connection
+refused, unknown host or timeout: tell the owner the file may be missing or wrong and stop; do not
+scan the network or retry in a loop.
 
 ## After reading
 

@@ -17,6 +17,14 @@
       "Bash(.claude/skills/ebusd/scripts/ebusctl * -def *)",
       "Bash(.claude/skills/ebusd/scripts/ebusctl * read * -p *)",
       "Bash(.claude/skills/ebusd/scripts/ebusctl * read -p *)"
+    ],
+    "deny": [
+      "Read(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Edit(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Write(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Bash(*ebusctl.conf*)",
+      "Bash(*skills/ebusd/.*)",
+      "Bash(*skills/ebusd/*.conf*)"
     ]
   }
 }
