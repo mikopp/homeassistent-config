@@ -124,8 +124,10 @@ trap 'echo "ERR: timeout talking to ebusd" >&2; exit 1' TERM
 trap '[ -n "$watchdog" ] && kill "$watchdog" 2>/dev/null' EXIT
 
 # LOCAL: connect with bash's /dev/tcp; the shell's own error names host and port, so hide it.
+# fd 9, not 3: on macOS the host-name lookup leaves a guarded network-policy fd on 3, and dup'ing
+# the socket onto it gets bash SIGKILLed (EXC_GUARD). bash 3.2 has no {fd} auto-allocation.
 connect() {
-  if ! { exec 3<>"/dev/tcp/$server/$port"; } 2>/dev/null; then
+  if ! { exec 9<>"/dev/tcp/$server/$port"; } 2>/dev/null; then
     echo "ERR: cannot connect to ebusd" >&2
     exit 1
   fi
@@ -136,8 +138,8 @@ if [ $# -ne 0 ]; then
   # non-interactive mode: send one line, print the answer up to ebusd's terminating empty line
   start_watchdog
   connect
-  printf '%s\n' "$*" >&3
-  readopts=(-r -u 3)
+  printf '%s\n' "$*" >&9
+  readopts=(-r -u 9)
   [ "$timeout" -gt 0 ] && readopts+=(-t "$timeout")
   ret=0
   while IFS= read "${readopts[@]}" line; do
@@ -149,15 +151,15 @@ if [ $# -ne 0 ]; then
       ret=1
     fi
   done
-  exec 3<&-
+  exec 9<&-
   exit $ret
 fi
 
 # interactive mode
 echo "entering interactive mode" >&2
 connect
-redact <&3 &
+redact <&9 &
 reader=$!
-cat >&3
-exec 3<&-
+cat >&9
+exec 9<&-
 kill "$reader" 2>/dev/null
