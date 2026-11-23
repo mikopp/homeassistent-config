@@ -1,10 +1,11 @@
 #!/bin/bash
-# Vendored from the ebusd project, GPL-3.0:
+# Adapted from the ebusd project, GPL-3.0:
 #   https://github.com/john30/ebusd/blob/master/contrib/scripts/ebusctl (master, fetched 2026-11-22)
-# Local changes, marked "LOCAL": the default host/port come from ../.ebusctl.conf (git-ignored),
-# and the host, its IPs and the port are masked in all output (stdout and nc's stderr).
-# Repo usage and the read-only policy: .claude/skills/ebusd/SKILL.md
-# Needs bash, getopt and nc (netcat). ebusd options go after `--`: `ebusctl -- read -f ...`.
+# Local changes, marked "LOCAL":
+#   - plain-bash option parsing and bash's /dev/tcp instead of getopt and nc, so it runs unchanged on
+#     Linux and macOS (BSD getopt has no long options, macOS nc has no -q); needs only bash >= 3.2;
+#   - the default host/port come from the git-ignored config file next to this skill;
+#   - the host, its addresses and the port are masked in all output; connect errors are generic.
 # ebusctl - tool for accessing ebusd via TCP.
 # this can either pass excess arguments to ebusd and then quit,
 # or run interactively if no excess arguments were given.
@@ -12,7 +13,7 @@
 # print help
 help() {
   cat << EOF
-Usage: ebusctl [OPTION...] [COMMAND...]
+Usage: ebusctl [OPTION...] [--] [COMMAND...]
 Client for accessing ebusd via TCP.
 
  Options:
@@ -29,20 +30,13 @@ Use 'help' as COMMAND for help on available ebusd commands.
 EOF
 }
 
-# parse cmdline options
-OPTS=$(getopt -n ebusctl -o 's:p:t:eh' -l 'server:,port:,timeout:,error,help' -- "$@")
-if [ $? -ne 0 ]; then
-  help
-  exit 1
-fi
-eval set -- "$OPTS"
 server=localhost
 port=8888
 # LOCAL: override the defaults from the git-ignored .ebusctl.conf next to this skill (host=, port=
 # lines; parsed, never sourced, so the file cannot run code). -s / -p below still win.
 conf="$(dirname "${BASH_SOURCE[0]}")/../.ebusctl.conf"
 if [ -r "$conf" ]; then
-  while IFS='=' read -r key value; do
+  while IFS='=' read -r key value || [ -n "$key" ]; do
     value="${value%%#*}"; value="${value//[[:space:]]/}"; key="${key//[[:space:]]/}"
     case "$key" in
       host) [ -n "$value" ] && server="$value" ;;
@@ -52,94 +46,118 @@ if [ -r "$conf" ]; then
 fi
 timeout=60
 error=
-while true; do
+
+# LOCAL: parse options in plain bash (no getopt). Stops at `--` or at the first non-option, so the
+# ebusd command's own flags (`read -f`) are passed through untouched.
+need_arg() {
+  if [ "$2" -lt 2 ]; then
+    echo "ebusctl: option requires an argument -- '$1'" >&2
+    help
+    exit 1
+  fi
+}
+while [ $# -gt 0 ]; do
   case "$1" in
-    '-s'|'--server')
-      shift
-      server="$1"
-      shift
-      if [ -z "$server" ]; then
-        echo "invalid server" >&2
-        exit 1
-      fi
-      continue
-      ;;
-    '-p'|'--port')
-      shift
-      port="$1"
-      shift
-      if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        echo "invalid port" >&2
-        exit 1
-      fi
-      continue
-      ;;
-    '-t'|'--timeout')
-      shift
-      timeout="$1"
-      shift
-      if [ "$timeout" -lt 0 ] || [ "$timeout" -gt 3600 ]; then
-        echo "invalid timeout" >&2
-        exit 1
-      fi
-      continue
-      ;;
-    '-e'|'--error')
-      shift
-      error=1
-      continue
-      ;;
-    '-h'|'--help')
-      shift
-      help
-      exit
-      ;;
-    '--')
-      shift
-      break
-      ;;
-    *)
-      echo "error" >&2
-      exit 1
-      ;;
+    -s|--server)  need_arg "$1" $#; server="$2"; shift 2 ;;
+    --server=*)   server="${1#*=}"; shift ;;
+    -p|--port)    need_arg "$1" $#; port="$2"; shift 2 ;;
+    --port=*)     port="${1#*=}"; shift ;;
+    -t|--timeout) need_arg "$1" $#; timeout="$2"; shift 2 ;;
+    --timeout=*)  timeout="${1#*=}"; shift ;;
+    -e|--error)   error=1; shift ;;
+    -h|--help)    help; exit ;;
+    --)           shift; break ;;
+    -*)           echo "ebusctl: invalid option -- '$1'" >&2; help; exit 1 ;;
+    *)            break ;;
   esac
 done
-
-# set arguments to netcat
-args=(-q 0)
-if [ "$timeout" -gt 0 ]; then
-  args+=(-w "$timeout")
+if [ -z "$server" ]; then
+  echo "invalid server" >&2
+  exit 1
 fi
-args+=("$server" "$port")
+case "$port" in ''|*[!0-9]*) echo "invalid port" >&2; exit 1 ;; esac
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  echo "invalid port" >&2
+  exit 1
+fi
+case "$timeout" in ''|*[!0-9]*) echo "invalid timeout" >&2; exit 1 ;; esac
+if [ "$timeout" -gt 3600 ]; then
+  echo "invalid timeout" >&2
+  exit 1
+fi
 
 # LOCAL: mask the host, the addresses it resolves to and "port N" in every output line, so a
 # caller (an agent) never sees where ebusd runs. Literal matches (quoted ${//}), not regexes.
+# getent exists on Linux only; on macOS the host name itself is still masked.
 masks=("$server")
 if command -v getent >/dev/null 2>&1; then
   while read -r ip _; do masks+=("$ip"); done < <(getent ahosts "$server" 2>/dev/null | sort -u -k1,1)
 fi
+redact_line() {
+  local m
+  out="$1"
+  for m in "${masks[@]}"; do [ -n "$m" ] && out="${out//"$m"/<ebusd-host>}"; done
+  out="${out//"port $port"/port <ebusd-port>}"
+}
 redact() {
-  local l m
+  local l
   while IFS= read -r l || [ -n "$l" ]; do
-    for m in "${masks[@]}"; do [ -n "$m" ] && l="${l//"$m"/<ebusd-host>}"; done
-    l="${l//"port $port"/port <ebusd-port>}"
-    printf '%s\n' "$l"
+    redact_line "$l"
+    printf '%s\n' "$out"
   done
+}
+
+# LOCAL: watchdog for the whole non-interactive call (bash's /dev/tcp has no connect timeout).
+# It sends TERM to this script after $timeout seconds; its own sleep is killed when it is.
+watchdog=
+start_watchdog() {
+  [ "$timeout" -gt 0 ] || return
+  (
+    sleep "$timeout" </dev/null >/dev/null 2>&1 &
+    s=$!
+    trap 'kill "$s" 2>/dev/null; exit 0' TERM
+    wait "$s" && kill -TERM $$ 2>/dev/null
+  ) </dev/null >/dev/null 2>&1 &
+  watchdog=$!
+}
+trap 'echo "ERR: timeout talking to ebusd" >&2; exit 1' TERM
+trap '[ -n "$watchdog" ] && kill "$watchdog" 2>/dev/null' EXIT
+
+# LOCAL: connect with bash's /dev/tcp; the shell's own error names host and port, so hide it.
+connect() {
+  if ! { exec 3<>"/dev/tcp/$server/$port"; } 2>/dev/null; then
+    echo "ERR: cannot connect to ebusd" >&2
+    exit 1
+  fi
 }
 
 # check interactive mode
 if [ $# -ne 0 ]; then
-  # non-interactive mode
+  # non-interactive mode: send one line, print the answer up to ebusd's terminating empty line
+  start_watchdog
+  connect
+  printf '%s\n' "$*" >&3
+  readopts=(-r -u 3)
+  [ "$timeout" -gt 0 ] && readopts+=(-t "$timeout")
   ret=0
-  while IFS= read -r line; do
-    echo "$line"
+  while IFS= read "${readopts[@]}" line; do
+    line="${line%$'\r'}"
+    [ -z "$line" ] && break
+    redact_line "$line"
+    echo "$out"
     if [ -n "$error" ] && [ "${line##ERR:}" != "$line" ]; then
       ret=1
     fi
-  done < <(echo "$@"|nc "${args[@]}" 2> >(redact >&2)|redact)
+  done
+  exec 3<&-
   exit $ret
 fi
 
 # interactive mode
 echo "entering interactive mode" >&2
-nc "${args[@]}" 2> >(redact >&2) | redact
+connect
+redact <&3 &
+reader=$!
+cat >&3
+exec 3<&-
+kill "$reader" 2>/dev/null
