@@ -18,7 +18,11 @@
       "Bash(.claude/skills/ebusd/scripts/ebusctl * read * -p *)",
       "Bash(.claude/skills/ebusd/scripts/ebusctl * read -p *)",
       "Edit(/.claude/skills/ebusd/**)",
-      "Write(/.claude/skills/ebusd/**)"
+      "Write(/.claude/skills/ebusd/**)",
+      "Edit(/.claude/settings.json)",
+      "Write(/.claude/settings.json)",
+      "Edit(/.claude/hooks/**)",
+      "Write(/.claude/hooks/**)"
     ],
     "deny": [
       "Read(/.claude/skills/ebusd/.ebusctl.conf)",
