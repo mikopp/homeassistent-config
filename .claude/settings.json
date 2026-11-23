@@ -2,13 +2,35 @@
   "permissions": {
     "allow": [
       "Bash(python3)",
-      "WebFetch"
+      "WebFetch",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl -- read *)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl -- find *)"
     ],
     "ask": [
       "Read(/doc/**/background*.md)",
       "Read(/doc/sources/**)",
       "Bash(cat doc/**/background*)",
-      "Bash(cat doc/sources/*)"
+      "Bash(cat doc/sources/*)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl *write*)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl *hex*)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl * -h *)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl * -def *)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl * read * -p *)",
+      "Bash(.claude/skills/ebusd/scripts/ebusctl * read -p *)",
+      "Edit(/.claude/skills/ebusd/**)",
+      "Write(/.claude/skills/ebusd/**)",
+      "Edit(/.claude/settings.json)",
+      "Write(/.claude/settings.json)",
+      "Edit(/.claude/hooks/**)",
+      "Write(/.claude/hooks/**)"
+    ],
+    "deny": [
+      "Read(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Edit(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Write(/.claude/skills/ebusd/.ebusctl.conf)",
+      "Bash(*ebusctl.conf*)",
+      "Bash(*skills/ebusd/.*)",
+      "Bash(*skills/ebusd/*.conf*)"
     ]
   }
 }

@@ -1,0 +1,5 @@
+# Local ebusd address for scripts/ebusctl. Owner only: copy to .ebusctl.conf (git-ignored), set the host.
+# Claude is denied any access to .ebusctl.conf (.claude/settings.json, skill ebusd).
+# Format: key=value, one per line; # starts a comment. -s / -p on the command line override these.
+host=ebusd.example.lan
+port=8888

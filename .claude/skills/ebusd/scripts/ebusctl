@@ -1,0 +1,145 @@
+#!/bin/bash
+# Vendored from the ebusd project, GPL-3.0:
+#   https://github.com/john30/ebusd/blob/master/contrib/scripts/ebusctl (master, fetched 2026-11-22)
+# Local changes, marked "LOCAL": the default host/port come from ../.ebusctl.conf (git-ignored),
+# and the host, its IPs and the port are masked in all output (stdout and nc's stderr).
+# Repo usage and the read-only policy: .claude/skills/ebusd/SKILL.md
+# Needs bash, getopt and nc (netcat). ebusd options go after `--`: `ebusctl -- read -f ...`.
+# ebusctl - tool for accessing ebusd via TCP.
+# this can either pass excess arguments to ebusd and then quit,
+# or run interactively if no excess arguments were given.
+
+# print help
+help() {
+  cat << EOF
+Usage: ebusctl [OPTION...] [COMMAND...]
+Client for accessing ebusd via TCP.
+
+ Options:
+  -s, --server=HOST   Connect to ebusd on HOST (name or IP) [localhost]
+  -p, --port=PORT     Connect to ebusd on PORT [8888]
+  -t, --timeout=SECS  Timeout for connecting to/receiving from ebusd, 0 for
+                      none [60]
+  -e, --error         Exit non-zero if the connection was fine but the response
+                      indicates non-success
+        [COMMAND...]  COMMAND (and arguments) to send to ebusd.
+
+If given, send COMMAND together with arguments to ebusd.
+Use 'help' as COMMAND for help on available ebusd commands.
+EOF
+}
+
+# parse cmdline options
+OPTS=$(getopt -n ebusctl -o 's:p:t:eh' -l 'server:,port:,timeout:,error,help' -- "$@")
+if [ $? -ne 0 ]; then
+  help
+  exit 1
+fi
+eval set -- "$OPTS"
+server=localhost
+port=8888
+# LOCAL: override the defaults from the git-ignored .ebusctl.conf next to this skill (host=, port=
+# lines; parsed, never sourced, so the file cannot run code). -s / -p below still win.
+conf="$(dirname "${BASH_SOURCE[0]}")/../.ebusctl.conf"
+if [ -r "$conf" ]; then
+  while IFS='=' read -r key value; do
+    value="${value%%#*}"; value="${value//[[:space:]]/}"; key="${key//[[:space:]]/}"
+    case "$key" in
+      host) [ -n "$value" ] && server="$value" ;;
+      port) [ -n "$value" ] && port="$value" ;;
+    esac
+  done < "$conf"
+fi
+timeout=60
+error=
+while true; do
+  case "$1" in
+    '-s'|'--server')
+      shift
+      server="$1"
+      shift
+      if [ -z "$server" ]; then
+        echo "invalid server" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-p'|'--port')
+      shift
+      port="$1"
+      shift
+      if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "invalid port" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-t'|'--timeout')
+      shift
+      timeout="$1"
+      shift
+      if [ "$timeout" -lt 0 ] || [ "$timeout" -gt 3600 ]; then
+        echo "invalid timeout" >&2
+        exit 1
+      fi
+      continue
+      ;;
+    '-e'|'--error')
+      shift
+      error=1
+      continue
+      ;;
+    '-h'|'--help')
+      shift
+      help
+      exit
+      ;;
+    '--')
+      shift
+      break
+      ;;
+    *)
+      echo "error" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# set arguments to netcat
+args=(-q 0)
+if [ "$timeout" -gt 0 ]; then
+  args+=(-w "$timeout")
+fi
+args+=("$server" "$port")
+
+# LOCAL: mask the host, the addresses it resolves to and "port N" in every output line, so a
+# caller (an agent) never sees where ebusd runs. Literal matches (quoted ${//}), not regexes.
+masks=("$server")
+if command -v getent >/dev/null 2>&1; then
+  while read -r ip _; do masks+=("$ip"); done < <(getent ahosts "$server" 2>/dev/null | sort -u -k1,1)
+fi
+redact() {
+  local l m
+  while IFS= read -r l || [ -n "$l" ]; do
+    for m in "${masks[@]}"; do [ -n "$m" ] && l="${l//"$m"/<ebusd-host>}"; done
+    l="${l//"port $port"/port <ebusd-port>}"
+    printf '%s\n' "$l"
+  done
+}
+
+# check interactive mode
+if [ $# -ne 0 ]; then
+  # non-interactive mode
+  ret=0
+  while IFS= read -r line; do
+    echo "$line"
+    if [ -n "$error" ] && [ "${line##ERR:}" != "$line" ]; then
+      ret=1
+    fi
+  done < <(echo "$@"|nc "${args[@]}" 2> >(redact >&2)|redact)
+  exit $ret
+fi
+
+# interactive mode
+echo "entering interactive mode" >&2
+nc "${args[@]}" 2> >(redact >&2) | redact
