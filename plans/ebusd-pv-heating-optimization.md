@@ -293,6 +293,8 @@ simpler setup. Worth revisiting only if Loxone is ever retired or repointed sepa
       `registers-ehp.md`) during such a spell and outside it, or poll it for a few days; note the
       menu 1 status text at the same time ("Sperrzeit" there may be compressor timing, not EVU).
       `1` at lunch → wired, times → device; `0` during a panel Sperrzeit → compressor timing.
+      Outside a spell: `PowerCut` answers forced reads, `no` on 2026-11-23 20:20 (device T53);
+      the lunch-time reading is still open.
       Then: does a block explain (b)? Result → device
       `protections.md` (T rows).
 - [DONE] 16. Catalog generation confirmed: ebusd 26.1, `hcmode` with `1=cooling` (device VWS-32,

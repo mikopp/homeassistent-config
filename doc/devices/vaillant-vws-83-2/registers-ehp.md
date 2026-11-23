@@ -16,7 +16,7 @@ and its parts. No entity ids. Decodes from the published catalog [CAT], checked 
 | | `ehp/OutsideTemp` | `b509 0d0600`: outdoor temp + sensor status | same value as `Broadcast/Outsidetemp` | r | [CAT] [T14] |
 | | `ehp/OutsideTempOffset` | outdoor calibration: read `b509 0dc300`, write `0ec300` (installer), `D2C` (1/16 K) | `uih` and `mc` have no offset register; non-integer writes untested (VWS-36) | rw | [CAT] [T14] |
 | | `ehp/ReturnTempMax` | return limit, °C (VWS-9) | 46 here (`behaviour.md` Settings) | r | [CAT] [T4] |
-| | `ehp/PowerCut` | `b509 0d1100`, `UCH`: EVU block ("Stromunterbrechung", vrDIALOG status [IA p.68]) | `0=no 1=yes`; not SW-gated in the catalog; not yet read on this unit | r | [CAT] |
+| | `ehp/PowerCut` | `b509 0d1100`, `UCH`: EVU block ("Stromunterbrechung", vrDIALOG status [IA p.68]) | `0=no 1=yes`; not SW-gated in the catalog; answers forced reads on this unit, `no` at the last read [T53] | r | [CAT] [T53] |
 
 ## Compressor, energy balance and counters
 

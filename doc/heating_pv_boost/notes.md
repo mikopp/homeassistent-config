@@ -111,9 +111,8 @@ setpoint.
 - **Loops: ground floor throttled a bit** from last year's balancing so the upper floor gets more
   flow; no flow-meter readings available (owner, 2026-11-21).
 - `mc/OperatingMode` = **`on`**, set by hand until Phase 2 is armed.
-- Frost protection kept small (owner-stated, set at the unit; HA does not read either):
-  `uih/FrostOverRideTime` 3 h, `mc/TempDesiredLow` 20 °C (TDL read 20 live before HA stopped
-  reading it). The owner's reading "it then kicks in only every 3 h while `off`" is UNPROVEN:
+- Frost protection kept small (set at the unit by the owner; HA does not read either):
+  `uih/FrostOverRideTime` 3 h, `mc/TempDesiredLow` 20 °C (both read back 2026-11-23). The owner's reading "it then kicks in only every 3 h while `off`" is UNPROVEN:
   documented as a delay only (device VWS-6). Whether the room temperature is ignored then is
   UNPROVEN (likely, with Raumaufschaltung `Keine`). Both: `plans/ebusd-pv-heating-optimization.md`
   step 15.
