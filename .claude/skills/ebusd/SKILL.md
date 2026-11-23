@@ -33,6 +33,11 @@ A permission prompt is not consent: if one appears for an ebusctl call, stop and
 command does and why first. Never work around the allowlist (other script path, `nc` directly,
 shortcut letters like `r`/`w`).
 
+**Changing this skill, the script or the ebusctl permission rules** (`.claude/skills/ebusd/**`,
+the ebusctl lines in `.claude/settings.json`) needs the owner's consent first, by any means (Edit,
+Write, `sed`, `git checkout`, moving or deleting): say what and why, wait for a yes. `ask` rules in
+`.claude/settings.json` prompt for Edit and Write there.
+
 ## How to call it
 
 - **Always put `--` before the ebusd command.** The script parses its own options with `getopt` and
