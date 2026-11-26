@@ -44,7 +44,7 @@ heating water.
    fails 5 tests; 20× stable.
 5. [DONE] **Knowledge:** design HPB-2 Efficiency bullet (SPF H4, boundary, ±10 %); notes entity map
    and "Energy modes"; README feature line.
-6. [TODO] **PR** with the post-deploy note: the SPF sensors step up ≈ +1 at deploy (formula change, not
+6. [DONE] **PR #201** with the post-deploy note: the SPF sensors step up ≈ +1 at deploy (formula change, not
    the machine). No bridge or broker change. Expect the 30 d space-heating SPF ≈ 4–4.5 in mild weather.
    The PR states that the owner check (step 7) is still open.
 7. [TODO] **Owner check:** read the panel's "Energy input display" total (top right, kWh) and
@@ -62,4 +62,4 @@ heating water.
 ## Status
 - 2026-11-26: plan created; owner check moved to step 7, implementation proceeds on the
   assumption.
-- 2026-11-26: steps 1–5 done. Next: step 6 (PR), then the owner check (step 7).
+- 2026-11-26: steps 1–6 done (PR #201). Next: the owner check (step 7), then Close.
