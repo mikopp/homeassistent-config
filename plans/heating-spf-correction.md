@@ -8,8 +8,8 @@ sensor, per bucket (space heating, hot water, combined). This is SPF **H4**: the
 measures everything the geoTHERM draws (compressor, brine pump, internal heating pump, controls,
 standby, hot water) and nothing else (owner, 2026-11-26).
 
-**HYPOTHESIS (until step 1):** that the `YieldTotal` register is the panel's "total environmental
-yield". Evidence so far:
+**HYPOTHESIS, assumed correct for implementation (owner, 2026-11-26), verified in step 7:** that the
+`YieldTotal` register is the panel's "total environmental yield". Evidence so far:
 - Vaillant *Operating Manual geoTHERM VWS* 0020045200_00 (VWS 63/83/103 /2), p. 16–17, "Energy input
   display": "Top right the total of the environmental yield since commissioning is displayed".
   Graphics display: "The output of the heat source must not be equated with the heating output. The
@@ -31,31 +31,34 @@ heating water.
   (`utility_meter`, `''` value_template).
 
 ## Steps
-1. [TODO] **Owner check:** read the panel's "Energy input display" total (top right, kWh) and
-   `sensor.geotherm_heating_yield_total` at the same moment. Equal (± a few kWh) → hypothesis
-   CONFIRMED (settles device VWS-29). Different → stop, re-plan.
-2. [TODO] **Device fact** (`device-knowledge` skill): correct VWS-29 in
-   `doc/devices/vaillant-vws-83-2/registers-ehp.md` to environmental yield; add the manual and the
-   step 1 read as evidence rows. Depends on 1.
-3. [TODO] **YAML** `packages/heating_pv_boost.yaml`: the 6 efficiency templates become
+1. [TODO] **Device fact** (`device-knowledge` skill): correct VWS-29 in
+   `doc/devices/vaillant-vws-83-2/registers-ehp.md` to environmental yield, tagged with the manual as
+   documentary evidence (new evidence row); not CONFIRMED until step 7.
+2. [TODO] **YAML** `packages/heating_pv_boost.yaml`: the 6 efficiency templates become
    `((heat + elec) / elec) | round(2) if elec >= floor else none`; `name:` becomes "… SPF …" (IDs
    unchanged); yield display names and comments say environmental yield; comments point to
    design/notes. Check per platform that a `name:` change keeps the ID (`ha-energy-metering`).
-4. [TODO] **Dashboard** `dashboards/heating-dashboard.yaml`: labels "Environmental yield", "SPF (H4)".
-5. [TODO] **Tests** (`ha-test-harness` first): `tests/ha/test_heating_pv_boost.py` daily and per-mode
+3. [TODO] **Dashboard** `dashboards/heating-dashboard.yaml`: labels "Environmental yield", "SPF (H4)".
+4. [TODO] **Tests** (`ha-test-harness` first): `tests/ha/test_heating_pv_boost.py` daily and per-mode
    cases, and `tests/ha/test_heating_pv_boost_rolling.py` 30 d cases, each expectation +1 (ratio of
    sums 43/11 = 3.91 vs mean of daily SPF 3.5). Mutation check: `heat / elec` must fail. Targeted run
    while working, full `.github/scripts/ci-local.sh` before push, `git ls-files --eol`.
-6. [TODO] **Knowledge:** design HPB-2 Efficiency bullet; `doc/heating_pv_boost/notes.md` entity map and
-   "Energy modes" (efficiency → SPF H4, env yield). Learnings via `record-learning`, after step 1.
-7. [TODO] **PR** with the post-deploy note: the SPF sensors step up ≈ +1 at deploy (formula change, not
+5. [TODO] **Knowledge:** design HPB-2 Efficiency bullet; `doc/heating_pv_boost/notes.md` entity map and
+   "Energy modes" (efficiency → SPF H4, env yield). No `record-learning` yet: it waits for step 7.
+6. [TODO] **PR** with the post-deploy note: the SPF sensors step up ≈ +1 at deploy (formula change, not
    the machine). No bridge or broker change. Expect the 30 d space-heating SPF ≈ 4–4.5 in mild weather.
-8. [TODO] Close: per `doc/KNOWLEDGE.md#K-6`, update the design doc (K-4.1 gate), check sizes,
-   delete this plan.
+   The PR states that the owner check (step 7) is still open.
+7. [TODO] **Owner check:** read the panel's "Energy input display" total (top right, kWh) and
+   `sensor.geotherm_heating_yield_total` at the same moment. Equal (± a few kWh) → mark VWS-29
+   CONFIRMED and record the learning via `record-learning`. Different → revert the formula change
+   (follow-up PR) and re-plan.
+8. [TODO] Close: waits on step 7 (the plan stays open after the PR merges). Per `doc/KNOWLEDGE.md#K-6`,
+   update the design doc (K-4.1 gate), check sizes, delete this plan.
 
 ## Knowledge homes touched
 `doc/devices/vaillant-vws-83-2/` (VWS-29, evidence), `doc/heating_pv_boost/design.md` (HPB-2),
 `doc/heating_pv_boost/notes.md`, YAML comments.
 
 ## Status
-- 2026-11-26: plan created, approved. Waiting on step 1 (owner panel read).
+- 2026-11-26: plan created; owner check moved to step 7, implementation proceeds on the
+  assumption. Next: step 1, on the owner's go-ahead.
