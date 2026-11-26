@@ -22,7 +22,8 @@ Parts:
   mode: between runs the heating-circuit pump circulates with hcmode (`ehp/Status` field 3) still
   `heat` [T33]. Compressor state is `ehp/Comp`, pump state `ehp/Hc1Pump` [CAT]. Draw on the
   unit's supply: idle circulation ~81–83 W, standby ~9 W, heating ~1.8 kW (never above ~2 kW;
-  start peaks 2.0–2.6 kW as hourly maxima), hot water ~3.1–3.5 kW [T33].
+  start peaks 2.0–2.6 kW as hourly maxima), hot water ~3.1–3.5 kW [T33]; passive cooling (brine
+  and heating-circuit pump) ~150 W, so each pump ≈ 70 W plus ~10 W controls [T54].
 - Heating-circuit modes: `auto` switches Heizen/Absenken by the time program; `eco` switches
   Heizen/Aus by the time program (frost protection still applies); `low` (Absenken) holds the
   setback temperature `TempDesiredLow`; `on` (Heizen) holds `TempDesired` regardless of the time
@@ -85,6 +86,8 @@ change; their current values are kept by the package note named in `README.md` U
 
 ## Open questions
 
+- What is the recurring ~50 W level seen in summer, besides 10 W and 150 W [T54]?
+  `plans/heating-spf-correction.md`
 - Electrical plan 3 (`README.md` Identity): is a network-operator block contact wired to terminal
   13 "EVU", when does it block, and does it explain `off` spells such as VWS-17 (`ehp/PowerCut`)?
   Menu 1 also shows "Sperrzeit Warmwasser" / "Sperrzeit Bereitschaft" [IA p.54], which the
