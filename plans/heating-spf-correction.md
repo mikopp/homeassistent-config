@@ -29,6 +29,13 @@ heating water.
   combined sensor that includes hot water.
 - Already in place, nothing to build: ratio of sums, division and floor guards, counter resets
   (`utility_meter`, `''` value_template).
+- Pump and controls share (owner, 2026-11-26): the brine pump + controls electricity in the
+  numerator (≈ 80 W during compressor runs, ≈ 10 W passive) overstates the SPF by ≈ 1 %; NOT
+  corrected (inside the ±10 % yield uncertainty). The heating pump's heat counts as delivered.
+  Recorded in design HPB-2 and device VWS-1 [T54].
+- **HYPOTHESIS / open:** the recurring ~50 W summer level (device T54) is UNPROVEN in cause. To settle:
+  energy mode, `ehp/Hc1Pump` and cooling states during an August plateau. At Close it moves to a
+  GitHub issue or design Known gaps.
 
 ## Steps
 1. [DONE] **Device fact** (`device-knowledge` skill): VWS-29 in
@@ -49,7 +56,7 @@ heating water.
    The PR states that the owner check (step 7) is still open.
 7. [TODO] **Owner check:** read the panel's "Energy input display" total (top right, kWh) and
    `sensor.geotherm_heating_yield_total` at the same moment. Equal (± a few kWh) → add T row
-   `T54` to `evidence.md`, replace VWS-29's `[ASSUMED]` with `[T54]` (CONFIRMED) and record the
+   `T55` to `evidence.md`, replace VWS-29's `[ASSUMED]` with `[T55]` (CONFIRMED) and record the
    learning via `record-learning`. Different → revert the formula change
    (follow-up PR) and re-plan.
 8. [TODO] Close: waits on step 7 (the plan stays open after the PR merges). Per `doc/KNOWLEDGE.md#K-6`,
@@ -62,4 +69,5 @@ heating water.
 ## Status
 - 2026-11-26: plan created; owner check moved to step 7, implementation proceeds on the
   assumption.
-- 2026-11-26: steps 1–6 done (PR #201). Next: the owner check (step 7), then Close.
+- 2026-11-26: steps 1–6 done (PR #201); pump/controls share documented, not corrected. Next: the
+  owner check (step 7), then Close.

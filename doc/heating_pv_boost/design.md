@@ -78,7 +78,10 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
   brine flow meter, and yield + electricity slightly overstates delivered heat (standby and case
   losses never reach the water). Rolling 30 days = from the 30-day sums of long-term
   statistics, never a mean of daily ratios; `unknown` below 10 kWh electricity (a whole-kWh
-  yield step then moves it ≤ 2.5 %). Rests on: (device VWS-29)
+  yield step then moves it ≤ 2.5 %). The numerator also counts the brine pump and controls
+  electricity (≈ 80 W while the compressor runs, ≈ 10 W in the passive cycle), which never reaches
+  the water; the heating pump's heat does and stays (owner). That overstates the SPF by ≈ 1 %,
+  inside the yield uncertainty, so it is not corrected (owner). Rests on: (device VWS-29, VWS-1)
 
 ## Known gaps
 
