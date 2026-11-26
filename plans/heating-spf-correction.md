@@ -32,8 +32,8 @@ heating water.
 - Pump and controls share (owner, 2026-11-26): the brine pump + controls electricity in the
   numerator (≈ 80 W during compressor runs, ≈ 10 W passive) overstates the SPF by ≈ 1 %; NOT
   corrected (inside the ±10 % yield uncertainty). The heating pump's heat counts as delivered.
-  Recorded in design HPB-2 and device VWS-1 [T54].
-- **HYPOTHESIS / open:** the recurring ~50 W summer level (device T54) is UNPROVEN in cause. To settle:
+  Recorded in design HPB-2 and (device VWS-1).
+- **HYPOTHESIS / open:** the recurring ~50 W summer level (device VWS-1, open question) is UNPROVEN in cause. To settle:
   energy mode, `ehp/Hc1Pump` and cooling states during an August plateau. At Close it moves to a
   GitHub issue or design Known gaps.
 
