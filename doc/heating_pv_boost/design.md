@@ -53,7 +53,7 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
 | `ehp/Comp` on, `hvac_action` = `water` | `water_heating` | hot water |
 | `ehp/Comp` on | `active_heating` | heating |
 | `ehp/Hc1Pump` on, `hvac_action` = `water` | `water_heating` (hot-water run-on) | hot water |
-| `ehp/Hc1Pump` on, `hvac_action` = `cooling` | `cooling` | cooling: no yield, no efficiency |
+| `ehp/Hc1Pump` on, `hvac_action` = `cooling` | `cooling` | cooling: no yield, no SPF |
 | `ehp/Hc1Pump` on | `passive_heating` | heating |
 | otherwise | `off` | standby |
 
@@ -70,8 +70,13 @@ Implemented by `sensor.heating_wanted_operating_mode` (mode) and `sensor.heating
   cycle's last kWh often arrives after the switch to the passive cycle. `cooling`/`off` yield
   should stay 0; growth there shows misbooking at the other mode boundaries. Rests on: (device
   VWS-29)
-- Efficiency: space heating = `space_heating` yield ÷ (active + passive electricity); hot water
-  = water yield ÷ water electricity. Rolling 30 days = ratio of the 30-day sums from long-term
+- Efficiency = SPF H4 = (environmental yield + electricity) ÷ electricity: `YieldTotal` is the
+  heat taken from the ground, not delivered heat, and the Shelly clamp meters the whole unit
+  (compressor, brine and heating pumps, controls, standby, hot water), hence boundary H4. Space
+  heating = (`space_heating` yield + active + passive electricity) ÷ that electricity; hot water
+  likewise with the water bucket; combined over all modes. An estimate (±~10 %): the unit has no
+  brine flow meter, and yield + electricity slightly overstates delivered heat (standby and case
+  losses never reach the water). Rolling 30 days = from the 30-day sums of long-term
   statistics, never a mean of daily ratios; `unknown` below 10 kWh electricity (a whole-kWh
   yield step then moves it ≤ 2.5 %). Rests on: (device VWS-29)
 
