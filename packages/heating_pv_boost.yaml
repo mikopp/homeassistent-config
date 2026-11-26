@@ -287,9 +287,9 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | int }}"
 
-    # ehp/YieldTotal — total heat delivered (kWh, heating + hot water). Whole-kWh resolution, so
-    # its daily delta is coarse; good enough for a day-over-day efficiency trend.
-    - name: "Heating Yield Total"
+    # ehp/YieldTotal — lifetime environmental yield: heat taken from the ground (kWh, heating + hot
+    # water), not delivered heat. Whole kWh, so its daily delta is coarse. (device VWS-29)
+    - name: "Heating Environmental Yield Total"
       unique_id: heating_yield_total
       default_entity_id: sensor.geotherm_heating_yield_total
       state_topic: "ebusd/ehp/YieldTotal"
@@ -632,6 +632,7 @@ sensor:
       hours: 24
 
 # Daily deltas of the machine-side counters and the Shelly heating energy, reset at midnight.
+# "Yield" here is always the environmental yield (ground heat, device VWS-29), not delivered heat.
 # A meter without mode buckets takes its entity id from `name:` at first registration, so key and
 # name slug are kept equal: sensor.heating_compressor_starts_daily etc.
 utility_meter:
@@ -993,13 +994,14 @@ template:
           {{ ((states('sensor.geotherm_heating_circuit_flow_temp_desired') | float)
               + (states('sensor.geotherm_heating_compressor_hysteresis') | float)) | round(1) }}
 
-      # ── Daily efficiency (heat out ÷ electricity in) ──────────────────────
-      # ehp/YieldTotal delta over the Shelly heating energy delta, both since midnight, ALL modes
-      # together (the per-mode split is below). YieldTotal moves in whole kWh, so read it as a
-      # day-over-day trend at the end of the day, not as an instantaneous COP.
+      # ── Daily SPF H4 ((environmental yield + electricity) ÷ electricity) ──
+      # YieldTotal and Shelly deltas since midnight, ALL modes together (per-mode split below).
+      # YieldTotal moves in whole kWh: a day-over-day trend, not an instantaneous COP.
       # unknown until at least 1 kWh of electricity has been used today (too coarse before that).
-      - name: "Heating Efficiency Today"
+      # → doc/heating_pv_boost/design.md#HPB-2
+      - name: "Heating SPF Today"
         unique_id: heating_efficiency_today
+        default_entity_id: sensor.heating_efficiency_today
         state_class: measurement
         icon: mdi:gauge
         availability: >
@@ -1008,7 +1010,7 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_daily') | float %}
           {% set elec = states('sensor.heating_electricity_daily') | float %}
-          {{ (heat / elec) | round(2) if elec >= 1 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 1 else none }}
 
       # ── Energy mode: which bucket the heat pump's energy goes to right now ──
       # The single decision behind the per-mode meters and the heating run statistics.
@@ -1039,11 +1041,11 @@ template:
                else 'cooling' if action == 'cooling' else 'passive_heating' }}
           {% else %}off{% endif %}
 
-      # ── Efficiency per mode (heat out ÷ electricity in, today) ────────────
-      # From the per-mode meters. Space heating = the space_heating yield over the active plus
-      # passive heating cycle's electricity. Same 1 kWh floor as the combined figure; no
-      # efficiency for cooling or off (no yield).
-      - name: "Space Heating Efficiency Today"
+      # ── SPF H4 per mode (today) ────────────────────────────────────────────
+      # From the per-mode meters. Space heating = (space_heating yield + active and passive
+      # heating cycle electricity) ÷ that electricity. Same 1 kWh floor as the combined figure; no
+      # SPF for cooling or off (no yield). → doc/heating_pv_boost/design.md#HPB-2
+      - name: "Space Heating SPF Today"
         unique_id: space_heating_efficiency_today
         default_entity_id: sensor.space_heating_efficiency_today
         state_class: measurement
@@ -1056,9 +1058,9 @@ template:
           {% set heat = states('sensor.heating_yield_by_mode_space_heating') | float %}
           {% set elec = (states('sensor.heating_electricity_by_mode_active_heating') | float)
                       + (states('sensor.heating_electricity_by_mode_passive_heating') | float) %}
-          {{ (heat / elec) | round(2) if elec >= 1 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 1 else none }}
 
-      - name: "Hot Water Efficiency Today"
+      - name: "Hot Water SPF Today"
         unique_id: hot_water_efficiency_today
         default_entity_id: sensor.hot_water_efficiency_today
         state_class: measurement
@@ -1069,14 +1071,14 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_by_mode_water_heating') | float %}
           {% set elec = states('sensor.heating_electricity_by_mode_water_heating') | float %}
-          {{ (heat / elec) | round(2) if elec >= 1 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 1 else none }}
 
-      # ── Efficiency, rolling 30 days (heat out ÷ electricity in) ────────────
-      # Ratio of the 30-day sums from the `sql:` block above (never a mean of daily ratios).
+      # ── SPF H4, rolling 30 days ────────────────────────────────────────────
+      # From the 30-day sums of the `sql:` block above (never a mean of daily ratios).
       # unknown below 10 kWh electricity in the window: a whole-kWh yield step would move the
       # ratio by more than ~2.5 %. Input ids come from the sql sensors' `name:`; verify after
       # deploy. → doc/heating_pv_boost/notes.md "Energy modes"
-      - name: "Heating Efficiency 30d"
+      - name: "Heating SPF 30d"
         unique_id: heating_efficiency_30d
         default_entity_id: sensor.heating_efficiency_30d
         state_class: measurement
@@ -1087,9 +1089,9 @@ template:
         state: >
           {% set heat = states('sensor.heating_yield_30d') | float %}
           {% set elec = states('sensor.heating_electricity_30d') | float %}
-          {{ (heat / elec) | round(2) if elec >= 10 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 10 else none }}
 
-      - name: "Space Heating Efficiency 30d"
+      - name: "Space Heating SPF 30d"
         unique_id: space_heating_efficiency_30d
         default_entity_id: sensor.space_heating_efficiency_30d
         state_class: measurement
@@ -1100,9 +1102,9 @@ template:
         state: >
           {% set heat = states('sensor.space_heating_yield_30d') | float %}
           {% set elec = states('sensor.space_heating_electricity_30d') | float %}
-          {{ (heat / elec) | round(2) if elec >= 10 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 10 else none }}
 
-      - name: "Hot Water Efficiency 30d"
+      - name: "Hot Water SPF 30d"
         unique_id: hot_water_efficiency_30d
         default_entity_id: sensor.hot_water_efficiency_30d
         state_class: measurement
@@ -1113,7 +1115,7 @@ template:
         state: >
           {% set heat = states('sensor.hot_water_yield_30d') | float %}
           {% set elec = states('sensor.hot_water_electricity_30d') | float %}
-          {{ (heat / elec) | round(2) if elec >= 10 else none }}
+          {{ ((heat + elec) / elec) | round(2) if elec >= 10 else none }}
 
   - binary_sensor:
       # ── Hot-water mask for the return temperature ─────────────────────────

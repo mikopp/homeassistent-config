@@ -422,24 +422,25 @@ COMPRESSOR_CASES = [
     Case(name="stop_temp_is_unavailable_while_the_setpoint_is_zero",
          inputs={"flow_desired": 0, "hysteresis": "7.0"}, expect={"stop_temp": _UNAV},
          then=[Step(inputs={"flow_desired": 26}, expect={"stop_temp": near(33)})]),
-    # 9 kWh heat from 3 kWh electricity → 3.0.
-    Case(name="efficiency_is_heat_over_electricity_once_meaningful",
+    # SPF H4: 9 kWh environmental yield + 3 kWh electricity, over 3 kWh → 4.0 (yield / elec
+    # alone would be 3.0, the COP − 1 the formula had before).
+    Case(name="spf_is_yield_plus_electricity_over_electricity_once_meaningful",
          inputs={"yield_inc": 9, "elec_inc": 3},
-         expect={"yield_daily": near(9), "elec_daily": near(3), "efficiency": near(3.0)}),
+         expect={"yield_daily": near(9), "elec_daily": near(3), "efficiency": near(4.0)}),
     # Under 1 kWh electricity the ratio is too coarse: `unknown` (no value), not 0 and not
     # unavailable (owner).
     Case(name="efficiency_is_unknown_under_one_kwh_electricity",
          inputs={"yield_inc": 9, "elec_inc": 0.5},
          expect={"yield_daily": near(9), "elec_daily": near(0.5), "efficiency": _UNKNOWN}),
-    # The floor's boundary: 0.99 kWh → unknown; +0.01 → exactly 1 kWh → 9 / 1 = 9.0.
+    # The floor's boundary: 0.99 kWh → unknown; +0.01 → exactly 1 kWh → (9 + 1) / 1 = 10.0.
     Case(name="efficiency_floor_boundary_is_one_kwh",
          inputs={"yield_inc": 9, "elec_inc": 0.99},
          expect={"elec_daily": near(0.99), "efficiency": _UNKNOWN},
          then=[Step(inputs={"yield_inc": 0, "elec_inc": 0.01},
-                    expect={"elec_daily": near(1.0), "efficiency": near(9.0)})]),
-    # 10 kWh heat from 3 kWh → 3.33 (rounded to 2 decimals).
+                    expect={"elec_daily": near(1.0), "efficiency": near(10.0)})]),
+    # (10 + 3) / 3 → 4.33 (rounded to 2 decimals).
     Case(name="efficiency_is_rounded_to_two_decimals",
-         inputs={"yield_inc": 10, "elec_inc": 3}, expect={"efficiency": near(3.33)}),
+         inputs={"yield_inc": 10, "elec_inc": 3}, expect={"efficiency": near(4.33)}),
 ]
 # The Docker average-run and efficiency tests had two steps each: the average one is a case with
 # a step; the efficiency one is two cases (its 2nd step changed only the electricity).
@@ -582,8 +583,8 @@ async def test_energy_split_by_mode(ha: HomeAssistant, broker: Broker) -> None:
     """Electricity and yield are booked to the mode active when each increment arrives.
 
     Real chain: ebusd/Shelly payloads → energy mode → the automation that sets the two mode
-    selects → the two per-mode `utility_meter`s → the two per-mode efficiencies (and the
-    combined one). The electricity select follows the energy mode; the yield select is
+    selects → the two per-mode `utility_meter`s → the two per-mode SPFs (and the combined one;
+    SPF = (yield + electricity) / electricity). The electricity select follows the energy mode; the yield select is
     `space_heating` for the active and the passive heating cycle, else the mode.
     Steps (electricity kWh / yield kWh): passive 0.2 / 0; active 0.79 / 6; then the regression
     (owner's bug): the mode turns passive and only THEN YieldTotal adds the active cycle's last
@@ -652,13 +653,13 @@ async def test_energy_split_by_mode(ha: HomeAssistant, broker: Broker) -> None:
     await energy("late yield after active → passive", 0.01, 1,
                  yield_space_heating=near(7), yield_cooling=near(0), yield_off=near(0),
                  yield_water_heating=near(0), elec_passive_heating=near(0.21),
-                 space=near(7.0), combined=near(7.0))
+                 space=near(8.0), combined=near(8.0))
     # Hot water: 0.99 kWh → below the floor; the run-on's 0.01 kWh reaches exactly 1 kWh.
     await switch("water heating", "on", "on", "water", "water_heating")
     await energy("water heating", 0.99, 3, yield_water_heating=near(3), dhw=_UNKNOWN,
-                 space=near(7.0))
+                 space=near(8.0))
     await switch("hot-water run-on", "off", "on", "water", "water_heating")
-    await energy("hot-water run-on", 0.01, 0, elec_water_heating=near(1.0), dhw=near(3.0))
+    await energy("hot-water run-on", 0.01, 0, elec_water_heating=near(1.0), dhw=near(4.0))
     await switch("cooling", "off", "on", "cooling", "cooling")
     await energy("cooling", 0.3, 0, elec_cooling=near(0.3))
     await switch("off", "off", "off", "off", "off")
@@ -671,12 +672,12 @@ async def test_energy_split_by_mode(ha: HomeAssistant, broker: Broker) -> None:
                                            "select_yield": is_state("off")},
                                  "mode unavailable"))
     # Totals: electricity 0.79 + 0.21 + 1.0 + 0.3 + 0.05 = 2.35 kWh, yield 7 + 3 = 10 kWh.
+    # SPF: space (7 + 1) / 1 = 8.0, hot water (3 + 1) / 1 = 4.0, combined 12.35 / 2.35 = 5.26.
     want = {"elec_active_heating": near(0.79), "elec_passive_heating": near(0.21),
             "elec_water_heating": near(1.0), "elec_cooling": near(0.3), "elec_off": near(0.05),
             "yield_space_heating": near(7), "yield_water_heating": near(3),
             "yield_cooling": near(0), "yield_off": near(0),
-            "space": near(round(7 / (0.79 + 0.21), 2)), "dhw": near(round(3 / 1.0, 2)),
-            "combined": near(round(10 / 2.35, 2))}
+            "space": near(8.0), "dhw": near(4.0), "combined": near(5.26)}
     failures.extend(check_states(ha, ids, want, "after all modes"))
     assert not failures, f"{len(failures)} energy-split check(s) failed:\n" + "\n".join(failures)
 
@@ -1100,8 +1101,8 @@ async def test_daily_meters_reset_at_midnight(
     """The daily utility meters behind the efficiency reset at local midnight (`cycle: daily`).
 
     New. The compressor table resets them with `utility_meter.reset`; here the real cycle does
-    it: 9 kWh heat / 3 kWh electricity during the day (efficiency 3.0), the clock crosses
-    midnight → both meters 0, efficiency `unknown` (0 kWh is below the 1 kWh floor), then the
+    it: 9 kWh yield / 3 kWh electricity during the day (SPF (9 + 3) / 3 = 4.0), the clock crosses
+    midnight → both meters 0, SPF `unknown` (0 kWh is below the 1 kWh floor), then the
     next increments count from 0. The per-mode meters reset the same way: with no energy-mode
     input each select stays at its first option (electricity `active_heating`, yield
     `space_heating`), which collects everything here.
@@ -1126,7 +1127,7 @@ async def test_daily_meters_reset_at_midnight(
     # First readings only set the meters' start; then +9 kWh heat, +3 kWh electricity.
     await _send(ha, broker, (yield_in, 60000), (_HEAT_ENERGY, 1_000_000.0))
     await _send(ha, broker, (yield_in, 60009), (_HEAT_ENERGY, 1_003_000.0))
-    check("evening", **{"yield": near(9), "elec": near(3), "efficiency": near(3.0),
+    check("evening", **{"yield": near(9), "elec": near(3), "efficiency": near(4.0),
                         "yield_space": near(9), "elec_active": near(3),
                         "select_yield": is_state("space_heating")})
     # Cross local midnight (22:00 → 00:00:30); the Shelly counter expires (120 s), so it is
@@ -1137,6 +1138,6 @@ async def test_daily_meters_reset_at_midnight(
                                "yield_space": near(0), "elec_active": near(0),
                                "select_yield": is_state("space_heating")})
     await _send(ha, broker, (yield_in, 60013), (_HEAT_ENERGY, 1_005_000.0))
-    check("next day", **{"yield": near(4), "elec": near(2), "efficiency": near(2.0),
+    check("next day", **{"yield": near(4), "elec": near(2), "efficiency": near(3.0),
                          "yield_space": near(4), "elec_active": near(2)})
     assert not failures, f"{len(failures)} meter check(s) failed:\n" + "\n".join(failures)

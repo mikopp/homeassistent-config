@@ -147,9 +147,9 @@ setpoint.
 | `sensor.heating_compressor_starts_daily` | daily delta of `ehp/CompStartsHc` (heating only) |
 | `sensor.hot_water_compressor_starts_daily` | daily delta of `ehp/CompStartsHwc` (hot water only) |
 | `select.heating_electricity_by_mode`, `sensor.heating_electricity_by_mode_<mode>` | Shelly energy per mode, daily (per-mode meter, five modes) |
-| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
-| `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode efficiency |
-| `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day efficiency (see "Energy modes") |
+| `select.heating_yield_by_mode`, `sensor.heating_yield_by_mode_<mode>` | `YieldTotal` (environmental yield, not delivered heat) per mode, daily (per-mode meter: `space_heating`, `water_heating`, `cooling`, `off`) |
+| `sensor.space_heating_efficiency_today`, `sensor.hot_water_efficiency_today` | per-mode SPF H4 (design HPB-2) |
+| `sensor.{heating,space_heating,hot_water}_efficiency_30d` | rolling 30-day SPF H4 (see "Energy modes") |
 | `sensor.{heating,space_heating,hot_water}_{yield,electricity}_30d` | `sql:` 30-day kWh sums from long-term statistics |
 | `binary_sensor.heating_slab_mode_wanted` | the decision |
 | `sensor.heating_wanted_operating_mode` | Phase 2 wanted mode: `on` / `off` / `none` (unknown season: write nothing); reads no actual register |
@@ -213,8 +213,10 @@ a case table in `test_energy_mode`).
 - The electricity meter keeps all five modes (Shelly Wh about every 60 s keeps the passive
   cycle's circulation-pump draw visible); the yield meter has one `space_heating` bucket (owner).
   Misbooking at active → hot water, hot water → passive and → off is accepted (owner).
-- The combined `sensor.heating_efficiency_today` (includes hot water) stays next to the per-mode
-  ones (owner); all daily efficiencies render `unknown`, not 0, below 1 kWh electricity (owner).
+- Every "efficiency" entity is the SPF H4 = (yield + electricity) ÷ electricity (design HPB-2;
+  ids keep the `efficiency` name, owner). The combined `sensor.heating_efficiency_today` (includes
+  hot water) stays next to the per-mode ones (owner); all daily SPFs render `unknown`, not 0,
+  below 1 kWh electricity (owner).
 - **Rolling 30 days** (owner): `space_heating_yield_30d` also sums the pre-merge statistics
   `sensor.heating_yield_by_mode_active_heating`/`_passive_heating`. Do not delete them from
   long-term statistics until 30 days after #164 is deployed, or the window shrinks.

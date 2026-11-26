@@ -325,7 +325,7 @@ EFFICIENCIES = {  # template unique_id → (entity id, yield sql uid, electricit
 }
 UNKNOWN, UNAVAILABLE = "unknown", "unavailable"
 
-# Reset vector before each case: every efficiency 2.5.
+# Reset vector before each case: every SPF (50 + 20) / 20 = 3.5.
 _RESET = {uid: ("50" if "yield" in uid else "20") for uid in SUMMED_IDS}
 
 # (name, sql inputs over the reset vector, expected template uid → number or state string)
@@ -334,12 +334,12 @@ EFFICIENCY_CASES: list[tuple[str, dict[str, str], dict[str, float | str]]] = [
      {"heating_yield_30d": "40", "heating_electricity_30d": "10",
       "space_heating_yield_30d": "30", "space_heating_electricity_30d": "12",
       "hot_water_yield_30d": "33", "hot_water_electricity_30d": "11"},
-     {"heating_efficiency_30d": 4.0, "space_heating_efficiency_30d": 2.5, "hot_water_efficiency_30d": 3.0}),
+     {"heating_efficiency_30d": 5.0, "space_heating_efficiency_30d": 3.5, "hot_water_efficiency_30d": 4.0}),
     ("rounded_to_two_decimals",
      {"heating_yield_30d": "100", "heating_electricity_30d": "30",
       "space_heating_yield_30d": "200", "space_heating_electricity_30d": "30",
       "hot_water_yield_30d": "125", "hot_water_electricity_30d": "45.5"},
-     {"heating_efficiency_30d": 3.33, "space_heating_efficiency_30d": 6.67, "hot_water_efficiency_30d": 2.75}),
+     {"heating_efficiency_30d": 4.33, "space_heating_efficiency_30d": 7.67, "hot_water_efficiency_30d": 3.75}),
     ("floor_boundary_9_99_is_unknown",
      {"heating_electricity_30d": "9.99", "space_heating_electricity_30d": "9.99",
       "hot_water_electricity_30d": "9.99"},
@@ -347,13 +347,13 @@ EFFICIENCY_CASES: list[tuple[str, dict[str, str], dict[str, float | str]]] = [
     ("floor_boundary_10_is_a_number",
      {"heating_electricity_30d": "10.0", "space_heating_electricity_30d": "10.0",
       "hot_water_electricity_30d": "10.0"},
-     {uid: 5.0 for uid in EFFICIENCIES}),
+     {uid: 6.0 for uid in EFFICIENCIES}),
     ("no_electricity_is_unknown_not_zero",
      {"heating_electricity_30d": "0", "space_heating_electricity_30d": "0", "hot_water_electricity_30d": "0"},
      {uid: UNKNOWN for uid in EFFICIENCIES}),
-    ("no_yield_above_the_floor_is_zero",
+    ("no_yield_above_the_floor_is_one",
      {"heating_yield_30d": "0", "space_heating_yield_30d": "0", "hot_water_yield_30d": "0"},
-     {uid: 0.0 for uid in EFFICIENCIES}),
+     {uid: 1.0 for uid in EFFICIENCIES}),
     ("yield_unavailable",
      {"heating_yield_30d": UNAVAILABLE, "space_heating_yield_30d": UNAVAILABLE,
       "hot_water_yield_30d": UNAVAILABLE},
@@ -364,8 +364,8 @@ EFFICIENCY_CASES: list[tuple[str, dict[str, str], dict[str, float | str]]] = [
      {uid: UNAVAILABLE for uid in EFFICIENCIES}),
     ("only_one_pair_unavailable",
      {"space_heating_electricity_30d": UNAVAILABLE},
-     {"heating_efficiency_30d": 2.5, "space_heating_efficiency_30d": UNAVAILABLE,
-      "hot_water_efficiency_30d": 2.5}),
+     {"heating_efficiency_30d": 3.5, "space_heating_efficiency_30d": UNAVAILABLE,
+      "hot_water_efficiency_30d": 3.5}),
 ]
 
 
@@ -396,14 +396,14 @@ async def _seed_sql(hass: HomeAssistant, values: Mapping[str, str]) -> None:
 
 
 async def test_efficiency_30d_table(ha: HomeAssistant, clock: Clock) -> None:
-    """Efficiency = yield ÷ electricity (2 decimals); under 10 kWh electricity `unknown`; a missing
+    """SPF H4 = (yield + electricity) ÷ electricity (2 decimals); under 10 kWh electricity `unknown`; a missing
     input `unavailable`. The frozen clock keeps the sql sensors from polling over the seeds.
     """
     eff = _efficiency_ids(ha)
     failures = []
     for name, inputs, expect in EFFICIENCY_CASES:
         await _seed_sql(ha, _RESET)
-        if bad := {u: ha.states.get(e).state for u, e in eff.items() if not _matches(ha.states.get(e).state, 2.5)}:
+        if bad := {u: ha.states.get(e).state for u, e in eff.items() if not _matches(ha.states.get(e).state, 3.5)}:
             failures.append(f"{name}: reset not reached: {bad}")
             continue
         await _seed_sql(ha, inputs)
@@ -417,8 +417,8 @@ async def test_efficiency_30d_table(ha: HomeAssistant, clock: Clock) -> None:
 async def test_window_ratio_is_the_ratio_of_sums(
     ha: HomeAssistant, clock: Clock, freezer: FrozenDateTimeFactory
 ) -> None:
-    """Day A 2 kWh heat / 1 kWh electricity, day B 30 / 10: the sql sums are 32 / 11 and the
-    efficiency is 32 / 11 = 2.91, not the mean of the daily ratios (2 + 3) / 2 = 2.5.
+    """Day A 2 kWh yield / 1 kWh electricity, day B 30 / 10: the sql sums are 32 / 11 and the
+    SPF is (32 + 11) / 11 = 3.91, not the mean of the daily SPFs (3 + 4) / 2 = 3.5.
     """
     rows: list[Row] = [
         (Y_TOTAL, 2 * DAY, 100.0), (Y_TOTAL, DAY, 102.0), (Y_TOTAL, HOUR, 132.0),
@@ -431,4 +431,4 @@ async def test_window_ratio_is_the_ratio_of_sums(
     await _seed_sql(ha, {**_RESET, "heating_yield_30d": str(results["heating_yield_30d"]["kwh"]),
                          "heating_electricity_30d": str(results["heating_electricity_30d"]["kwh"])})
     got = ha.states.get(_efficiency_ids(ha)["heating_efficiency_30d"]).state
-    assert _matches(got, 2.91), f"heating_efficiency_30d = {got!r}, want 2.91 (32 / 11; mean of daily ratios 2.5)"
+    assert _matches(got, 3.91), f"heating_efficiency_30d = {got!r}, want 3.91 (43 / 11; mean of daily SPFs 3.5)"

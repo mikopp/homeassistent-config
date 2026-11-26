@@ -35,17 +35,15 @@ heating water.
    `doc/devices/vaillant-vws-83-2/registers-ehp.md` now reads environmental yield `[BA p.16] [BA p.9]`,
    with the register = panel total link marked `[ASSUMED]`; BA's References `Covers` extended. No T row
    (no test). Copies: `design.md` HPB-2 is rewritten in step 5, the YAML comment in step 2.
-2. [TODO] **YAML** `packages/heating_pv_boost.yaml`: the 6 efficiency templates become
-   `((heat + elec) / elec) | round(2) if elec >= floor else none`; `name:` becomes "… SPF …" (IDs
-   unchanged); yield display names and comments say environmental yield; comments point to
-   design/notes. Check per platform that a `name:` change keeps the ID (`ha-energy-metering`).
-3. [TODO] **Dashboard** `dashboards/heating-dashboard.yaml`: labels "Environmental yield", "SPF (H4)".
-4. [TODO] **Tests** (`ha-test-harness` first): `tests/ha/test_heating_pv_boost.py` daily and per-mode
-   cases, and `tests/ha/test_heating_pv_boost_rolling.py` 30 d cases, each expectation +1 (ratio of
-   sums 43/11 = 3.91 vs mean of daily SPF 3.5). Mutation check: `heat / elec` must fail. Targeted run
-   while working, full `.github/scripts/ci-local.sh` before push, `git ls-files --eol`.
-5. [TODO] **Knowledge:** design HPB-2 Efficiency bullet; `doc/heating_pv_boost/notes.md` entity map and
-   "Energy modes" (efficiency → SPF H4, env yield). No `record-learning` yet: it waits for step 7.
+2. [DONE] **YAML**: the 6 efficiency templates are `((heat + elec) / elec)`; names "… SPF …";
+   `sensor.heating_efficiency_today` got `default_entity_id` so its name change cannot move its id on
+   a fresh install. `utility_meter`/`sql` names were NOT renamed: their entity ids come from `name:`
+   on first registration (fresh installs, tests); comments say environmental yield instead.
+3. [DONE] **Dashboard**: SPF H4 section/title, "Environmental yield (ground heat)" labels.
+4. [DONE] **Tests**: daily, per-mode, midnight-reset and 30 d expectations +1; mutation (`heat / elec`)
+   fails 5 tests; 20× stable.
+5. [DONE] **Knowledge:** design HPB-2 Efficiency bullet (SPF H4, boundary, ±10 %); notes entity map
+   and "Energy modes"; README feature line.
 6. [TODO] **PR** with the post-deploy note: the SPF sensors step up ≈ +1 at deploy (formula change, not
    the machine). No bridge or broker change. Expect the 30 d space-heating SPF ≈ 4–4.5 in mild weather.
    The PR states that the owner check (step 7) is still open.
@@ -64,4 +62,4 @@ heating water.
 ## Status
 - 2026-11-26: plan created; owner check moved to step 7, implementation proceeds on the
   assumption.
-- 2026-11-26: step 1 done (VWS-29 corrected from the owner's BA). Next: step 2, on the owner's go-ahead.
+- 2026-11-26: steps 1–5 done. Next: step 6 (PR), then the owner check (step 7).
