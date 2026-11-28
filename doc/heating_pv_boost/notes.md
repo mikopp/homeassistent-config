@@ -27,7 +27,7 @@ setpoint.
 ## Invariants
 
 - **Every ebusd register HA reads, polls or writes needs its Mosquitto bridge lines** (`in`,
-  `/get out`, `/set out`; broadcasts `in` only, never a `?N` poll) (device VWS-41, VWS-40): add
+  `/get out`, `/set out`; broadcasts and passive writes such as `mc/RcRoomTemp` `in` only, never a `?N` poll) (device VWS-41, VWS-40): add
   them on the HA broker host, restart Mosquitto, list the exact lines in the PR's post-deploy
   steps, and prove a new `/set` line with an idempotent write of the CURRENT value only.
   `mc/TempDesired/set` takes the one-decimal payload both writers send (`22.0`, `22.5`)
@@ -135,6 +135,7 @@ setpoint.
 | `sensor.geotherm_heating_circuit_return_temp` | `ehp/HcReturnTemp`, slab saturation signal |
 | `sensor.geotherm_heating_curve` | `mc/HeatingCurve` (slope) |
 | `sensor.geotherm_heating_outdoor_temp` | `Broadcast/Outsidetemp`, the geoTHERM's own outdoor sensor; reads colder than the weatherstation (device VWS-31) |
+| `sensor.geotherm_heating_rc_room_temp` | `mc/RcRoomTemp`, the VR 90's dining-room temperature (corrected value, passive: never polled) (device VWS-40) |
 | `sensor.geotherm_heating_circuit_flow_temp_desired_fine` | `mc/FlowTempDesired`, the curve output (0.5 K steps) |
 | `sensor.geotherm_heating_circuit_flow_temp_desired` | `uih/FlowTempDesired`, its whole-degree floor W, 0 in hot water: what the integral and `sensor.heating_compressor_stop_temp` use (device VWS-33) |
 | `number.geotherm_heating_temp_desired` | hand setter: read `mc/TempDesired`, write `mc/TempDesired/set` |

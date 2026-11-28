@@ -67,6 +67,7 @@ views:
           - entity: sensor.geotherm_heating_circuit_flow_temp_desired
           - entity: sensor.geotherm_heating_temp_desired
           - entity: sensor.geotherm_heating_outdoor_temp
+          - entity: sensor.geotherm_heating_rc_room_temp
           - entity: sensor.geotherm_heating_curve
 
       - type: history-graph

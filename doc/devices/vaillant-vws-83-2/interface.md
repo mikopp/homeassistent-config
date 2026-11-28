@@ -33,6 +33,8 @@ One path: eBUS → ebusd → ebusd's MQTT broker → Mosquitto bridge → HA's b
   `read -f`, not `find` (cache) [EBD].
 - **VWS-40** Broadcasts (catalog type `u`, e.g. `Broadcast/Outsidetemp`) are sent by the unit
   unasked; there is no read telegram for them, so they cannot be requested or polled [CAT].
+  Passive writes another participant sends (catalog `uw`, e.g. `mc/RcRoomTemp` from the VR 90)
+  likewise: cached reads only [T63].
 - Write-only entries (only a `w` line in the catalog, e.g. `mc/RoomTempOffset`, `mc/Party`) have
   no read telegram; their values appear only when another participant writes them [CAT] [T5].
 - Installer-level registers (`ehp/OutsideTempOffset`, `uih/FrostOverRideTime`,
@@ -61,7 +63,7 @@ One path: eBUS → ebusd → ebusd's MQTT broker → Mosquitto bridge → HA's b
   in either direction; `ebusd/global/running` and `/scan` are `in` only [T44]. Per register:
   `topic ebusd/<circuit>/<name> in 0` (read), `.../get out 0` (poll), `.../set out 0` (write);
   without `in` nothing arrives, without `/get out` a poll and without `/set out` a write never
-  reaches ebusd, silently [MOSQ]. Broadcasts get only `in` (VWS-40), topic in the catalog's case
+  reaches ebusd, silently [MOSQ]. Broadcasts and passive writes get only `in` (VWS-40), topic in the catalog's case
   (`ebusd/Broadcast/Outsidetemp`) [T44]. A bridge change applies only when the bridge
   reconnects, so restart Mosquitto rather than reload [MOSQ].
 

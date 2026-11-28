@@ -45,7 +45,7 @@ they followed 6, 8 and 15 s after the VR 90's write, `ehp/Status` hcmode after 4
 | | `mc/Status32` (also `cc`, `hwc`) | `state;tot24hhc2`: `state` = circuit **served** now, `tot24hhc2` °C | `state`: `off` (idle or hot water), `heat` (also with the compressor off), `cool` [T57] [T58] [T59]. Only `mc` carries it: `cc` and `hwc` are `off` always, `hwc` also during hot water (trap: the hot-water circuit does not report hot water) [T57]. `tot24hhc2` = `mc/Tot24hHc2` [T56] | r (UIH polls all three, VR 90 polls `mc`) | [CATB] [T56] [T57] |
 | | `Broadcast/SystemMode` | what the heat pump is doing now | `off` (idle), `heat`, `cool`, `water`; follows `ehp/Status` hcmode within seconds, `heat` also with the compressor off [T56] [T57] [T58] [T59] | broadcast | [CATB] [T56] [T57] [T58] [T59] |
 | | `Broadcast/Tot24h`, `mc/Status33` | °C; the broadcast every 60 s | the 24 h outdoor average, equal to `mc/Tot24hHc2` and `Status32` `tot24hhc2`; not the live `Broadcast/Outsidetemp` [T56] | broadcast; r | [CATB] [T56] |
-| | `mc/RcRoomTemp` | written by the VR 90 cyclically, °C | the VR 90's room temperature; once equal to `rcc/RoomTemp` + `RoomTempOffset` + `RoomTempOffsetSelfWarming` (23.75 + 0.50 − 2.00 = 22.25), so probably the corrected value [T61] | passive write (VR 90 → `mc`) | [CATB] [T61] |
+| | `mc/RcRoomTemp` | written by the VR 90 cyclically, °C | the VR 90's room temperature; once equal to `rcc/RoomTemp` + `RoomTempOffset` + `RoomTempOffsetSelfWarming` (23.75 + 0.50 − 2.00 = 22.25), so probably the corrected value [T61] | passive write (VR 90 → `mc`), catalog type `uw`: cached read only, no `read -f`, no poll; missing while the CSV had `w` [T63] | [CATB] [T61] [T63] |
 
 ## Cooling
 
