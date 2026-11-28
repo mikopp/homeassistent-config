@@ -208,6 +208,21 @@ mqtt:
       device: *ebusd_geotherm
       value_template: "{{ '' if value | trim | float(none) is none else value | float | round(2) }}"
 
+    # mc/RcRoomTemp — the VR 90's dining-room temperature, as the VR 90 sends it to mc (corrected
+    # value). Read to judge the heating curve against a room (plans/heating-curve-tuning.md).
+    # A passive message: published when the VR 90 writes it, never polled
+    # (→ doc/heating_pv_boost/notes.md "Invariants", entity map).
+    - name: "Heating VR 90 Room Temp"
+      unique_id: heating_rc_room_temp
+      default_entity_id: sensor.geotherm_heating_rc_room_temp
+      state_topic: "ebusd/mc/RcRoomTemp"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:home-thermometer
+      device: *ebusd_geotherm
+      value_template: "{{ '' if value | trim | float(none) is none else value | float | round(2) }}"
+
     # ── Tuning settings (installer level, changed by hand at the Vaillant panel) ──
     # Read so every tuning step is visible in HA history next to its effect.
 

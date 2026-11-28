@@ -62,6 +62,7 @@ _HOLDING_TOPICS = {
     "ebusd/ehp/Status": "23.88;1.540;1.513;heat;08", "ebusd/ehp/HcReturnTemp": "24.12;ok",
     "ebusd/mc/TempDesired": "22.0", "ebusd/mc/OperatingMode": "on",
     "ebusd/uih/FlowTempDesired": "26.00", "ebusd/Broadcast/Outsidetemp": "3.750",
+    "ebusd/mc/RcRoomTemp": "22.38",
     "ebusd/mc/FlowTempDesired": "26.5", "ebusd/ehp/FlowTemp": "31.94;ok",
     "ebusd/ehp/CompIntegral": "-180", "ebusd/ehp/CompHysteresis": "7.00",
     "ebusd/mc/HeatingCurve": "0.14",
@@ -78,7 +79,7 @@ _HOLDING = [
     *[("sensor", u) for u in (
         "heating_hvac_action", "heating_circuit_flow_temp", "heating_circuit_return_temp",
         "heating_temp_desired", "heating_hvac_mode",
-        "heating_circuit_flow_temp_desired", "heating_outdoor_temp",
+        "heating_circuit_flow_temp_desired", "heating_outdoor_temp", "heating_rc_room_temp",
         "heating_circuit_flow_temp_desired_fine", "heating_flow_temp_vf2",
         "heating_compressor_start_integral",
         "heating_compressor_hysteresis", "heating_curve", "heating_compressor_starts",

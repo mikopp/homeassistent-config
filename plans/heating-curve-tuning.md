@@ -18,19 +18,34 @@ Room targets (owner):
 | Room | Target | Band (target ± 0.3 K) | Floor | HA sensor (Ecowitt channel) |
 |---|---|---|---|---|
 | Living room | 22–23 °C | 21.7–23.3 | ground floor | `sensor.wheatherstation_indoor_temperature` (base station) |
-| Bathroom | 22 °C | 21.7–22.3 | upper floor | `sensor.wheatherstation_temperature_5` |
-| **Office (limiting room)** | 22 °C | 21.7–22.3 | upper floor | `sensor.wheatherstation_temperature_3` |
+| **Bathroom** (indicator, valve open) | 22 °C | 21.7–22.3 | upper floor | `sensor.wheatherstation_temperature_5` |
+| **Office** (indicator, valve open) | 22 °C | 21.7–22.3 | upper floor | `sensor.wheatherstation_temperature_3` |
 | Bedroom | 21.5 °C | 21.2–21.8 | upper floor | `sensor.wheatherstation_temperature_1` |
 | Kids' room (Kilian) | 21.5–22 °C | 21.2–22.3 | upper floor | `sensor.wheatherstation_temperature_2` |
+| Whole house (extract air) | ≈ 21.6–21.7 (HYPOTHESIS) | — | all rooms | `sensor.comfoconnect_pro_extract_air_temperature` |
+| Dining room (VR 90) | as living | — | ground floor | `sensor.geotherm_heating_rc_room_temp` (`mc/RcRoomTemp`, new, 4.10) |
 
-No YAML in this repo references the room sensors. Owner facts: the bedroom and Kilian's room warm
-up at night with people sleeping in them (judge them on 08–20 h); the bedroom sensor was moved to a
-neutral spot on or before 2026-11-21 (older bedroom data overstate it); last year's balancing
-gives the upper floor more flow. Bathroom: a temperature spike with a humidity spike
-(`sensor.wheatherstation_humidity_5`) is a shower; leave those hours out of every evaluation.
-Office (owner, 2026-11-23): north-west, no sun by day; on **Mondays and Fridays** someone works
-there all day (screen, notebook), which adds heat. Leave Mondays and Fridays out of every office
-evaluation, and judge it only over several days, never one.
+Owner facts per room (2026-11-28 unless dated):
+- **Office:** valve fully open, upper floor (colder than the ground floor: height, distance,
+  balancing), north-west, no sun. **Mondays and Fridays** someone works there all day, which adds
+  heat (2026-11-23): leave those days out and judge it over several days, never one.
+- **Bathroom:** valve fully open, but less floor heating per m² than the rest of the house, so
+  less heat at the same flow; east, morning sun too weak to matter in winter. A temperature spike
+  with a humidity spike (`sensor.wheatherstation_humidity_5`) is a shower: leave those hours out.
+- **Bedroom, Kilian:** valves throttled a little on purpose (wanted cooler); south: the house
+  automation lets the sun in but prevents overheating; both warm up at night with people
+  sleeping (judge on 08–20 h). The bedroom sensor was moved to a neutral spot on or before
+  2026-11-21 (older bedroom data overstate it).
+- **Living room:** large, often occupied, electronics: internal gains. It stands for the whole
+  ground floor (kitchen, dining). Sun overheating on sunny days is accepted. Last year's
+  balancing throttles the ground floor a bit so the upper floor gets more flow.
+- **Extract air:** what the ventilation draws from all rooms, the house average (owner). Reads
+  ≈ 0.2–0.4 K below the mean of the five room sensors (11-24…28, OBSERVED); the target above is
+  that offset applied to the mean room target (≈ 22.0), HYPOTHESIS until more days.
+- **VR 90 (`mc/RcRoomTemp`):** dining room, other sensor type: may be offset like the outdoor
+  sensors. 22.38 on 11-28 ≈ 10 h against living 22.3–22.6.
+
+No other YAML references the room sensors.
 
 Outdoor: the weatherstation `sensor.wheatherstation_outdoor_temperature` and the machine's own
 `sensor.geotherm_heating_outdoor_temp` (north side, no sun). Sun:
@@ -78,8 +93,16 @@ automatically.
     (accepted): frost protection ("below 3 °C"), the AT-Abschaltgrenze and the cooling release
     move with it. Log the offset with every change; re-check it before the cooling season.
   - **Room-to-room differences** are hydraulics or room losses: Phase 3, no lever above fixes them.
-- **Limiting room:** steer on the **office** (22 °C). A living-room overshoot is accepted until
-  Phase 3.
+- **Judging: indicators, no hard rule (owner, 2026-11-28).** The curve has to serve the rooms
+  whose valves are already fully open, since a valve cannot give them more: the **office** and
+  the **bathroom** (structurally low). Rooms with headroom (bedroom, Kilian throttled; living with
+  internal gains and accepted sun) are trimmed by valves (Phase 3), not by the curve. The
+  **extract air** says whether the house as a whole is warm or cool; the VR 90 and living room
+  stand for the ground floor. A change needs these to agree, judged per curve level (below).
+- **Judge per curve level, not only per outdoor class.** At 21.5 / 0.14 the curve has two levels
+  between −7 and +2 °C (0.7): 26.5 from −3.5 to +1.4 and 28.5 below −3.5. "Days at 26.5" and
+  "days after a night at 28.5" answer different questions: the first the level (`TempDesired`),
+  the second the cold step (slope or offset).
 - **Order (owner):** office-to-living gap > 0.5 K → Phase 3 before Phase 2. One change at a time,
   each followed by the settle time.
 - **Qualifying days:** daily radiation mean < 25 W/m². Cold class: daily outdoor mean < 3 °C; mild:
@@ -107,6 +130,10 @@ automatically.
 | 2026-11-22 10:10 – 10:40 | `TempDesired` | 22.0 → 22.5 → 22.0 | Owner, `uih` test; set back within 1 h, settle time not restarted |
 | 2026-11-22 17:07:45 | `TempDesired` | 22.0 → 21.5 | Owner, hand setter (2.1), during hot water. Forced reads after it: `mc` 26.5, `uih` 26.00 (was 27.0 / 27): W −1 K |
 | 2026-11-22 17:07:57 | `input_number.heating_comfort_temp` | 21.0 → 20.5 | Owner, 1 K below `TempDesired` (5.1) |
+| 2026-11-26 20:40 – 20:47 | unknown (fine 26.5 → 25, W 26 → 25, outdoor flat −0.62) | set back | Owner test, setting unknown; compressor off. **Ignore this window in every analysis** |
+| 2026-11-27 08:16 – 08:21 | Raumaufschaltung | Keine → Thermostat → Keine | Owner test (device T58): heating mode off ≈ 5 min, setpoint 0 |
+| 2026-11-27 20:15 – 20:25 | unknown (W 26 → 29, fine unchanged 26.5) | set back | Owner test, setting unknown; compressor off. **Ignore this window in every analysis** |
+| 2026-11-27 20:56 – 21:15 | VR 90 cooling mode, Raumaufschaltung | off → auto → off; Keine → Thermostat → Keine | Owner test (device T62) |
 | before 2026-11-21 | `CompHysteresis` | likely 6 → 7 K | Owner, during the cycling tuning |
 | unchanged | everything else | — | current values: the note's "Owner-side configuration" |
 
@@ -150,7 +177,9 @@ whole-degree W and the curve's jumps (f).
   Data so far (HA hourly means, geoTHERM − weatherstation): daily −0.5 K (11-22), −1.1 K (11-23);
   by hour 11-23: −0.7 (00 h), −1.2 (04 h), −0.55 (12 h), **−2.5 (18 h**, −3.5 vs −1.0, no sun).
   The gap is not constant: largest on the evening after a sunny day (HYPOTHESIS: the north-side
-  sensor cools faster).
+  sensor cools faster). Daily 11-24…28: −1.95 (clear night, sunny day), −0.9, −0.2, +0.2, 0.0
+  (overcast): ≈ 0 when overcast, up to −2 K after clear nights (OBSERVED). So the cold step (0.7)
+  fires most on clear nights, which come before sunny days: step and sun add up.
 - [TODO] **0.7** Map the setpoint jumps (hypothesis (f), device VWS-30). Passive. From the
   "Curve check" graph (5 min statistics, ≈ 10 days kept): every jump of the fine setpoint outside
   hot water, with time, size and geoTHERM outdoor value, per `TempDesired`, next to the formula.
@@ -164,7 +193,14 @@ whole-degree W and the curve's jumps (f).
   | 22.5 | ≈ −2.5 | 29.5 ↔ 27.5 (2 K) | 11-22 02:11 / 08:20 |
   | 22.0 | ≈ 1.9 (1.81 ↔ 2.06) | 27 ↔ 26 (1 K) | 11-22 11:10 / 16:30 |
   | 21.5 | ≈ 1.4 (1.31 ↔ 1.56) | 26.5 ↔ 25.5 (1 K) | 11-23 10:45 down, 15:40 up |
-  | 21.5 | ≈ −3.5 (−3.38 ↔ −3.69) | 26.5 → 28.5 (2 K) | 11-23 18:25 up (down not yet seen) |
+  | 21.5 | ≈ −3.5 (−3.38 ↔ −3.69) | 26.5 ↔ 28.5 (2 K) | 11-23 18:25 up; 11-24 ≈ 09:40 down, 17:35 up; 11-25 08:40 down: no hysteresis |
+  | 21.5 | ≈ 1.4 | 26.5 ↔ 25.5 | again 11-24 12–14 h, 11-27 11–15 h |
+
+  The steps follow the **live** outdoor value, not the 24 h mean `Broadcast/Tot24h` (owner
+  question 2026-11-28): the mean stayed ≈ −4 while the live value crossed −3.5 three times
+  (device T64, behaviour.md "Outdoor value and setpoint"). What the unit uses `Tot24h` for is
+  open (candidates, UNPROVEN: the heating cut-off `OtShutdownLimit`, the cooling release); not
+  read by HA.
 
   HYPOTHESIS (two pairs): an edge moves along the outdoor axis by the same amount as
   `TempDesired` (mild edge −0.5 K for −0.5 K, cold edge ≈ −1 K for −1 K), and each level drops by
@@ -193,14 +229,17 @@ whole-degree W and the curve's jumps (f).
 ### Phase 1 — settle the current setting
 
 - [DONE] **1.1** Ended early 11-22: office +0.9, gap to living 0.35–0.4 K → Phase 2.
-- [TODO] **1.2** Evaluate settled days: per room daily mean minus target, min/max, outdoor mean,
-  radiation, per class. Bedroom and Kilian on 08–20 h. Then decide: office-to-living gap > 0.5 K →
-  Phase 3 next, else Phase 2. Log under "Observations". Depends on: 1.1.
+- [DONE] **1.2** Settled days evaluated 11-28 ("Observations", settle week): office-to-living gap
+  0.3–0.4 K → Phase 2 continues, no balancing yet.
 
 ### Phase 2 — tune, one change at a time
 
-Decision rule per evaluation, on the **office**. d = its mean daily mean minus 22 °C over the
-qualifying days of the window, Mondays and Fridays left out (occupied), at least 4 such days. Target band d within ±0.3 K; swinging inside it is fine (owner). Before each change read the
+The table is a guide, not a rule (owner, 2026-11-28): read it with the indicators of "Judging"
+(office and bathroom, extract air, VR 90 / living), per curve level. d = the office's mean daily
+mean minus 22 °C over the qualifying days, Mondays and Fridays left out, at least 4 such days;
+a row applies only when the bathroom and the extract air point the same way. Swinging inside the
+bands is fine (owner). Remember the step size: W moves in whole degrees, ≈ 0.6–0.7 K room, so a
+deviation smaller than about half of that is better left alone. Before each change read the
 fine setpoint (`sensor.geotherm_heating_circuit_flow_temp_desired_fine`) and W
 (`sensor.geotherm_heating_circuit_flow_temp_desired`). After a `TempDesired` change, check within
 minutes that W moved as intended; if not, the step did nothing.
@@ -230,17 +269,30 @@ configuration".
   one change per evaluation, until the success metrics hold across one cold-class and one
   mild-class period. Any `CompHysteresis`/`CompIntegral` change waits until 2.2 is done.
   Depends on: 2.1.
-  Check 11-23 20:00 (HA + ebus): settings unchanged. First qualifying day 11-23 (cold class);
-  11-22 holds the change. Earliest evaluation: the other rooms from 11-27
-  (11-23…11-26); the **office from 11-29**, since 11-23 (Mon) and 11-27 (Fri) do not count for it
-  (11-24, 25, 26, 28, if they qualify).
+  Check 11-23 20:00 (HA + ebus): settings unchanged; 11-22 holds the change.
   - Cold edge: **28.5** (W 28) at ≈ −3.5 °C geoTHERM, 11-23 18:25 (was 29.5 at 22.5): −1 K, as
     expected.
   - Runs 11-23 (5 min): ≈ 35, 35, **≈ 12** (W fell 26 → 25 at the 1.4 °C edge mid-run, the stop
     line fell to 32), 25, ≥ 25 (cut by hot water), 45 min (W 28); mean ≈ 30 min. Starts 6/day.
   - Rooms 11-23: "Observations".
+  - Check 11-28 10:00 (HA + ebus `read -f`): curve 0.14, `TempDesired` 21.5, offset 0.00,
+    fine 26.5, W 26: unchanged. Owner test windows (change log) left out. Week: "Observations".
+    Result: **hold 21.5**. At the 26.5 level every room is in band and the extract air ≈ 21.5,
+    ≈ 0.1–0.2 K cool overall; the only step up (22.0) adds 1 K W (≈ +0.6 K room) and raises the
+    cold step to ≈ 29 at ≈ −3 °C. No finer lever on the flat part (0.5 K of the fine setpoint is
+    floored away; offset and slope only move edges there).
+- [TODO] **2.3** Cold-step overshoot (HYPOTHESIS: the 2 K step at −3.5 °C, 26.5 → 28.5, is too
+  big). Evidence so far 11-23…25: nights at 28.5 raised the rooms 0.3–0.7 K before any sun
+  (office 22.9 → 23.2, Kilian 21.7 → 22.4, 20 → 08 h), extract air 22.4–22.5 for two days; sun on
+  11-24/25 added to it. Test passively: at the next cold clear night (geoTHERM < −3.5 for
+  several hours), followed if possible by an overcast day, log hours at 28.5, extract air and
+  office/bathroom from 20 h to 20 h next day. Confirmed → candidates, one at a time: outdoor
+  offset +1 K (the north sensor reads up to 2 K cold on clear nights, 0.5; moves the cold edge
+  down, but also the 1.4 edge, so 0.8 first) or slope 0.13 (map its edges first, 0.7). Both also
+  lower the mild side slightly. Depends on: 2.2, 0.8 for the offset.
 
-Success metrics, on qualifying days: office daily mean 21.7–22.3 °C, every other room in its band
+Success metrics, on qualifying days: office and bathroom daily mean in band, extract air near its
+target, every other room in its band
 (living upper bound only after Phase 3); daily min/max range per room ≤ 1 K (bedroom and Kilian
 08–20 h); heating starts ≤ 8/day and mean run ≥ 20 min.
 
@@ -268,6 +320,12 @@ together, the pump speed cannot be set (device VWS-23), no flow meters.
   and a "Room deviation" card. Depends on: owner approval.
 - [DONE] **4.9** W from `uih/FlowTempDesired` (#191), stop line unavailable while W is 0 (hot
   water, #194). Whether the unit's stop line uses W: open, see "How runs start and end".
+- [IN_PROGRESS] **4.10** `sensor.geotherm_heating_rc_room_temp` from `mc/RcRoomTemp` (VR 90
+  dining room, the corrected value; `rcc/RoomTemp` is the raw one, 23.88 vs 22.38). A passive
+  `uw` message (owner fixed the CSV from `w`, device T63): cached reads only, so no poll and one
+  bridge line `topic ebusd/mc/RcRoomTemp in 0`; on the "Curve check" graph. Coded and tested in
+  this branch; after deploy: add the bridge line, restart Mosquitto, check the entity gets values.
+  Open: the exact MQTT payload (assumed `22.38`, as the cached read).
 
 ### Phase 5 — writer and sunny-day exception
 
@@ -302,10 +360,29 @@ bedroom and Kilian on 08–19 h):
 OBSERVED: the office is the warmest upper-floor room, 0.17 K below living (0.57–0.81 in the
 baseline), and rose by day while the others fell: 11-23 was a Monday (occupied, owner), so it does
 not count. 11-22 (Sunday) also rose by day, but carried the 29.5 night and noon sun. If the office
-still runs warm on unoccupied days at the 11-29 evaluation, reconsider the limiting room
-(candidate: the bathroom).
+still runs warm on unoccupied days, weigh the bathroom more (superseded 11-28: indicators, "Judging").
 The three other upper-floor rooms were still falling at 20 h: the slab was still giving off the
 29.5 night (11-21/22); W 28 since 18:25 recharges it tonight.
+
+**2026-11-23…28, 21.5 / 0.14, settle week** (all cold class; HA daily / hourly means; owner test
+windows and the living-room dip 11-26 15–18 h, airing, left out):
+
+| | 11-24 ☀ | 11-25 | 11-26 | 11-27 (Fri) | 11-28 (to 10 h) |
+|---|---|---|---|---|---|
+| Outdoor ws / geoTHERM | −1.7 / −3.7 | −1.5 / −2.4 | −0.3 / −0.5 | −0.6 / −0.4 | −1.9 / −1.8 |
+| Radiation W/m² | 28 | 20 | 3 | 22 | — |
+| Nights at 28.5 | 11-23/24 | 11-24/25 | — | — | — |
+| Extract air | 22.46 | 22.36 | 21.80 | 21.57 | ≈ 21.5 |
+| Living | 23.79 | 23.53 | 22.63 | 22.50 | 22.38 |
+| Office | 23.24 | 23.16 | 22.22 | 22.23 | 22.06 |
+| Bathroom (no showers) | ≈ 22.5 | ≈ 22.4 | ≈ 21.85 | ≈ 21.72 | 21.6 |
+| Bedroom 08–20 h | — | 21.96 | 21.32 | 21.31 | — |
+| Kilian 08–20 h | — | 22.36 | 21.60 | 21.48 | — |
+
+OBSERVED: after nights at 28.5 the whole house runs 0.5–1.2 K over target (2.3); at 26.5 all day
+it falls back and levels off from 11-27 (extract air 21.4–21.7), every room in band, the
+bathroom at its lower edge, office-to-living gap 0.3–0.4 K (no Phase 3 trigger). Heating starts
+7–10/day (10 on 11-26), compressor 4–5 h/day.
 
 **How runs start and end** (`ehp/Integral`, 5 min statistics; `CompIntegral` −180,
 `CompHysteresis` 7 K):
@@ -346,7 +423,7 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 - geoTHERM device docs (`doc/devices/vaillant-vws-83-2/`, 6.1): every unit fact confirmed here, graded by origin,
   incl. what does not work; the curve-step and offset results of 0.7 and 0.8.
 - `doc/heating_pv_boost/notes.md` "Owner-side configuration": the settled curve, `TempDesired`
-  and offset values, the room targets and limiting room (office, without Mondays/Fridays), the
+  and offset values, the room targets and the judging indicators (office and bathroom, extract air), the
   loop valve settings after 3.1. Unit
   facts only as anchored one-liners.
 - Design doc: HPB-1 already carries the hand-setter line; no further change expected (K-4.1).
@@ -358,13 +435,13 @@ References table of `doc/devices/vaillant-vws-83-2/README.md`.
 - [DONE] 0.1–0.4, 0.6, 0.9, 0.12; [DROPPED] 0.10; [TODO] 0.5 (informative), 0.7 (edges, before any
   slope change), 0.8 (offset test at the first offset change; baseline read 11-23), 0.11
   (`TempDesired` write vs compressor, at the next 2.2 change)
-- [DONE] 1.1; [TODO] 1.2 (first run after 2.2's settle time)
-- [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07,
-  (W 27 → 26 confirmed by forced read), evaluate other rooms from 2026-11-27, the office from
-  11-29 (Mondays/Fridays excluded); checked 11-23 20:00: cold edge 28.5, runs ≈ 30 min, 6
-  starts/day
+- [DONE] 1.1, 1.2 (11-28: gap 0.3–0.4 K, Phase 2)
+- [DONE] 2.1 (22.0 did nothing); [IN_PROGRESS] 2.2 `TempDesired` 21.5 since 2026-11-22 17:07;
+  checked 11-28: hold (level right within ≈ 0.2 K, judged by indicators, no hard office rule);
+  [TODO] 2.3 cold-step overshoot, at the next cold clear night
 - [TODO] 3.1–3.2 balancing
-- [DONE] 4.3, 4.5–4.9; [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
+- [DONE] 4.3, 4.5–4.9; [IN_PROGRESS] 4.10 VR 90 room sensor (coded, awaiting deploy + bridge
+  line); [DROPPED] 4.2, 4.4; [TODO] 4.1 optional
 - [DONE] 5.1; [TODO] 5.2 deferred
 - [DONE] 6.1 geoTHERM device docs (#193)
 - [TODO] Close

@@ -37,7 +37,9 @@ Parts:
   outdoor sensor [T14]. It reads colder than the house weatherstation: 0.65 K (one evening), ≈ 1 K
   at night, ≈ 0.5 K in the morning [T14] [T35].
 - No damping of the outdoor value visible at 5 min resolution: setpoint jumps fall in the same
-  5 min as the outdoor value crossing the curve's edge [T22].
+  5 min as the outdoor value crossing the curve's edge [T22]. The curve uses the live value, not
+  the 24 h mean `Broadcast/Tot24h`: the edges followed the live value while the mean stayed
+  ≈ 1 K below the edge [T64].
 - Room influence (menu C5, VWS-21): `Keine` ignores the VR 90 room temperature [IA p.59];
   `Aufschaltung` shifts the flow setpoint depending on (room desired − actual), factor
   undocumented [IA p.59]; `Thermostat` uses the VR 90 room temperature as a room thermostat

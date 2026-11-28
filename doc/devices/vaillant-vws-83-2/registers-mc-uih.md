@@ -32,11 +32,27 @@ catalog [CAT], checked against a full `ebusctl` dump of this bus [T2] [T3].
 | | `rcc/RoomTempOffset` | `1f00`, "Raumisttemp. Korrekturwert": calibrates the VR 90's own room sensor; not `mc/RoomTempOffset` | 0.50 here, with `RoomTempOffsetSelfWarming` −2.00 | r | [CAT] [T3] |
 | | `rcc/HolidayPeriod`, `rcc/RoomTempHoliday` | holiday settings | 2015 dates here (never set) | r | [T3] |
 
+## EHP sync messages (sent unasked)
+
+Not in the published catalog; decodes from [CATB], loaded here [T60]. The UIH polls each circuit
+about every 30 s; broadcasts are passive only (VWS-40). One chain: the circuit asks (`Status31`),
+the heat pump decides (`SystemMode`), the circuit is served (`Status32`); on Raumaufschaltung off
+they followed 6, 8 and 15 s after the VR 90's write, `ehp/Status` hcmode after 42 s [T58].
+
+| ID | Register / path | Decode (type, scale, unit) | Values / range | Access | Evidence |
+|---|---|---|---|---|---|
+| | `mc/Status31` | heat/cool **demand** of the circuit | `off`, `heat`, `cool`; stays `heat` during hot water [T57]; `off` when the Raumaufschaltung Thermostat cancels heating [T58]; `cool` once, in summer [T59]. Not `mc/OperatingMode`: `heat` with it `off` [T56] | r (UIH poll; forced read answers) | [CATB] [T56] [T57] [T58] [T59] |
+| | `mc/Status32` (also `cc`, `hwc`) | `state;tot24hhc2`: `state` = circuit **served** now, `tot24hhc2` °C | `state`: `off` (idle or hot water), `heat` (also with the compressor off), `cool` [T57] [T58] [T59]. Only `mc` carries it: `cc` and `hwc` are `off` always, `hwc` also during hot water (trap: the hot-water circuit does not report hot water) [T57]. `tot24hhc2` = `mc/Tot24hHc2` [T56] | r (UIH polls all three, VR 90 polls `mc`) | [CATB] [T56] [T57] |
+| | `Broadcast/SystemMode` | what the heat pump is doing now | `off` (idle), `heat`, `cool`, `water`; follows `ehp/Status` hcmode within seconds, `heat` also with the compressor off [T56] [T57] [T58] [T59] | broadcast | [CATB] [T56] [T57] [T58] [T59] |
+| | `Broadcast/Tot24h`, `mc/Status33` | °C; the broadcast every 60 s | the 24 h outdoor average, equal to `mc/Tot24hHc2` and `Status32` `tot24hhc2`; not the live `Broadcast/Outsidetemp` [T56] | broadcast; r | [CATB] [T56] |
+| | `mc/RcRoomTemp` | written by the VR 90 cyclically, °C | the VR 90's room temperature; once equal to `rcc/RoomTemp` + `RoomTempOffset` + `RoomTempOffsetSelfWarming` (23.75 + 0.50 − 2.00 = 22.25), so probably the corrected value [T61] | passive write (VR 90 → `mc`), catalog type `uw`: cached read only, no `read -f`, no poll; missing while the CSV had `w` [T63] | [CATB] [T61] [T63] |
+
 ## Cooling
 
 | ID | Register / path | Decode (type, scale, unit) | Values / range | Access | Evidence |
 |---|---|---|---|---|---|
-| | `mc/CoolingOperatingModeHc2` | cooling **setting** | on through the summer, arriving as `1` (VWS-44) | rw | [CAT] [T42] |
+| | `mc/CoolingOperatingModeHc2` | cooling **setting** | on through the summer, arriving as `1` (VWS-44); `off` at the last read [T62] | rw | [CAT] [T42] [T62] |
+| | `mc/SetCoolingOperatingModeHc2` | the VR 90's write of the cooling setting, same values as `mc/CoolingOperatingModeHc2` | `on`, `off`, `auto`, all seen; one write per value shown while scrolling, the last of a burst is the setting (trap) [T62]; heating mode goes as `mc/SetMode` instead [T62]. Not in the loaded CSVs yet (T60) | passive write (VR 90 → `mc`) | [CATB] [T62] |
 | | `uih/CoolingDemand` | raw cooling need | — | r | [CAT] |
 | | `mc/CoolingRequestHc2` | gated, actually triggered request ("abhängig von der Kühlungsbetriebsart, Zeitfenstern und Effizienzfunktionen") | arrives as `0` (VWS-44) | r | [CAT] [T42] |
 | | `uih/CoolingActive` | UIH "Kühlung aktiv" flag | — | r | [CAT] |
